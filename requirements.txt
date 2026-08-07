@@ -1,0 +1,2 @@
+# Python dependencies beyond the standard library.
+fpdf2

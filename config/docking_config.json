@@ -1,0 +1,47 @@
+{
+  "name": "liver_cancer_vs",
+  "workdir": "../dock",
+  "output_dir": "outputs/run_001",
+  "receptor": {
+    "input": "data/receptors/receptor.pdb",
+    "output": "data/receptors/receptor.pdbqt",
+    "center": [0.0, 0.0, 0.0],
+    "size": [22.5, 22.5, 22.5],
+    "flexible": []
+  },
+  "ligand": {
+    "input": "data/ligands/library.sdf",
+    "output_dir": "data/ligands/prepared",
+    "smiles_column": "SMILES",
+    "id_column": "ID",
+    "ph": 7.4,
+    "remove_salts": true,
+    "neutralize": true,
+    "max_heavy_atoms": 60,
+    "max_rotatable_bonds": 15,
+    "max_ligands": null,
+    "conformers": 1,
+    "seed": 42,
+    "engine": "auto"
+  },
+  "docking": {
+    "engine": "vina",
+    "executable": "vina",
+    "scoring": "vina",
+    "exhaustiveness": 8,
+    "num_modes": 9,
+    "energy_range": 3.0,
+    "cpu": 4,
+    "max_workers": 4,
+    "seed": 42,
+    "timeout_seconds": 600,
+    "resume": true
+  },
+  "analysis": {
+    "cutoff": -7.0,
+    "top_n": 100,
+    "figures": true,
+    "diversity": true,
+    "tanimoto_cutoff": 0.7
+  }
+}
