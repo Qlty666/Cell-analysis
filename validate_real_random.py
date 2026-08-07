@@ -1,0 +1,181 @@
+#!/usr/bin/env python3
+"""Random real-data validation for evidence collection and detect-box."""
+
+import csv
+import json
+import random
+import subprocess
+import sys
+import urllib.request
+from pathlib import Path
+
+SRC = Path(__file__).resolve().parent / "src"
+if str(SRC) not in sys.path:
+    sys.path.insert(0, str(SRC))
+
+from docking.box import detect_box_data  # noqa: E402
+
+SKILLS = Path.home() / ".codex" / "skills"
+SKILL_NAMES = {
+    "uniprot": "uniprot-skill",
+    "rcsb": "rcsb-pdb-skill",
+    "chembl": "chembl-skill",
+    "bindingdb": "bindingdb-skill",
+    "pubchem": "pubchem-pug-skill",
+    "chebi": "chebi-skill",
+}
+OUT_DIR = Path(__file__).resolve().parent / "dock" / "validation_real_random"
+POOL = [
+    "1M17",
+    "1XKK",
+    "3CEJ",
+    "4ASD",
+    "1KV2",
+    "1YET",
+    "2HYY",
+    "2BTR",
+    "3OG7",
+    "3PP0",
+    "1AQ1",
+    "1H1S",
+    "2ITO",
+    "3C4F",
+    "4EKX",
+    "2XHE",
+    "4AG8",
+    "1Y6B",
+    "3LQ8",
+    "5FDP",
+]
+
+
+def call_skill(skill: str, payload: dict, timeout: int = 60) -> dict:
+    script = SKILLS / SKILL_NAMES[skill] / "scripts" / "rest_request.py"
+    try:
+        proc = subprocess.run(
+            [sys.executable, str(script)],
+            input=json.dumps(payload),
+            capture_output=True,
+            text=True,
+            encoding="utf-8",
+            errors="replace",
+            timeout=timeout,
+        )
+    except subprocess.TimeoutExpired:
+        return {"ok": False, "error": {"message": f"timeout after {timeout}s"}}
+    if not proc.stdout.strip():
+        return {"ok": False, "error": {"message": proc.stderr or "empty output"}}
+    try:
+        return json.loads(proc.stdout)
+    except Exception:
+        return {"ok": False, "error": {"message": proc.stderr or "parse error"}}
+
+
+def download_pdb(pdb_id: str, dest: Path) -> None:
+    url = f"https://files.rcsb.org/download/{pdb_id}.pdb"
+    req = urllib.request.Request(url, headers={"User-Agent": "Codex"})
+    with urllib.request.urlopen(req, timeout=60) as resp:
+        dest.write_bytes(resp.read())
+
+
+def main() -> int:
+    random.seed(20260807)
+    sample = random.sample(POOL, 10)
+    OUT_DIR.mkdir(parents=True, exist_ok=True)
+    pdb_dir = OUT_DIR / "pdb"
+    pdb_dir.mkdir(parents=True, exist_ok=True)
+    rows: list[dict] = []
+    summary: dict[str, dict] = {}
+
+    print(f"{'PDB':<8}{'RCSB':<7}{'BindingDB':<10}{'box_mode':<18}{'center'}")
+    for pdb_id in sample:
+        rcsb = call_skill(
+            "rcsb",
+            {
+                "base_url": "https://data.rcsb.org/rest/v1",
+                "path": f"core/entry/{pdb_id}",
+            },
+        )
+        bdb = call_skill(
+            "bindingdb",
+            {
+                "base_url": "https://bindingdb.org",
+                "path": "rest/getLigandsByPDBs",
+                "params": {
+                    "pdb": pdb_id,
+                    "cutoff": 100,
+                    "identity": 92,
+                    "response": "application/json",
+                },
+                "record_path": "getLindsByPDBsResponse.affinities",
+                "max_items": 5,
+                "max_depth": 3,
+            },
+        )
+        ligand_count = len(bdb.get("records") or [])
+        box: dict = {"center": None, "size": None, "mode": "failed", "error": ""}
+        try:
+            dest = pdb_dir / f"{pdb_id}.pdb"
+            download_pdb(pdb_id, dest)
+            center, size, mode = detect_box_data(dest)
+            box = {"center": center, "size": size, "mode": mode, "error": ""}
+        except Exception as exc:
+            box["error"] = str(exc)
+        rows.append(
+            {
+                "pdb": pdb_id,
+                "rcsb_ok": bool(rcsb.get("ok")),
+                "bindingdb_ligands": ligand_count,
+                "box_mode": box["mode"],
+                "center_x": box["center"][0] if box["center"] else "",
+                "center_y": box["center"][1] if box["center"] else "",
+                "center_z": box["center"][2] if box["center"] else "",
+                "size": box["size"],
+                "box_error": box["error"],
+            }
+        )
+        summary[pdb_id] = {
+            "rcsb_ok": bool(rcsb.get("ok")),
+            "bindingdb_ligands": ligand_count,
+            "box": box,
+        }
+        print(
+            f"{pdb_id:<8}{str(rcsb.get('ok')).lower():<7}{ligand_count:<10}"
+            f"{box['mode']:<18}{box['center']}"
+        )
+
+    csv_path = OUT_DIR / "results.csv"
+    with csv_path.open("w", newline="", encoding="utf-8") as fh:
+        writer = csv.DictWriter(
+            fh,
+            fieldnames=[
+                "pdb",
+                "rcsb_ok",
+                "bindingdb_ligands",
+                "box_mode",
+                "center_x",
+                "center_y",
+                "center_z",
+                "size",
+                "box_error",
+            ],
+        )
+        writer.writeheader()
+        writer.writerows(rows)
+    (OUT_DIR / "summary.json").write_text(
+        json.dumps(
+            {"sample": sample, "summary": summary, "total_ligands": sum(
+                r["bindingdb_ligands"] for r in rows
+            )},
+            ensure_ascii=False,
+            indent=2,
+        ),
+        encoding="utf-8",
+    )
+    print("OUTPUT", OUT_DIR)
+    print("TOTAL_LIGANDS", sum(r["bindingdb_ligands"] for r in rows))
+    return 0
+
+
+if __name__ == "__main__":
+    sys.exit(main())

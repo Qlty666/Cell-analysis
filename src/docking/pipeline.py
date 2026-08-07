@@ -7,7 +7,7 @@ import logging
 import shutil
 from datetime import datetime
 
-from . import analysis, docking, ligands, receptor
+from . import analysis, docking, ligands, receptor, redock, report
 from .config import ResolvedConfig
 from .utils import DockingError
 
@@ -16,6 +16,8 @@ STAGES = [
     ("02", "prepare-ligands", ligands.prepare_ligands),
     ("03", "dock", docking.run_docking),
     ("04", "analyze", analysis.analyze_results),
+    ("05", "redock", redock.run_redock),
+    ("06", "report", report.generate_report),
 ]
 
 

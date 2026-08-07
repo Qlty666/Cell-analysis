@@ -761,6 +761,41 @@ def _dock_file_path(info: dict, name: str):
     return None
 
 
+def _detect_and_save_box(workdir: str, receptor: str) -> dict:
+    from docking.box import detect_box_data
+    from docking.config import load_config, save_config
+
+    workdir = Path(workdir).expanduser().resolve()
+    receptor_path = Path(receptor).expanduser()
+    if not receptor_path.is_absolute():
+        receptor_path = workdir / receptor_path
+    receptor_path = receptor_path.resolve()
+    if not receptor_path.is_file():
+        raise ValueError(f"receptor file not found: {receptor_path}")
+    center, size, mode = detect_box_data(receptor_path)
+    config_path = workdir / "config" / "docking_config.json"
+    if config_path.exists():
+        cfg = load_config(config_path)
+    else:
+        cfg = load_config(
+            APP_ROOT / "config" / "docking_config.json",
+            {"workdir": str(workdir)},
+        )
+    rel = os.path.relpath(receptor_path, workdir)
+    rel_path = rel if not rel.startswith("..") else str(receptor_path)
+    cfg.data["receptor"]["detect_input"] = rel_path
+    cfg.data["receptor"]["input"] = rel_path
+    cfg.data["receptor"]["center"] = center
+    cfg.data["receptor"]["size"] = size
+    save_config(cfg, config_path)
+    return {
+        "center": center,
+        "size": size,
+        "mode": mode,
+        "config": str(config_path),
+    }
+
+
 class Handler(BaseHTTPRequestHandler):
     def log_message(self, fmt, *args):
         pass
@@ -1159,6 +1194,26 @@ class Handler(BaseHTTPRequestHandler):
                     json.dumps(
                         {"ok": False, "output": "install timed out after 600s"}
                     ).encode("utf-8"),
+                    "application/json",
+                )
+            except Exception as exc:
+                self._send(
+                    400,
+                    json.dumps({"error": str(exc)}).encode("utf-8"),
+                    "application/json",
+                )
+            return
+
+        if parsed.path == "/dock/detect-box":
+            try:
+                workdir = _first(data, "workdir", "")
+                receptor = _first(data, "receptor", "")
+                if not workdir or not receptor:
+                    raise ValueError("workdir and receptor are required")
+                result = _detect_and_save_box(workdir, receptor)
+                self._send(
+                    200,
+                    json.dumps(result, ensure_ascii=False).encode("utf-8"),
                     "application/json",
                 )
             except Exception as exc:
