@@ -1,0 +1,55 @@
+# Python
+__pycache__/
+*.py[cod]
+*$py.class
+*.egg-info/
+.eggs/
+.venv/
+venv/
+.pytest_cache/
+.mypy_cache/
+
+# R
+.Rhistory
+.RData
+.Rproj.user/
+
+# OS / editors
+.DS_Store
+Thumbs.db
+.idea/
+.vscode/
+
+# Web runtime files
+web/history.json
+web/dock_history.json
+web/install_log.txt
+web/*_smoke*.log
+web/*_smoke.pid
+web/templates/index.html
+
+# Single-cell pipeline data and outputs
+data/raw/*
+!data/raw/.gitkeep
+results/*
+!results/README.md
+logs/*
+!logs/.gitkeep
+
+# Virtual screening workdir: generated data and binaries
+dock/evidence/
+dock/validation_real/
+dock/logs/
+dock/outputs/*
+!dock/outputs/.gitkeep
+dock/data/ligands/prepared/
+dock/data/ligands/*.smi
+dock/data/ligands/library.sdf
+dock/data/receptors/*.pdb
+dock/data/receptors/*.pdbqt
+dock/config/docking_web_*.json
+dock/tools/
+
+# Validation artifacts
+*.log
+*.tmp

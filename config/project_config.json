@@ -1,0 +1,59 @@
+{
+  "dataset": "GSE125449",
+  "dataset_title": "Single Cell Transcriptomic Landscape of Liver Cancer (HCC vs iCCA)",
+  "raw_dir": "data/raw",
+  "results_dir": "results",
+  "log_dir": "logs",
+  "downloads": [
+    {
+      "url": "https://ftp.ncbi.nlm.nih.gov/geo/series/GSE125nnn/GSE125449/suppl/GSE125449_Set1_barcodes.tsv.gz",
+      "file": "GSE125449_Set1_barcodes.tsv.gz",
+      "min_bytes": 20000
+    },
+    {
+      "url": "https://ftp.ncbi.nlm.nih.gov/geo/series/GSE125nnn/GSE125449/suppl/GSE125449_Set1_genes.tsv.gz",
+      "file": "GSE125449_Set1_genes.tsv.gz",
+      "min_bytes": 100000
+    },
+    {
+      "url": "https://ftp.ncbi.nlm.nih.gov/geo/series/GSE125nnn/GSE125449/suppl/GSE125449_Set1_matrix.mtx.gz",
+      "file": "GSE125449_Set1_matrix.mtx.gz",
+      "min_bytes": 20000000
+    },
+    {
+      "url": "https://ftp.ncbi.nlm.nih.gov/geo/series/GSE125nnn/GSE125449/suppl/GSE125449_Set1_samples.txt.gz",
+      "file": "GSE125449_Set1_samples.txt.gz",
+      "min_bytes": 20000
+    },
+    {
+      "url": "https://ftp.ncbi.nlm.nih.gov/geo/series/GSE125nnn/GSE125449/suppl/GSE125449_Set2_barcodes.tsv.gz",
+      "file": "GSE125449_Set2_barcodes.tsv.gz",
+      "min_bytes": 15000
+    },
+    {
+      "url": "https://ftp.ncbi.nlm.nih.gov/geo/series/GSE125nnn/GSE125449/suppl/GSE125449_Set2_genes.tsv.gz",
+      "file": "GSE125449_Set2_genes.tsv.gz",
+      "min_bytes": 100000
+    },
+    {
+      "url": "https://ftp.ncbi.nlm.nih.gov/geo/series/GSE125nnn/GSE125449/suppl/GSE125449_Set2_matrix.mtx.gz",
+      "file": "GSE125449_Set2_matrix.mtx.gz",
+      "min_bytes": 15000000
+    },
+    {
+      "url": "https://ftp.ncbi.nlm.nih.gov/geo/series/GSE125nnn/GSE125449/suppl/GSE125449_Set2_samples.txt.gz",
+      "file": "GSE125449_Set2_samples.txt.gz",
+      "min_bytes": 15000
+    },
+    {
+      "url": "https://ftp.ncbi.nlm.nih.gov/geo/series/GSE125nnn/GSE125449/matrix/GSE125449-GPL18573_series_matrix.txt.gz",
+      "file": "GSE125449-GPL18573_series_matrix.txt.gz",
+      "min_bytes": 1000
+    },
+    {
+      "url": "https://ftp.ncbi.nlm.nih.gov/geo/series/GSE125nnn/GSE125449/matrix/GSE125449-GPL20301_series_matrix.txt.gz",
+      "file": "GSE125449-GPL20301_series_matrix.txt.gz",
+      "min_bytes": 1000
+    }
+  ]
+}

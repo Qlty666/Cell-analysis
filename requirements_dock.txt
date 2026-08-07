@@ -1,0 +1,10 @@
+numpy
+pandas
+matplotlib
+pyyaml
+openpyxl
+rdkit
+meeko
+gemmi
+openbabel-wheel
+versioneer

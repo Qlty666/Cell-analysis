@@ -1,0 +1,472 @@
+<!DOCTYPE html>
+<html lang="zh-CN">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1">
+<title>虚拟筛选流水线</title>
+<style>
+body {
+  font-family: "Segoe UI", Arial, sans-serif;
+  margin: 0;
+  color: #1f2933;
+  background: url('/static/background.png') no-repeat center center fixed;
+  background-size: cover;
+}
+.topnav {
+  position: sticky;
+  top: 0;
+  z-index: 100;
+  background: #0f172a;
+  padding: 12px 28px;
+  display: flex;
+  gap: 18px;
+  align-items: center;
+  flex-wrap: wrap;
+  box-shadow: 0 2px 8px rgba(15, 23, 42, 0.35);
+}
+.topnav a {
+  color: #ffffff;
+  text-decoration: none;
+  font-size: 15px;
+  font-weight: 600;
+  padding: 6px 10px;
+  border-radius: 6px;
+  background: rgba(255, 255, 255, 0.08);
+}
+.topnav a:hover, .topnav a.active { background: #1665c0; color: #fff; }
+.wrap { max-width: 1180px; margin: 0 auto; padding: 28px; }
+h1 { font-size: 26px; margin: 0 0 6px; }
+h2 { font-size: 17px; margin: 0 0 10px; }
+.muted { color: #6b7280; font-size: 13px; }
+.card {
+  background: rgba(255, 255, 255, 0.95);
+  border: 1px solid #d7dde4;
+  border-radius: 8px;
+  padding: 20px;
+  margin-bottom: 18px;
+  box-shadow: 0 1px 4px rgba(15, 23, 42, 0.08);
+}
+.grid { display: grid; grid-template-columns: repeat(auto-fit, minmax(220px, 1fr)); gap: 10px; }
+.grid.wide { grid-template-columns: repeat(auto-fit, minmax(260px, 1fr)); }
+label { display: block; margin: 10px 0 4px; font-weight: 600; font-size: 13px; }
+input, select {
+  width: 100%;
+  padding: 9px;
+  border: 1px solid #cbd2d9;
+  border-radius: 6px;
+  box-sizing: border-box;
+  font-size: 13px;
+}
+.inline3 { display: grid; grid-template-columns: 1fr 1fr 1fr; gap: 8px; }
+.actions { display: flex; gap: 12px; margin-top: 18px; flex-wrap: wrap; }
+button {
+  padding: 10px 18px;
+  border: 0;
+  border-radius: 6px;
+  background: #1665c0;
+  color: #fff;
+  font-size: 14px;
+  cursor: pointer;
+}
+button.secondary { background: #475569; }
+button.env-action { background: #1665c0; color: #fff; }
+button.env-action:disabled { background: #9aa5b1; color: #fff; cursor: not-allowed; }
+button:disabled { background: #9aa5b1; cursor: not-allowed; }
+.toggle { display: flex; align-items: center; gap: 8px; margin-top: 14px; font-weight: 600; }
+.toggle input { width: auto; }
+pre {
+  background: #0f172a;
+  color: #dbeafe;
+  padding: 14px;
+  border-radius: 8px;
+  height: 380px;
+  overflow: auto;
+  font-size: 12px;
+  white-space: pre-wrap;
+}
+.error { color: #b91c1c; margin-top: 10px; }
+.ok { color: #047857; margin-top: 10px; }
+table { width: 100%; border-collapse: collapse; background: #fff; font-size: 13px; }
+th, td { border: 1px solid #e5e7eb; padding: 7px 8px; text-align: left; }
+th { background: #eef2f7; position: sticky; top: 0; }
+.tablebox { max-height: 420px; overflow: auto; border: 1px solid #e5e7eb; border-radius: 6px; }
+.gallery { display: grid; grid-template-columns: repeat(auto-fit, minmax(340px, 1fr)); gap: 16px; margin-top: 10px; }
+.gallery figure { margin: 0; }
+.gallery img { width: 100%; border: 1px solid #e5e7eb; border-radius: 6px; background: #fff; }
+.gallery figcaption { color: #52606d; font-size: 12px; margin-top: 5px; }
+.badge { display: inline-block; padding: 2px 8px; border-radius: 10px; font-size: 12px; }
+.badge.ok { background: #dcfce7; color: #166534; }
+.badge.bad { background: #fee2e2; color: #991b1b; }
+a.file-link { color: #1665c0; text-decoration: none; margin-right: 12px; }
+</style>
+</head>
+<body>
+<div class="topnav">
+  <a href="/">单细胞分析</a>
+  <a href="/dock" class="active">虚拟筛选</a>
+</div>
+<div class="wrap">
+<h1>虚拟筛选流水线</h1>
+<p class="muted">AutoDock Vina 对接：受体准备、配体库准备、并行对接、命中排序与多样性筛选。</p>
+
+<div class="card">
+  <form id="form">
+    <div class="grid wide">
+      <label>工作目录
+        <input name="workdir" placeholder="请输入保存路径" required>
+      </label>
+      <label>受体文件（相对工作目录）
+        <input name="receptor" placeholder="请输入受体文件路径">
+      </label>
+      <label>配体库文件（相对工作目录）
+        <input name="ligand" placeholder="请输入配体文件路径">
+      </label>
+    </div>
+    <div class="grid wide">
+      <label>执行步骤
+        <select name="stage">
+          <option value="pipeline">完整流程（断点续跑）</option>
+          <option value="prepare-receptor">仅准备受体</option>
+          <option value="prepare-ligands">仅准备配体</option>
+          <option value="dock">仅对接</option>
+          <option value="analyze">仅分析</option>
+          <option value="evidence">证据收集（UniProt/PDB/ChEMBL/BindingDB）</option>
+          <option value="ml-train">训练 ML/DL 重打分模型</option>
+          <option value="ml-predict">ML/DL 重打分</option>
+          <option value="export-md">导出 MD 交接模板</option>
+          <option value="export-external">导出外部对接模板</option>
+        </select>
+      </label>
+      <div>
+        <label>对接盒中心 (X Y Z)</label>
+        <div class="inline3">
+          <input name="center_x" type="number" step="0.1" value="0">
+          <input name="center_y" type="number" step="0.1" value="0">
+          <input name="center_z" type="number" step="0.1" value="0">
+        </div>
+      </div>
+      <div>
+        <label>对接盒尺寸 (X Y Z)</label>
+        <div class="inline3">
+          <input name="size_x" type="number" step="0.5" value="22.5">
+          <input name="size_y" type="number" step="0.5" value="22.5">
+          <input name="size_z" type="number" step="0.5" value="22.5">
+        </div>
+      </div>
+    </div>
+    <div class="grid">
+      <label>exhaustiveness
+        <input name="exhaustiveness" type="number" min="1" value="8">
+      </label>
+      <label>num_modes
+        <input name="num_modes" type="number" min="1" value="9">
+      </label>
+      <label>energy_range
+        <input name="energy_range" type="number" step="0.5" value="3.0">
+      </label>
+      <label>cpu / workers
+        <input name="max_workers" type="number" min="1" value="4">
+      </label>
+      <label>命中阈值 (kcal/mol)
+        <input name="cutoff" type="number" step="0.1" value="-7.0">
+      </label>
+      <label>Top N
+        <input name="top_n" type="number" min="1" value="100">
+      </label>
+    </div>
+    <label class="toggle"><input type="checkbox" name="force" value="1"> 强制从第一阶段重跑</label>
+    <div class="actions">
+      <button id="startBtn" type="button" onclick="startRun()">开始任务</button>
+    </div>
+  </form>
+  <div id="message"></div>
+  <div id="envBox"></div>
+</div>
+
+<div class="card">
+  <h2>实时进度</h2>
+  <div class="actions" style="margin-top:0;">
+    <button id="pauseBtn" class="secondary" type="button" onclick="pauseDockJob()" disabled>暂停任务</button>
+    <button id="resumeBtn" class="secondary" type="button" onclick="resumeDockJob()" disabled>继续任务</button>
+  </div>
+  <pre id="log">等待开始...</pre>
+</div>
+
+<div class="card">
+  <h2>筛选结果</h2>
+  <div id="summaryRow"></div>
+  <div id="fileLinks"></div>
+  <div class="tablebox"><table id="resultTable"></table></div>
+  <div id="gallery" class="gallery"></div>
+</div>
+
+<div class="card">
+  <h2>分析历史</h2>
+  <div id="dockHistory">正在加载历史记录...</div>
+</div>
+
+<div class="card">
+  <h2>环境状态与自动补全</h2>
+  <label for="dockInstallPath">安装地址</label>
+  <input id="dockInstallPath" name="install_path" placeholder="请输入环境安装地址">
+  <div class="actions" style="margin-top:0;">
+    <button class="env-action" type="button" onclick="checkEnv(this)">检查虚拟筛选环境</button>
+    <button class="env-action" type="button" onclick="installEnv(this)">补全虚拟筛选环境</button>
+  </div>
+  <pre id="dockEnvOutput">点击“检查环境”查看当前依赖状态。</pre>
+</div>
+
+<div class="card">
+  <h2>软件环境</h2>
+  <div id="dockEnv">正在获取环境信息...</div>
+</div>
+</div>
+
+<script>
+let currentJob = null;
+let pollTimer = null;
+
+function msg(text, cls) {
+  const el = document.getElementById('message');
+  el.className = cls || '';
+  el.textContent = text;
+}
+
+async function checkEnv(btn) {
+  const box = document.getElementById('dockEnvOutput');
+  btn.disabled = true;
+  box.textContent = '正在检查环境...';
+  try {
+    await loadDockEnv();
+    box.textContent = '环境检查完成。';
+  } finally {
+    btn.disabled = false;
+  }
+}
+
+async function startRun() {
+  const form = document.getElementById('form');
+  const data = new URLSearchParams(new FormData(form));
+  const btn = document.getElementById('startBtn');
+  btn.disabled = true;
+  msg('正在启动...');
+  try {
+    const resp = await fetch('/dock/start', {method: 'POST', body: data});
+    const result = await resp.json();
+    if (!resp.ok) throw new Error(result.error || '启动失败');
+    currentJob = result.job;
+    document.getElementById('log').textContent = '';
+    document.getElementById('resultTable').innerHTML = '';
+    document.getElementById('gallery').innerHTML = '';
+    document.getElementById('summaryRow').textContent = '';
+    document.getElementById('fileLinks').textContent = '';
+    msg('任务已启动，日志实时刷新。', 'ok');
+    document.getElementById('pauseBtn').disabled = false;
+    document.getElementById('resumeBtn').disabled = true;
+    if (pollTimer) clearInterval(pollTimer);
+    pollTimer = setInterval(poll, 1000);
+  } catch (e) {
+    msg(String(e.message || e), 'error');
+  } finally {
+    btn.disabled = false;
+  }
+}
+
+async function poll() {
+  if (!currentJob) return;
+  try {
+    const logResp = await fetch('/dock/log?job=' + currentJob);
+    const text = await logResp.text();
+    const box = document.getElementById('log');
+    box.textContent = text;
+    box.scrollTop = box.scrollHeight;
+    const statusResp = await fetch('/dock/status?job=' + currentJob);
+    const status = await statusResp.json();
+    const pauseBtn = document.getElementById('pauseBtn');
+    const resumeBtn = document.getElementById('resumeBtn');
+    if (status.running) {
+      pauseBtn.disabled = false;
+      resumeBtn.disabled = true;
+    } else if (status.paused) {
+      pauseBtn.disabled = true;
+      resumeBtn.disabled = false;
+    } else {
+      pauseBtn.disabled = true;
+      resumeBtn.disabled = true;
+    }
+    if (!status.running) {
+      clearInterval(pollTimer);
+      const m = document.getElementById('message');
+      if (status.paused) {
+        m.className = 'ok';
+        m.textContent = '任务已暂停，可点击继续任务。';
+      } else {
+        m.className = status.ok ? 'ok' : 'error';
+        m.textContent = status.ok ? '任务已完成' : '任务失败，请查看日志';
+      }
+      if (status.ok) await loadResults(currentJob);
+      if (!status.paused) currentJob = null;
+    }
+  } catch (e) {
+    // keep polling on transient errors
+  }
+}
+
+async function pauseDockJob() {
+  if (!currentJob) return;
+  const form = new URLSearchParams({job: currentJob});
+  try {
+    const resp = await fetch('/dock/pause', {method: 'POST', body: form});
+    const data = await resp.json();
+    if (!resp.ok) throw new Error(data.error || '暂停失败');
+    msg('暂停请求已发送。', 'ok');
+  } catch (e) {
+    msg(String(e.message || e), 'error');
+  }
+}
+
+async function resumeDockJob() {
+  if (!currentJob) return;
+  const form = new URLSearchParams({job: currentJob});
+  try {
+    const resp = await fetch('/dock/resume', {method: 'POST', body: form});
+    const data = await resp.json();
+    if (!resp.ok) throw new Error(data.error || '恢复失败');
+    msg('任务已恢复。', 'ok');
+    document.getElementById('pauseBtn').disabled = false;
+    document.getElementById('resumeBtn').disabled = true;
+    if (pollTimer) clearInterval(pollTimer);
+    pollTimer = setInterval(poll, 1000);
+  } catch (e) {
+    msg(String(e.message || e), 'error');
+  }
+}
+
+async function loadResults(job) {
+  try {
+    const resp = await fetch('/dock/results?job=' + job);
+    const data = await resp.json();
+    const summary = data.summary || {};
+    const summaryRow = document.getElementById('summaryRow');
+    summaryRow.innerHTML = '<p class="muted">成功对接 ' + (summary.total_docked || 0) +
+      ' 个配体，命中 ' + (summary.hits || 0) +
+      ' 个，最佳亲和力 ' + (summary.best_affinity === null || summary.best_affinity === undefined ? '-' : summary.best_affinity) +
+      ' kcal/mol。输出目录：' + data.output_dir + '</p>';
+
+    const links = document.getElementById('fileLinks');
+    links.innerHTML = (data.files || []).map(name =>
+      '<a class="file-link" href="/dock/file?job=' + job + '&name=' + encodeURIComponent(name) + '" download>' + name + '</a>'
+    ).join('');
+
+    const table = document.getElementById('resultTable');
+    if (data.rows && data.rows.length) {
+      table.innerHTML = '<thead><tr><th>排名</th><th>ID</th><th>亲和力</th><th>模式</th><th>SMILES</th></tr></thead><tbody>' +
+        data.rows.map(r =>
+          '<tr><td>' + (r.rank || '') + '</td><td>' + r.id + '</td><td>' +
+          r.affinity + '</td><td>' + (r.mode || '') + '</td><td style="max-width:280px;word-break:break-all;">' +
+          (r.smiles || '') + '</td></tr>'
+        ).join('') + '</tbody>';
+    } else {
+      table.innerHTML = '<tbody><tr><td>暂无结果</td></tr></tbody>';
+    }
+
+    const gallery = document.getElementById('gallery');
+    gallery.innerHTML = (data.figures || []).map(name =>
+      '<figure><img src="/dock/file?job=' + job + '&name=' + encodeURIComponent(name) + '"><figcaption>' + name + '</figcaption></figure>'
+    ).join('');
+  } catch (e) {
+    document.getElementById('summaryRow').innerHTML = '<div class="error">结果加载失败：' + String(e.message || e) + '</div>';
+  }
+}
+
+async function loadDockHistory() {
+  const box = document.getElementById('dockHistory');
+  try {
+    const resp = await fetch('/dock/history');
+    const items = await resp.json();
+    if (!items.length) {
+      box.textContent = '暂无分析历史。';
+      return;
+    }
+    const rows = items.map(item =>
+      '<tr><td>' + (item.stage || '') + '</td><td>' + item.status + '</td><td>' +
+      new Date(item.finished * 1000).toLocaleString() + '</td><td>' +
+      item.output + '</td></tr>'
+    ).join('');
+    box.innerHTML = '<table><thead><tr><th>阶段</th><th>状态</th><th>完成时间</th><th>输出路径</th></tr></thead><tbody>' + rows + '</tbody></table>';
+  } catch (e) {
+    box.textContent = '历史记录加载失败：' + String(e.message || e);
+  }
+}
+
+async function loadDockEnv() {
+  const box = document.getElementById('dockEnv');
+  try {
+    const resp = await fetch('/dock/check-env', {method: 'POST'});
+    const data = await resp.json();
+    if (!data.checks || !data.checks.length) {
+      box.textContent = '无法获取环境信息。';
+      return;
+    }
+    const badge = c => c.ok ? '<span class="badge ok">OK</span>' : '<span class="badge bad">FAIL</span>';
+    const software = data.checks.filter(c => c.kind === 'software');
+    const packages = data.checks.filter(c => c.kind !== 'software');
+    const softwareRows = software.map(c =>
+      '<tr><td>' + c.name + '</td><td>' + c.version + '</td><td>' + badge(c) +
+      '</td><td><a href="' + c.url + '" target="_blank" rel="noopener">' + c.url + '</a></td></tr>'
+    ).join('');
+    const packageRows = packages.map(c =>
+      '<tr><td>' + c.name + '</td><td>' + c.version + '</td><td>' + badge(c) +
+      '</td><td><code>' + (c.install || '') + '</code></td></tr>'
+    ).join('');
+    let html = '<h3>软件</h3>';
+    html += '<table><thead><tr><th>软件</th><th>版本/路径</th><th>状态</th><th>下载地址</th></tr></thead><tbody>' + softwareRows + '</tbody></table>';
+    html += '<h3>Python 库 / 插件</h3>';
+    html += '<table><thead><tr><th>插件</th><th>版本</th><th>状态</th><th>安装命令</th></tr></thead><tbody>' + packageRows + '</tbody></table>';
+    box.innerHTML = html;
+  } catch (e) {
+    box.textContent = '环境信息加载失败：' + String(e.message || e);
+  }
+}
+
+async function installEnv(btn) {
+  const box = document.getElementById('dockEnvOutput');
+  const target = document.getElementById('dockInstallPath').value.trim();
+  btn.disabled = true;
+  box.innerHTML = '<p class="muted">正在安装缺失依赖，请稍候...</p>';
+  try {
+    const form = new URLSearchParams({project: 'dock'});
+    if (target) form.set('target', target);
+    await fetch('/install', {method: 'POST', body: form});
+    const timer = setInterval(async () => {
+      try {
+        const resp = await fetch('/install-status');
+        const data = await resp.json();
+        if (!data.running) {
+          clearInterval(timer);
+          const ok = data.ok;
+          box.innerHTML = '<div class="' + (ok ? 'ok' : 'error') + '">' +
+            (ok ? '环境补全完成。' : '环境补全失败，请查看日志。') +
+            '</div>' + (data.log ? '<pre style="height:220px;">' + data.log + '</pre>' : '');
+          await loadDockEnv();
+          btn.disabled = false;
+        } else {
+          box.innerHTML = '<pre style="height:220px;">' + (data.log || '正在安装...') + '</pre>';
+        }
+      } catch (e) {
+        clearInterval(timer);
+        box.innerHTML = '<div class="error">状态读取失败：' + String(e.message || e) + '</div>';
+        btn.disabled = false;
+      }
+    }, 1000);
+  } catch (e) {
+    box.innerHTML = '<div class="error">环境补全启动失败：' + String(e.message || e) + '</div>';
+    btn.disabled = false;
+  }
+}
+
+loadDockHistory();
+loadDockEnv();
+</script>
+</body>
+</html>

@@ -1,0 +1,438 @@
+<!DOCTYPE html>
+<html lang="zh-CN">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1">
+<title>单细胞数据集分析</title>
+<style>
+body {
+  font-family: "Segoe UI", Arial, sans-serif;
+  margin: 0;
+  color: #1f2933;
+  background: url('/static/background.png') no-repeat center center fixed;
+  background-size: cover;
+}
+.wrap { max-width: 1180px; margin: 0 auto; padding: 28px; }
+h1 { font-size: 28px; margin: 0 0 8px; }
+h2 { font-size: 18px; }
+.card {
+  background: rgba(255, 255, 255, 0.94);
+  border: 1px solid #d7dde4;
+  border-radius: 8px;
+  padding: 20px;
+  margin-bottom: 18px;
+  box-shadow: 0 1px 4px rgba(15, 23, 42, 0.08);
+}
+label { display: block; margin: 12px 0 4px; font-weight: 600; }
+input, select {
+  width: 100%;
+  padding: 10px;
+  border: 1px solid #cbd2d9;
+  border-radius: 6px;
+  box-sizing: border-box;
+}
+button {
+  margin-top: 18px;
+  padding: 10px 18px;
+  border: 0;
+  border-radius: 6px;
+  background: #1665c0;
+  color: #fff;
+  font-size: 15px;
+  cursor: pointer;
+}
+button:disabled { background: #9aa5b1; cursor: not-allowed; }
+pre {
+  background: #0f172a;
+  color: #dbeafe;
+  padding: 14px;
+  border-radius: 8px;
+  height: 420px;
+  overflow: auto;
+  font-size: 12px;
+  white-space: pre-wrap;
+}
+.error { color: #b91c1c; margin-top: 10px; }
+.ok { color: #047857; margin-top: 10px; }
+.muted { color: #6b7280; }
+.figrow {
+  border: 1px solid #e5e7eb;
+  border-radius: 8px;
+  padding: 10px;
+  margin: 10px 0;
+  background: #fafbfc;
+}
+.fighead {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  gap: 12px;
+  font-weight: 600;
+}
+.fighead select { width: 72px; }
+.fig-opts { display: flex; align-items: center; gap: 6px; }
+.fig-opts .style-select { width: 110px; }
+.params { display: grid; grid-template-columns: repeat(auto-fit, minmax(220px, 1fr)); gap: 8px; margin-top: 8px; }
+.figslot { margin-top: 10px; min-height: 32px; }
+.figslot img {
+  width: 100%;
+  border: 1px solid #e5e7eb;
+  border-radius: 6px;
+  background: #fff;
+}
+table { width: 100%; border-collapse: collapse; background: #fff; font-size: 13px; }
+th, td { border: 1px solid #e5e7eb; padding: 8px; text-align: left; }
+th { background: #eef2f7; }
+a { color: #1665c0; text-decoration: none; }
+</style>
+</head>
+<body>
+<div class="wrap">
+<h1>单细胞数据集分析</h1>
+<p class="muted">输入 GEO 数据集编号和输出路径，自动完成下载、质控、双细胞、聚类、注释、差异表达与富集分析。</p>
+
+<div class="card">
+  <form id="form">
+    <label for="acc">GSE 数据集编号</label>
+    <input id="acc" name="accession" placeholder="请输入数据集编号" required>
+
+    <label for="out">结果保存路径</label>
+    <input id="out" name="output" placeholder="请输入保存路径" required>
+
+    <label for="sp">物种</label>
+    <select id="sp" name="species">
+      <option value="auto" selected>auto - 自动识别</option>
+      <option value="hs">hs - Human</option>
+      <option value="mm">mm - Mouse</option>
+    </select>
+
+    <div class="params">
+      <h2>分析参数</h2>
+      <label>QC 最小基因数 <input type="number" name="LIVER_QC_MIN_FEATURES" placeholder="自动"></label>
+      <label>QC 最大基因数 <input type="number" name="LIVER_QC_MAX_FEATURES" placeholder="自动"></label>
+      <label>QC 最小 UMI <input type="number" name="LIVER_QC_MIN_COUNTS" placeholder="自动"></label>
+      <label>QC 最大 UMI <input type="number" name="LIVER_QC_MAX_COUNTS" placeholder="自动"></label>
+      <label>QC 最大线粒体比例 <input type="number" name="LIVER_QC_MAX_MT" placeholder="自动"></label>
+      <label>聚类分辨率 <input type="number" step="0.1" name="LIVER_CLUSTER_RESOLUTION" placeholder="0.6"></label>
+      <label>聚类算法 1-Louvain 4-Leiden <input type="number" name="LIVER_CLUSTER_ALGORITHM" placeholder="1"></label>
+      <label>差异表达 log2FC 阈值 <input type="number" step="0.05" name="LIVER_DE_LOGFc" placeholder="0.25"></label>
+      <label>差异表达 Padj 阈值 <input type="number" step="0.01" name="LIVER_DE_PADJ" placeholder="0.05"></label>
+    </div>
+
+    <div id="figureToggles" style="margin-top: 16px;">
+      <h2>结果图开关</h2>
+      <p class="muted">默认 yes；选择 no 则跳过该图。开始分析后不可修改。</p>
+<!--FIGURE_TOGGLES-->
+    </div>
+
+    <button id="startBtn" type="button" onclick="startRun()">开始分析</button>
+    <button id="pauseBtn" type="button" onclick="pauseRun()" disabled>暂停分析</button>
+    <button id="resumeBtn" type="button" onclick="resumeRun()" disabled>继续分析</button>
+  </form>
+  <div id="message"></div>
+</div>
+
+<div class="card">
+  <h2>实时进度</h2>
+  <pre id="log">等待开始...</pre>
+</div>
+
+<div class="card">
+  <h2>分析历史</h2>
+  <div id="history">正在加载历史记录...</div>
+</div>
+
+<div class="card">
+  <h2>环境状态与自动补全</h2>
+  <label for="installPath">安装地址</label>
+  <input id="installPath" name="install_path" placeholder="C:\pylibs">
+  <button type="button" onclick="checkEnvironment()">检查单细胞环境</button>
+  <button type="button" onclick="installEnvironment('single')">补全单细胞环境</button>
+  <pre id="envOutput">点击“检查环境”查看当前依赖状态。</pre>
+</div>
+
+<div class="card">
+  <h2>软件环境</h2>
+  <div id="versions">正在获取版本信息...</div>
+</div>
+</div>
+
+<script>
+let currentJob = null;
+let pollTimer = null;
+let figTimer = null;
+let paused = false;
+
+function setupFigureSlots() {
+  document.querySelectorAll('.figrow').forEach(row => {
+    const select = row.querySelector('select');
+    const slot = row.querySelector('.figslot');
+    if (select.value === 'no') {
+      row.style.display = 'none';
+      slot.innerHTML = '';
+    } else {
+      row.style.display = 'block';
+      slot.innerHTML = '<p class="muted">等待生成...</p>';
+    }
+  });
+}
+
+async function startRun() {
+  const form = document.getElementById('form');
+  const data = new URLSearchParams(new FormData(form));
+  const btn = document.getElementById('startBtn');
+  const pauseBtn = document.getElementById('pauseBtn');
+  const resumeBtn = document.getElementById('resumeBtn');
+  const msg = document.getElementById('message');
+  btn.disabled = true;
+  pauseBtn.disabled = true;
+  resumeBtn.disabled = true;
+  paused = false;
+  msg.className = '';
+  msg.textContent = '正在启动...';
+  document.querySelectorAll('#figureToggles select').forEach(s => s.disabled = true);
+  setupFigureSlots();
+
+  try {
+    const resp = await fetch('/start', {method: 'POST', body: data});
+    const result = await resp.json();
+    if (!resp.ok) throw new Error(result.error || '启动失败');
+    currentJob = result.job;
+    document.getElementById('log').textContent = '';
+    msg.className = 'ok';
+    msg.textContent = '任务已启动，日志与结果图会实时刷新。';
+    pauseBtn.disabled = false;
+    if (pollTimer) clearInterval(pollTimer);
+    if (figTimer) clearInterval(figTimer);
+    pollTimer = setInterval(pollLog, 1000);
+    figTimer = setInterval(pollFigures, 2000);
+  } catch (e) {
+    msg.className = 'error';
+    msg.textContent = String(e.message || e);
+    document.querySelectorAll('#figureToggles select').forEach(s => s.disabled = false);
+    pauseBtn.disabled = true;
+    resumeBtn.disabled = true;
+  } finally {
+    btn.disabled = false;
+  }
+}
+
+async function pollLog() {
+  if (!currentJob) return;
+  try {
+    const resp = await fetch('/log?job=' + currentJob);
+    const text = await resp.text();
+    const box = document.getElementById('log');
+    box.textContent = text;
+    box.scrollTop = box.scrollHeight;
+    const statusResp = await fetch('/status?job=' + currentJob);
+    const status = await statusResp.json();
+    if (!status.running) {
+      if (status.queued) {
+        const msg = document.getElementById('message');
+        msg.className = 'ok';
+        msg.textContent = '任务已进入队列，等待前面的分析完成...';
+        return;
+      }
+      if (status.paused) {
+        clearInterval(pollTimer);
+        clearInterval(figTimer);
+        paused = true;
+        const msg = document.getElementById('message');
+        msg.className = 'ok';
+        msg.textContent = '分析已暂停，点击继续分析将从断点继续。';
+        document.getElementById('pauseBtn').disabled = true;
+        document.getElementById('resumeBtn').disabled = false;
+        return;
+      }
+      clearInterval(pollTimer);
+      clearInterval(figTimer);
+      await pollFigures();
+      const msg = document.getElementById('message');
+      msg.className = status.ok ? 'ok' : 'error';
+      msg.textContent = status.ok ? '分析已完成' : '分析运行失败，请查看日志';
+      document.querySelectorAll('#figureToggles select').forEach(s => s.disabled = false);
+      document.getElementById('pauseBtn').disabled = true;
+      document.getElementById('resumeBtn').disabled = true;
+      currentJob = null;
+      await loadHistory();
+    }
+  } catch (e) {
+    // keep polling on transient errors
+  }
+}
+
+async function pauseRun() {
+  if (!currentJob) return;
+  try {
+    await fetch('/pause', {
+      method: 'POST',
+      body: new URLSearchParams({job: currentJob})
+    });
+    const msg = document.getElementById('message');
+    msg.className = 'ok';
+    msg.textContent = '暂停请求已发送，当前分析阶段完成后会停止。';
+    document.getElementById('pauseBtn').disabled = true;
+  } catch (e) {
+    const msg = document.getElementById('message');
+    msg.className = 'error';
+    msg.textContent = '暂停失败：' + String(e.message || e);
+  }
+}
+
+async function resumeRun() {
+  if (!currentJob) return;
+  try {
+    const resp = await fetch('/resume', {
+      method: 'POST',
+      body: new URLSearchParams({job: currentJob})
+    });
+    const result = await resp.json();
+    if (!resp.ok) throw new Error(result.error || '继续失败');
+    paused = false;
+    const msg = document.getElementById('message');
+    msg.className = 'ok';
+    msg.textContent = '正在从断点继续分析...';
+    document.getElementById('pauseBtn').disabled = false;
+    document.getElementById('resumeBtn').disabled = true;
+    if (pollTimer) clearInterval(pollTimer);
+    if (figTimer) clearInterval(figTimer);
+    pollTimer = setInterval(pollLog, 1000);
+    figTimer = setInterval(pollFigures, 2000);
+  } catch (e) {
+    const msg = document.getElementById('message');
+    msg.className = 'error';
+    msg.textContent = '继续失败：' + String(e.message || e);
+  }
+}
+
+async function pollFigures() {
+  if (!currentJob) return;
+  try {
+    const resp = await fetch('/files?job=' + currentJob);
+    const data = await resp.json();
+    const available = new Set(data.figures || []);
+    document.querySelectorAll('.figslot').forEach(slot => {
+      const name = slot.dataset.name;
+      const row = document.getElementById('figrow_' + name);
+      if (!row || row.style.display === 'none') return;
+      if (available.has(name)) {
+        if (!slot.querySelector('img')) {
+          const img = document.createElement('img');
+          img.src = '/figure?job=' + currentJob + '&name=' + encodeURIComponent(name);
+          slot.innerHTML = '';
+          slot.appendChild(img);
+        }
+      } else if (!slot.querySelector('img')) {
+        slot.innerHTML = '<p class="muted">生成中...</p>';
+      }
+    });
+  } catch (e) {
+    // keep polling on transient errors
+  }
+}
+
+async function loadVersions() {
+  const box = document.getElementById('versions');
+  try {
+    const resp = await fetch('/versions');
+    const items = await resp.json();
+    if (!items.length) {
+      box.textContent = '无法获取版本信息。';
+      return;
+    }
+    const software = items.filter(item => item.kind === 'software');
+    const packages = items.filter(item => item.kind === 'package');
+    const okItem = item => item.version && !['not installed', 'unknown', 'not found', 'missing'].includes(String(item.version).toLowerCase());
+    const badge = item => okItem(item)
+      ? '<span style="padding:2px 8px;border-radius:10px;font-size:12px;background:#dcfce7;color:#166534;">OK</span>'
+      : '<span style="padding:2px 8px;border-radius:10px;font-size:12px;background:#fee2e2;color:#991b1b;">FAIL</span>';
+    const softwareRows = software.map(item => (
+      '<tr><td>' + item.name + '</td><td>' + item.version + '</td><td>' + badge(item) +
+      '</td><td><a href="' + item.url + '" target="_blank" rel="noopener">' + item.url + '</a></td></tr>'
+    )).join('');
+    const packageRows = packages.map(item => (
+      '<tr><td>' + item.name + '</td><td>' + item.version + '</td><td>' + badge(item) +
+      '</td><td><code>' + (item.install || '') + '</code></td></tr>'
+    )).join('');
+    let html = '<h3>软件</h3>';
+    html += '<table><thead><tr><th>软件</th><th>版本</th><th>状态</th><th>下载地址</th></tr></thead><tbody>' + softwareRows + '</tbody></table>';
+    html += '<h3>R 插件 / 包</h3>';
+    html += '<table><thead><tr><th>插件</th><th>版本</th><th>状态</th><th>安装命令</th></tr></thead><tbody>' + packageRows + '</tbody></table>';
+    box.innerHTML = html;
+  } catch (e) {
+    box.textContent = '版本信息加载失败：' + String(e.message || e);
+  }
+}
+
+async function loadHistory() {
+  const box = document.getElementById('history');
+  try {
+    const resp = await fetch('/history');
+    const items = await resp.json();
+    if (!items.length) {
+      box.textContent = '暂无分析历史。';
+      return;
+    }
+    const rows = items.map(item => (
+      '<tr><td>' + item.accession + '</td><td>' + item.species + '</td><td>' +
+      item.status + '</td><td>' + item.figures + '</td><td>' +
+      new Date(item.finished * 1000).toLocaleString() + '</td><td>' +
+      item.output + '</td></tr>'
+    )).join('');
+    box.innerHTML = '<table><thead><tr><th>数据集</th><th>物种</th><th>状态</th><th>图数量</th><th>完成时间</th><th>输出路径</th></tr></thead><tbody>' + rows + '</tbody></table>';
+  } catch (e) {
+    box.textContent = '历史记录加载失败：' + String(e.message || e);
+  }
+}
+
+async function checkEnvironment() {
+  const box = document.getElementById('envOutput');
+  box.textContent = '正在检查环境...';
+  try {
+    const resp = await fetch('/environment');
+    const data = await resp.json();
+    box.textContent = data.output || '环境检查完成';
+    const msg = document.getElementById('message');
+    msg.className = data.ok ? 'ok' : 'error';
+    msg.textContent = data.ok ? '环境检测通过' : '环境检测未通过，可点击自动补全环境';
+  } catch (e) {
+    box.textContent = '环境检查失败：' + String(e.message || e);
+  }
+}
+
+async function installEnvironment(project) {
+  const box = document.getElementById('envOutput');
+  const target = document.getElementById('installPath').value.trim();
+  box.textContent = '正在自动补全环境...';
+  try {
+    const form = new URLSearchParams({project: project});
+    if (target) form.set('target', target);
+    await fetch('/install', {method: 'POST', body: form});
+    const timer = setInterval(async () => {
+      try {
+        const resp = await fetch('/install-status');
+        const data = await resp.json();
+        box.textContent = data.log || '正在安装...';
+        if (!data.running) {
+          clearInterval(timer);
+          const msg = document.getElementById('message');
+          msg.className = data.ok ? 'ok' : 'error';
+          msg.textContent = data.ok ? '环境补全完成' : '环境补全失败，请查看日志';
+          await checkEnvironment();
+        }
+      } catch (e) {
+        clearInterval(timer);
+        box.textContent = '环境补全状态读取失败：' + String(e.message || e);
+      }
+    }, 1000);
+  } catch (e) {
+    box.textContent = '环境补全启动失败：' + String(e.message || e);
+  }
+}
+
+loadHistory();
+loadVersions();
+</script>
+</body>
+</html>
