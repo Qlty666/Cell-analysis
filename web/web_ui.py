@@ -131,9 +131,6 @@ def find_rscript() -> str:
             candidates = sorted(base.glob("R-*/bin/Rscript.exe"), reverse=True)
             if candidates:
                 return str(candidates[0])
-    candidate = Path(r"D:\R\R-4.5.1\bin\Rscript.exe")
-    if candidate.exists():
-        return str(candidate)
     raise RuntimeError("Rscript not found")
 
 
@@ -376,7 +373,7 @@ pre { background: #0f172a; color: #dbeafe; padding: 14px; border-radius: 8px; he
     <input id="acc" name="accession" placeholder="GSE125449" required>
 
     <label for="out">结果保存路径</label>
-    <input id="out" name="output" placeholder="D:\\AAA Liver cancer\\out" required>
+    <input id="out" name="output" placeholder="C:\\results\\out" required>
 
     <label for="sp">物种</label>
     <select id="sp" name="species">

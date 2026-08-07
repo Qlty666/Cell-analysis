@@ -60,9 +60,6 @@ def find_rscript() -> str:
             candidates = sorted(base.glob("R-*/bin/Rscript.exe"), reverse=True)
             if candidates:
                 return str(candidates[0])
-    candidate = Path(r"D:\R\R-4.5.1\bin\Rscript.exe")
-    if candidate.exists():
-        return str(candidate)
     raise RuntimeError("Rscript not found")
 
 
