@@ -135,6 +135,8 @@ a.file-link { color: #1665c0; text-decoration: none; margin-right: 12px; }
           <option value="ml-predict">ML/DL 重打分</option>
           <option value="export-md">导出 MD 交接模板</option>
           <option value="export-external">导出外部对接模板</option>
+          <option value="redock">Top 命中精细重对接</option>
+          <option value="report">生成 HTML 报告</option>
         </select>
       </label>
       <div>
@@ -152,6 +154,9 @@ a.file-link { color: #1665c0; text-decoration: none; margin-right: 12px; }
           <input name="size_y" type="number" step="0.5" value="22.5">
           <input name="size_z" type="number" step="0.5" value="22.5">
         </div>
+      </div>
+      <div style="align-self:end;">
+        <button class="env-action" type="button" onclick="detectBox()">自动检测对接盒</button>
       </div>
     </div>
     <div class="grid">
@@ -232,6 +237,13 @@ function msg(text, cls) {
   el.textContent = text;
 }
 
+function formValue(name) {
+  const form = document.getElementById('form');
+  if (!form) return '';
+  const fd = new FormData(form);
+  return fd.get(name) || '';
+}
+
 async function checkEnv(btn) {
   const box = document.getElementById('dockEnvOutput');
   btn.disabled = true;
@@ -241,6 +253,34 @@ async function checkEnv(btn) {
     box.textContent = '环境检查完成。';
   } finally {
     btn.disabled = false;
+  }
+}
+
+async function detectBox() {
+  const workdir = formValue('workdir');
+  const receptor = formValue('receptor');
+  if (!workdir || !receptor) {
+    msg('请先填写工作目录和受体文件路径', 'error');
+    return;
+  }
+  const form = new URLSearchParams({workdir: workdir, receptor: receptor});
+  try {
+    const resp = await fetch('/dock/detect-box', {method: 'POST', body: form});
+    const data = await resp.json();
+    if (!resp.ok) throw new Error(data.error || '检测失败');
+    const setVal = (id, value) => {
+      const el = document.getElementById(id);
+      if (el) el.value = value;
+    };
+    setVal('center_x', data.center[0]);
+    setVal('center_y', data.center[1]);
+    setVal('center_z', data.center[2]);
+    setVal('size_x', data.size[0]);
+    setVal('size_y', data.size[1]);
+    setVal('size_z', data.size[2]);
+    msg('对接盒已自动检测并写入配置。', 'ok');
+  } catch (e) {
+    msg(String(e.message || e), 'error');
   }
 }
 

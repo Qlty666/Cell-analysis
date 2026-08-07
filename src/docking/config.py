@@ -20,6 +20,7 @@ DEFAULTS = {
     "receptor": {
         "input": "data/receptors/receptor.pdb",
         "output": "data/receptors/receptor.pdbqt",
+        "detect_input": None,
         "center": [0.0, 0.0, 0.0],
         "size": [22.5, 22.5, 22.5],
         "flexible": [],
@@ -81,6 +82,19 @@ DEFAULTS = {
     "md": {
         "export_dir": "outputs/md",
         "top_n": 10,
+    },
+    "redock": {
+        "enabled": True,
+        "top_n": 20,
+        "exhaustiveness": 32,
+        "num_modes": 9,
+        "energy_range": 3.0,
+        "max_workers": 4,
+        "timeout_seconds": 600,
+        "resume": True,
+    },
+    "report": {
+        "top_n": 20,
     },
 }
 
@@ -279,6 +293,7 @@ def save_config(cfg: ResolvedConfig, path: Path) -> None:
         "receptor": {
             "input": _rel(cfg.receptor_input(), cfg.workdir),
             "output": _rel(cfg.receptor_output(), cfg.workdir),
+            "detect_input": cfg.get("receptor", "detect_input"),
             "center": cfg.receptor_center(),
             "size": cfg.receptor_size(),
             "flexible": [_rel(item, cfg.workdir) for item in cfg.receptor_flexible()],
@@ -340,6 +355,19 @@ def save_config(cfg: ResolvedConfig, path: Path) -> None:
         "md": {
             "export_dir": cfg.get("md", "export_dir", "outputs/md"),
             "top_n": cfg.get("md", "top_n", 10),
+        },
+        "redock": {
+            "enabled": cfg.get("redock", "enabled", True),
+            "top_n": cfg.get("redock", "top_n", 20),
+            "exhaustiveness": cfg.get("redock", "exhaustiveness", 32),
+            "num_modes": cfg.get("redock", "num_modes", 9),
+            "energy_range": cfg.get("redock", "energy_range", 3.0),
+            "max_workers": cfg.get("redock", "max_workers", 4),
+            "timeout_seconds": cfg.get("redock", "timeout_seconds", 600),
+            "resume": cfg.get("redock", "resume", True),
+        },
+        "report": {
+            "top_n": cfg.get("report", "top_n", 20),
         },
     }
     path.parent.mkdir(parents=True, exist_ok=True)

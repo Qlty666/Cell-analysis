@@ -7,7 +7,19 @@ import argparse
 import sys
 from pathlib import Path
 
-from . import analysis, docking, evidence, handoff, ligands, ml, pipeline, receptor
+from . import (
+    analysis,
+    box,
+    docking,
+    evidence,
+    handoff,
+    ligands,
+    ml,
+    pipeline,
+    receptor,
+    redock,
+    report,
+)
 from .config import load_config, save_config
 from .environment import check_environment
 from .utils import setup_logging
@@ -34,6 +46,9 @@ def main(argv: list[str] | None = None) -> int:
         ("ml-predict", "apply trained ML/DL model to docking results"),
         ("export-md", "export top hits to Amber/GROMACS templates"),
         ("export-external", "export UniDock/HDOCK/HADDOCK templates"),
+        ("redock", "re-dock top hits with higher exhaustiveness"),
+        ("report", "generate HTML summary report"),
+        ("detect-box", "detect docking box from cocrystal ligand and save config"),
         ("check-env", "check Python packages and external tools"),
         ("check-cadd", "check CADD workflow skills and ML libraries"),
         ("init", "create the workdir skeleton"),
@@ -114,6 +129,12 @@ def main(argv: list[str] | None = None) -> int:
         handoff.export_md(cfg, log)
     elif args.command == "export-external":
         handoff.export_external(cfg, log)
+    elif args.command == "redock":
+        redock.run_redock(cfg, log)
+    elif args.command == "report":
+        report.generate_report(cfg, log)
+    elif args.command == "detect-box":
+        box.detect_and_update_config(cfg, log)
     else:
         parser.error(f"unknown command: {args.command}")
     log.info("%s complete", args.command)
@@ -165,7 +186,7 @@ def _init_workdir(cfg, log) -> None:
         cfg.workdir / "data" / "receptors",
         cfg.workdir / "data" / "ligands",
         cfg.output_dir,
-        cfg.logs_dir,
+        cfg.logs_dir(),
     ]:
         path.mkdir(parents=True, exist_ok=True)
     save_config(cfg, cfg.workdir / "config" / "docking_config.json")
