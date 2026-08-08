@@ -1,0 +1,40 @@
+{
+  "accession": "GSE125449",
+  "single_cell_output": "../liver_cancer",
+  "workdir": "dock",
+  "species": "auto",
+  "top_genes": 50,
+  "docking_targets": 3,
+  "keep_all_genes": false,
+  "case_label": null,
+  "normal_label": null,
+  "ligand_library": null,
+  "ko_top_n": 50,
+  "depmap_csv": null,
+  "evidence": {
+    "fetch": true,
+    "max_workers": 6,
+    "timeout": 90
+  },
+  "gene_blacklist": [
+    "^RPL",
+    "^RPS",
+    "^MRPL",
+    "^MRPS",
+    "^MT-",
+    "^MTRNR",
+    "^SNORD",
+    "^SCGB",
+    "^IGH",
+    "^IGK",
+    "^IGL",
+    "^TRA",
+    "^TRB",
+    "^TRG",
+    "^HLA-D",
+    "^LINC",
+    "^RP[0-9]",
+    "^AC[0-9]",
+    "^AL[0-9]"
+  ]
+}

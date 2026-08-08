@@ -63,12 +63,12 @@ class TestCommandBuild(unittest.TestCase):
             {
                 "center": [10.0, 20.0, 30.0],
                 "size": [25.0, 25.0, 25.0],
-                "executable": r"D:\fake vina.py",
+                "executable": "fake_vina.py",
             },
         )
         cmd = build_vina_command(
             cfg,
-            r"D:\fake vina.py",
+            "fake_vina.py",
             "receptor.pdbqt",
             "ligand.pdbqt",
             "out.pdbqt",

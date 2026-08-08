@@ -76,7 +76,13 @@ def find_tool(name: str) -> str | None:
         candidates.append(Path(sys.executable).parent / variant)
         candidates.append(Path(sys.executable).parent.parent / "Scripts" / variant)
         candidates.append(project_root / "dock" / "tools" / variant)
-        for base in [Path(r"D:\anaconda"), Path(r"C:\ProgramData\miniconda3")]:
+        conda_bases: list[Path] = []
+        for env_key in ["CONDA_PREFIX", "CONDA_ROOT", "CONDA_HOME", "MAMBA_ROOT_PREFIX"]:
+            value = os.environ.get(env_key)
+            if value:
+                conda_bases.append(Path(value))
+        conda_bases += [Path.home() / "anaconda3", Path.home() / "miniconda3"]
+        for base in conda_bases:
             if not base.exists():
                 continue
             for env in [

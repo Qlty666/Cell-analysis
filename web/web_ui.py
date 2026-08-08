@@ -38,6 +38,10 @@ DOCK_JOBS = {}
 DOCK_QUEUE = []
 DOCK_QUEUE_LOCK = threading.Lock()
 DOCK_HISTORY_PATH = WEB_DIR / "dock_history.json"
+FULL_TEMPLATE_PATH = TEMPLATE_DIR / "full_page_template.html"
+FULL_JOBS = {}
+FULL_QUEUE = []
+FULL_QUEUE_LOCK = threading.Lock()
 VALIDATION_REPORT_DIR = APP_ROOT / "dock" / "validation_real" / "pan_cancer_20"
 VALIDATION_REPORT_PATH = VALIDATION_REPORT_DIR / "validation_report.md"
 VALIDATION_LOG = WEB_DIR / "validation_run.log"
@@ -46,6 +50,7 @@ NAV_HTML = (
     '<div class="topnav">'
     '<a href="/">单细胞分析</a>'
     '<a href="/dock">虚拟筛选</a>'
+    '<a href="/full">全自动流水线</a>'
     '</div>'
 )
 NAV_CSS = (
@@ -377,7 +382,7 @@ pre { background: #0f172a; color: #dbeafe; padding: 14px; border-radius: 8px; he
     <input id="acc" name="accession" placeholder="GSE125449" required>
 
     <label for="out">结果保存路径</label>
-    <input id="out" name="output" placeholder="C:\\results\\out" required>
+    <input id="out" name="output" placeholder="results\\out" required>
 
     <label for="sp">物种</label>
     <select id="sp" name="species">
@@ -545,6 +550,15 @@ def render_dock_page() -> str:
     )
 
 
+def render_full_page() -> str:
+    if FULL_TEMPLATE_PATH.exists():
+        return FULL_TEMPLATE_PATH.read_text(encoding="utf-8")
+    return (
+        "<html><body><h1>full pipeline template missing</h1>"
+        "<p>web/templates/full_page_template.html not found</p></body></html>"
+    )
+
+
 def _first(data: dict, key: str, default: str = "") -> str:
     values = data.get(key)
     if not values:
@@ -678,6 +692,224 @@ def _dock_status(info: dict) -> dict:
             info["recorded"] = True
         _drain_dock_queue()
     return {"running": running, "ok": ok, "queued": False, "paused": paused}
+
+
+def start_full_job(data: dict) -> dict:
+    workdir = Path(
+        _first(data, "workdir", str(APP_ROOT / "dock"))
+    ).expanduser().resolve()
+    workdir.mkdir(parents=True, exist_ok=True)
+    job_id = uuid.uuid4().hex[:8]
+    log_path = workdir / "logs" / f"web_full_{job_id}.log"
+    log_path.parent.mkdir(parents=True, exist_ok=True)
+
+    cmd = [
+        sys.executable,
+        str(APP_ROOT / "run_full_pipeline.py"),
+        "--config",
+        str(APP_ROOT / "config" / "full_pipeline_config.json"),
+        "--docking-config",
+        str(APP_ROOT / "config" / "docking_config.json"),
+    ]
+    accession = _first(data, "accession", "").strip()
+    if accession:
+        cmd += ["--accession", accession]
+    output = _first(data, "output", "").strip()
+    if output:
+        cmd += ["--output", output]
+    species = _first(data, "species", "").strip()
+    if species:
+        cmd += ["--species", species]
+    top_genes = _int_field(data, "top_genes")
+    if top_genes:
+        cmd += ["--top-genes", str(top_genes)]
+    docking_targets = _int_field(data, "docking_targets")
+    if docking_targets is not None:
+        cmd += ["--docking-targets", str(docking_targets)]
+    ko_top_n = _int_field(data, "ko_top_n")
+    if ko_top_n:
+        cmd += ["--ko-top-n", str(ko_top_n)]
+    ligand_library = _first(data, "ligand_library", "").strip()
+    if ligand_library:
+        cmd += ["--ligand-library", ligand_library]
+    case_label = _first(data, "case_label", "").strip()
+    if case_label:
+        cmd += ["--case-label", case_label]
+    normal_label = _first(data, "normal_label", "").strip()
+    if normal_label:
+        cmd += ["--normal-label", normal_label]
+    start_stage = _first(data, "start_stage", "").strip()
+    if start_stage:
+        cmd += ["--start-stage", start_stage]
+    for flag in [
+        "skip_scrna",
+        "skip_download",
+        "skip_deps",
+        "skip_evidence_fetch",
+        "skip_pseudobulk",
+        "skip_knockout",
+        "skip_docking",
+        "keep_all_genes",
+        "force",
+    ]:
+        if _first(data, flag, "") in ("1", "true", "on", "yes"):
+            cmd.append("--" + flag.replace("_", "-"))
+
+    env = os.environ.copy()
+    env["PYTHONIOENCODING"] = "utf-8"
+    FULL_JOBS[job_id] = {
+        "log": log_path,
+        "proc": None,
+        "started": time.time(),
+        "workdir": workdir,
+        "output": output,
+        "cmd": cmd,
+        "env": env,
+        "queued": True,
+    }
+    FULL_QUEUE.append(FULL_JOBS[job_id])
+    _drain_full_queue()
+    return {
+        "job": job_id,
+        "log_url": f"/full/log?job={job_id}",
+        "status_url": f"/full/status?job={job_id}",
+    }
+
+
+def _start_full_process(info: dict) -> None:
+    log_handle = info["log"].open("w", encoding="utf-8", errors="replace")
+    proc = subprocess.Popen(
+        info["cmd"],
+        cwd=APP_ROOT,
+        env=info["env"],
+        stdout=log_handle,
+        stderr=subprocess.STDOUT,
+        text=True,
+        encoding="utf-8",
+        errors="replace",
+    )
+    info["proc"] = proc
+    info["queued"] = False
+    info["started"] = time.time()
+
+
+def _drain_full_queue() -> None:
+    with FULL_QUEUE_LOCK:
+        for info in FULL_QUEUE:
+            if info.get("proc") is None:
+                _start_full_process(info)
+                break
+
+
+def _full_status(info: dict) -> dict:
+    queued = info.get("proc") is None
+    if queued:
+        return {"running": False, "ok": False, "queued": True, "paused": False}
+    if info.get("paused"):
+        return {"running": False, "ok": False, "queued": False, "paused": True}
+    running = info["proc"].poll() is None
+    ok = not running and info["proc"].returncode == 0
+    if not running:
+        _drain_full_queue()
+    return {"running": running, "ok": ok, "queued": False, "paused": False}
+
+
+def _read_json(path: Path) -> dict:
+    if not path.exists():
+        return {}
+    try:
+        data = json.loads(path.read_text(encoding="utf-8"))
+        return data if isinstance(data, dict) else {}
+    except Exception:
+        return {}
+
+
+def full_results(workdir: Path) -> dict:
+    workdir = Path(workdir).expanduser().resolve()
+    out = workdir / "outputs" / "integration"
+    result = {
+        "workdir": str(workdir),
+        "exists": out.exists(),
+        "files": [],
+        "summary": {},
+        "key_genes": [],
+        "knockout": [],
+        "docking": [],
+        "evidence": [],
+    }
+    if not out.exists():
+        return result
+    result["summary"] = _read_json(out / "integration_summary.json")
+    files = []
+    for name in [
+        "key_genes.csv",
+        "gene_evidence.csv",
+        "docking_targets.csv",
+        "knockout_summary.json",
+        "integration_summary.json",
+        "integration_report.html",
+    ]:
+        if (out / name).exists():
+            files.append(name)
+    for rel in [
+        "outputs/run_001/knockout/ranked_knockout.csv",
+        "outputs/run_001/knockout/target_candidates.csv",
+        "outputs/run_001/validation/validation_plan.md",
+        "outputs/run_001/validation/validation_candidates.csv",
+    ]:
+        if (workdir / rel).exists():
+            files.append(rel)
+    result["files"] = files
+    try:
+        result["key_genes"] = json.loads(
+            pd_read_csv(out / "key_genes.csv").to_json(orient="records")
+        )
+    except Exception:
+        result["key_genes"] = []
+    try:
+        result["knockout"] = json.loads(
+            pd_read_csv(workdir / "outputs" / "run_001" / "knockout" / "ranked_knockout.csv").to_json(orient="records")
+        )
+    except Exception:
+        result["knockout"] = []
+    try:
+        result["docking"] = json.loads(
+            pd_read_csv(out / "docking_targets.csv").to_json(orient="records")
+        )
+    except Exception:
+        result["docking"] = []
+    try:
+        result["evidence"] = json.loads(
+            pd_read_csv(out / "gene_evidence.csv").to_json(orient="records")
+        )
+    except Exception:
+        result["evidence"] = []
+    return result
+
+
+def pd_read_csv(path: Path):
+    import pandas as pd
+
+    return pd.read_csv(path)
+
+
+def _full_file_path(workdir: Path, name: str) -> Path | None:
+    workdir = Path(workdir).expanduser().resolve()
+    allowed_roots = [
+        (workdir / "outputs" / "integration").resolve(),
+        (workdir / "outputs" / "run_001" / "knockout").resolve(),
+        (workdir / "outputs" / "run_001" / "validation").resolve(),
+        (workdir / "data" / "knockout").resolve(),
+    ]
+    name_path = Path(name)
+    if name_path.is_absolute():
+        return None
+    target = (workdir / name_path).resolve()
+    if not target.is_file():
+        return None
+    if not any(target.is_relative_to(root) for root in allowed_roots):
+        return None
+    return target
 
 
 def validation_report_text() -> str:
@@ -1079,6 +1311,80 @@ class Handler(BaseHTTPRequestHandler):
             body = json.dumps(_dock_status(info)).encode("utf-8")
             self._send(200, body, "application/json")
             return
+        if parsed.path == "/full":
+            self._send(
+                200,
+                render_full_page().encode("utf-8"),
+                "text/html; charset=utf-8",
+            )
+            return
+        if parsed.path == "/full/log":
+            query = parse_qs(parsed.query)
+            job = query.get("job", [""])[0]
+            info = FULL_JOBS.get(job)
+            if not info:
+                self._send(404, b"job not found", "text/plain; charset=utf-8")
+                return
+            text = (
+                info["log"].read_text(encoding="utf-8", errors="replace")
+                if info["log"].exists()
+                else ""
+            )
+            self._send(200, text.encode("utf-8"), "text/plain; charset=utf-8")
+            return
+        if parsed.path == "/full/status":
+            query = parse_qs(parsed.query)
+            job = query.get("job", [""])[0]
+            info = FULL_JOBS.get(job)
+            if not info:
+                self._send(404, b"job not found", "application/json")
+                return
+            body = json.dumps(_full_status(info)).encode("utf-8")
+            self._send(200, body, "application/json")
+            return
+        if parsed.path == "/full/results":
+            query = parse_qs(parsed.query)
+            job = query.get("job", [""])[0]
+            workdir = query.get("workdir", [""])[0]
+            if job and job in FULL_JOBS:
+                workdir = str(FULL_JOBS[job]["workdir"])
+            if not workdir:
+                self._send(400, b"job or workdir required", "application/json")
+                return
+            body = json.dumps(
+                full_results(workdir),
+                ensure_ascii=False,
+            ).encode("utf-8")
+            self._send(200, body, "application/json")
+            return
+        if parsed.path == "/full/file":
+            query = parse_qs(parsed.query)
+            job = query.get("job", [""])[0]
+            name = query.get("name", [""])[0]
+            workdir = query.get("workdir", [""])[0]
+            if job and job in FULL_JOBS:
+                workdir = str(FULL_JOBS[job]["workdir"])
+            if not workdir or not name:
+                self._send(400, b"workdir and name required", "text/plain; charset=utf-8")
+                return
+            target = _full_file_path(workdir, name)
+            if not target:
+                self._send(404, b"file not found", "text/plain; charset=utf-8")
+                return
+            content_type = {
+                ".png": "image/png",
+                ".jpg": "image/jpeg",
+                ".jpeg": "image/jpeg",
+                ".svg": "image/svg+xml",
+                ".pdf": "application/pdf",
+                ".csv": "text/csv; charset=utf-8",
+                ".json": "application/json",
+                ".html": "text/html; charset=utf-8",
+                ".md": "text/markdown; charset=utf-8",
+                ".xlsx": "application/vnd.openxmlformats-officedocument.spreadsheetml.sheet",
+            }.get(target.suffix.lower(), "application/octet-stream")
+            self._send(200, target.read_bytes(), content_type)
+            return
         if parsed.path == "/dock/results":
             query = parse_qs(parsed.query)
             job = query.get("job", [""])[0]
@@ -1348,6 +1654,73 @@ class Handler(BaseHTTPRequestHandler):
             )
             return
 
+        if parsed.path == "/full/pause":
+            job = data.get("job", [""])[0]
+            info = FULL_JOBS.get(job)
+            if not info:
+                self._send(404, b"job not found", "application/json")
+                return
+            proc = info.get("proc")
+            if proc and proc.poll() is None:
+                proc.terminate()
+                try:
+                    proc.wait(timeout=20)
+                except subprocess.TimeoutExpired:
+                    proc.kill()
+                    proc.wait()
+            info["paused"] = True
+            self._send(
+                200,
+                json.dumps({"paused": True}).encode("utf-8"),
+                "application/json",
+            )
+            return
+
+        if parsed.path == "/full/resume":
+            job = data.get("job", [""])[0]
+            info = FULL_JOBS.get(job)
+            if not info:
+                self._send(404, b"job not found", "application/json")
+                return
+            info["paused"] = False
+            log_handle = info["log"].open("a", encoding="utf-8", errors="replace")
+            log_handle.write("\n[full pipeline] resume requested\n")
+            log_handle.flush()
+            proc = subprocess.Popen(
+                info["cmd"],
+                cwd=APP_ROOT,
+                env=info.get("env", os.environ.copy()),
+                stdout=log_handle,
+                stderr=subprocess.STDOUT,
+                text=True,
+                encoding="utf-8",
+                errors="replace",
+            )
+            info["proc"] = proc
+            info["started"] = time.time()
+            self._send(
+                200,
+                json.dumps({"resumed": True}).encode("utf-8"),
+                "application/json",
+            )
+            return
+
+        if parsed.path == "/full/start":
+            try:
+                result = start_full_job(data)
+                self._send(
+                    200,
+                    json.dumps(result).encode("utf-8"),
+                    "application/json",
+                )
+            except Exception as exc:
+                self._send(
+                    400,
+                    json.dumps({"error": str(exc)}).encode("utf-8"),
+                    "application/json",
+                )
+            return
+
         if parsed.path == "/dock/check-env":
             from docking.environment import check_environment
 
@@ -1563,7 +1936,7 @@ def main() -> int:
     parser.add_argument("--port", type=int, default=8000)
     parser.add_argument(
         "--page",
-        choices=["single", "dock"],
+        choices=["single", "dock", "full"],
         default="single",
         help="page to open in the browser",
     )
@@ -1573,7 +1946,12 @@ def main() -> int:
     server = ThreadingHTTPServer((args.host, args.port), Handler)
     url = f"http://{args.host}:{args.port}"
     print(f"Web UI started: {url}")
-    open_url = url + ("/dock" if args.page == "dock" else "")
+    if args.page == "dock":
+        open_url = url + "/dock"
+    elif args.page == "full":
+        open_url = url + "/full"
+    else:
+        open_url = url
     threading.Timer(1.0, lambda: webbrowser.open(open_url)).start()
     try:
         server.serve_forever()

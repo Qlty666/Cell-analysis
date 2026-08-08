@@ -53,7 +53,7 @@ python -m pip install scikit-learn joblib torch
 
 ## 数据库证据收集（Codex skills）
 
-需要在 `C:\Users\<user>\.codex\skills\` 下存在：
+需要在 `%USERPROFILE%\.codex\skills\` 下存在：
 
 - uniprot-skill
 - rcsb-pdb-skill

@@ -2,7 +2,7 @@
 chcp 65001 >nul
 cd /d "%~dp0.."
 set /p ACC=Input GSE accession e.g. GSE125449:
-set /p OUT=Input output folder e.g. C:\results\liver_cancer:
+set /p OUT=Input output folder e.g. results\liver_cancer:
 set /p SP=Input species: hs=human, mm=mouse, default hs:
 if "%ACC%"=="" goto err_acc
 if "%OUT%"=="" goto err_out

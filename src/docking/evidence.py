@@ -291,19 +291,21 @@ def _parse_bindingdb_raw(path: Path, target: str) -> list[dict]:
                 "ligand_id": (
                     item.get("ligand_id")
                     or item.get("ligand_name")
+                    or item.get("monomerid")
                     or ""
                 ),
                 "smiles": (
                     item.get("smiles")
                     or item.get("ligand_smiles")
                     or item.get("canonical_smiles")
+                    or item.get("smile")
                     or ""
                 ),
                 "activity": (
                     item.get("ki")
                     or item.get("ic50")
                     or item.get("k_d")
-                    or item.get("k_d")
+                    or item.get("affinity")
                     or ""
                 ),
                 "units": item.get("units") or item.get("unit") or "nM",
