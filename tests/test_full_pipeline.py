@@ -1,0 +1,227 @@
+#!/usr/bin/env python3
+"""Tests for the integrated scRNA -> targets -> knockout pipeline."""
+
+from __future__ import annotations
+
+import json
+import sys
+import tempfile
+import unittest
+from pathlib import Path
+
+import numpy as np
+import pandas as pd
+
+APP_ROOT = Path(__file__).resolve().parent.parent
+if str(APP_ROOT / "src") not in sys.path:
+    sys.path.insert(0, str(APP_ROOT / "src"))
+
+from pipeline.integration import (  # noqa: E402
+    _extract_cocrystal_ligands,
+    build_knockout_inputs,
+    extract_key_genes,
+    main,
+)
+
+
+def _write_deg(root: Path) -> None:
+    rows = [
+        ["GENE1", 0.0, 3.0, "Up", 0.5, 0.1, True],
+        ["GENE2", 0.0, -2.5, "Down", 0.6, 0.2, True],
+        ["RPLP0", 0.0, 4.0, "Up", 0.9, 0.3, True],
+        ["MT-ND1", 0.0, 3.5, "Up", 0.8, 0.2, True],
+        ["GENE3", 1e-12, 1.5, "Up", 0.4, 0.2, True],
+        ["GENE4", 1e-6, 0.5, "NS", 0.3, 0.2, False],
+    ]
+    frame = pd.DataFrame(
+        rows,
+        columns=[
+            "gene",
+            "p_val_adj",
+            "avg_log2FC",
+            "direction",
+            "pct.1",
+            "pct.2",
+            "significant",
+        ],
+    )
+    (root / "results" / "data").mkdir(parents=True, exist_ok=True)
+    frame.to_csv(root / "results" / "data" / "deg_significant.csv", index=False)
+
+
+def _write_pseudobulk(workdir: Path, n_genes: int = 24) -> None:
+    pseudo = workdir / "data" / "knockout" / "_pseudobulk"
+    pseudo.mkdir(parents=True, exist_ok=True)
+    rng = np.random.default_rng(11)
+    signature = [
+        "MKI67",
+        "PCNA",
+        "TOP2A",
+        "AURKA",
+        "CDC20",
+        "CDK1",
+        "CCNB1",
+        "BUB1",
+        "BIRC5",
+        "CENPA",
+    ]
+    genes = signature + [f"GENE{i:02d}" for i in range(n_genes)]
+    genes = list(dict.fromkeys(genes))[:n_genes]
+    rows = {"gene": genes}
+    for sample in ["T1", "T2", "N1", "N2"]:
+        base = 4.0 if sample.startswith("T") else 1.0
+        rows[sample] = base + rng.normal(0, 0.2, len(genes))
+    expr = pd.DataFrame(rows)
+    expr.loc[expr["gene"].isin(signature), ["T1", "T2"]] += 3.0
+    expr.to_csv(pseudo / "pseudobulk_expression.csv", index=False)
+    pd.DataFrame(
+        {
+            "sample": ["T1", "T2", "N1", "N2"],
+            "condition": ["Tumor", "Tumor", "Normal", "Normal"],
+            "cell_type": ["Hepatocyte", "T_NK", "Hepatocyte", "T_NK"],
+        }
+    ).to_csv(pseudo / "pseudobulk_metadata.csv", index=False)
+
+
+class TestExtractKeyGenes(unittest.TestCase):
+    def test_rank_and_blacklist(self):
+        with tempfile.TemporaryDirectory() as tmp:
+            root = Path(tmp) / "single_cell"
+            root.mkdir(parents=True)
+            _write_deg(root)
+            out = root / "integration_out"
+            frame = extract_key_genes(root, out, top_n=10)
+            self.assertNotIn("RPLP0", frame["gene"].tolist())
+            self.assertNotIn("MT-ND1", frame["gene"].tolist())
+            self.assertNotIn("GENE4", frame["gene"].tolist())
+            self.assertEqual(frame.iloc[0]["gene"], "GENE1")
+            self.assertAlmostEqual(float(frame.iloc[0]["avg_log2fc"]), 3.0)
+            self.assertTrue((out / "key_genes.csv").exists())
+            self.assertTrue((out / "key_genes_summary.json").exists())
+
+
+class TestCocrystalLigandFallback(unittest.TestCase):
+    def test_extract_hetatm_ligand(self):
+        with tempfile.TemporaryDirectory() as tmp:
+            pdb = Path(tmp) / "lig.pdb"
+            pdb.write_text(
+                "HETATM    1  C1  LIG A 101       1.000   2.000   3.000  1.00 20.00           C\n"
+                "HETATM    2  N1  LIG A 101       2.000   2.000   3.000  1.00 20.00           N\n"
+                "HETATM    3  C2  LIG A 101       3.000   2.000   3.000  1.00 20.00           C\n"
+                "HETATM    4  O1  LIG A 101       4.000   2.000   3.000  1.00 20.00           O\n"
+                "HETATM    5  C3  LIG A 101       1.000   1.000   3.000  1.00 20.00           C\n"
+                "HETATM    6  C4  LIG A 101       1.000   3.000   3.000  1.00 20.00           C\n"
+                "CONECT    1    2    5    6\n"
+                "CONECT    2    1    3\n"
+                "CONECT    3    2    4\n"
+                "CONECT    4    3\n"
+                "END\n",
+                encoding="utf-8",
+            )
+            ligands = _extract_cocrystal_ligands(pdb)
+            self.assertEqual(len(ligands), 1)
+            self.assertTrue(ligands[0]["smiles"])
+
+
+class TestBuildKnockoutInputs(unittest.TestCase):
+    def test_inputs_written(self):
+        with tempfile.TemporaryDirectory() as tmp:
+            root = Path(tmp) / "single_cell"
+            root.mkdir(parents=True)
+            _write_deg(root)
+            workdir = Path(tmp) / "work"
+            _write_pseudobulk(workdir)
+            evidence = pd.DataFrame(
+                {
+                    "gene": ["GENE1", "GENE2"],
+                    "uniprot": ["P00001", ""],
+                    "known_ligands": [5, 0],
+                    "chembl_bioactivities": [5, 0],
+                    "pdb_structures": [2, 0],
+                    "pdb_ids": ["1ABC,2DEF", ""],
+                    "off_target_paralogs": [1, 0],
+                    "safety_concern": [0, 0],
+                    "entrez": ["1", "2"],
+                    "ensembl": ["ENSG1", "ENSG2"],
+                    "chembl_target_id": ["CHEMBL1", ""],
+                }
+            )
+            (workdir / "outputs" / "integration").mkdir(parents=True, exist_ok=True)
+            evidence.to_csv(
+                workdir / "outputs" / "integration" / "gene_evidence.csv",
+                index=False,
+            )
+            summary = build_knockout_inputs(root, workdir)
+            ko_dir = workdir / "data" / "knockout"
+            self.assertTrue((ko_dir / "expression.csv").exists())
+            self.assertTrue((ko_dir / "metadata.csv").exists())
+            self.assertTrue((ko_dir / "prognosis.csv").exists())
+            self.assertTrue((ko_dir / "druggability.csv").exists())
+            self.assertTrue((ko_dir / "off_target.csv").exists())
+            self.assertEqual(summary["samples"], 4)
+            druggable = pd.read_csv(ko_dir / "druggability.csv")
+            self.assertEqual(
+                int(druggable.loc[druggable["gene"] == "GENE1", "known_ligands"].iloc[0]),
+                5,
+            )
+
+
+class TestFullPipeline(unittest.TestCase):
+    def test_end_to_end_without_docking(self):
+        with tempfile.TemporaryDirectory() as tmp:
+            root = Path(tmp) / "single_cell"
+            root.mkdir(parents=True)
+            _write_deg(root)
+            (root / "results").mkdir(parents=True, exist_ok=True)
+            (root / "results" / "pipeline_complete.json").write_text(
+                json.dumps({"ok": True}),
+                encoding="utf-8",
+            )
+            (root / "results" / "summary.json").write_text(
+                json.dumps({"dataset": "GSE_TEST", "n_genes": 100}),
+                encoding="utf-8",
+            )
+            workdir = Path(tmp) / "work"
+            _write_pseudobulk(workdir)
+            cfg = Path(tmp) / "full_pipeline_config.json"
+            cfg.write_text(
+                json.dumps(
+                    {
+                        "accession": "GSE_TEST",
+                        "single_cell_output": str(root),
+                        "workdir": str(workdir),
+                        "top_genes": 10,
+                        "docking_targets": 2,
+                        "species": "hs",
+                    }
+                ),
+                encoding="utf-8",
+            )
+            code = main(
+                [
+                    "--config",
+                    str(cfg),
+                    "--skip-scrna",
+                    "--skip-docking",
+                    "--skip-evidence-fetch",
+                    "--docking-config",
+                    str(APP_ROOT / "config" / "docking_config.json"),
+                ]
+            )
+            self.assertEqual(code, 0)
+            out = workdir / "outputs" / "integration"
+            self.assertTrue((out / "key_genes.csv").exists())
+            self.assertTrue((out / "gene_evidence.csv").exists())
+            self.assertTrue(
+                (workdir / "outputs" / "run_001" / "knockout" / "ranked_knockout.csv").exists()
+            )
+            self.assertTrue(
+                (workdir / "outputs" / "run_001" / "validation" / "validation_plan.md").exists()
+            )
+            self.assertTrue((out / "integration_report.html").exists())
+            self.assertTrue((out / "integration_summary.json").exists())
+            self.assertTrue((out / ".stages" / "07_report.done").exists())
+
+
+if __name__ == "__main__":
+    unittest.main()

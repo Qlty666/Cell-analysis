@@ -19,6 +19,14 @@ venv/
 Thumbs.db
 .idea/
 .vscode/
+.ipynb_checkpoints/
+
+# Local environment and secrets
+.env
+.env.*
+*.pem
+*.p12
+*.key
 
 # Web runtime files
 web/history.json
@@ -51,6 +59,7 @@ dock/data/receptors/*.pdb
 dock/data/receptors/*.pdbqt
 dock/config/docking_web_*.json
 dock/tools/
+dock/work/
 
 # Validation artifacts
 *.log

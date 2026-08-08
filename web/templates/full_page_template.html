@@ -1,0 +1,393 @@
+<!DOCTYPE html>
+<html lang="zh-CN">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1">
+<title>全自动流水线</title>
+<style>
+body {
+  font-family: "Segoe UI", Arial, sans-serif;
+  margin: 0;
+  color: #1f2933;
+  background: url('/static/background.png') no-repeat center center fixed;
+  background-size: cover;
+}
+.topnav {
+  position: sticky;
+  top: 0;
+  z-index: 100;
+  background: #0f172a;
+  padding: 12px 28px;
+  display: flex;
+  gap: 18px;
+  align-items: center;
+  flex-wrap: wrap;
+  box-shadow: 0 2px 8px rgba(15, 23, 42, 0.35);
+}
+.topnav a {
+  color: #ffffff;
+  text-decoration: none;
+  font-size: 15px;
+  font-weight: 600;
+  padding: 6px 10px;
+  border-radius: 6px;
+  background: rgba(255, 255, 255, 0.08);
+}
+.topnav a:hover, .topnav a.active { background: #1665c0; color: #fff; }
+.wrap { max-width: 1180px; margin: 0 auto; padding: 28px; }
+h1 { font-size: 26px; margin: 0 0 6px; }
+h2 { font-size: 17px; margin: 0 0 10px; }
+.muted { color: #6b7280; font-size: 13px; }
+.card {
+  background: rgba(255, 255, 255, 0.95);
+  border: 1px solid #d7dde4;
+  border-radius: 8px;
+  padding: 20px;
+  margin-bottom: 18px;
+  box-shadow: 0 1px 4px rgba(15, 23, 42, 0.08);
+}
+.grid { display: grid; grid-template-columns: repeat(auto-fit, minmax(220px, 1fr)); gap: 10px; }
+.grid.wide { grid-template-columns: repeat(auto-fit, minmax(260px, 1fr)); }
+label { display: block; margin: 10px 0 4px; font-weight: 600; font-size: 13px; }
+input, select {
+  width: 100%;
+  padding: 9px;
+  border: 1px solid #cbd2d9;
+  border-radius: 6px;
+  box-sizing: border-box;
+  font-size: 13px;
+}
+.actions { display: flex; gap: 12px; margin-top: 18px; flex-wrap: wrap; }
+button {
+  padding: 10px 18px;
+  border: 0;
+  border-radius: 6px;
+  background: #1665c0;
+  color: #fff;
+  font-size: 14px;
+  cursor: pointer;
+}
+button.secondary { background: #475569; }
+button:disabled { background: #9aa5b1; cursor: not-allowed; }
+.toggles { display: grid; grid-template-columns: repeat(auto-fit, minmax(230px, 1fr)); gap: 8px; margin-top: 14px; }
+.toggle { display: flex; align-items: center; gap: 8px; font-weight: 600; margin: 0; }
+.toggle input { width: auto; }
+pre {
+  background: #0f172a;
+  color: #dbeafe;
+  padding: 14px;
+  border-radius: 8px;
+  height: 380px;
+  overflow: auto;
+  font-size: 12px;
+  white-space: pre-wrap;
+}
+.error { color: #b91c1c; margin-top: 10px; }
+.ok { color: #047857; margin-top: 10px; }
+table { width: 100%; border-collapse: collapse; background: #fff; font-size: 12px; }
+th, td { border: 1px solid #e5e7eb; padding: 6px 7px; text-align: left; }
+th { background: #eef2f7; position: sticky; top: 0; }
+.tablebox { max-height: 360px; overflow: auto; border: 1px solid #e5e7eb; border-radius: 6px; margin-top: 8px; }
+.tablebox + .tablebox { margin-top: 18px; }
+a.file-link { color: #1665c0; text-decoration: none; margin-right: 12px; }
+</style>
+</head>
+<body>
+<div class="topnav">
+  <a href="/">单细胞分析</a>
+  <a href="/dock">虚拟筛选</a>
+  <a href="/full" class="active">全自动流水线</a>
+</div>
+<div class="wrap">
+<h1>全自动流水线</h1>
+<p class="muted">单细胞分析 → 关键基因/蛋白筛选 → 证据富集 → 虚拟敲除 → 虚拟筛选 → 集成报告。</p>
+
+<div class="card">
+  <form id="form">
+    <div class="grid wide">
+      <label>GEO 数据集编号
+        <input name="accession" value="GSE125449" placeholder="GSE125449">
+      </label>
+      <label>单细胞结果目录
+        <input name="output" placeholder="results\liver_cancer（留空用默认）">
+      </label>
+      <label>工作目录
+        <input name="workdir" placeholder="dock（留空用默认）">
+      </label>
+      <label>配体库（可选）
+        <input name="ligand_library" placeholder="data/ligands/library.smi">
+      </label>
+    </div>
+    <div class="grid wide">
+      <label>物种
+        <select name="species">
+          <option value="auto">auto</option>
+          <option value="hs">hs - Human</option>
+          <option value="mm">mm - Mouse</option>
+        </select>
+      </label>
+      <label>关键基因数
+        <input name="top_genes" type="number" min="1" value="50">
+      </label>
+      <label>对接靶点数
+        <input name="docking_targets" type="number" min="0" value="3">
+      </label>
+      <label>敲除报告 Top N
+        <input name="ko_top_n" type="number" min="1" value="50">
+      </label>
+      <label>病例标签（可选）
+        <input name="case_label" placeholder="Tumor / iCCA">
+      </label>
+      <label>正常标签（可选）
+        <input name="normal_label" placeholder="Normal / HCC">
+      </label>
+      <label>起始阶段
+        <select name="start_stage">
+          <option value="">自动（断点续跑）</option>
+          <option value="01">01 单细胞分析</option>
+          <option value="02">02 关键基因</option>
+          <option value="03">03 证据富集</option>
+          <option value="04">04 敲除输入</option>
+          <option value="05">05 虚拟敲除</option>
+          <option value="06">06 虚拟筛选</option>
+          <option value="07">07 集成报告</option>
+        </select>
+      </label>
+    </div>
+    <div class="toggles">
+      <label class="toggle"><input type="checkbox" name="skip_scrna" value="1"> 跳过单细胞分析</label>
+      <label class="toggle"><input type="checkbox" name="skip_download" value="1"> 跳过数据下载</label>
+      <label class="toggle"><input type="checkbox" name="skip_deps" value="1"> 跳过依赖检查</label>
+      <label class="toggle"><input type="checkbox" name="skip_evidence_fetch" value="1"> 跳过联网证据</label>
+      <label class="toggle"><input type="checkbox" name="skip_pseudobulk" value="1"> 跳过伪 bulk 导出</label>
+      <label class="toggle"><input type="checkbox" name="skip_knockout" value="1"> 跳过虚拟敲除</label>
+      <label class="toggle"><input type="checkbox" name="skip_docking" value="1"> 跳过虚拟筛选</label>
+      <label class="toggle"><input type="checkbox" name="keep_all_genes" value="1"> 保留全部基因</label>
+      <label class="toggle"><input type="checkbox" name="force" value="1"> 强制重跑</label>
+    </div>
+    <div class="actions">
+      <button id="startBtn" type="button" onclick="startRun()">开始全自动流水线</button>
+      <button id="pauseBtn" class="secondary" type="button" onclick="pauseFullJob()" disabled>暂停</button>
+      <button id="resumeBtn" class="secondary" type="button" onclick="resumeFullJob()" disabled>继续</button>
+    </div>
+  </form>
+  <div id="message"></div>
+</div>
+
+<div class="card">
+  <h2>查看已有结果</h2>
+  <div class="grid wide">
+    <label>工作目录
+      <input id="existingWorkdir" placeholder="dock 或完整路径">
+    </label>
+  </div>
+  <div class="actions" style="margin-top:10px;">
+    <button type="button" class="secondary" onclick="loadByWorkdir()">加载已有结果</button>
+  </div>
+  <div id="loadMessage"></div>
+</div>
+
+<div class="card">
+  <h2>实时进度</h2>
+  <pre id="log">等待开始...</pre>
+</div>
+
+<div class="card">
+  <h2>流程结果</h2>
+  <div id="summaryRow"></div>
+  <div id="fileLinks"></div>
+  <div class="tablebox"><table id="keyTable"><caption>关键基因</caption></table></div>
+  <div class="tablebox"><table id="koTable"><caption>虚拟敲除 Top</caption></table></div>
+  <div class="tablebox"><table id="dockTable"><caption>虚拟筛选</caption></table></div>
+</div>
+</div>
+
+<script>
+let currentJob = null;
+let pollTimer = null;
+
+function msg(text, cls) {
+  const el = document.getElementById('message');
+  el.className = cls || '';
+  el.textContent = text;
+}
+
+function renderTable(id, rows, columns) {
+  const table = document.getElementById(id);
+  table.innerHTML = '';
+  const cols = columns || (rows && rows.length ? Object.keys(rows[0]) : []);
+  if (!rows || !rows.length) {
+    table.innerHTML = '<tbody><tr><td class="muted">暂无数据</td></tr></tbody>';
+    return;
+  }
+  const thead = document.createElement('thead');
+  const trh = document.createElement('tr');
+  cols.forEach((c) => {
+    const th = document.createElement('th');
+    th.textContent = c;
+    trh.appendChild(th);
+  });
+  thead.appendChild(trh);
+  table.appendChild(thead);
+  const tbody = document.createElement('tbody');
+  rows.slice(0, 20).forEach((row) => {
+    const tr = document.createElement('tr');
+    cols.forEach((c) => {
+      const td = document.createElement('td');
+      td.textContent = row[c] === null || row[c] === undefined ? '' : String(row[c]);
+      tr.appendChild(td);
+    });
+    tbody.appendChild(tr);
+  });
+  table.appendChild(tbody);
+}
+
+async function startRun() {
+  const form = document.getElementById('form');
+  const data = new URLSearchParams(new FormData(form));
+  const btn = document.getElementById('startBtn');
+  btn.disabled = true;
+  msg('正在启动...');
+  try {
+    const resp = await fetch('/full/start', {method: 'POST', body: data});
+    const result = await resp.json();
+    if (!resp.ok) throw new Error(result.error || '启动失败');
+    currentJob = result.job;
+    document.getElementById('log').textContent = '';
+    document.getElementById('pauseBtn').disabled = false;
+    document.getElementById('resumeBtn').disabled = false;
+    msg('任务已启动，日志实时刷新。', 'ok');
+    if (pollTimer) clearInterval(pollTimer);
+    pollTimer = setInterval(poll, 1500);
+  } catch (e) {
+    msg(String(e.message || e), 'error');
+  } finally {
+    btn.disabled = false;
+  }
+}
+
+async function poll() {
+  if (!currentJob) return;
+  try {
+    const logResp = await fetch('/full/log?job=' + currentJob);
+    const text = await logResp.text();
+    const box = document.getElementById('log');
+    box.textContent = text;
+    box.scrollTop = box.scrollHeight;
+    const statusResp = await fetch('/full/status?job=' + currentJob);
+    const status = await statusResp.json();
+    const pauseBtn = document.getElementById('pauseBtn');
+    const resumeBtn = document.getElementById('resumeBtn');
+    if (status.running) {
+      pauseBtn.disabled = false;
+      resumeBtn.disabled = true;
+    } else if (status.paused) {
+      pauseBtn.disabled = true;
+      resumeBtn.disabled = false;
+    } else {
+      pauseBtn.disabled = true;
+      resumeBtn.disabled = true;
+    }
+    if (!status.running) {
+      clearInterval(pollTimer);
+      pollTimer = null;
+      if (status.paused) {
+        msg('任务已暂停，可点击继续任务。', 'ok');
+      } else {
+        msg(status.ok ? '流水线已完成。' : '流水线运行失败，请查看日志。', status.ok ? 'ok' : 'error');
+        if (status.ok) await loadResults(currentJob);
+        currentJob = null;
+      }
+    }
+  } catch (e) {
+    // keep polling on transient errors
+  }
+}
+
+async function loadResults(job) {
+  try {
+    const resp = await fetch('/full/results?job=' + job);
+    const data = await resp.json();
+    renderResults(data);
+  } catch (e) {
+    document.getElementById('summaryRow').textContent = '结果加载失败：' + String(e.message || e);
+  }
+}
+
+async function loadByWorkdir() {
+  const workdir = document.getElementById('existingWorkdir').value.trim();
+  const box = document.getElementById('loadMessage');
+  if (!workdir) {
+    box.className = 'error';
+    box.textContent = '请输入工作目录';
+    return;
+  }
+  try {
+    const resp = await fetch('/full/results?workdir=' + encodeURIComponent(workdir));
+    const data = await resp.json();
+    if (!resp.ok) throw new Error(data.error || '加载失败');
+    renderResults(data);
+    box.className = 'ok';
+    box.textContent = '已加载：' + data.workdir;
+  } catch (e) {
+    box.className = 'error';
+    box.textContent = String(e.message || e);
+  }
+}
+
+function renderResults(data) {
+  const summary = data.summary || {};
+  const ko = summary.knockout || {};
+  const dock = summary.docking || {};
+  document.getElementById('summaryRow').innerHTML =
+    '<p class="muted">单细胞：' + (summary.single_cell ? summary.single_cell.dataset || '' : '') +
+    '；关键基因：' + (summary.key_genes !== undefined ? summary.key_genes : data.key_genes.length) +
+    '；敲除评分基因数：' + (ko.genes_scored !== undefined ? ko.genes_scored : 0) +
+    '；对接成功：' + (dock.ok !== undefined ? dock.ok : 0) +
+    '；失败：' + (dock.failed !== undefined ? dock.failed : 0) + '</p>';
+  const links = document.getElementById('fileLinks');
+  links.innerHTML = '';
+  (data.files || []).forEach((name) => {
+    const a = document.createElement('a');
+    a.className = 'file-link';
+    a.href = '/full/file?job=' + (currentJob || '') + '&workdir=' + encodeURIComponent(data.workdir) + '&name=' + encodeURIComponent(name);
+    a.textContent = name.split('/').pop();
+    links.appendChild(a);
+  });
+  renderTable('keyTable', data.key_genes, ['rank', 'gene', 'direction', 'avg_log2fc', 'p_val_adj']);
+  renderTable('koTable', data.knockout, ['rank', 'gene', 'target_class', 'target_score', 'knockout_score']);
+  renderTable('dockTable', data.docking, ['gene', 'status', 'pdb_id', 'ligand_count', 'hits', 'best_affinity']);
+}
+
+async function pauseFullJob() {
+  if (!currentJob) return;
+  const body = new URLSearchParams({job: currentJob});
+  try {
+    const resp = await fetch('/full/pause', {method: 'POST', body});
+    const data = await resp.json();
+    if (!resp.ok) throw new Error(data.error || '暂停失败');
+    msg('暂停请求已发送。', 'ok');
+  } catch (e) {
+    msg(String(e.message || e), 'error');
+  }
+}
+
+async function resumeFullJob() {
+  if (!currentJob) return;
+  const body = new URLSearchParams({job: currentJob});
+  try {
+    const resp = await fetch('/full/resume', {method: 'POST', body});
+    const result = await resp.json();
+    if (!resp.ok) throw new Error(result.error || '恢复失败');
+    msg('任务已恢复。', 'ok');
+    document.getElementById('pauseBtn').disabled = false;
+    document.getElementById('resumeBtn').disabled = true;
+    if (pollTimer) clearInterval(pollTimer);
+    pollTimer = setInterval(poll, 1500);
+  } catch (e) {
+    msg(String(e.message || e), 'error');
+  }
+}
+</script>
+</body>
+</html>

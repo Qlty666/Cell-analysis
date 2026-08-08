@@ -40,7 +40,7 @@ def find_rscript() -> str | None:
     for base in [
         Path(r"C:\Program Files\R"),
         Path(r"C:\Program Files\Microsoft\R Open"),
-        Path(r"C:\Users") / Path.home().name / r"AppData\Local\Programs\R",
+        Path.home() / "AppData" / "Local" / "Programs" / "R",
     ]:
         if not base.exists():
             continue
