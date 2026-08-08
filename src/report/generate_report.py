@@ -117,6 +117,17 @@ def main() -> int:
         data_link("enrichment_down_go.csv", "下调 GO 富集"),
         data_link("enrichment_up_kegg.csv", "上调 KEGG 富集"),
         data_link("enrichment_down_kegg.csv", "下调 KEGG 富集"),
+        data_link("cell_cycle_scores.csv", "细胞周期打分"),
+        data_link("doublet_rate_by_sample.csv", "样本双细胞率"),
+        data_link("cluster_markers.csv", "聚类 marker 基因"),
+        data_link("signature_scores.csv", "功能签名打分"),
+        data_link("cnv_heatmap.csv", "推断 CNV 热图矩阵"),
+        data_link("singleR_annotations.csv", "SingleR 注释"),
+        data_link("singleR_confusion.csv", "SingleR 混淆矩阵"),
+        data_link("trajectory_pseudotime.csv", "拟时序结果"),
+        data_link("cellchat_communication.csv", "CellChat 通讯矩阵"),
+        data_link("cellchat_pathways.csv", "CellChat 通路表"),
+        data_link("ml_classification_report.csv", "ML 分类报告"),
         data_link("sample_annotations.csv", "样本分组"),
         data_link("liver_cancer_seurat.rds", "Seurat 对象"),
     ])
@@ -163,6 +174,7 @@ footer {{ margin-top: 40px; color: #7b8794; font-size: 12px; }}
   <div class="card"><div class="num">{esc(summary.get('n_cells_after_doublet_removal', 'NA'))}</div><div class="label">去双细胞后</div></div>
   <div class="card"><div class="num">{esc(summary.get('n_genes', 'NA'))}</div><div class="label">基因数</div></div>
   <div class="card"><div class="num">{esc(summary.get('n_clusters', 'NA'))}</div><div class="label">聚类数</div></div>
+  <div class="card"><div class="num">{esc(summary.get('n_celltypes', 'NA'))}</div><div class="label">细胞类型</div></div>
   <div class="card"><div class="num">{esc(summary.get('deg_up', 'NA'))}</div><div class="label">HCC 上调 DEG</div></div>
   <div class="card"><div class="num">{esc(summary.get('deg_down', 'NA'))}</div><div class="label">HCC 下调 DEG</div></div>
 </div>
@@ -210,10 +222,34 @@ footer {{ margin-top: 40px; color: #7b8794; font-size: 12px; }}
 <h2>7. 机器学习分析</h2>
 {image_card('fig_24_ml_feature_importance.png', 'ML 特征重要性')}
 {image_card('fig_25_ml_shap.png', 'SHAP 可解释性')}
+{image_card('fig_43_ml_confusion_matrix.png', 'ML 混淆矩阵')}
+{image_card('fig_44_ml_roc_pr.png', 'ML ROC 与 PR 曲线')}
+{image_card('fig_45_ml_cv_scores.png', 'ML 交叉验证得分')}
 {go_html}
 {kegg_html}
 
-<h2>7. 数据文件</h2>
+<h2>8. 高级分析与发表图</h2>
+{image_card('fig_26_cellcycle_umap.png', '细胞周期 UMAP')}
+{image_card('fig_27_cellcycle_proportion.png', '细胞周期比例')}
+{image_card('fig_28_umap_sample.png', 'UMAP 按样本')}
+{image_card('fig_29_doublet_rate_sample.png', '样本双细胞率')}
+{image_card('fig_30_sample_proportion.png', '样本细胞类型比例')}
+{image_card('fig_31_cluster_marker_heatmap.png', '聚类 marker 热图')}
+{image_card('fig_32_cluster_marker_dotplot.png', '聚类 marker DotPlot')}
+{image_card('fig_33_signature_scores_umap.png', '功能签名 UMAP')}
+{image_card('fig_34_signature_scores_boxplot.png', '功能签名箱线图')}
+{image_card('fig_35_celltype_abundance_effect.png', '细胞类型丰度变化')}
+{image_card('fig_36_cnv_heatmap.png', '推断 CNV 热图')}
+{image_card('fig_37_singler_umap.png', 'SingleR 注释 UMAP')}
+{image_card('fig_38_singler_confusion_heatmap.png', 'SingleR 混淆矩阵')}
+{image_card('fig_39_trajectory_umap.png', '拟时序轨迹')}
+
+<h2>9. CellChat 细胞通讯</h2>
+{image_card('fig_40_cellchat_network.png', 'CellChat 通讯网络')}
+{image_card('fig_41_cellchat_heatmap.png', 'CellChat 通讯热图')}
+{image_card('fig_42_cellchat_bubble.png', 'CellChat 配体受体气泡图')}
+
+<h2>10. 数据文件</h2>
 <ul>{links}</ul>
 
 <footer>Pipeline: R / Seurat / scDblFinder / clusterProfiler | 自动生成于 {esc(summary.get('finished_at', ''))}</footer>
