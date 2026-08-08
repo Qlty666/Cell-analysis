@@ -76,6 +76,43 @@ save_fig <- function(file, plot, width, height, dpi = 150) {
   log_msg("saved figure: ", name)
 }
 
+flag_on <- function(name, default = "yes") {
+  val <- tolower(trimws(Sys.getenv(name, unset = default)))
+  val %in% c("yes", "true", "1", "on")
+}
+
+run_cellcycle <- flag_on("LIVER_RUN_CELLCYCLE", "yes")
+run_cluster_markers <- flag_on("LIVER_RUN_CLUSTER_MARKERS", "yes")
+run_signatures <- flag_on("LIVER_RUN_SIGNATURES", "yes")
+run_cnv <- flag_on("LIVER_RUN_CNV", "yes")
+run_singler <- flag_on("LIVER_RUN_SINGLER", "yes")
+run_trajectory <- flag_on("LIVER_RUN_TRAJECTORY", "no")
+regress_cellcycle <- flag_on("LIVER_REGRESS_CELLCYCLE", "no")
+
+save_pheatmap <- function(file, fn, width, height, res = 150) {
+  name <- basename(file)
+  if (name %in% skip_figs) {
+    log_msg("skip figure: ", name)
+    return(invisible(NULL))
+  }
+  png(file, width = width, height = height, res = res)
+  on.exit(dev.off())
+  fn()
+  log_msg("saved figure: ", name)
+}
+
+expand_genes <- function(genes) {
+  if (species == "mm") {
+    mouse_genes <- paste0(
+      toupper(substr(genes, 1, 1)),
+      tolower(substr(genes, 2, nchar(genes)))
+    )
+    unique(c(genes, mouse_genes))
+  } else {
+    genes
+  }
+}
+
 args <- commandArgs(trailingOnly = TRUE)
 root <- Sys.getenv("LIVER_ROOT", unset = NA)
 if (is.na(root) || !nzchar(root)) {
@@ -830,7 +867,47 @@ if (stage_allowed("04")) run_stage("04_cluster", {
     nfeatures = 2000,
     verbose = FALSE
   )
-  seurat <- ScaleData(seurat, features = VariableFeatures(seurat), verbose = FALSE)
+  if (run_cellcycle) {
+    cc_genes <- tryCatch(Seurat::cc.genes, error = function(e) NULL)
+    if (is.null(cc_genes)) {
+      cc_genes <- tryCatch(Seurat::cc.genes.updated.2019, error = function(e) NULL)
+    }
+    s_genes <- intersect(cc_genes$s.genes, rownames(seurat))
+    g2m_genes <- intersect(cc_genes$g2m.genes, rownames(seurat))
+    if (length(s_genes) >= 5 && length(g2m_genes) >= 5) {
+      seurat <- CellCycleScoring(
+        seurat,
+        s.features = s_genes,
+        g2m.features = g2m_genes,
+        set.ident = FALSE
+      )
+      cc_tbl <- data.frame(
+        cell = colnames(seurat),
+        S.Score = seurat$S.Score,
+        G2M.Score = seurat$G2M.Score,
+        Phase = seurat$Phase,
+        condition = seurat$condition,
+        stringsAsFactors = FALSE
+      )
+      write.csv(cc_tbl, file.path(data_dir, "cell_cycle_scores.csv"), row.names = FALSE)
+      log_msg("cell cycle scoring applied")
+      if (regress_cellcycle) {
+        seurat <- ScaleData(
+          seurat,
+          features = VariableFeatures(seurat),
+          vars.to.regress = c("S.Score", "G2M.Score"),
+          verbose = FALSE
+        )
+      } else {
+        seurat <- ScaleData(seurat, features = VariableFeatures(seurat), verbose = FALSE)
+      }
+    } else {
+      log_msg("cell cycle markers insufficient; skipping cell cycle scoring")
+      seurat <- ScaleData(seurat, features = VariableFeatures(seurat), verbose = FALSE)
+    }
+  } else {
+    seurat <- ScaleData(seurat, features = VariableFeatures(seurat), verbose = FALSE)
+  }
   seurat <- RunPCA(seurat, npcs = 30, verbose = FALSE)
   reduction <- "pca"
   if (
@@ -930,17 +1007,6 @@ if (stage_allowed("05")) run_stage("05_annotation", {
     Malignant = c("EPCAM", "KRT8", "KRT18", "KRT19", "AFP", "GPC3"),
     Mast = c("TPSAB1", "CPA3", "MS4A2")
   )
-  expand_genes <- function(genes) {
-    if (species == "mm") {
-      mouse_genes <- paste0(
-        toupper(substr(genes, 1, 1)),
-        tolower(substr(genes, 2, nchar(genes)))
-      )
-      unique(c(genes, mouse_genes))
-    } else {
-      genes
-    }
-  }
   marker_list <- lapply(marker_list, expand_genes)
   marker_list <- lapply(marker_list, function(x) intersect(x, rownames(seurat)))
   marker_list <- marker_list[lengths(marker_list) > 0]
@@ -1535,9 +1601,719 @@ if (stage_allowed("07")) run_stage("07_enrichment", {
   log_msg("enrichment tables and plots generated")
 })
 
-if (stage_allowed("08")) run_stage("08_summary_outputs", {
+if (stage_allowed("08")) run_stage("08_publication_analyses", {
   if (!exists("seurat")) {
     seurat <- readRDS(ckpt_path("seurat_annotated.rds"))
+  }
+  seurat <- NormalizeData(seurat, verbose = FALSE)
+  Idents(seurat) <- "condition"
+
+  if (run_cellcycle) {
+    if (!"Phase" %in% colnames(seurat@meta.data)) {
+      cc_genes <- tryCatch(Seurat::cc.genes, error = function(e) NULL)
+      if (is.null(cc_genes)) {
+        cc_genes <- tryCatch(Seurat::cc.genes.updated.2019, error = function(e) NULL)
+      }
+      s_genes <- intersect(cc_genes$s.genes, rownames(seurat))
+      g2m_genes <- intersect(cc_genes$g2m.genes, rownames(seurat))
+      if (length(s_genes) >= 5 && length(g2m_genes) >= 5) {
+        seurat <- CellCycleScoring(
+          seurat,
+          s.features = s_genes,
+          g2m.features = g2m_genes,
+          set.ident = FALSE
+        )
+        cc_tbl <- data.frame(
+          cell = colnames(seurat),
+          S.Score = seurat$S.Score,
+          G2M.Score = seurat$G2M.Score,
+          Phase = seurat$Phase,
+          condition = seurat$condition,
+          stringsAsFactors = FALSE
+        )
+        write.csv(cc_tbl, file.path(data_dir, "cell_cycle_scores.csv"), row.names = FALSE)
+      }
+    }
+    if ("Phase" %in% colnames(seurat@meta.data)) {
+      p_cc_umap <- DimPlot(seurat, group.by = "Phase") +
+        ggtitle("Cell cycle phase")
+      save_fig(
+        file.path(fig_dir, "fig_26_cellcycle_umap.png"),
+        p_cc_umap,
+        width = 8,
+        height = 7,
+        dpi = 150
+      )
+      cc_prop <- as.data.frame(table(
+        Condition = seurat$condition,
+        Phase = seurat$Phase
+      ))
+      p_cc_prop <- ggplot(cc_prop, aes(x = Condition, y = Freq, fill = Phase)) +
+        geom_col(position = "fill") +
+        scale_y_continuous(labels = scales::percent) +
+        theme_minimal() +
+        labs(
+          x = "Condition",
+          y = "Proportion",
+          fill = "Phase",
+          title = "Cell cycle phase proportion"
+        )
+      save_fig(
+        file.path(fig_dir, "fig_27_cellcycle_proportion.png"),
+        p_cc_prop,
+        width = 7,
+        height = 5,
+        dpi = 150
+      )
+    }
+  }
+
+  if (length(unique(seurat$sample)) > 1) {
+    p_sample <- DimPlot(seurat, group.by = "sample", label = FALSE) +
+      ggtitle("UMAP by sample")
+    save_fig(
+      file.path(fig_dir, "fig_28_umap_sample.png"),
+      p_sample,
+      width = 8,
+      height = 7,
+      dpi = 150
+    )
+  } else {
+    log_msg("skip figure: fig_28_umap_sample.png (single sample)")
+  }
+
+  dbl_path <- file.path(data_dir, "doublet_results.csv")
+  if (file.exists(dbl_path)) {
+    dbl <- read.csv(dbl_path, stringsAsFactors = FALSE)
+    if (nrow(dbl) > 0 && "doublet_call" %in% colnames(dbl)) {
+      dbl_rate <- dbl %>%
+        dplyr::group_by(sample) %>%
+        dplyr::summarise(
+          n_cells = dplyr::n(),
+          n_doublets = sum(doublet_call == "doublet", na.rm = TRUE),
+          doublet_rate = n_doublets / n_cells,
+          .groups = "drop"
+        )
+      dbl_rate$condition <- dbl$condition[match(dbl_rate$sample, dbl$sample)]
+      write.csv(
+        dbl_rate,
+        file.path(data_dir, "doublet_rate_by_sample.csv"),
+        row.names = FALSE
+      )
+      p_dbl_rate <- ggplot(
+        dbl_rate,
+        aes(x = sample, y = doublet_rate, fill = condition)
+      ) +
+        geom_col() +
+        geom_text(
+          aes(label = sprintf("%.1f%%", 100 * doublet_rate)),
+          vjust = -0.4,
+          size = 3
+        ) +
+        theme_minimal() +
+        theme(axis.text.x = element_text(angle = 45, hjust = 1)) +
+        labs(
+          x = "Sample",
+          y = "Doublet rate",
+          fill = "Condition",
+          title = "Doublet rate by sample"
+        )
+      save_fig(
+        file.path(fig_dir, "fig_29_doublet_rate_sample.png"),
+        p_dbl_rate,
+        width = 8,
+        height = 5,
+        dpi = 150
+      )
+    }
+  }
+
+  prop_sample <- as.data.frame(table(
+    CellType = seurat$celltype_annot,
+    Sample = seurat$sample
+  ))
+  p_prop_sample <- ggplot(
+    prop_sample,
+    aes(x = Sample, y = Freq, fill = CellType)
+  ) +
+    geom_col(position = "fill") +
+    scale_y_continuous(labels = scales::percent) +
+    theme_minimal() +
+    theme(axis.text.x = element_text(angle = 45, hjust = 1)) +
+    labs(
+      x = "Sample",
+      y = "Proportion",
+      fill = "Cell type",
+      title = "Cell type proportion by sample"
+    )
+  save_fig(
+    file.path(fig_dir, "fig_30_sample_proportion.png"),
+    p_prop_sample,
+    width = 10,
+    height = 6,
+    dpi = 150
+  )
+
+  if (run_cluster_markers) {
+    Idents(seurat) <- "seurat_clusters"
+    markers <- tryCatch(
+      FindAllMarkers(
+        seurat,
+        only.pos = TRUE,
+        min.pct = 0.25,
+        logfc.threshold = 0.5,
+        verbose = FALSE
+      ),
+      error = function(e) NULL
+    )
+    if (!is.null(markers) && nrow(markers) > 0) {
+      if (!"gene" %in% colnames(markers)) {
+        markers$gene <- rownames(markers)
+      }
+      write.csv(
+        markers,
+        file.path(data_dir, "cluster_markers.csv"),
+        row.names = FALSE
+      )
+      cluster_col <- if ("cluster" %in% colnames(markers)) {
+        "cluster"
+      } else {
+        "seurat_clusters"
+      }
+      if (!"avg_log2FC" %in% colnames(markers) &&
+          "avg_logFC" %in% colnames(markers)) {
+        markers$avg_log2FC <- markers$avg_logFC
+      }
+      top_markers <- markers %>%
+        dplyr::group_by(dplyr::across(dplyr::all_of(cluster_col))) %>%
+        dplyr::slice_max(n = 3, order_by = avg_log2FC)
+      top_genes <- unique(top_markers$gene)
+      top_genes <- intersect(top_genes, rownames(seurat))
+      if (length(top_genes) > 0) {
+        tryCatch(
+          {
+            seurat <- ScaleData(seurat, features = top_genes, verbose = FALSE)
+            p_marker_heat <- DoHeatmap(
+              seurat,
+              features = top_genes,
+              group.by = "seurat_clusters",
+              angle = 45
+            ) + scale_fill_viridis_c()
+            save_fig(
+              file.path(fig_dir, "fig_31_cluster_marker_heatmap.png"),
+              p_marker_heat,
+              width = 12,
+              height = 9,
+              dpi = 150
+            )
+            p_marker_dot <- DotPlot(
+              seurat,
+              features = top_genes,
+              group.by = "seurat_clusters"
+            ) + RotatedAxis()
+            save_fig(
+              file.path(fig_dir, "fig_32_cluster_marker_dotplot.png"),
+              p_marker_dot,
+              width = 14,
+              height = 8,
+              dpi = 150
+            )
+          },
+          error = function(e) {
+            log_msg("cluster marker figures failed: ", conditionMessage(e))
+          }
+        )
+      }
+    } else {
+      log_msg("no cluster markers found")
+    }
+    Idents(seurat) <- "condition"
+  }
+
+  if (run_signatures) {
+    signatures <- list(
+      Proliferation = c(
+        "MKI67", "PCNA", "TOP2A", "MCM2", "MCM3", "MCM4", "MCM5",
+        "MCM6", "MCM7", "CDC20", "CCNB1", "CCNA2", "BIRC5", "AURKA",
+        "AURKB", "UBE2C", "CENPF", "CENPE", "KIF11", "KIF2C"
+      ),
+      EMT = c(
+        "VIM", "FN1", "CDH2", "SNAI1", "SNAI2", "TWIST1", "ZEB1",
+        "ZEB2", "MMP2", "MMP9", "COL1A1", "COL1A2", "LUM", "DCN",
+        "TGFB1", "ACTA2"
+      ),
+      Hypoxia = c(
+        "HIF1A", "VEGFA", "SLC2A1", "LDHA", "PGK1", "PDK1", "CA9",
+        "BNIP3", "BNIP3L", "NDRG1", "ADM", "ALDOA", "ENO1", "TPI1"
+      ),
+      ImmuneCheckpoint = c(
+        "PDCD1", "CTLA4", "LAG3", "HAVCR2", "TIGIT", "CD274",
+        "PDCD1LG2", "IDO1", "TNFRSF9", "CD27", "CD70", "LGALS9"
+      ),
+      TcellExhaustion = c(
+        "PDCD1", "CTLA4", "LAG3", "HAVCR2", "TIGIT", "TOX",
+        "ENTPD1", "CXCL13", "BATF", "MAF"
+      ),
+      Stemness = c(
+        "PROM1", "EPCAM", "ALDH1A1", "SOX2", "NANOG", "MYC", "CD44",
+        "KIT", "LGR5", "ABCG2", "AFP", "GPC3"
+      ),
+      Inflammation = c(
+        "IL6", "IL1B", "TNF", "CXCL8", "CCL2", "CCL5", "CXCL10",
+        "CXCL9", "ICAM1", "VCAM1", "NFKB1", "NFKBIA", "JUN", "FOS"
+      )
+    )
+    sig_features <- lapply(
+      signatures,
+      function(gs) intersect(expand_genes(gs), rownames(seurat))
+    )
+    sig_features <- sig_features[lengths(sig_features) >= 3]
+    if (length(sig_features) > 0) {
+      tryCatch(
+        {
+      seurat <- AddModuleScore(
+        seurat,
+        features = sig_features,
+        name = "Signature_",
+        ctrl = 50
+      )
+      sig_cols <- paste0("Signature_", seq_along(sig_features))
+      names(sig_cols) <- names(sig_features)
+      sig_df <- FetchData(
+        seurat,
+        c("condition", "celltype_annot", unname(sig_cols))
+      )
+      colnames(sig_df) <- c("condition", "celltype_annot", names(sig_features))
+      write.csv(
+        sig_df,
+        file.path(data_dir, "signature_scores.csv"),
+        row.names = FALSE
+      )
+
+      show_sigs <- intersect(
+        c("Proliferation", "EMT", "Hypoxia", "ImmuneCheckpoint"),
+        names(sig_cols)
+      )
+      if (length(show_sigs) > 0) {
+        p_sig_umap <- FeaturePlot(
+          seurat,
+          features = unname(sig_cols[show_sigs]),
+          ncol = 2,
+          cols = c("grey90", "#B31B1B")
+        )
+        save_fig(
+          file.path(fig_dir, "fig_33_signature_scores_umap.png"),
+          p_sig_umap,
+          width = 10,
+          height = 4 * ceiling(length(show_sigs) / 2),
+          dpi = 150
+        )
+      }
+
+      sig_long <- do.call(rbind, lapply(names(sig_cols), function(nm) {
+        data.frame(
+          condition = seurat$condition,
+          celltype = seurat$celltype_annot,
+          signature = nm,
+          score = seurat@meta.data[[sig_cols[[nm]]]],
+          stringsAsFactors = FALSE
+        )
+      }))
+      p_sig_box <- ggplot(
+        sig_long,
+        aes(x = condition, y = score, fill = condition)
+      ) +
+        geom_violin(trim = FALSE) +
+        geom_boxplot(width = 0.15, outlier.shape = NA) +
+        facet_wrap(~signature, scales = "free_y", ncol = 2) +
+        theme_minimal() +
+        theme(
+          axis.text.x = element_text(angle = 45, hjust = 1),
+          legend.position = "none"
+        ) +
+        labs(
+          x = "Condition",
+          y = "Signature score",
+          title = "Signature scores by condition"
+        )
+      save_fig(
+        file.path(fig_dir, "fig_34_signature_scores_boxplot.png"),
+        p_sig_box,
+        width = 10,
+        height = 8,
+        dpi = 150
+      )
+        },
+        error = function(e) {
+          log_msg("signature analysis failed: ", conditionMessage(e))
+        }
+      )
+    }
+  }
+
+  prop_stats_path <- file.path(data_dir, "celltype_proportion_stats.csv")
+  if (file.exists(prop_stats_path)) {
+    prop_stats <- read.csv(prop_stats_path, stringsAsFactors = FALSE)
+    prop_stats$log2OR <- log2(prop_stats$OddsRatio)
+    prop_stats$log2OR[!is.finite(prop_stats$log2OR)] <- NA_real_
+    prop_stats$neg_log10_padj <- -log10(pmax(prop_stats$Padj, 1e-300))
+    p_abundance <- ggplot(
+      prop_stats,
+      aes(x = log2OR, y = neg_log10_padj, color = CellType)
+    ) +
+      geom_point(size = 2.5) +
+      geom_text_repel(aes(label = CellType), size = 3, max.overlaps = 20) +
+      geom_vline(xintercept = 0, linetype = "dashed", color = "grey40") +
+      labs(
+        x = "log2 odds ratio",
+        y = "-log10 adjusted p value",
+        color = "Cell type",
+        title = "Cell type abundance shift"
+      ) +
+      theme_minimal()
+    save_fig(
+      file.path(fig_dir, "fig_35_celltype_abundance_effect.png"),
+      p_abundance,
+      width = 9,
+      height = 7,
+      dpi = 150
+    )
+  }
+
+  if (run_cnv) {
+    tryCatch(
+      {
+    org_db_cnv <- if (species == "mm") {
+      if (requireNamespace("org.Mm.eg.db", quietly = TRUE)) {
+        getExportedValue("org.Mm.eg.db", "org.Mm.eg.db")
+      } else {
+        NULL
+      }
+    } else {
+      org.Hs.eg.db
+    }
+    if (!is.null(org_db_cnv)) {
+      mapped <- tryCatch(
+        AnnotationDbi::select(
+          org_db_cnv,
+          keys = rownames(seurat),
+          columns = c("CHR", "CHRLOC"),
+          keytype = "SYMBOL"
+        ),
+        error = function(e) NULL
+      )
+      if (!is.null(mapped) && nrow(mapped) > 1000) {
+        mapped <- mapped[
+          !is.na(mapped$SYMBOL) & !duplicated(mapped$SYMBOL),
+          , drop = FALSE
+        ]
+        mapped <- mapped[
+          !is.na(mapped$CHR) &
+            grepl("^([0-9]+|X|Y)$", as.character(mapped$CHR)),
+          , drop = FALSE
+        ]
+        mapped$chr_order <- factor(
+          as.character(mapped$CHR),
+          levels = c(as.character(1:22), "X", "Y")
+        )
+        if ("CHRLOC" %in% colnames(mapped) &&
+            sum(!is.na(mapped$CHRLOC)) > 500) {
+          mapped <- mapped[!is.na(mapped$CHRLOC), , drop = FALSE]
+          mapped <- mapped[order(mapped$chr_order, mapped$CHRLOC), , drop = FALSE]
+        } else {
+          mapped <- mapped[order(mapped$chr_order, mapped$SYMBOL), , drop = FALSE]
+        }
+        cnv_genes <- intersect(mapped$SYMBOL, rownames(seurat))
+        if (length(cnv_genes) >= 200) {
+          set.seed(42)
+          cell_idx <- unlist(lapply(unique(seurat$condition), function(cond) {
+            idx <- which(seurat$condition == cond)
+            sample(idx, min(length(idx), 750))
+          }))
+          cell_idx <- as.integer(cell_idx)
+          expr_sub <- as.matrix(
+            GetAssayData(seurat, layer = "data")[
+              cnv_genes, cell_idx, drop = FALSE
+            ]
+          )
+          expr_scaled <- t(scale(t(expr_sub)))
+          expr_scaled[!is.finite(expr_scaled)] <- 0
+          starts <- seq(1, length(cnv_genes) - 49, by = 25)
+          win_scores <- sapply(starts, function(s) {
+            e <- expr_scaled[s:min(s + 99, length(cnv_genes)), , drop = FALSE]
+            colMeans(e)
+          })
+          if (is.null(dim(win_scores))) {
+            win_scores <- matrix(win_scores, ncol = 1)
+          }
+          win_scores <- sweep(
+            win_scores,
+            2,
+            apply(win_scores, 2, median),
+            "-"
+          )
+          win_labels <- vapply(starts, function(s) {
+            mid <- floor((s + min(s + 99, length(cnv_genes))) / 2)
+            paste0(
+              "chr",
+              mapped$CHR[match(cnv_genes[mid], mapped$SYMBOL)]
+            )
+          }, character(1))
+          colnames(win_scores) <- paste0(
+            win_labels,
+            "_w",
+            seq_along(starts)
+          )
+          rownames(win_scores) <- colnames(expr_sub)
+          cnv_df <- data.frame(
+            cell = rownames(win_scores),
+            win_scores,
+            check.names = FALSE
+          )
+          write.csv(
+            cnv_df,
+            file.path(data_dir, "cnv_heatmap.csv"),
+            row.names = FALSE
+          )
+          ann_col <- data.frame(
+            row.names = rownames(win_scores),
+            Condition = seurat$condition[cell_idx],
+            CellType = seurat$celltype_annot[cell_idx]
+          )
+          cond_levels_cnv <- sort(unique(as.character(ann_col$Condition)))
+          ct_levels_cnv <- sort(unique(as.character(ann_col$CellType)))
+          ann_colors <- list(
+            Condition = setNames(
+              c("#E64B35", "#4DBBD5", "#00A087")[seq_along(cond_levels_cnv)],
+              cond_levels_cnv
+            ),
+            CellType = setNames(
+              rainbow(length(ct_levels_cnv)),
+              ct_levels_cnv
+            )
+          )
+          save_pheatmap(
+            file.path(fig_dir, "fig_36_cnv_heatmap.png"),
+            function() {
+              pheatmap(
+                win_scores,
+                annotation_col = ann_col,
+                annotation_colors = ann_colors,
+                show_rownames = FALSE,
+                show_colnames = TRUE,
+                cluster_rows = TRUE,
+                cluster_cols = FALSE,
+                color = colorRampPalette(
+                  c("#3B4CC0", "#FFFFFF", "#B40426")
+                )(100),
+                fontsize_col = 6,
+                main = "Inferred CNV profile (sliding window)"
+              )
+            },
+            width = 1200,
+            height = 900
+          )
+          log_msg("CNV heatmap generated")
+        }
+      } else {
+        log_msg("CNV skipped: insufficient chromosome annotation")
+      }
+    } else {
+      log_msg("CNV skipped: organism annotation package unavailable")
+    }
+      },
+      error = function(e) {
+        log_msg("CNV analysis failed: ", conditionMessage(e))
+      }
+    )
+  }
+
+  if (run_singler) {
+    singler_ok <- requireNamespace("SingleR", quietly = TRUE) &&
+      requireNamespace("celldex", quietly = TRUE)
+    if (singler_ok) {
+      ref <- tryCatch(
+        if (species == "mm") {
+          celldex::MouseRNAseqData()
+        } else {
+          celldex::HumanPrimaryCellAtlasData()
+        },
+        error = function(e) NULL
+      )
+      if (!is.null(ref)) {
+        set.seed(42)
+        all_cells <- colnames(seurat)
+        max_cells <- 20000
+        chosen <- if (length(all_cells) > max_cells) {
+          sample(all_cells, max_cells)
+        } else {
+          all_cells
+        }
+        pred <- tryCatch(
+          SingleR::SingleR(
+            test = GetAssayData(seurat, layer = "data")[
+              , chosen, drop = FALSE
+            ],
+            ref = ref,
+            labels = ref$label.main
+          ),
+          error = function(e) NULL
+        )
+        if (!is.null(pred)) {
+          seurat$singleR_label <- NA_character_
+          seurat$singleR_label[chosen] <- as.character(pred$labels)
+          for (cl in unique(seurat$seurat_clusters)) {
+            idx <- seurat$seurat_clusters == cl
+            labs <- seurat$singleR_label[idx]
+            if (sum(!is.na(labs)) > 0) {
+              seurat$singleR_label[idx] <- names(
+                sort(table(labs), decreasing = TRUE)
+              )[1]
+            }
+          }
+          write.csv(
+            data.frame(
+              cell = colnames(seurat),
+              seurat_clusters = as.character(seurat$seurat_clusters),
+              celltype_annot = seurat$celltype_annot,
+              singleR_label = seurat$singleR_label,
+              condition = seurat$condition,
+              stringsAsFactors = FALSE
+            ),
+            file.path(data_dir, "singleR_annotations.csv"),
+            row.names = FALSE
+          )
+          p_singler <- DimPlot(seurat, group.by = "singleR_label", label = TRUE) +
+            ggtitle("SingleR cell type annotation")
+          save_fig(
+            file.path(fig_dir, "fig_37_singler_umap.png"),
+            p_singler,
+            width = 9,
+            height = 7,
+            dpi = 150
+          )
+          conf_singler <- table(
+            seurat$celltype_annot,
+            seurat$singleR_label
+          )
+          write.csv(
+            as.data.frame.matrix(conf_singler),
+            file.path(data_dir, "singleR_confusion.csv")
+          )
+          if (nrow(conf_singler) > 0 && ncol(conf_singler) > 0) {
+            save_pheatmap(
+              file.path(fig_dir, "fig_38_singler_confusion_heatmap.png"),
+              function() {
+                pheatmap(
+                  conf_singler,
+                  display_numbers = TRUE,
+                  fontsize_number = 6,
+                  cluster_rows = FALSE,
+                  cluster_cols = FALSE,
+                  main = "Marker annotation vs SingleR"
+                )
+              },
+              width = 1100,
+              height = 800
+            )
+          }
+        }
+      }
+    }
+    if (!"singleR_label" %in% colnames(seurat@meta.data)) {
+      log_msg("SingleR skipped: reference data or prediction unavailable")
+    }
+  }
+
+  if (run_trajectory) {
+    if (requireNamespace("slingshot", quietly = TRUE)) {
+      tryCatch(
+        {
+          set.seed(42)
+          rd <- Embeddings(seurat, reduction = "umap")
+          sce_traj <- SingleCellExperiment(
+            assays = list(counts = GetAssayData(seurat, layer = "counts")),
+            reducedDims = list(UMAP = rd),
+            colData = DataFrame(
+              cluster = as.character(seurat$seurat_clusters)
+            )
+          )
+          sce_traj <- slingshot::slingshot(
+            sce_traj,
+            clusterLabels = "cluster",
+            reducedDim = "UMAP"
+          )
+          pt <- slingshot::slingPseudotime(sce_traj)
+          if (!is.null(dim(pt)) && ncol(pt) >= 1) {
+            seurat$pseudotime <- pt[, 1]
+            write.csv(
+              data.frame(
+                cell = colnames(seurat),
+                cluster = as.character(seurat$seurat_clusters),
+                pseudotime = seurat$pseudotime,
+                stringsAsFactors = FALSE
+              ),
+              file.path(data_dir, "trajectory_pseudotime.csv"),
+              row.names = FALSE
+            )
+            p_pt <- FeaturePlot(seurat, features = "pseudotime") +
+              scale_color_viridis_c() +
+              ggtitle("Slingshot pseudotime")
+            curves <- slingshot::slingCurves(sce_traj)
+            curve_df <- do.call(rbind, lapply(seq_along(curves), function(i) {
+              coords <- as.data.frame(curves[[i]]$s)
+              colnames(coords) <- c("UMAP_1", "UMAP_2")
+              coords$lineage <- as.character(i)
+              coords
+            }))
+            rd_df <- as.data.frame(rd)
+            colnames(rd_df) <- c("UMAP_1", "UMAP_2")
+            rd_df$cluster <- as.character(seurat$seurat_clusters)
+            p_line <- ggplot(
+              rd_df,
+              aes(x = UMAP_1, y = UMAP_2, color = cluster)
+            ) +
+              geom_point(size = 0.5, alpha = 0.7) +
+              geom_path(
+                data = curve_df,
+                aes(x = UMAP_1, y = UMAP_2, group = lineage),
+                inherit.aes = FALSE,
+                color = "black",
+                linewidth = 1
+              ) +
+              theme_minimal() +
+              labs(color = "Cluster", title = "Slingshot lineages on UMAP")
+            save_fig(
+              file.path(fig_dir, "fig_39_trajectory_umap.png"),
+              p_pt + p_line,
+              width = 14,
+              height = 7,
+              dpi = 150
+            )
+          }
+        },
+        error = function(e) {
+          log_msg("trajectory analysis failed: ", conditionMessage(e))
+        }
+      )
+    } else {
+      log_msg("trajectory skipped: slingshot not installed")
+    }
+  }
+
+  saveRDS(seurat, ckpt_path("seurat_annotated.rds"))
+  saveRDS(seurat, ckpt_path("seurat_publication.rds"))
+  log_msg("publication analyses complete")
+})
+
+if (stage_allowed("09")) run_stage("09_summary_outputs", {
+  if (!exists("seurat")) {
+    pub_path <- ckpt_path("seurat_publication.rds")
+    if (file.exists(pub_path)) {
+      seurat <- readRDS(pub_path)
+    } else {
+      seurat <- readRDS(ckpt_path("seurat_annotated.rds"))
+    }
   }
   if (!exists("seurat_raw")) {
     seurat_raw <- readRDS(ckpt_path("seurat_raw.rds"))
@@ -1565,6 +2341,7 @@ if (stage_allowed("08")) run_stage("08_summary_outputs", {
     n_cells_after_doublet_removal = ncol(seurat),
     n_genes = nrow(seurat),
     n_clusters = length(unique(seurat$seurat_clusters)),
+    n_celltypes = length(unique(seurat$celltype_annot)),
     condition_counts = as.list(table(seurat$condition)),
     deg_total = nrow(deg),
     deg_up = sum(

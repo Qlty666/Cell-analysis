@@ -27,7 +27,20 @@
 - 差异表达（DESeq2 pseudobulk 或 Seurat Wilcoxon 回退）与 GO/KEGG/GSEA 富集分析。
 - 可选 CellChat 细胞通讯分析（设置 `LIVER_RUN_CELLCHAT=yes`）。
 - ML 疾病分类（XGBoost 或 RandomForest）、特征重要性和 SHAP 解释。
-- 输出 25 张分析图、HTML 报告，支持断点续跑、暂停/继续、停滞自动重启。
+- 发表级分析：细胞周期打分与回归校正、聚类 marker 发现、功能签名打分、推断 CNV、SingleR 自动注释，以及可选 slingshot 拟时序。
+- 输出 45 张分析图、HTML 报告，支持断点续跑、暂停/继续、停滞自动重启。
+
+新增分析可通过环境变量控制：
+
+| 环境变量 | 默认 | 说明 |
+| --- | --- | --- |
+| `LIVER_RUN_CELLCYCLE` | `yes` | 细胞周期打分与 UMAP/比例图 |
+| `LIVER_REGRESS_CELLCYCLE` | `no` | 在 ScaleData 时回归 S/G2M 得分 |
+| `LIVER_RUN_CLUSTER_MARKERS` | `yes` | `FindAllMarkers` 与聚类 marker 热图/DotPlot |
+| `LIVER_RUN_SIGNATURES` | `yes` | 增殖/EMT/缺氧/免疫检查点等签名打分 |
+| `LIVER_RUN_CNV` | `yes` | 基于染色体窗口均值的推断 CNV 热图 |
+| `LIVER_RUN_SINGLER` | `yes` | SingleR 参考注释与混淆矩阵 |
+| `LIVER_RUN_TRAJECTORY` | `no` | slingshot 拟时序轨迹（需安装 `slingshot`） |
 
 ### 2.2 虚拟筛选（CADD）流水线
 
@@ -301,8 +314,8 @@ python -m unittest discover -s tests -p "test_*.py" -v
 
 输出（以 `../liver_cancer` 为例）：
 
-- `results/figures/`：25 张结果图（R 图 + ML 解释图）。
-- `results/data/`：QC、双细胞、注释、差异表达、富集、ML 分类和可选 CellChat 表格。
+- `results/figures/`：45 张结果图，覆盖 QC、双细胞、聚类注释、DEG、富集、细胞周期、聚类 marker、功能签名、CNV、SingleR、拟时序、CellChat 与 ML 解释。
+- `results/data/`：QC、双细胞、注释、差异表达、富集、ML 分类和可选 CellChat 表格；新增 `cell_cycle_scores.csv`、`cluster_markers.csv`、`signature_scores.csv`、`cnv_heatmap.csv`、`singleR_annotations.csv`、`trajectory_pseudotime.csv`、`cellchat_*.csv`、`ml_classification_report.csv`。
 - `results/data/deg_significant.csv`：显著差异基因表。
 - `results/checkpoints/`：Seurat 断点对象。
 - `results/result_report.html`：最终 HTML 报告。
