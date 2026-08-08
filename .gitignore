@@ -24,6 +24,7 @@ Thumbs.db
 web/history.json
 web/dock_history.json
 web/install_log.txt
+web/validation_run.log
 web/*_smoke*.log
 web/*_smoke.pid
 web/templates/index.html

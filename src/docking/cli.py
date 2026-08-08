@@ -13,12 +13,14 @@ from . import (
     docking,
     evidence,
     handoff,
+    knockout,
     ligands,
     ml,
     pipeline,
     receptor,
     redock,
     report,
+    validation,
 )
 from .config import load_config, save_config
 from .environment import check_environment
@@ -48,6 +50,8 @@ def main(argv: list[str] | None = None) -> int:
         ("export-external", "export UniDock/HDOCK/HADDOCK templates"),
         ("redock", "re-dock top hits with higher exhaustiveness"),
         ("report", "generate HTML summary report"),
+        ("virtual-knockout", "score virtual gene knockouts from expression/DepMap data"),
+        ("export-validation", "export wet-lab validation plan for top targets"),
         ("detect-box", "detect docking box from cocrystal ligand and save config"),
         ("check-env", "check Python packages and external tools"),
         ("check-cadd", "check CADD workflow skills and ML libraries"),
@@ -88,6 +92,18 @@ def main(argv: list[str] | None = None) -> int:
         "ligand_name": args.ligand_name,
         "ligand_smiles": args.ligand_smiles,
         "max_items": args.max_items,
+        "expression_csv": args.expression_csv,
+        "metadata_csv": args.metadata_csv,
+        "depmap_csv": args.depmap_csv,
+        "prognosis_csv": args.prognosis_csv,
+        "druggability_csv": args.druggability_csv,
+        "off_target_csv": args.off_target_csv,
+        "cell_type_column": args.cell_type_column,
+        "group_column": args.group_column,
+        "case_label": args.case_label,
+        "normal_label": args.normal_label,
+        "ko_top_n": args.ko_top_n,
+        "validation_top_n": args.validation_top_n,
     }
     overrides = {key: value for key, value in overrides.items() if value is not None}
     cfg = load_config(args.config, overrides)
@@ -133,6 +149,10 @@ def main(argv: list[str] | None = None) -> int:
         redock.run_redock(cfg, log)
     elif args.command == "report":
         report.generate_report(cfg, log)
+    elif args.command == "virtual-knockout":
+        knockout.run_knockout(cfg, log)
+    elif args.command == "export-validation":
+        validation.export_validation(cfg, log)
     elif args.command == "detect-box":
         box.detect_and_update_config(cfg, log)
     else:
@@ -176,6 +196,37 @@ def _add_common(sub: argparse.ArgumentParser) -> None:
     sub.add_argument("--ligand-name", help="ligand name for ChEBI/PubChem")
     sub.add_argument("--ligand-smiles", help="ligand SMILES for PubChem")
     sub.add_argument("--max-items", type=int, help="max records per database")
+    sub.add_argument(
+        "--expression-csv",
+        help="expression matrix or long-format CSV for virtual knockout",
+    )
+    sub.add_argument("--metadata-csv", help="sample metadata CSV (sample + group)")
+    sub.add_argument("--depmap-csv", help="DepMap CRISPR gene effect CSV")
+    sub.add_argument(
+        "--prognosis-csv",
+        help="prognosis CSV (gene + hazard ratio) for target scoring",
+    )
+    sub.add_argument(
+        "--druggability-csv",
+        help="druggability CSV (gene + known ligands/structures/assays)",
+    )
+    sub.add_argument(
+        "--off-target-csv",
+        help="off-target CSV (gene + paralogs/safety concern)",
+    )
+    sub.add_argument(
+        "--cell-type-column",
+        help="cell-type column in metadata for specificity scoring",
+    )
+    sub.add_argument("--group-column", help="group/condition column in metadata")
+    sub.add_argument("--case-label", help="case/tumor group label")
+    sub.add_argument("--normal-label", help="normal/control group label")
+    sub.add_argument("--ko-top-n", type=int, help="top N genes for knockout report")
+    sub.add_argument(
+        "--validation-top-n",
+        type=int,
+        help="top N genes for the wet-lab validation plan",
+    )
     sub.add_argument("--force", action="store_true", help="rerun stages from scratch")
     sub.add_argument("--start-stage", default=None, help="stage code to start from")
     sub.add_argument("--verbose", action="store_true")

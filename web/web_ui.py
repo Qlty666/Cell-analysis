@@ -38,6 +38,10 @@ DOCK_JOBS = {}
 DOCK_QUEUE = []
 DOCK_QUEUE_LOCK = threading.Lock()
 DOCK_HISTORY_PATH = WEB_DIR / "dock_history.json"
+VALIDATION_REPORT_DIR = APP_ROOT / "dock" / "validation_real" / "pan_cancer_20"
+VALIDATION_REPORT_PATH = VALIDATION_REPORT_DIR / "validation_report.md"
+VALIDATION_LOG = WEB_DIR / "validation_run.log"
+VALIDATION_JOB = {"proc": None, "log": None, "handle": None, "started": None}
 NAV_HTML = (
     '<div class="topnav">'
     '<a href="/">单细胞分析</a>'
@@ -676,6 +680,64 @@ def _dock_status(info: dict) -> dict:
     return {"running": running, "ok": ok, "queued": False, "paused": paused}
 
 
+def validation_report_text() -> str:
+    if VALIDATION_REPORT_PATH.exists():
+        return VALIDATION_REPORT_PATH.read_text(encoding="utf-8", errors="replace")
+    return (
+        "报告尚未生成。\n"
+        "请在命令行运行：python validate_new_features.py --max-studies 20"
+    )
+
+
+def start_validation_job() -> dict:
+    proc = VALIDATION_JOB.get("proc")
+    if proc is not None and proc.poll() is None:
+        return {"running": True, "message": "验证任务已在运行"}
+    VALIDATION_LOG.parent.mkdir(parents=True, exist_ok=True)
+    handle = VALIDATION_LOG.open("w", encoding="utf-8", errors="replace")
+    proc = subprocess.Popen(
+        [
+            sys.executable,
+            str(APP_ROOT / "validate_new_features.py"),
+            "--max-studies",
+            "20",
+        ],
+        cwd=APP_ROOT,
+        stdout=handle,
+        stderr=subprocess.STDOUT,
+        text=True,
+        encoding="utf-8",
+        errors="replace",
+    )
+    VALIDATION_JOB.update(
+        {
+            "proc": proc,
+            "log": VALIDATION_LOG,
+            "handle": handle,
+            "started": time.time(),
+        }
+    )
+    return {"running": True, "job": "validation"}
+
+
+def validation_job_status() -> dict:
+    proc = VALIDATION_JOB.get("proc")
+    if proc is None:
+        return {"running": False, "ok": False, "started": False, "log": ""}
+    running = proc.poll() is None
+    log_text = ""
+    if VALIDATION_LOG.exists():
+        log_text = VALIDATION_LOG.read_text(
+            encoding="utf-8", errors="replace"
+        )[-6000:]
+    return {
+        "running": running,
+        "ok": not running and proc.returncode == 0,
+        "started": True,
+        "log": log_text,
+    }
+
+
 def load_dock_history() -> list[dict]:
     if not DOCK_HISTORY_PATH.exists():
         return []
@@ -755,6 +817,104 @@ def _dock_file_path(info: dict, name: str):
         target = (folder / base).resolve()
         if target.is_file() and target.parent == folder:
             return target
+    return None
+
+
+def run_knockout_request(data: dict) -> dict:
+    from docking.config import load_config
+    from docking.knockout import run_knockout
+
+    workdir = Path(
+        _first(data, "ko_workdir", str(APP_ROOT / "dock"))
+    ).expanduser().resolve()
+    workdir.mkdir(parents=True, exist_ok=True)
+    overrides = {
+        "workdir": str(workdir),
+        "expression_csv": _first(data, "ko_expression", "") or None,
+        "metadata_csv": _first(data, "ko_metadata", "") or None,
+        "depmap_csv": _first(data, "ko_depmap", "") or None,
+        "case_label": _first(data, "ko_case", "") or None,
+        "normal_label": _first(data, "ko_normal", "") or None,
+        "ko_top_n": _int_field(data, "ko_top_n"),
+    }
+    cfg = load_config(APP_ROOT / "config" / "docking_config.json", overrides)
+    import logging
+
+    summary = run_knockout(cfg, logging.getLogger("docking.web_knockout"))
+    ko_dir = cfg.output_dir / "knockout"
+    ranked = ko_dir / "ranked_knockout.csv"
+    rows: list[dict] = []
+    if ranked.exists():
+        import csv as csv_module
+
+        limit = int(cfg.get("knockout", "top_n", 50))
+        with ranked.open("r", newline="", encoding="utf-8") as fh:
+            for i, row in enumerate(csv_module.DictReader(fh)):
+                if i >= limit:
+                    break
+                rows.append(row)
+    figures = (
+        sorted(p.name for p in ko_dir.glob("*.png"))
+        if ko_dir.exists()
+        else []
+    )
+    files = (
+        sorted(p.name for p in ko_dir.iterdir() if p.is_file())
+        if ko_dir.exists()
+        else []
+    )
+    return {
+        "summary": summary,
+        "rows": rows,
+        "figures": figures,
+        "files": files,
+        "output_dir": str(ko_dir),
+        "workdir": str(workdir),
+    }
+
+
+def run_validation_request(data: dict) -> dict:
+    from docking.config import load_config
+    from docking.validation import export_validation
+
+    workdir = Path(
+        _first(data, "ko_workdir", str(APP_ROOT / "dock"))
+    ).expanduser().resolve()
+    overrides = {
+        "workdir": str(workdir),
+        "validation_top_n": _int_field(data, "validation_top_n"),
+    }
+    cfg = load_config(APP_ROOT / "config" / "docking_config.json", overrides)
+    import logging
+
+    summary = export_validation(cfg, logging.getLogger("docking.web_validation"))
+    val_dir = cfg.output_dir / "validation"
+    files = (
+        sorted(p.name for p in val_dir.iterdir() if p.is_file())
+        if val_dir.exists()
+        else []
+    )
+    return {
+        "summary": summary,
+        "files": files,
+        "output_dir": str(val_dir),
+        "workdir": str(workdir),
+    }
+
+
+def _ko_file_path(workdir: str, name: str):
+    from docking.config import load_config
+
+    work = Path(workdir).expanduser().resolve()
+    cfg = load_config(
+        APP_ROOT / "config" / "docking_config.json",
+        {"workdir": str(work)},
+    )
+    folder = (cfg.output_dir / "knockout").resolve()
+    base = Path(name).name
+    target = (folder / base).resolve()
+    if target.is_file() and target.parent == folder:
+        return target
     return None
 
 
@@ -960,6 +1120,43 @@ class Handler(BaseHTTPRequestHandler):
         if parsed.path == "/dock/history":
             body = json.dumps(
                 load_dock_history(),
+                ensure_ascii=False,
+            ).encode("utf-8")
+            self._send(200, body, "application/json")
+            return
+        if parsed.path == "/dock/knockout/file":
+            query = parse_qs(parsed.query)
+            workdir = query.get("workdir", [""])[0]
+            name = query.get("name", [""])[0]
+            target = _ko_file_path(workdir, name)
+            if not target:
+                self._send(404, b"file not found", "text/plain; charset=utf-8")
+                return
+            content_type = {
+                ".png": "image/png",
+                ".jpg": "image/jpeg",
+                ".jpeg": "image/jpeg",
+                ".svg": "image/svg+xml",
+                ".pdf": "application/pdf",
+                ".csv": "text/csv; charset=utf-8",
+                ".md": "text/markdown; charset=utf-8",
+                ".json": "application/json",
+            }.get(target.suffix.lower(), "application/octet-stream")
+            self._send(200, target.read_bytes(), content_type)
+            return
+        if parsed.path == "/dock/validation-report":
+            body = json.dumps(
+                {
+                    "report": validation_report_text(),
+                    "exists": VALIDATION_REPORT_PATH.exists(),
+                },
+                ensure_ascii=False,
+            ).encode("utf-8")
+            self._send(200, body, "application/json")
+            return
+        if parsed.path == "/dock/validation-status":
+            body = json.dumps(
+                validation_job_status(),
                 ensure_ascii=False,
             ).encode("utf-8")
             self._send(200, body, "application/json")
@@ -1219,6 +1416,42 @@ class Handler(BaseHTTPRequestHandler):
                     json.dumps({"error": str(exc)}).encode("utf-8"),
                     "application/json",
                 )
+            return
+
+        if parsed.path == "/dock/knockout":
+            try:
+                result = run_knockout_request(data)
+                body = json.dumps(result, ensure_ascii=False).encode("utf-8")
+                self._send(200, body, "application/json")
+            except Exception as exc:
+                body = json.dumps(
+                    {"error": str(exc)}, ensure_ascii=False
+                ).encode("utf-8")
+                self._send(400, body, "application/json")
+            return
+
+        if parsed.path == "/dock/knockout/validate":
+            try:
+                result = run_validation_request(data)
+                body = json.dumps(result, ensure_ascii=False).encode("utf-8")
+                self._send(200, body, "application/json")
+            except Exception as exc:
+                body = json.dumps(
+                    {"error": str(exc)}, ensure_ascii=False
+                ).encode("utf-8")
+                self._send(400, body, "application/json")
+            return
+
+        if parsed.path == "/dock/validation/run":
+            try:
+                result = start_validation_job()
+                body = json.dumps(result, ensure_ascii=False).encode("utf-8")
+                self._send(200, body, "application/json")
+            except Exception as exc:
+                body = json.dumps(
+                    {"error": str(exc)}, ensure_ascii=False
+                ).encode("utf-8")
+                self._send(400, body, "application/json")
             return
 
         if parsed.path == "/dock/start":

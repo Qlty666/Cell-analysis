@@ -43,5 +43,46 @@
     "figures": true,
     "diversity": true,
     "tanimoto_cutoff": 0.7
+  },
+  "knockout": {
+    "enabled": true,
+    "expression_csv": "data/knockout/expression.csv",
+    "metadata_csv": null,
+    "depmap_csv": null,
+    "prognosis_csv": null,
+    "druggability_csv": null,
+    "off_target_csv": null,
+    "group_column": "condition",
+    "cell_type_column": null,
+    "case_label": null,
+    "normal_label": null,
+    "top_n": 50,
+    "figures": true,
+    "max_genes": 2000,
+    "max_samples": 5000,
+    "corr_cutoff": 0.7,
+    "liver_lineage": "liver",
+    "off_target_penalty": 0.05,
+    "disease_up_genes": null,
+    "disease_down_genes": null,
+    "pathway_genes": null,
+    "weights": {
+      "expression": 0.35,
+      "proliferation": 0.25,
+      "network": 0.20,
+      "depmap": 0.20
+    },
+    "target_weights": {
+      "base": 0.35,
+      "reversal": 0.20,
+      "pathway": 0.15,
+      "specificity": 0.10,
+      "prognosis": 0.10,
+      "druggability": 0.10
+    }
+  },
+  "validation": {
+    "top_n": 10,
+    "output_dir": "outputs/run_001/validation"
   }
 }

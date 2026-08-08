@@ -96,6 +96,47 @@ DEFAULTS = {
     "report": {
         "top_n": 20,
     },
+    "knockout": {
+        "enabled": True,
+        "expression_csv": "data/knockout/expression.csv",
+        "metadata_csv": None,
+        "depmap_csv": None,
+        "prognosis_csv": None,
+        "druggability_csv": None,
+        "off_target_csv": None,
+        "group_column": "condition",
+        "cell_type_column": None,
+        "case_label": None,
+        "normal_label": None,
+        "top_n": 50,
+        "figures": True,
+        "max_genes": 2000,
+        "max_samples": 5000,
+        "corr_cutoff": 0.7,
+        "liver_lineage": "liver",
+        "off_target_penalty": 0.05,
+        "disease_up_genes": None,
+        "disease_down_genes": None,
+        "pathway_genes": None,
+        "weights": {
+            "expression": 0.35,
+            "proliferation": 0.25,
+            "network": 0.20,
+            "depmap": 0.20,
+        },
+        "target_weights": {
+            "base": 0.35,
+            "reversal": 0.20,
+            "pathway": 0.15,
+            "specificity": 0.10,
+            "prognosis": 0.10,
+            "druggability": 0.10,
+        },
+    },
+    "validation": {
+        "top_n": 10,
+        "output_dir": "outputs/run_001/validation",
+    },
 }
 
 
@@ -270,6 +311,18 @@ def apply_overrides(cfg: ResolvedConfig, overrides: dict) -> ResolvedConfig:
         "ligand_name": ("evidence", "ligand_name"),
         "ligand_smiles": ("evidence", "ligand_smiles"),
         "max_items": ("evidence", "max_items"),
+        "expression_csv": ("knockout", "expression_csv"),
+        "metadata_csv": ("knockout", "metadata_csv"),
+        "depmap_csv": ("knockout", "depmap_csv"),
+        "prognosis_csv": ("knockout", "prognosis_csv"),
+        "druggability_csv": ("knockout", "druggability_csv"),
+        "off_target_csv": ("knockout", "off_target_csv"),
+        "cell_type_column": ("knockout", "cell_type_column"),
+        "group_column": ("knockout", "group_column"),
+        "case_label": ("knockout", "case_label"),
+        "normal_label": ("knockout", "normal_label"),
+        "ko_top_n": ("knockout", "top_n"),
+        "validation_top_n": ("validation", "top_n"),
     }
     for key, (section, field) in section_map.items():
         if overrides.get(key) is not None:
@@ -368,6 +421,59 @@ def save_config(cfg: ResolvedConfig, path: Path) -> None:
         },
         "report": {
             "top_n": cfg.get("report", "top_n", 20),
+        },
+        "knockout": {
+            "enabled": cfg.get("knockout", "enabled", True),
+            "expression_csv": cfg.get(
+                "knockout", "expression_csv", "data/knockout/expression.csv"
+            ),
+            "metadata_csv": cfg.get("knockout", "metadata_csv"),
+            "depmap_csv": cfg.get("knockout", "depmap_csv"),
+            "prognosis_csv": cfg.get("knockout", "prognosis_csv"),
+            "druggability_csv": cfg.get("knockout", "druggability_csv"),
+            "off_target_csv": cfg.get("knockout", "off_target_csv"),
+            "group_column": cfg.get("knockout", "group_column", "condition"),
+            "cell_type_column": cfg.get("knockout", "cell_type_column"),
+            "case_label": cfg.get("knockout", "case_label"),
+            "normal_label": cfg.get("knockout", "normal_label"),
+            "top_n": cfg.get("knockout", "top_n", 50),
+            "figures": cfg.get("knockout", "figures", True),
+            "max_genes": cfg.get("knockout", "max_genes", 2000),
+            "max_samples": cfg.get("knockout", "max_samples", 5000),
+            "corr_cutoff": cfg.get("knockout", "corr_cutoff", 0.7),
+            "liver_lineage": cfg.get("knockout", "liver_lineage", "liver"),
+            "off_target_penalty": cfg.get("knockout", "off_target_penalty", 0.05),
+            "disease_up_genes": cfg.get("knockout", "disease_up_genes"),
+            "disease_down_genes": cfg.get("knockout", "disease_down_genes"),
+            "pathway_genes": cfg.get("knockout", "pathway_genes"),
+            "weights": cfg.get(
+                "knockout",
+                "weights",
+                {
+                    "expression": 0.35,
+                    "proliferation": 0.25,
+                    "network": 0.20,
+                    "depmap": 0.20,
+                },
+            ),
+            "target_weights": cfg.get(
+                "knockout",
+                "target_weights",
+                {
+                    "base": 0.35,
+                    "reversal": 0.20,
+                    "pathway": 0.15,
+                    "specificity": 0.10,
+                    "prognosis": 0.10,
+                    "druggability": 0.10,
+                },
+            ),
+        },
+        "validation": {
+            "top_n": cfg.get("validation", "top_n", 10),
+            "output_dir": cfg.get(
+                "validation", "output_dir", "outputs/run_001/validation"
+            ),
         },
     }
     path.parent.mkdir(parents=True, exist_ok=True)
