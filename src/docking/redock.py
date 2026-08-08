@@ -97,5 +97,70 @@ def run_redock(cfg: ResolvedConfig, log) -> dict:
         "redock_dir": str(redock_dir),
     }
     write_json(redock_dir / "summary.json", summary)
+    try:
+        make_redock_figure(cfg, log)
+    except Exception as exc:
+        log.warning("redock comparison figure failed: %s", exc)
     log.info("redock complete: %s ok, best affinity %s", len(ok_results), summary["best_affinity"])
     return summary
+
+
+def make_redock_figure(cfg: ResolvedConfig, log) -> None:
+    """Save a before/after affinity comparison for redocked hits."""
+    import matplotlib
+
+    matplotlib.use("Agg")
+    import matplotlib.pyplot as plt
+    import pandas as pd
+
+    ranked = cfg.reports_dir() / "ranked_results.csv"
+    redock_csv = cfg.output_dir / "redock" / "results.csv"
+    if not ranked.exists() or not redock_csv.exists():
+        return
+    initial = pd.read_csv(ranked, dtype={"id": str})
+    redocked = pd.read_csv(redock_csv, dtype={"id": str})
+    redocked = redocked[redocked.get("status", "") == "ok"]
+    if initial.empty or redocked.empty:
+        return
+    merged = initial[["id", "affinity"]].merge(
+        redocked[["id", "affinity"]],
+        on="id",
+        suffixes=("_initial", "_redock"),
+    )
+    merged = merged.dropna(subset=["affinity_initial", "affinity_redock"])
+    if merged.empty:
+        return
+
+    delta = merged["affinity_redock"] - merged["affinity_initial"]
+    lo = (
+        min(merged["affinity_initial"].min(), merged["affinity_redock"].min())
+        - 0.5
+    )
+    hi = (
+        max(merged["affinity_initial"].max(), merged["affinity_redock"].max())
+        + 0.5
+    )
+    fig, axes = plt.subplots(1, 2, figsize=(10, 4.5))
+    axes[0].scatter(
+        merged["affinity_initial"],
+        merged["affinity_redock"],
+        s=22,
+        alpha=0.75,
+        color="#2e7d32",
+    )
+    axes[0].plot([lo, hi], [lo, hi], "k--", linewidth=1)
+    axes[0].set_xlim(lo, hi)
+    axes[0].set_ylim(lo, hi)
+    axes[0].set_xlabel("Initial affinity (kcal/mol)")
+    axes[0].set_ylabel("Redock affinity (kcal/mol)")
+    axes[0].set_title("Redock consistency")
+    axes[1].hist(delta, bins=20, color="#4c7bb8", edgecolor="white")
+    axes[1].axvline(0, color="#c0392b", linestyle="--", linewidth=1.2)
+    axes[1].set_xlabel("Affinity change (kcal/mol)")
+    axes[1].set_ylabel("Ligand count")
+    axes[1].set_title("Redock affinity change")
+    fig.tight_layout()
+    out_path = cfg.reports_dir() / "redock_comparison.png"
+    fig.savefig(out_path, dpi=150)
+    plt.close(fig)
+    log.info("redock comparison figure saved: %s", out_path)

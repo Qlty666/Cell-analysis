@@ -26,6 +26,18 @@ STALL_SECONDS = int(os.environ.get("LIVER_STALL_SECONDS", "1800"))
 POLL_INTERVAL = 30
 MAX_ATTEMPTS = 4
 
+SINGLE_CELL_STAGES = [
+    "01_load_data",
+    "02_qc_filter",
+    "03_doublets",
+    "04_cluster",
+    "05_annotation",
+    "06_differential_expression",
+    "07_enrichment",
+    "08_publication_analyses",
+    "09_summary_outputs",
+]
+
 try:
     from data.download_data import ensure_data_for_accession
 except ImportError:
@@ -194,13 +206,10 @@ def next_missing_stage(force: bool) -> str:
     stage_dir = OUTPUT_ROOT / "results" / ".stages"
     if not stage_dir.exists():
         return "01"
-    done = {
-        path.stem.split("_", 1)[0]
-        for path in stage_dir.glob("*.done")
-    }
-    for code in ["01", "02", "03", "04", "05", "06", "07", "08"]:
-        if code not in done:
-            return code
+    done = {path.stem for path in stage_dir.glob("*.done")}
+    for name in SINGLE_CELL_STAGES:
+        if name not in done:
+            return name.split("_", 1)[0]
     return "01"
 
 
