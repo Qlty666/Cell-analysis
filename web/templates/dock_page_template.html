@@ -189,6 +189,54 @@ a.file-link { color: #1665c0; text-decoration: none; margin-right: 12px; }
 </div>
 
 <div class="card">
+  <h2>虚拟敲除优先级分析</h2>
+  <form id="koForm">
+    <div class="grid wide">
+      <label>工作目录
+        <input name="ko_workdir" placeholder="请输工作目录，默认 dock">
+      </label>
+      <label>表达矩阵 CSV（相对工作目录）
+        <input name="ko_expression" placeholder="data/knockout/expression.csv" required>
+      </label>
+      <label>样本元数据 CSV（可选）
+        <input name="ko_metadata" placeholder="data/knockout/metadata.csv">
+      </label>
+      <label>DepMap 依赖 CSV（可选）
+        <input name="ko_depmap" placeholder="data/knockout/depmap_gene_effect.csv">
+      </label>
+      <label>肿瘤/病例标签（可选）
+        <input name="ko_case" placeholder="Tumor">
+      </label>
+      <label>正常标签（可选）
+        <input name="ko_normal" placeholder="Normal">
+      </label>
+      <label>Top N
+        <input name="ko_top_n" type="number" min="1" value="50">
+      </label>
+    </div>
+    <div class="actions">
+      <button type="button" onclick="runKnockout(this)">运行虚拟敲除</button>
+      <button type="button" class="secondary" onclick="exportValidation(this)">导出湿实验验证方案</button>
+    </div>
+  </form>
+  <div id="koMessage"></div>
+  <div id="koSummary"></div>
+  <div id="koFiles"></div>
+  <div id="koValidation"></div>
+  <div class="tablebox"><table id="koTable"></table></div>
+  <div id="koGallery" class="gallery"></div>
+</div>
+
+<div class="card">
+  <h2>真实数据验证报告</h2>
+  <div class="actions" style="margin-top:0;">
+    <button type="button" onclick="loadValidationReport()">查看验证报告</button>
+    <button type="button" class="secondary" onclick="runValidationJob(this)">重新运行验证</button>
+  </div>
+  <pre id="validationReport">点击“查看验证报告”加载结果。</pre>
+</div>
+
+<div class="card">
   <h2>实时进度</h2>
   <div class="actions" style="margin-top:0;">
     <button id="pauseBtn" class="secondary" type="button" onclick="pauseDockJob()" disabled>暂停任务</button>
@@ -505,8 +553,158 @@ async function installEnv(btn) {
   }
 }
 
+function koMsg(text, cls) {
+  const el = document.getElementById('koMessage');
+  el.className = cls || '';
+  el.textContent = text;
+}
+
+async function runKnockout(btn) {
+  const form = document.getElementById('koForm');
+  const data = new URLSearchParams(new FormData(form));
+  btn.disabled = true;
+  koMsg('正在运行虚拟敲除...');
+  try {
+    const resp = await fetch('/dock/knockout', {method: 'POST', body: data});
+    const result = await resp.json();
+    if (!resp.ok) throw new Error(result.error || '虚拟敲除失败');
+    renderKnockout(result);
+    koMsg('虚拟敲除完成。', 'ok');
+  } catch (e) {
+    koMsg(String(e.message || e), 'error');
+  } finally {
+    btn.disabled = false;
+  }
+}
+
+async function exportValidation(btn) {
+  const form = document.getElementById('koForm');
+  const data = new URLSearchParams(new FormData(form));
+  if (!data.get('validation_top_n')) data.set('validation_top_n', '10');
+  btn.disabled = true;
+  const box = document.getElementById('koValidation');
+  box.textContent = '正在导出湿实验验证方案...';
+  try {
+    const resp = await fetch('/dock/knockout/validate', {method: 'POST', body: data});
+    const result = await resp.json();
+    if (!resp.ok) throw new Error(result.error || '验证方案导出失败');
+    const linkBase = '/dock/knockout/file?workdir=' +
+      encodeURIComponent(result.workdir) + '&name=';
+    box.innerHTML = '<p class="muted">验证方案已导出：' + result.output_dir + '</p>' +
+      (result.files || []).map(name =>
+        '<a class="file-link" href="' + linkBase + encodeURIComponent(name) +
+        '" download>' + name + '</a>'
+      ).join('');
+  } catch (e) {
+    box.innerHTML = '<p class="error">' + String(e.message || e) + '</p>';
+  } finally {
+    btn.disabled = false;
+  }
+}
+
+async function loadValidationReport() {
+  const box = document.getElementById('validationReport');
+  box.textContent = '正在加载验证报告...';
+  try {
+    const resp = await fetch('/dock/validation-report');
+    const data = await resp.json();
+    box.textContent = data.report || '暂无报告';
+  } catch (e) {
+    box.textContent = '加载失败：' + String(e.message || e);
+  }
+}
+
+async function runValidationJob(btn) {
+  const box = document.getElementById('validationReport');
+  btn.disabled = true;
+  box.textContent = '正在启动真实数据验证（约 2-5 分钟）...';
+  try {
+    const resp = await fetch('/dock/validation/run', {method: 'POST'});
+    const data = await resp.json();
+    if (!resp.ok) throw new Error(data.error || '启动失败');
+    const timer = setInterval(async () => {
+      try {
+        const sresp = await fetch('/dock/validation-status');
+        const status = await sresp.json();
+        if (!status.running) {
+          clearInterval(timer);
+          btn.disabled = false;
+          box.textContent = (status.ok ? '验证完成。' : '验证运行失败。') +
+            '\n' + (status.log || '');
+          if (status.ok) await loadValidationReport();
+        } else {
+          box.textContent = '验证运行中...\n' + (status.log || '');
+        }
+      } catch (e) {
+        clearInterval(timer);
+        btn.disabled = false;
+        box.textContent = '状态读取失败：' + String(e.message || e);
+      }
+    }, 2000);
+  } catch (e) {
+    btn.disabled = false;
+    box.textContent = '启动失败：' + String(e.message || e);
+  }
+}
+
+function renderKnockout(data) {
+  const summary = data.summary || {};
+  const summaryEl = document.getElementById('koSummary');
+  const classes = summary.target_class_counts || {};
+  const classText = Object.keys(classes).map(k =>
+    k + ' ' + classes[k]
+  ).join('；');
+  summaryEl.innerHTML = '<p class="muted">评分基因 ' + (summary.genes_scored || 0) +
+    ' 个，病例样本 ' + (summary.case_samples || 0) +
+    '，正常样本 ' + (summary.normal_samples || 0) +
+    '，DepMap 细胞系 ' + (summary.depmap_lines || 0) +
+    '，多维评分 ' + (summary.multidimensional_scoring ? '是' : '否') +
+    '。分类：' + (classText || '无') +
+    '。输出目录：' + data.output_dir + '</p>';
+
+  const linkBase = '/dock/knockout/file?workdir=' +
+    encodeURIComponent(data.workdir) + '&name=';
+  document.getElementById('koFiles').innerHTML = (data.files || []).map(name =>
+    '<a class="file-link" href="' + linkBase + encodeURIComponent(name) +
+    '" download>' + name + '</a>'
+  ).join('');
+
+  const headers = ['排名', '基因', '靶点评分', '分类', '敲除分', '逆转分', '通路分',
+    '特异性分', '预后分', '成药性分', '安全标记', '优先级'];
+  const keys = ['rank', 'gene', 'target_score', 'target_class', 'knockout_score',
+    'reversal_score', 'pathway_score', 'specificity_score', 'prognosis_score',
+    'druggability_score', 'safety_concern', 'target_priority'];
+  const scoreKeys = ['target_score', 'knockout_score', 'reversal_score',
+    'pathway_score', 'specificity_score', 'prognosis_score', 'druggability_score',
+    'safety_concern'];
+  const table = document.getElementById('koTable');
+  if (data.rows && data.rows.length) {
+    table.innerHTML = '<thead><tr>' + headers.map(h =>
+      '<th>' + h + '</th>'
+    ).join('') + '</tr></thead><tbody>' + data.rows.map(row => {
+      return '<tr>' + keys.map(key => {
+        let value = row[key];
+        if (scoreKeys.indexOf(key) >= 0 && value !== '' &&
+            value !== undefined && value !== null) {
+          value = Number(value).toFixed(3);
+        }
+        if (value === '' || value === undefined || value === null) value = '-';
+        return '<td>' + value + '</td>';
+      }).join('') + '</tr>';
+    }).join('') + '</tbody>';
+  } else {
+    table.innerHTML = '<tbody><tr><td>暂无结果</td></tr></tbody>';
+  }
+
+  document.getElementById('koGallery').innerHTML = (data.figures || []).map(name =>
+    '<figure><img src="' + linkBase + encodeURIComponent(name) +
+    '"><figcaption>' + name + '</figcaption></figure>'
+  ).join('');
+}
+
 loadDockHistory();
 loadDockEnv();
+loadValidationReport();
 </script>
 </body>
 </html>
