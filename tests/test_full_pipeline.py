@@ -22,6 +22,7 @@ from pipeline.integration import (  # noqa: E402
     extract_key_genes,
     main,
 )
+from pipeline.integration import IntegrationError  # noqa: E402
 
 
 def _write_deg(root: Path) -> None:
@@ -98,6 +99,29 @@ class TestExtractKeyGenes(unittest.TestCase):
             self.assertAlmostEqual(float(frame.iloc[0]["avg_log2fc"]), 3.0)
             self.assertTrue((out / "key_genes.csv").exists())
             self.assertTrue((out / "key_genes_summary.json").exists())
+
+    def test_duplicate_log2fc_columns_are_deduped(self):
+        with tempfile.TemporaryDirectory() as tmp:
+            root = Path(tmp) / "single_cell"
+            data_dir = root / "results" / "data"
+            data_dir.mkdir(parents=True)
+            frame = pd.DataFrame(
+                {
+                    "gene": ["GENE1", "GENE2"],
+                    "avg_log2FC": [3.0, -2.0],
+                    "log2FoldChange": [2.9, -1.9],
+                    "p_val_adj": [0.01, 0.02],
+                    "pct.1": [0.5, 0.6],
+                    "pct.2": [0.2, 0.3],
+                    "direction": ["Up", "Down"],
+                    "significant": [True, True],
+                }
+            )
+            frame.to_csv(data_dir / "deg_significant.csv", index=False)
+            out = root / "integration_out"
+            result = extract_key_genes(root, out, top_n=10)
+            self.assertEqual(result.iloc[0]["gene"], "GENE1")
+            self.assertAlmostEqual(float(result.iloc[0]["avg_log2fc"]), 3.0)
 
 
 class TestCocrystalLigandFallback(unittest.TestCase):
@@ -221,6 +245,44 @@ class TestFullPipeline(unittest.TestCase):
             self.assertTrue((out / "integration_report.html").exists())
             self.assertTrue((out / "integration_summary.json").exists())
             self.assertTrue((out / ".stages" / "07_report.done").exists())
+
+    def test_stale_stage01_marker_reruns_when_outputs_missing(self):
+        with tempfile.TemporaryDirectory() as tmp:
+            root = Path(tmp) / "single_cell"
+            root.mkdir(parents=True)
+            workdir = Path(tmp) / "work"
+            stage_dir = workdir / "outputs" / "integration" / ".stages"
+            stage_dir.mkdir(parents=True)
+            (stage_dir / "01_single_cell.done").write_text(
+                "stale", encoding="utf-8"
+            )
+            cfg = Path(tmp) / "full_pipeline_config.json"
+            cfg.write_text(
+                json.dumps(
+                    {
+                        "accession": "GSE_TEST",
+                        "single_cell_output": str(root),
+                        "workdir": str(workdir),
+                        "top_genes": 10,
+                        "docking_targets": 2,
+                        "species": "hs",
+                    }
+                ),
+                encoding="utf-8",
+            )
+            code = main(
+                [
+                    "--config",
+                    str(cfg),
+                    "--skip-scrna",
+                    "--skip-docking",
+                    "--skip-evidence-fetch",
+                    "--docking-config",
+                    str(APP_ROOT / "config" / "docking_config.json"),
+                ]
+            )
+            self.assertEqual(code, 1)
+            self.assertFalse((stage_dir / "01_single_cell.done").exists())
 
 
 if __name__ == "__main__":

@@ -55,8 +55,6 @@ def _fetch(url: str) -> str:
 
 
 def _download(url: str, out: Path, log) -> None:
-    if out.exists():
-        out.unlink()
     log(f"downloading {out.name}")
     subprocess.run(
         [
@@ -64,12 +62,13 @@ def _download(url: str, out: Path, log) -> None:
             "-L",
             "--ssl-no-revoke",
             "-A", "Mozilla/5.0",
+            "-C", "-",
             "--retry", "5",
             "--retry-delay", "3",
             "--fail",
             "--silent",
             "--show-error",
-            "--max-time", "900",
+            "--max-time", "5400",
             "-o", str(out),
             url,
         ],
@@ -92,14 +91,17 @@ def _select_files(names: list[str]) -> dict:
 
     for name in names:
         low = name.lower()
-        if "normalized" in low:
+        if "normalized" in low or "tpm" in low or "natural_log" in low:
             continue
-        if "barcode" in low:
+        if re.search(
+            r"samples|metadata|cellinfo|cell_info|phenotype|celltype|annotation",
+            low,
+        ):
+            metadata.append(name)
+        elif "barcode" in low:
             barcodes.append(name)
         elif "genes" in low or "features" in low:
             genes.append(name)
-        elif re.search(r"samples|metadata|cellinfo|cell_info|phenotype|celltype", low):
-            metadata.append(name)
         elif re.search(r"matrix|\.mtx|counts?|read_counts|umi_counts|\.rds$", low):
             matrices.append(name)
 

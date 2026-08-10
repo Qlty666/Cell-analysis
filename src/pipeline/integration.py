@@ -126,6 +126,17 @@ def _read_json(path: Path, default=None) -> dict:
         return default or {}
 
 
+def _single_cell_outputs_ready(root: Path) -> bool:
+    """True when the single-cell stage produced the files later stages need."""
+    return (
+        (root / "results" / "pipeline_complete.json").exists()
+        and (
+            (root / "results" / "data" / "deg_significant.csv").exists()
+            or (root / "results" / "data" / "deg_all.csv").exists()
+        )
+    )
+
+
 def _resolve_path(value, base: Path) -> Path:
     path = Path(str(value)).expanduser()
     if not path.is_absolute():
@@ -159,6 +170,9 @@ def extract_key_genes(
         "padj": "p_val_adj",
     }
     frame = frame.rename(columns=rename)
+    # Some DEG exports contain both avg_log2FC and log2FoldChange. After the
+    # rename both become avg_log2fc, which turns column access into a DataFrame.
+    frame = frame.loc[:, ~frame.columns.duplicated()]
     if "gene" not in frame.columns:
         raise IntegrationError(f"DEG table has no gene column: {deg_path}")
 
@@ -517,17 +531,28 @@ def build_knockout_inputs(
     expression_dst = ko_dir / "expression.csv"
     metadata_dst = ko_dir / "metadata.csv"
 
-    if not expression_dst.exists() or not metadata_dst.exists():
+    if not _knockout_inputs_ready(expression_dst, metadata_dst):
         pseudo_dir = ko_dir / "_pseudobulk"
-        if not (pseudo_dir / "pseudobulk_expression.csv").exists() or not (
-            pseudo_dir / "pseudobulk_metadata.csv"
-        ).exists():
+        if (
+            not (pseudo_dir / "pseudobulk_expression.csv").exists()
+            or not (pseudo_dir / "pseudobulk_metadata.csv").exists()
+            or not _knockout_inputs_ready(
+                pseudo_dir / "pseudobulk_expression.csv",
+                pseudo_dir / "pseudobulk_metadata.csv",
+            )
+        ):
             if skip_pseudobulk:
                 raise IntegrationError(
                     "pseudobulk files are missing and --skip-pseudobulk was set; "
                     "run the single-cell pipeline first"
                 )
+            if pseudo_dir.exists():
+                shutil.rmtree(pseudo_dir)
             export_pseudobulk(single_cell_root, pseudo_dir)
+        if expression_dst.exists():
+            expression_dst.unlink()
+        if metadata_dst.exists():
+            metadata_dst.unlink()
         shutil.copyfile(
             pseudo_dir / "pseudobulk_expression.csv",
             expression_dst,
@@ -590,6 +615,31 @@ def build_knockout_inputs(
         ko_dir,
     )
     return summary
+
+
+def _knockout_inputs_ready(expression_path: Path, metadata_path: Path) -> bool:
+    """Return False when cached knockout inputs are malformed or stale."""
+    try:
+        if not expression_path.exists() or not metadata_path.exists():
+            return False
+        expr = pd.read_csv(expression_path)
+        meta = pd.read_csv(metadata_path)
+        if expr.empty or meta.empty or len(expr.columns) < 2:
+            return False
+        numeric = expr.drop(columns=[expr.columns[0]]).apply(
+            pd.to_numeric, errors="coerce"
+        )
+        if numeric.dropna(how="all").empty:
+            return False
+        if not {"sample", "condition"}.issubset(meta.columns):
+            return False
+        if meta["sample"].isna().any() or meta["sample"].duplicated().any():
+            return False
+        if meta["condition"].nunique() < 2:
+            return False
+        return True
+    except Exception:
+        return False
 
 
 def run_knockout_stage(
@@ -1308,6 +1358,20 @@ def _stage_docking(args, workdir: Path, ctx: dict) -> None:
         write_json(_integration_dir(workdir) / "docking_summary.json", summary)
         ctx["docking"] = summary
         return
+    if "key_genes_path" not in ctx:
+        key_genes_path = _integration_dir(workdir) / "key_genes.csv"
+        if not key_genes_path.exists():
+            raise IntegrationError(
+                "key_genes.csv missing; run stage 02 before docking"
+            )
+        ctx["key_genes_path"] = key_genes_path
+    if "evidence_path" not in ctx:
+        evidence_path = _integration_dir(workdir) / "gene_evidence.csv"
+        if not evidence_path.exists():
+            raise IntegrationError(
+                "gene_evidence.csv missing; run stage 03 before docking"
+            )
+        ctx["evidence_path"] = evidence_path
     ctx["docking"] = run_docking_stage(
         workdir,
         ctx["docking_config"],
@@ -1347,8 +1411,27 @@ def run_full_pipeline(args) -> int:
             log.info("stage %s %s skipped by --start-stage", code, name)
             continue
         if not args.force and marker.exists():
-            log.info("skip stage %s %s (already done)", code, name)
-            continue
+            if code == "01" and not _single_cell_outputs_ready(
+                ctx["single_cell_root"]
+            ):
+                log.warning(
+                    "stage 01 marker exists but single-cell outputs are missing "
+                    "under %s; rerunning",
+                    ctx["single_cell_root"],
+                )
+                marker.unlink(missing_ok=True)
+            elif code == "04" and not _knockout_inputs_ready(
+                workdir / "data" / "knockout" / "expression.csv",
+                workdir / "data" / "knockout" / "metadata.csv",
+            ):
+                log.warning(
+                    "stage 04 marker exists but knockout inputs are missing or "
+                    "malformed; rebuilding pseudobulk"
+                )
+                marker.unlink(missing_ok=True)
+            else:
+                log.info("skip stage %s %s (already done)", code, name)
+                continue
         log.info("=== stage %s %s ===", code, name)
         fn = {
             "01": _stage_single_cell,

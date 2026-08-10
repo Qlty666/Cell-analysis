@@ -269,6 +269,18 @@ read_generic_counts <- function(manifest) {
   count_list <- list()
   cell_sample <- character()
   cell_group <- character()
+  bc <- character()
+  infer_cell_samples <- function(labels) {
+    labels <- as.character(labels)
+    out <- rep("Sample1", length(labels))
+    pattern <- "_[A-Za-z0-9]+(?:_[A-Za-z0-9]+)?$"
+    m <- regexpr(pattern, labels, perl = TRUE)
+    hits <- which(m > 0)
+    if (length(hits) > 0) {
+      out[hits] <- sub("^_", "", regmatches(labels[hits], regexpr(pattern, labels[hits], perl = TRUE)))
+    }
+    out
+  }
   for (i in seq_along(matrices)) {
     mat_file <- matrices[i]
     mat_path <- file.path(raw_dir, mat_file)
@@ -322,7 +334,7 @@ read_generic_counts <- function(manifest) {
       close(con)
       first_fields <- trimws(unlist(strsplit(first_line, "[,\t]")))
       first_field <- gsub('^"|"$', "", first_fields[1])
-      looks_barcode <- grepl("^[ACGTN]+([-_]|$)", first_field) ||
+      looks_barcode <- grepl("^[ACGTN]+([.-]|$)", first_field) ||
         grepl("^[ACGTN]+[0-9]+$", first_field) ||
         grepl("^[A-Z0-9]+_[A-Z0-9]+", first_field)
 
@@ -352,19 +364,33 @@ read_generic_counts <- function(manifest) {
       }
       m <- as(m, "CsparseMatrix")
     }
-    sample_label <- "Sample1"
+    barcode_labels <- infer_cell_samples(
+      if (length(bc) >= ncol(m)) bc else colnames(m)
+    )
+    filename_sample <- "Sample1"
     g_match <- regmatches(mat_file, regexpr("G[0-9]+[A-Z]?", mat_file))
     if (length(g_match) > 0) {
-      sample_label <- g_match
+      filename_sample <- g_match
     } else {
       gsm_match <- regmatches(mat_file, regexpr("GSM[0-9]+", mat_file))
       if (length(gsm_match) > 0) {
-        sample_label <- gsm_match
+        filename_sample <- gsm_match
       }
     }
-    colnames(m) <- make.unique(paste0(colnames(m), "_", sample_label))
+    if (all(barcode_labels == "Sample1")) {
+      sample_label <- filename_sample
+      sample_labels <- rep(sample_label, length(barcode_labels))
+    } else {
+      sample_label <- barcode_labels[1]
+      sample_labels <- barcode_labels
+    }
+    if (identical(sample_label, "Sample1")) {
+      colnames(m) <- make.unique(colnames(m))
+    } else {
+      colnames(m) <- make.unique(paste0(colnames(m), "_", sample_label))
+    }
     count_list[[i]] <- m
-    cell_sample <- c(cell_sample, rep(sample_label, ncol(m)))
+    cell_sample <- c(cell_sample, sample_labels)
     cell_group <- c(
       cell_group,
       rep(infer_group_from_filename(mat_file), ncol(m))
@@ -436,6 +462,18 @@ infer_group_from_filename <- function(mat_file) {
   if (grepl("control", low)) {
     return("Control")
   }
+  if (grepl("mock", low)) {
+    return("Mock")
+  }
+  if (grepl("sars|sars-cov|covid", low)) {
+    return("SARS")
+  }
+  if (grepl("ccrcc[0-9]", low)) {
+    return(sub("^.*(ccrcc[0-9]).*$", "\\1", low))
+  }
+  if (grepl("gsm[0-9]+", low)) {
+    return(sub("^.*(gsm[0-9]+).*$", "\\1", low))
+  }
   ""
 }
 
@@ -447,21 +485,54 @@ read_generic_metadata <- function(manifest, cells) {
   }
 
   for (f in files) {
-    tab <- fread(file.path(raw_dir, f), header = TRUE)
-    if (ncol(tab) == 0) next
-    colnames(tab) <- make.names(colnames(tab), unique = TRUE)
+    tab <- fread(file.path(raw_dir, f), header = FALSE, fill = TRUE)
+    if (nrow(tab) < 2 || ncol(tab) == 0) next
+    header_vals <- as.character(tab[1, ])
+    if (sum(nzchar(trimws(header_vals))) < ncol(tab)) {
+      colnames(tab) <- make.names(
+        c("barcode", header_vals[seq_len(ncol(tab) - 1)]),
+        unique = TRUE
+      )
+    } else {
+      colnames(tab) <- make.names(header_vals, unique = TRUE)
+    }
+    tab <- tab[-1]
     bc_names <- c(
       "Cell.Barcode", "Cell", "Barcode", "cell", "barcode",
-      "cell_barcode", "cellID", "V1"
+      "cell_barcode", "cellID", "Index", "V1"
     )
     bc_col <- bc_names[bc_names %in% colnames(tab)][1]
-    if (is.na(bc_col) || !bc_col %in% colnames(tab)) next
+    if (is.na(bc_col) || !bc_col %in% colnames(tab)) {
+      first_vals <- as.character(tab[[1]])[!is.na(as.character(tab[[1]]))]
+      looks_barcode <- length(first_vals) > 0 &&
+        (
+          grepl("^[A-Za-z0-9]+-1$", first_vals[1]) ||
+          grepl("^[ACGTN]{10,}", first_vals[1])
+        )
+      if (looks_barcode) {
+        bc_col <- colnames(tab)[1]
+      } else {
+        next
+      }
+    }
 
     bc_vals <- as.character(tab[[bc_col]])
     match_barcodes <- function(cells, vals) {
       idx <- match(cells, vals)
       if (sum(!is.na(idx)) < 10) {
         idx <- match(sub("_[^_]+$", "", cells), vals)
+      }
+      if (sum(!is.na(idx)) < 10) {
+        idx <- match(
+          gsub("\\.", "-", sub("_[^_]+$", "", cells)),
+          gsub("\\.", "-", vals)
+        )
+      }
+      if (sum(!is.na(idx)) < 10) {
+        idx <- match(
+          gsub("\\.", "-", cells),
+          gsub("\\.", "-", vals)
+        )
       }
       if (sum(!is.na(idx)) < 10) {
         idx <- match(sub("^.*_", "", cells), sub("^.*_", "", vals))
@@ -484,6 +555,14 @@ read_generic_metadata <- function(manifest, cells) {
       idx
     }
     bc_idx <- match_barcodes(cells, bc_vals)
+    log_msg(
+      "metadata file ",
+      f,
+      ": bc_col=",
+      bc_col,
+      " matches=",
+      sum(!is.na(bc_idx))
+    )
     for (col in setdiff(colnames(tab), bc_col)) {
       meta[[col]] <- tab[[col]][bc_idx]
     }
@@ -491,7 +570,8 @@ read_generic_metadata <- function(manifest, cells) {
 
   if (!"sample" %in% colnames(meta)) {
     sample_candidates <- c(
-      "sample", "Sample", "donor", "Donor", "patient", "Patient"
+      "sample", "Sample", "sample.id", "sample_id",
+      "donor", "Donor", "patient", "Patient", "patient.id"
     )
     sample_col <- sample_candidates[sample_candidates %in% colnames(meta)][1]
     if (length(sample_col) == 1 && !is.na(sample_col)) {
@@ -501,7 +581,7 @@ read_generic_metadata <- function(manifest, cells) {
 
   type_candidates <- c(
     "Type", "celltype", "cell_type", "celltype_global", "celltype_sub",
-    "CellType", "Cell.type"
+    "CellType", "Cell.type", "cell.type", "cell_type_annot"
   )
   type_col <- type_candidates[type_candidates %in% colnames(meta)][1]
   if (length(type_col) == 1 && !is.na(type_col)) {
@@ -577,6 +657,21 @@ infer_condition <- function(meta, sample_ann) {
   }
 
   if (!is.null(sample_ann) && "sample" %in% colnames(meta)) {
+    extract_key <- function(v) {
+      v <- sub("^.*:", "", as.character(v))
+      v <- sub("^\\s+|\\s+$", "", v)
+      keep_phrase <- grepl(
+        "primary CRC|primary colorectal cancer|liver metastases|PBMC",
+        v,
+        ignore.case = TRUE
+      )
+      v_norm <- sub("_CRC$", " primary CRC", v)
+      v_norm <- sub("_LM$", " liver metastases", v_norm)
+      v_norm <- sub("_PBMC$", " PBMC", v_norm)
+      out <- sub("^.*\\b([A-Za-z]+[0-9]+).*$", "\\1", v_norm)
+      out[keep_phrase] <- v_norm[keep_phrase]
+      out
+    }
     match_samples <- function(a, b) {
       idx <- match(a, b)
       if (sum(!is.na(idx)) < 5) {
@@ -584,13 +679,25 @@ infer_condition <- function(meta, sample_ann) {
         b2 <- sub("^.*(G[0-9]+[A-Z]?).*$", "\\1", b)
         idx <- match(a2, b2)
       }
+      if (sum(!is.na(idx)) < 5) {
+        idx <- match(extract_key(a), extract_key(b))
+      }
       idx
     }
     for (col in colnames(sample_ann)) {
       if (tolower(col) == "sample") next
       vals <- as.character(sample_ann[[col]])
       if (length(unique(vals[!is.na(vals)])) >= 2) {
-        cond <- vals[match_samples(meta$sample, sample_ann$sample)]
+        idx <- match_samples(meta$sample, sample_ann$sample)
+        log_msg(
+          "condition candidate ",
+          col,
+          ": matches=",
+          sum(!is.na(idx)),
+          " unique=",
+          length(unique(vals[!is.na(vals)]))
+        )
+        cond <- vals[idx]
         if (any(!is.na(cond))) {
           return(cond)
         }
@@ -608,7 +715,11 @@ normalize_condition <- function(meta) {
   } else {
     tt <- sort(table(cond), decreasing = TRUE)
     if (length(tt) < 2) {
-      stop("Cannot find two groups for differential expression.")
+      stop(
+        "Cannot find two groups for differential expression. ",
+        "Unique conditions: ",
+        paste(names(tt), collapse = ", ")
+      )
     }
     keep <- cond %in% names(tt)[1:2]
   }
@@ -624,7 +735,31 @@ read_generic_dataset <- function(manifest) {
   if (!"sample" %in% colnames(meta)) {
     meta$sample <- loaded$cell_sample
   }
+  log_msg(
+    "generic metadata columns: ",
+    paste(colnames(meta), collapse = ", ")
+  )
+  if ("sample" %in% colnames(meta)) {
+    log_msg(
+      "generic metadata sample head: ",
+      paste(head(as.character(meta$sample), 20), collapse = ", ")
+    )
+  }
   ann <- parse_series_generic(manifest)
+  log_msg(
+    "generic sample labels: ",
+    paste(head(as.character(meta$sample), 20), collapse = ", ")
+  )
+  if (!is.null(ann)) {
+    log_msg(
+      "series sample labels: ",
+      paste(head(as.character(ann$sample), 20), collapse = ", ")
+    )
+    log_msg(
+      "series columns: ",
+      paste(colnames(ann), collapse = ", ")
+    )
+  }
   cond <- infer_condition(meta, ann)
   if (is.null(cond) && any(nzchar(loaded$cell_group))) {
     meta$condition <- loaded$cell_group
@@ -636,6 +771,14 @@ read_generic_dataset <- function(manifest) {
       "Add a condition/group/tissue column to the dataset metadata."
     )
   }
+  log_msg(
+    "inferred condition unique: ",
+    paste(unique(as.character(cond)), collapse = ", ")
+  )
+  log_msg(
+    "inferred condition table: ",
+    paste(names(table(cond)), table(cond), sep = "=", collapse = ", ")
+  )
   meta$condition <- cond
   meta <- normalize_condition(meta)
   counts <- counts[, rownames(meta), drop = FALSE]
