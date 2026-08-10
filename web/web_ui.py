@@ -1963,6 +1963,9 @@ def main() -> int:
     args = parser.parse_args()
 
     INDEX_PATH.write_text(render_page(), encoding="utf-8")
+    # On Windows, SO_REUSEADDR allows a second instance to bind the same port
+    # and steal incoming connections, which surfaces as "connection refused".
+    ThreadingHTTPServer.allow_reuse_address = False
     server = ThreadingHTTPServer((args.host, args.port), Handler)
     url = f"http://{args.host}:{args.port}"
     print(f"Web UI started: {url}")
