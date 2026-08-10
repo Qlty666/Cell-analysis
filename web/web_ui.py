@@ -42,8 +42,8 @@ FULL_TEMPLATE_PATH = TEMPLATE_DIR / "full_page_template.html"
 FULL_JOBS = {}
 FULL_QUEUE = []
 FULL_QUEUE_LOCK = threading.Lock()
-VALIDATION_REPORT_DIR = APP_ROOT / "dock" / "validation_real" / "pan_cancer_20"
-VALIDATION_REPORT_PATH = VALIDATION_REPORT_DIR / "validation_report.md"
+VALIDATION_REPORT_DIR = APP_ROOT.parent / "y1" / "validation"
+VALIDATION_REPORT_PATH = VALIDATION_REPORT_DIR / "validation_summary.json"
 VALIDATION_LOG = WEB_DIR / "validation_run.log"
 VALIDATION_JOB = {"proc": None, "log": None, "handle": None, "started": None}
 NAV_HTML = (
@@ -934,10 +934,33 @@ def _full_file_path(workdir: Path, name: str) -> Path | None:
 
 def validation_report_text() -> str:
     if VALIDATION_REPORT_PATH.exists():
-        return VALIDATION_REPORT_PATH.read_text(encoding="utf-8", errors="replace")
+        try:
+            data = json.loads(
+                VALIDATION_REPORT_PATH.read_text(encoding="utf-8", errors="replace")
+            )
+        except Exception:
+            data = {}
+        lines = [
+            "# 随机真实 GSE 全流程验证汇总",
+            "",
+            f"- 请求数量：{data.get('requested', 0)}",
+            f"- 通过数量：{data.get('passed', 0)}",
+            f"- 随机种子：{data.get('seed', '')}",
+            f"- 完成时间：{data.get('finished_at', '')}",
+            "",
+        ]
+        for record in data.get("results", []):
+            lines.append(
+                f"### {record.get('accession', '')}：{record.get('status', '')}"
+            )
+            lines.append(f"- 耗时：{record.get('elapsed_seconds', '')} 秒")
+            lines.append(f"- 工作目录：{record.get('workdir', '')}")
+            lines.append("")
+        return "\n".join(lines)
     return (
         "报告尚未生成。\n"
-        "请在命令行运行：python validate_new_features.py --max-studies 20"
+        "请在网页版点击“重新运行随机真实 GSE 验证”，"
+        "或在命令行运行：python validate_random_real_full_pipeline.py --count 10"
     )
 
 
@@ -950,9 +973,13 @@ def start_validation_job() -> dict:
     proc = subprocess.Popen(
         [
             sys.executable,
-            str(APP_ROOT / "validate_new_features.py"),
-            "--max-studies",
-            "20",
+            str(APP_ROOT / "validate_random_real_full_pipeline.py"),
+            "--result-root",
+            str(APP_ROOT.parent / "y1"),
+            "--count",
+            "10",
+            "--seed",
+            "20260810",
         ],
         cwd=APP_ROOT,
         stdout=handle,
