@@ -84,6 +84,40 @@ table { width: 100%; border-collapse: collapse; background: #fff; font-size: 13p
 th, td { border: 1px solid #e5e7eb; padding: 8px; text-align: left; }
 th { background: #eef2f7; }
 a { color: #1665c0; text-decoration: none; }
+.job-toast {
+  position: fixed;
+  top: 76px;
+  right: 24px;
+  z-index: 999;
+  max-width: 440px;
+  background: #ffffff;
+  border: 1px solid #d7dde4;
+  border-left: 6px solid #1665c0;
+  border-radius: 8px;
+  box-shadow: 0 12px 32px rgba(15, 23, 42, 0.28);
+  padding: 14px 16px;
+}
+.job-toast.ok { border-left-color: #047857; }
+.job-toast.error { border-left-color: #b91c1c; }
+.job-toast.paused { border-left-color: #b45309; }
+.job-toast-title { font-weight: 700; font-size: 15px; margin-bottom: 6px; }
+.job-toast-body {
+  font-size: 13px;
+  color: #334155;
+  white-space: pre-wrap;
+  word-break: break-all;
+  max-height: 190px;
+  overflow: auto;
+}
+.job-toast-close {
+  margin-top: 10px;
+  padding: 6px 14px;
+  border: 0;
+  border-radius: 6px;
+  background: #1665c0;
+  color: #fff;
+  cursor: pointer;
+}
 </style>
 </head>
 <body>
@@ -162,6 +196,71 @@ let currentJob = null;
 let pollTimer = null;
 let figTimer = null;
 let paused = false;
+let jobAlerted = false;
+const SINGLE_JOB_KEY = 'liver_ui_single_job';
+
+function saveJobRecord() {
+  try { sessionStorage.setItem(SINGLE_JOB_KEY, currentJob); } catch (e) {}
+}
+
+function clearJobRecord() {
+  try { sessionStorage.removeItem(SINGLE_JOB_KEY); } catch (e) {}
+}
+
+function clearJobRecordsOnReload() {
+  try {
+    const nav = performance.getEntriesByType('navigation')[0];
+    if (nav && nav.type === 'reload') {
+      sessionStorage.removeItem('liver_ui_single_job');
+      sessionStorage.removeItem('liver_ui_dock_job');
+      sessionStorage.removeItem('liver_ui_full_job');
+    }
+  } catch (e) {}
+}
+
+function restoreJobRecord() {
+  let saved = null;
+  let target = null;
+  try { saved = sessionStorage.getItem(SINGLE_JOB_KEY); } catch (e) {}
+  try { target = new URLSearchParams(window.location.search).get('job'); } catch (e) {}
+  const job = target || saved;
+  if (!job) return;
+  currentJob = job;
+  saveJobRecord();
+  if (target) {
+    try {
+      const url = new URL(window.location.href);
+      url.searchParams.delete('job');
+      window.history.replaceState(null, '', url.toString());
+    } catch (e) {}
+  }
+  const msg = document.getElementById('message');
+  msg.className = 'ok';
+  msg.textContent = '已恢复正在运行的分析任务，日志与结果图继续刷新。';
+  document.getElementById('pauseBtn').disabled = false;
+  document.getElementById('resumeBtn').disabled = true;
+  document.querySelectorAll('#figureToggles select').forEach(s => s.disabled = true);
+  setupFigureSlots();
+  if (pollTimer) clearInterval(pollTimer);
+  if (figTimer) clearInterval(figTimer);
+  pollTimer = setInterval(pollLog, 1000);
+  figTimer = setInterval(pollFigures, 2000);
+}
+
+function showJobToast(kind, title, body) {
+  const toast = document.getElementById('jobToast');
+  if (!toast) return;
+  toast.className = 'job-toast ' + (kind || 'info');
+  document.getElementById('jobToastTitle').textContent = title;
+  document.getElementById('jobToastBody').textContent = body || '';
+  toast.hidden = false;
+  jobAlerted = true;
+}
+
+function closeJobToast() {
+  const toast = document.getElementById('jobToast');
+  if (toast) toast.hidden = true;
+}
 
 function setupFigureSlots() {
   document.querySelectorAll('.figrow').forEach(row => {
@@ -188,6 +287,8 @@ async function startRun() {
   pauseBtn.disabled = true;
   resumeBtn.disabled = true;
   paused = false;
+  jobAlerted = false;
+  closeJobToast();
   msg.className = '';
   msg.textContent = '正在启动...';
   document.querySelectorAll('#figureToggles select').forEach(s => s.disabled = true);
@@ -198,6 +299,7 @@ async function startRun() {
     const result = await resp.json();
     if (!resp.ok) throw new Error(result.error || '启动失败');
     currentJob = result.job;
+    saveJobRecord();
     document.getElementById('log').textContent = '';
     msg.className = 'ok';
     msg.textContent = '任务已启动，日志与结果图会实时刷新。';
@@ -243,6 +345,9 @@ async function pollLog() {
         msg.textContent = '分析已暂停，点击继续分析将从断点继续。';
         document.getElementById('pauseBtn').disabled = true;
         document.getElementById('resumeBtn').disabled = false;
+        if (!jobAlerted) {
+          showJobToast('paused', '任务已暂停', '当前阶段：' + (status.stage || '未知'));
+        }
         return;
       }
       clearInterval(pollTimer);
@@ -250,11 +355,20 @@ async function pollLog() {
       await pollFigures();
       const msg = document.getElementById('message');
       msg.className = status.ok ? 'ok' : 'error';
-      msg.textContent = status.ok ? '分析已完成' : '分析运行失败，请查看日志';
+      if (status.ok) {
+        msg.textContent = '分析已完成';
+        if (!jobAlerted) showJobToast('ok', '任务已完成', '单细胞分析任务已全部完成。');
+      } else {
+        msg.textContent = '分析运行失败，请查看日志';
+        if (!jobAlerted) {
+          showJobToast('error', '任务中断', '运行到阶段：' + (status.stage || '未知') + '\n原因：' + (status.error || '请查看日志'));
+        }
+      }
       document.querySelectorAll('#figureToggles select').forEach(s => s.disabled = false);
       document.getElementById('pauseBtn').disabled = true;
       document.getElementById('resumeBtn').disabled = true;
       currentJob = null;
+      clearJobRecord();
       await loadHistory();
     }
   } catch (e) {
@@ -290,6 +404,8 @@ async function resumeRun() {
     const result = await resp.json();
     if (!resp.ok) throw new Error(result.error || '继续失败');
     paused = false;
+    jobAlerted = false;
+    closeJobToast();
     const msg = document.getElementById('message');
     msg.className = 'ok';
     msg.textContent = '正在从断点继续分析...';
@@ -433,6 +549,13 @@ async function installEnvironment(project) {
 
 loadHistory();
 loadVersions();
+clearJobRecordsOnReload();
+restoreJobRecord();
 </script>
+<div id="jobToast" class="job-toast" hidden>
+  <div class="job-toast-title" id="jobToastTitle"></div>
+  <div class="job-toast-body" id="jobToastBody"></div>
+  <button type="button" class="job-toast-close" onclick="closeJobToast()">知道了</button>
+</div>
 </body>
 </html>

@@ -28,6 +28,8 @@ PAGE_TEMPLATE_PATH = TEMPLATE_DIR / "web_page_template.html"
 HISTORY_PATH = WEB_DIR / "history.json"
 INSTALL_LOG = WEB_DIR / "install_log.txt"
 INSTALL_JOB = {}
+FINISHED_NOTIFICATIONS: list[dict] = []
+NOTIFY_LOCK = threading.Lock()
 
 SRC_DIR = APP_ROOT / "src"
 if str(SRC_DIR) not in sys.path:
@@ -39,6 +41,8 @@ DOCK_QUEUE = []
 DOCK_QUEUE_LOCK = threading.Lock()
 DOCK_HISTORY_PATH = WEB_DIR / "dock_history.json"
 FULL_TEMPLATE_PATH = TEMPLATE_DIR / "full_page_template.html"
+RESULTS_TEMPLATE_PATH = TEMPLATE_DIR / "results_manifest_template.html"
+TASKS_TEMPLATE_PATH = TEMPLATE_DIR / "tasks_template.html"
 FULL_JOBS = {}
 FULL_QUEUE = []
 FULL_QUEUE_LOCK = threading.Lock()
@@ -48,9 +52,11 @@ VALIDATION_LOG = WEB_DIR / "validation_run.log"
 VALIDATION_JOB = {"proc": None, "log": None, "handle": None, "started": None}
 NAV_HTML = (
     '<div class="topnav">'
+    '<a href="/full">全自动流水线</a>'
     '<a href="/">单细胞分析</a>'
     '<a href="/dock">虚拟筛选</a>'
-    '<a href="/full">全自动流水线</a>'
+    '<a href="/results">结果清单</a>'
+    '<a href="/tasks" class="nav-right">任务进度</a>'
     '</div>'
 )
 NAV_CSS = (
@@ -61,6 +67,7 @@ NAV_CSS = (
     "font-weight:600;padding:6px 10px;border-radius:6px;"
     "background:rgba(255,255,255,.08);}"
     ".topnav a:hover,.topnav a.active{background:#1665c0;color:#fff;}"
+    ".topnav .nav-right{margin-left:auto;}"
 )
 
 FIGURES = [
@@ -248,6 +255,7 @@ def start_job(
         env[key] = str(value)
 
     JOBS[job_id] = {
+        "job_id": job_id,
         "log": log_path,
         "proc": None,
         "started": time.time(),
@@ -261,6 +269,7 @@ def start_job(
         "queued": True,
         "recorded": False,
         "paused": False,
+        "notified": False,
     }
     QUEUE.append(JOBS[job_id])
     _drain_queue()
@@ -362,6 +371,7 @@ def resume_job(job_id: str) -> dict:
         errors="replace",
     )
     info["proc"] = proc
+    info["notified"] = False
     info["started"] = time.time()
     return {"job": job_id, "resumed": True}
 
@@ -391,6 +401,40 @@ pre { background: #0f172a; color: #dbeafe; padding: 14px; border-radius: 8px; he
 .gallery figure { margin: 0; }
 .gallery img { width: 100%; border: 1px solid #e4e7eb; border-radius: 6px; background: #fff; }
 .gallery figcaption { color: #52606d; font-size: 12px; margin-top: 5px; }
+.job-toast {
+  position: fixed;
+  top: 76px;
+  right: 24px;
+  z-index: 999;
+  max-width: 440px;
+  background: #ffffff;
+  border: 1px solid #d7dde4;
+  border-left: 6px solid #1665c0;
+  border-radius: 8px;
+  box-shadow: 0 12px 32px rgba(15, 23, 42, 0.28);
+  padding: 14px 16px;
+}
+.job-toast.ok { border-left-color: #047857; }
+.job-toast.error { border-left-color: #b91c1c; }
+.job-toast.paused { border-left-color: #b45309; }
+.job-toast-title { font-weight: 700; font-size: 15px; margin-bottom: 6px; }
+.job-toast-body {
+  font-size: 13px;
+  color: #334155;
+  white-space: pre-wrap;
+  word-break: break-all;
+  max-height: 190px;
+  overflow: auto;
+}
+.job-toast-close {
+  margin-top: 10px;
+  padding: 6px 14px;
+  border: 0;
+  border-radius: 6px;
+  background: #1665c0;
+  color: #fff;
+  cursor: pointer;
+}
 </style>
 </head>
 <body>
@@ -433,6 +477,65 @@ pre { background: #0f172a; color: #dbeafe; padding: 14px; border-radius: 8px; he
 <script>
 let currentJob = null;
 let pollTimer = null;
+let jobAlerted = false;
+const SINGLE_JOB_KEY = 'liver_ui_single_job';
+
+function saveJobRecord() {
+  try { sessionStorage.setItem(SINGLE_JOB_KEY, currentJob); } catch (e) {}
+}
+
+function clearJobRecord() {
+  try { sessionStorage.removeItem(SINGLE_JOB_KEY); } catch (e) {}
+}
+
+function clearJobRecordsOnReload() {
+  try {
+    const nav = performance.getEntriesByType('navigation')[0];
+    if (nav && nav.type === 'reload') {
+      sessionStorage.removeItem('liver_ui_single_job');
+      sessionStorage.removeItem('liver_ui_dock_job');
+      sessionStorage.removeItem('liver_ui_full_job');
+    }
+  } catch (e) {}
+}
+
+function restoreJobRecord() {
+  let saved = null;
+  let target = null;
+  try { saved = sessionStorage.getItem(SINGLE_JOB_KEY); } catch (e) {}
+  try { target = new URLSearchParams(window.location.search).get('job'); } catch (e) {}
+  const job = target || saved;
+  if (!job) return;
+  currentJob = job;
+  saveJobRecord();
+  if (target) {
+    try {
+      const url = new URL(window.location.href);
+      url.searchParams.delete('job');
+      window.history.replaceState(null, '', url.toString());
+    } catch (e) {}
+  }
+  const msg = document.getElementById('message');
+  msg.className = 'ok';
+  msg.textContent = '已恢复正在运行的分析任务，日志继续刷新。';
+  if (pollTimer) clearInterval(pollTimer);
+  pollTimer = setInterval(pollLog, 1000);
+}
+
+function showJobToast(kind, title, body) {
+  const toast = document.getElementById('jobToast');
+  if (!toast) return;
+  toast.className = 'job-toast ' + (kind || 'info');
+  document.getElementById('jobToastTitle').textContent = title;
+  document.getElementById('jobToastBody').textContent = body || '';
+  toast.hidden = false;
+  jobAlerted = true;
+}
+
+function closeJobToast() {
+  const toast = document.getElementById('jobToast');
+  if (toast) toast.hidden = true;
+}
 
 async function startRun() {
   const form = document.getElementById('form');
@@ -440,6 +543,8 @@ async function startRun() {
   const btn = document.getElementById('startBtn');
   const msg = document.getElementById('message');
   btn.disabled = true;
+  jobAlerted = false;
+  closeJobToast();
   msg.className = '';
   msg.textContent = '正在启动...';
 
@@ -448,6 +553,7 @@ async function startRun() {
     const result = await resp.json();
     if (!resp.ok) throw new Error(result.error || '启动失败');
     currentJob = result.job;
+    saveJobRecord();
     document.getElementById('log').textContent = '';
     document.getElementById('gallery').innerHTML = '<p class="muted">分析完成后在此显示。</p>';
     msg.className = 'ok';
@@ -472,13 +578,29 @@ async function pollLog() {
     box.scrollTop = box.scrollHeight;
     const statusResp = await fetch('/status?job=' + currentJob);
     const status = await statusResp.json();
+    if (status.queued) {
+      const msg = document.getElementById('message');
+      msg.className = 'ok';
+      msg.textContent = '任务已进入队列，等待前面的分析完成...';
+      return;
+    }
     if (!status.running) {
       clearInterval(pollTimer);
       const msg = document.getElementById('message');
-      msg.className = status.ok ? 'ok' : 'error';
-      msg.textContent = status.ok ? '流水线已完成' : '流水线运行失败，请查看日志';
+      if (status.ok) {
+        msg.className = 'ok';
+        msg.textContent = '流水线已完成';
+        if (!jobAlerted) showJobToast('ok', '任务已完成', '单细胞分析任务已全部完成。');
+      } else {
+        msg.className = 'error';
+        msg.textContent = '流水线运行失败，请查看日志';
+        if (!jobAlerted) {
+          showJobToast('error', '任务中断', '运行到阶段：' + (status.stage || '未知') + '\n原因：' + (status.error || '请查看日志'));
+        }
+      }
       if (status.ok) await loadResults(currentJob);
       currentJob = null;
+      clearJobRecord();
     }
   } catch (e) {
     // keep polling on transient errors
@@ -509,7 +631,15 @@ async function loadResults(job) {
     gallery.innerHTML = '<p class="error">结果图加载失败：' + String(e.message || e) + '</p>';
   }
 }
+
+clearJobRecordsOnReload();
+restoreJobRecord();
 </script>
+<div id="jobToast" class="job-toast" hidden>
+  <div class="job-toast-title" id="jobToastTitle"></div>
+  <div class="job-toast-body" id="jobToastBody"></div>
+  <button type="button" class="job-toast-close" onclick="closeJobToast()">知道了</button>
+</div>
 </body>
 </html>
 """
@@ -576,6 +706,24 @@ def render_full_page() -> str:
     return (
         "<html><body><h1>full pipeline template missing</h1>"
         "<p>web/templates/full_page_template.html not found</p></body></html>"
+    )
+
+
+def render_results_page() -> str:
+    if RESULTS_TEMPLATE_PATH.exists():
+        return RESULTS_TEMPLATE_PATH.read_text(encoding="utf-8")
+    return (
+        "<html><body><h1>results template missing</h1>"
+        "<p>web/templates/results_manifest_template.html not found</p></body></html>"
+    )
+
+
+def render_tasks_page() -> str:
+    if TASKS_TEMPLATE_PATH.exists():
+        return TASKS_TEMPLATE_PATH.read_text(encoding="utf-8")
+    return (
+        "<html><body><h1>tasks template missing</h1>"
+        "<p>web/templates/tasks_template.html not found</p></body></html>"
     )
 
 
@@ -653,6 +801,7 @@ def start_dock_job(data: dict) -> dict:
     env = os.environ.copy()
     env["DOCK_WORKDIR"] = str(workdir)
     DOCK_JOBS[job_id] = {
+        "job_id": job_id,
         "log": log_path,
         "proc": None,
         "started": time.time(),
@@ -663,6 +812,7 @@ def start_dock_job(data: dict) -> dict:
         "env": env,
         "queued": True,
         "recorded": False,
+        "notified": False,
     }
     DOCK_QUEUE.append(DOCK_JOBS[job_id])
     _drain_dock_queue()
@@ -701,17 +851,61 @@ def _drain_dock_queue() -> None:
 def _dock_status(info: dict) -> dict:
     queued = info.get("proc") is None
     if queued:
-        return {"running": False, "ok": False, "queued": True, "paused": False}
+        return {"running": False, "ok": False, "queued": True, "paused": False, "stage": "", "error": ""}
     running = info["proc"].poll() is None
     paused = bool(info.get("paused"))
     ok = False
-    if not running and not paused:
+    if not running:
+        marker_dir = info["output_dir"] / ".stages"
+        log_paths = [info["log"]]
+        if paused:
+            stage, error = _finished_info(marker_dir, DOCK_STAGE_LABELS, log_paths, True)
+            _notify_finished(
+                info,
+                "dock",
+                "虚拟筛选",
+                f"{info.get('stage', 'pipeline')} 虚拟筛选",
+                "paused",
+                stage,
+                error,
+                exit_code=info["proc"].returncode,
+            )
+            return {
+                "running": False,
+                "ok": False,
+                "queued": False,
+                "paused": True,
+                "stage": stage,
+                "error": error,
+            }
         ok = info["proc"].returncode == 0
         if not info.get("recorded"):
             record_dock_job(info, ok)
             info["recorded"] = True
         _drain_dock_queue()
-    return {"running": running, "ok": ok, "queued": False, "paused": paused}
+        stage, error = _finished_info(marker_dir, DOCK_STAGE_LABELS, log_paths, False)
+        status = "completed" if ok else "interrupted"
+        if status == "completed":
+            error = ""
+        _notify_finished(
+            info,
+            "dock",
+            "虚拟筛选",
+            f"{info.get('stage', 'pipeline')} 虚拟筛选",
+            status,
+            stage,
+            error,
+            exit_code=info["proc"].returncode,
+        )
+        return {
+            "running": False,
+            "ok": ok,
+            "queued": False,
+            "paused": False,
+            "stage": stage,
+            "error": error,
+        }
+    return {"running": True, "ok": False, "queued": False, "paused": False, "stage": "", "error": ""}
 
 
 def start_full_job(data: dict) -> dict:
@@ -778,14 +972,17 @@ def start_full_job(data: dict) -> dict:
     env = os.environ.copy()
     env["PYTHONIOENCODING"] = "utf-8"
     FULL_JOBS[job_id] = {
+        "job_id": job_id,
         "log": log_path,
         "proc": None,
         "started": time.time(),
         "workdir": workdir,
+        "accession": accession,
         "output": output,
         "cmd": cmd,
         "env": env,
         "queued": True,
+        "notified": False,
     }
     FULL_QUEUE.append(FULL_JOBS[job_id])
     _drain_full_queue()
@@ -824,14 +1021,370 @@ def _drain_full_queue() -> None:
 def _full_status(info: dict) -> dict:
     queued = info.get("proc") is None
     if queued:
-        return {"running": False, "ok": False, "queued": True, "paused": False}
+        return {"running": False, "ok": False, "queued": True, "paused": False, "stage": "", "error": ""}
     if info.get("paused"):
-        return {"running": False, "ok": False, "queued": False, "paused": True}
+        marker_dir = info["workdir"] / "outputs" / "integration" / ".stages"
+        stage, error = _finished_info(
+            marker_dir,
+            FULL_STAGE_LABELS,
+            [info["log"]],
+            True,
+        )
+        _notify_finished(
+            info,
+            "full",
+            "全自动流水线",
+            f"{info.get('accession') or '全自动流水线'} 全自动流水线",
+            "paused",
+            stage,
+            error,
+            exit_code=info["proc"].returncode if info.get("proc") else None,
+        )
+        return {
+            "running": False,
+            "ok": False,
+            "queued": False,
+            "paused": True,
+            "stage": stage,
+            "error": error,
+        }
     running = info["proc"].poll() is None
-    ok = not running and info["proc"].returncode == 0
     if not running:
+        ok = info["proc"].returncode == 0
         _drain_full_queue()
-    return {"running": running, "ok": ok, "queued": False, "paused": False}
+        marker_dir = info["workdir"] / "outputs" / "integration" / ".stages"
+        stage, error = _finished_info(
+            marker_dir,
+            FULL_STAGE_LABELS,
+            [info["log"]],
+            False,
+        )
+        status = "completed" if ok else "interrupted"
+        if status == "completed":
+            error = ""
+        _notify_finished(
+            info,
+            "full",
+            "全自动流水线",
+            f"{info.get('accession') or '全自动流水线'} 全自动流水线",
+            status,
+            stage,
+            error,
+            exit_code=info["proc"].returncode,
+        )
+        return {
+            "running": False,
+            "ok": ok,
+            "queued": False,
+            "paused": False,
+            "stage": stage,
+            "error": error,
+        }
+    return {"running": True, "ok": False, "queued": False, "paused": False, "stage": "", "error": ""}
+
+
+def _single_status(info: dict) -> dict:
+    queued = info.get("proc") is None
+    if queued:
+        return {"running": False, "ok": False, "queued": True, "paused": False, "stage": "", "error": ""}
+    running = info["proc"].poll() is None
+    ok = False
+    paused = False
+    if not running:
+        ok = info["proc"].returncode == 0
+        paused = info["proc"].returncode == 98
+        if not info.get("recorded"):
+            record_job(info, ok)
+            info["recorded"] = True
+        _drain_queue()
+        marker_dir = info["out"] / "results" / ".stages"
+        log_paths = [info["log"], info["out"] / "logs" / "pipeline_r.log"]
+        stage, error = _finished_info(marker_dir, SINGLE_STAGE_LABELS, log_paths, paused)
+        status = "paused" if paused else "completed" if ok else "interrupted"
+        if status == "completed":
+            error = ""
+        _notify_finished(
+            info,
+            "single",
+            "单细胞分析",
+            f"{info.get('accession', 'GSE')} 单细胞分析",
+            status,
+            stage,
+            error,
+            exit_code=info["proc"].returncode,
+        )
+        return {
+            "running": False,
+            "ok": ok,
+            "queued": False,
+            "paused": paused,
+            "stage": stage,
+            "error": error,
+        }
+    return {"running": True, "ok": False, "queued": False, "paused": False, "stage": "", "error": ""}
+
+
+SINGLE_STAGE_LABELS = {
+    "01": "数据加载",
+    "02": "QC 过滤",
+    "03": "双细胞检测",
+    "04": "聚类",
+    "05": "细胞注释",
+    "06": "差异表达",
+    "07": "富集分析",
+    "08": "发表级分析",
+    "09": "汇总输出",
+}
+
+DOCK_STAGE_LABELS = {
+    "01": "受体准备",
+    "02": "配体准备",
+    "03": "分子对接",
+    "04": "结果分析",
+    "05": "精修重对接",
+    "06": "HTML 报告",
+}
+
+FULL_STAGE_LABELS = {
+    "01": "单细胞分析",
+    "02": "关键基因",
+    "03": "证据富集",
+    "04": "敲除输入",
+    "05": "虚拟敲除",
+    "06": "分子对接",
+    "07": "集成报告",
+}
+
+
+def _marker_progress(marker_dir: Path, total: int) -> int:
+    if not marker_dir.exists() or total <= 0:
+        return 0
+    try:
+        done = len(list(marker_dir.glob("*.done")))
+    except OSError:
+        return 0
+    return max(0, min(100, int(round(done * 100 / total))))
+
+
+def _current_stage(marker_dir: Path, labels: dict) -> str:
+    if not marker_dir.exists():
+        return ""
+    try:
+        done = [path.stem for path in marker_dir.glob("*.done")]
+    except OSError:
+        return ""
+    if not done:
+        return ""
+    codes = sorted(code[:2] for code in done)
+    return labels.get(codes[-1], "")
+
+
+def _log_tail(path: Path, limit: int = 1200) -> str:
+    if not path.exists():
+        return ""
+    try:
+        text = path.read_text(encoding="utf-8", errors="replace")
+        return text[-limit:]
+    except OSError:
+        return ""
+
+
+def _stage_from_log(log_text: str, labels: dict) -> str:
+    if not log_text:
+        return ""
+    matches = []
+    for pattern in [
+        r"start stage:\s*(\d+)[_\s-][A-Za-z0-9_-]+",
+        r"=== stage (\d+) [A-Za-z0-9_-]+ ===",
+    ]:
+        matches.extend(re.finditer(pattern, log_text))
+    if not matches:
+        return ""
+    return labels.get(matches[-1].group(1), "")
+
+
+def _extract_error(log_text: str, limit: int = 700) -> str:
+    lines = [line.strip() for line in log_text.splitlines() if line.strip()]
+    if not lines:
+        return ""
+    keywords = ("error", "traceback", "exception", "failed", "fatal", "cannot", "missing")
+    error_lines = [
+        line for line in lines
+        if any(keyword in line.lower() for keyword in keywords)
+    ]
+    tail = "\n".join(error_lines[-6:]) if error_lines else "\n".join(lines[-8:])
+    return tail[-limit:]
+
+
+def _finished_info(
+    marker_dir: Path,
+    labels: dict,
+    log_paths: list[Path],
+    paused: bool,
+) -> tuple[str, str]:
+    log_text = "\n".join(_log_tail(path, 4000) for path in log_paths).strip()
+    stage = (
+        _stage_from_log(log_text, labels)
+        or _current_stage(marker_dir, labels)
+        or "未知"
+    )
+    if paused:
+        error = "任务已暂停"
+    else:
+        error = _extract_error(log_text) or "进程已退出，请查看日志"
+    return stage, error
+
+
+def _notify_finished(
+    info: dict,
+    page: str,
+    page_label: str,
+    title: str,
+    status: str,
+    stage: str,
+    error: str,
+    exit_code: int | None = None,
+) -> None:
+    if info.get("notified"):
+        return
+    info["notified"] = True
+    item = {
+        "page": page,
+        "page_label": page_label,
+        "job": info.get("job_id", ""),
+        "title": title,
+        "status": status,
+        "stage": stage,
+        "error": error,
+        "exit_code": exit_code,
+        "finished_at": time.time(),
+    }
+    with NOTIFY_LOCK:
+        FINISHED_NOTIFICATIONS.append(item)
+        if len(FINISHED_NOTIFICATIONS) > 50:
+            del FINISHED_NOTIFICATIONS[:-50]
+
+
+def running_tasks_data() -> dict:
+    tasks = []
+    now = time.time()
+    for job_id, info in list(JOBS.items()):
+        status = _single_status(info)
+        if not (status.get("running") or status.get("queued") or status.get("paused")):
+            continue
+        state = (
+            "queued" if status.get("queued")
+            else "paused" if status.get("paused")
+            else "running"
+        )
+        marker_dir = info["out"] / "results" / ".stages"
+        progress = 0 if state == "queued" else _marker_progress(marker_dir, 9)
+        stage_label = (
+            "排队中" if state == "queued"
+            else "已暂停" if state == "paused"
+            else _current_stage(marker_dir, SINGLE_STAGE_LABELS) or "准备中"
+        )
+        log_text = "\n".join(
+            [
+                _log_tail(info["log"]),
+                _log_tail(info["out"] / "logs" / "pipeline_r.log"),
+            ]
+        ).strip()
+        started = float(info.get("started") or now)
+        tasks.append(
+            {
+                "page": "single",
+                "page_label": "单细胞分析",
+                "job": job_id,
+                "url": f"/?job={job_id}",
+                "title": (
+                    f"{info.get('accession', 'GSE')} · "
+                    f"{info.get('species', '')} 单细胞分析"
+                ),
+                "detail": str(info["out"]),
+                "status": state,
+                "started": started,
+                "elapsed": int(now - started),
+                "progress": progress,
+                "stage_label": stage_label,
+                "log_tail": log_text,
+            }
+        )
+
+    for job_id, info in list(DOCK_JOBS.items()):
+        status = _dock_status(info)
+        if not (status.get("running") or status.get("queued") or status.get("paused")):
+            continue
+        state = (
+            "queued" if status.get("queued")
+            else "paused" if status.get("paused")
+            else "running"
+        )
+        marker_dir = info["output_dir"] / ".stages"
+        progress = 0 if state == "queued" else _marker_progress(marker_dir, 6)
+        stage_label = (
+            "排队中" if state == "queued"
+            else "已暂停" if state == "paused"
+            else _current_stage(marker_dir, DOCK_STAGE_LABELS) or "准备中"
+        )
+        started = float(info.get("started") or now)
+        tasks.append(
+            {
+                "page": "dock",
+                "page_label": "虚拟筛选",
+                "job": job_id,
+                "url": f"/dock?job={job_id}",
+                "title": f"{info.get('stage', 'pipeline')} · 虚拟筛选",
+                "detail": str(info["workdir"]),
+                "status": state,
+                "started": started,
+                "elapsed": int(now - started),
+                "progress": progress,
+                "stage_label": stage_label,
+                "log_tail": _log_tail(info["log"]),
+            }
+        )
+
+    for job_id, info in list(FULL_JOBS.items()):
+        status = _full_status(info)
+        if not (status.get("running") or status.get("queued") or status.get("paused")):
+            continue
+        state = (
+            "queued" if status.get("queued")
+            else "paused" if status.get("paused")
+            else "running"
+        )
+        marker_dir = info["workdir"] / "outputs" / "integration" / ".stages"
+        progress = 0 if state == "queued" else _marker_progress(marker_dir, 7)
+        stage_label = (
+            "排队中" if state == "queued"
+            else "已暂停" if state == "paused"
+            else _current_stage(marker_dir, FULL_STAGE_LABELS) or "准备中"
+        )
+        started = float(info.get("started") or now)
+        output = info.get("output") or "-"
+        tasks.append(
+            {
+                "page": "full",
+                "page_label": "全自动流水线",
+                "job": job_id,
+                "url": f"/full?job={job_id}",
+                "title": (
+                    f"{info.get('accession') or '全自动流水线'} · "
+                    "全自动流水线"
+                ),
+                "detail": f"{info['workdir']} | output: {output}",
+                "status": state,
+                "started": started,
+                "elapsed": int(now - started),
+                "progress": progress,
+                "stage_label": stage_label,
+                "log_tail": _log_tail(info["log"]),
+            }
+        )
+
+    tasks.sort(key=lambda item: float(item.get("started") or 0))
+    return {"tasks": tasks}
 
 
 def _read_json(path: Path) -> dict:
@@ -1275,26 +1828,7 @@ class Handler(BaseHTTPRequestHandler):
             if not info:
                 self._send(404, b"job not found", "application/json")
                 return
-            queued = info.get("proc") is None
-            running = False if queued else info["proc"].poll() is None
-            ok = False
-            paused = False
-            if queued:
-                body = json.dumps(
-                    {"running": False, "ok": False, "paused": False, "queued": True}
-                ).encode("utf-8")
-                self._send(200, body, "application/json")
-                return
-            if not running:
-                ok = info["proc"].returncode == 0
-                paused = info["proc"].returncode == 98
-                if not info.get("recorded"):
-                    record_job(info, ok)
-                    info["recorded"] = True
-                _drain_queue()
-            body = json.dumps(
-                {"running": running, "ok": ok, "paused": paused}
-            ).encode("utf-8")
+            body = json.dumps(_single_status(info)).encode("utf-8")
             self._send(200, body, "application/json")
             return
         if parsed.path == "/files":
@@ -1364,6 +1898,37 @@ class Handler(BaseHTTPRequestHandler):
                 render_full_page().encode("utf-8"),
                 "text/html; charset=utf-8",
             )
+            return
+        if parsed.path == "/results":
+            self._send(
+                200,
+                render_results_page().encode("utf-8"),
+                "text/html; charset=utf-8",
+            )
+            return
+        if parsed.path == "/tasks":
+            self._send(
+                200,
+                render_tasks_page().encode("utf-8"),
+                "text/html; charset=utf-8",
+            )
+            return
+        if parsed.path == "/tasks/data":
+            body = json.dumps(
+                running_tasks_data(),
+                ensure_ascii=False,
+            ).encode("utf-8")
+            self._send(200, body, "application/json")
+            return
+        if parsed.path == "/tasks/notifications":
+            with NOTIFY_LOCK:
+                items = FINISHED_NOTIFICATIONS[:]
+                FINISHED_NOTIFICATIONS.clear()
+            body = json.dumps(
+                {"notifications": items},
+                ensure_ascii=False,
+            ).encode("utf-8")
+            self._send(200, body, "application/json")
             return
         if parsed.path == "/full/log":
             query = parse_qs(parsed.query)
@@ -1679,6 +2244,7 @@ class Handler(BaseHTTPRequestHandler):
             if flag.exists():
                 flag.unlink()
             info["paused"] = False
+            info["notified"] = False
             log_handle = info["log"].open("a", encoding="utf-8", errors="replace")
             log_handle.write("\n[pipeline] resume requested\n")
             log_handle.flush()
@@ -1730,6 +2296,7 @@ class Handler(BaseHTTPRequestHandler):
                 self._send(404, b"job not found", "application/json")
                 return
             info["paused"] = False
+            info["notified"] = False
             log_handle = info["log"].open("a", encoding="utf-8", errors="replace")
             log_handle.write("\n[full pipeline] resume requested\n")
             log_handle.flush()
@@ -1983,8 +2550,8 @@ def main() -> int:
     parser.add_argument("--port", type=int, default=8000)
     parser.add_argument(
         "--page",
-        choices=["single", "dock", "full"],
-        default="single",
+        choices=["single", "dock", "full", "results", "tasks"],
+        default="full",
         help="page to open in the browser",
     )
     args = parser.parse_args()
@@ -2000,6 +2567,10 @@ def main() -> int:
         open_url = url + "/dock"
     elif args.page == "full":
         open_url = url + "/full"
+    elif args.page == "results":
+        open_url = url + "/results"
+    elif args.page == "tasks":
+        open_url = url + "/tasks"
     else:
         open_url = url
     threading.Timer(1.0, lambda: webbrowser.open(open_url)).start()
