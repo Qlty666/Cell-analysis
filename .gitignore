@@ -31,6 +31,7 @@ Thumbs.db
 # Web runtime files
 web/history.json
 web/dock_history.json
+web/task_history.json
 web/install_log.txt
 web/validation_run.log
 web/*_smoke*.log
@@ -55,6 +56,7 @@ dock/outputs/*
 dock/data/ligands/prepared/
 dock/data/ligands/*.smi
 dock/data/ligands/library.sdf
+dock/data/knockout/
 dock/data/receptors/*.pdb
 dock/data/receptors/*.pdbqt
 dock/config/docking_web_*.json

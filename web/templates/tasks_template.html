@@ -167,6 +167,37 @@ footer { color: #64748b; font-size: 12px; margin: 26px 0 8px; }
   color: #fff;
   cursor: pointer;
 }
+.history-head {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  gap: 12px;
+  flex-wrap: wrap;
+  margin-bottom: 10px;
+}
+button.danger { background: #b91c1c; }
+button.danger:hover { background: #991b1b; }
+.history-table {
+  width: 100%;
+  border-collapse: collapse;
+  background: #fff;
+  font-size: 12px;
+}
+.history-table th, .history-table td {
+  border: 1px solid #e5e7eb;
+  padding: 7px 8px;
+  text-align: left;
+  vertical-align: top;
+}
+.history-table th { background: #eef2f7; }
+.history-table code {
+  font-family: Consolas, "Courier New", monospace;
+  font-size: 11px;
+  background: #f1f5f9;
+  border-radius: 4px;
+  padding: 1px 5px;
+  word-break: break-all;
+}
 </style>
 </head>
 <body>
@@ -184,6 +215,17 @@ footer { color: #64748b; font-size: 12px; margin: 26px 0 8px; }
 <div class="card">
   <div id="statusline" class="statusline muted">正在刷新任务列表...</div>
   <div id="taskList" class="task-list"></div>
+</div>
+
+<div class="card">
+  <div class="history-head">
+    <h2 style="margin:0;">历史记录</h2>
+    <div>
+      <span id="historyStatus" class="muted" style="margin-right:12px;">正在加载...</span>
+      <button type="button" class="danger" onclick="clearHistory()">清空历史</button>
+    </div>
+  </div>
+  <div id="historyList"></div>
 </div>
 
 <footer>列表每 2 秒自动刷新；刷新或关闭本页只会清除浏览器会话记录，后台任务继续运行。</footer>
@@ -335,10 +377,98 @@ async function pollNotifications() {
   }
 }
 
+const HISTORY_STATE = {completed: '已完成', interrupted: '已中断', paused: '已暂停'};
+const HISTORY_CLASS = {completed: 'ok', interrupted: 'error', paused: 'paused'};
+
+function renderHistory(records) {
+  const box = document.getElementById('historyList');
+  box.innerHTML = '';
+  if (!records.length) {
+    const empty = document.createElement('div');
+    empty.className = 'empty';
+    empty.textContent = '暂无历史记录。';
+    box.appendChild(empty);
+    return;
+  }
+  const table = document.createElement('table');
+  table.className = 'history-table';
+  const thead = document.createElement('thead');
+  const headRow = document.createElement('tr');
+  ['状态', '页面', '任务', '阶段', '原因/说明', '完成时间'].forEach(text => {
+    const th = document.createElement('th');
+    th.textContent = text;
+    headRow.appendChild(th);
+  });
+  thead.appendChild(headRow);
+  table.appendChild(thead);
+  const tbody = document.createElement('tbody');
+  records.slice(0, 50).forEach(record => {
+    const tr = document.createElement('tr');
+    const statusTd = document.createElement('td');
+    const badge = document.createElement('span');
+    badge.className = 'badge ' + (HISTORY_CLASS[record.status] || 'queued');
+    badge.textContent = HISTORY_STATE[record.status] || record.status || '未知';
+    statusTd.appendChild(badge);
+    tr.appendChild(statusTd);
+
+    const pageTd = document.createElement('td');
+    pageTd.textContent = record.page_label || record.page || '';
+    tr.appendChild(pageTd);
+
+    const titleTd = document.createElement('td');
+    titleTd.textContent = record.title || record.job || '';
+    tr.appendChild(titleTd);
+
+    const stageTd = document.createElement('td');
+    stageTd.textContent = record.stage || '未知';
+    tr.appendChild(stageTd);
+
+    const errorTd = document.createElement('td');
+    errorTd.textContent = record.error || (record.status === 'completed' ? '任务已完成' : '');
+    tr.appendChild(errorTd);
+
+    const timeTd = document.createElement('td');
+    timeTd.textContent = record.finished_at
+      ? new Date(Number(record.finished_at) * 1000).toLocaleString()
+      : '-';
+    tr.appendChild(timeTd);
+    tbody.appendChild(tr);
+  });
+  table.appendChild(tbody);
+  box.appendChild(table);
+}
+
+async function loadHistory() {
+  try {
+    const resp = await fetch('/tasks/history');
+    if (!resp.ok) throw new Error('加载失败');
+    const data = await resp.json();
+    const records = data.history || [];
+    document.getElementById('historyStatus').textContent = '共 ' + records.length + ' 条历史记录';
+    renderHistory(records);
+  } catch (e) {
+    document.getElementById('historyStatus').textContent = '历史记录加载失败：' + String(e.message || e);
+  }
+}
+
+async function clearHistory() {
+  if (!window.confirm('确定清空全部任务历史记录吗？')) return;
+  try {
+    const resp = await fetch('/tasks/history/clear', {method: 'POST'});
+    const data = await resp.json();
+    if (!resp.ok || !data.cleared) throw new Error(data.error || '清空失败');
+    await loadHistory();
+  } catch (e) {
+    document.getElementById('historyStatus').textContent = '清空失败：' + String(e.message || e);
+  }
+}
+
 refresh();
 setInterval(refresh, 2000);
 pollNotifications();
 setInterval(pollNotifications, 2000);
+loadHistory();
+setInterval(loadHistory, 5000);
 
 try {
   const nav = performance.getEntriesByType('navigation')[0];
