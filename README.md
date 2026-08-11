@@ -99,7 +99,7 @@
 - 虚拟筛选：`/dock`
 - 全自动流水线：`/full`
 
-网页端支持任务启动、实时日志、暂停/继续、结果表和文件下载、环境检查与自动补全；全自动流水线页还支持直接填写工作目录加载已有结果。
+网页端支持任务启动、实时日志、暂停/继续、结果表和文件下载、环境检查与自动补全。单细胞页的 GEO 数据集编号需手动输入，不再预填示例；全自动流水线页支持直接填写工作目录加载已有结果，工作目录需填到 `outputs` 的上一层目录，未找到结果时会明确提示。
 
 ### 2.6 真实数据验证与可复现性
 
@@ -285,6 +285,8 @@ launchers\run_web_ui.bat --page dock
 launchers\run_web_ui.bat --page full
 ```
 
+全自动流水线页的“工作目录”应填到包含 `outputs` 的上一层目录；目录中没有结果时页面会显示错误提示。单细胞页需要手动填写 GEO 数据集编号。
+
 ### 4.5 验证脚本与测试
 
 ```bash
@@ -414,6 +416,7 @@ Script/
 ├── run_full_pipeline.py
 ├── validate_*.py
 ├── README.md
+├── AGENTS.md            # Codex 项目执行规则
 ├── VIRTUAL_SCREENING_REQUIREMENTS.md
 ├── requirements.txt
 ├── requirements_dock.txt
