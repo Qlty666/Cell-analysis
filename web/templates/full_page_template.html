@@ -106,7 +106,7 @@ a.file-link { color: #1665c0; text-decoration: none; margin-right: 12px; }
   <form id="form">
     <div class="grid wide">
       <label>GEO 数据集编号
-        <input name="accession" value="GSE125449" placeholder="GSE125449">
+        <input name="accession" value="" placeholder="请输入数据集编号">
       </label>
       <label>单细胞结果目录
         <input name="output" placeholder="results\liver_cancer（留空用默认）">
@@ -178,7 +178,7 @@ a.file-link { color: #1665c0; text-decoration: none; margin-right: 12px; }
   <h2>查看已有结果</h2>
   <div class="grid wide">
     <label>工作目录
-      <input id="existingWorkdir" placeholder="dock 或完整路径">
+      <input id="existingWorkdir" placeholder="填到 outputs 的上一层目录">
     </label>
   </div>
   <div class="actions" style="margin-top:10px;">
@@ -327,6 +327,11 @@ async function loadByWorkdir() {
     const data = await resp.json();
     if (!resp.ok) throw new Error(data.error || '加载失败');
     renderResults(data);
+    if (!data.exists) {
+      box.className = 'error';
+      box.textContent = '该目录未找到结果：请填到 outputs 的上一层目录';
+      return;
+    }
     box.className = 'ok';
     box.textContent = '已加载：' + data.workdir;
   } catch (e) {
