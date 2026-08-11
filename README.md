@@ -1,6 +1,6 @@
 # Liver Cancer Bioinformatics Workflow
 
-> 当前版本：0.3.1
+> 当前版本：0.3.0
 
 面向肝癌研究的本地生信自动化工作流，整合三条可实际运行的流水线：
 
@@ -463,8 +463,3 @@ GSE125449: Tumor cell biodiversity drives microenvironmental reprogramming in li
 GSE165816 和 TCGA PanCancer Atlas 仅用于真实数据验证。
 
 MIT License. See `LICENSE` for details.
-
-## 9. 更新记录
-
-- v0.3.1：将 GitHub 版本更新规则写入 `AGENTS.md`，版本更新时同步处理版本号、README、Git Tag 和 GitHub Release。
-- v0.3.0：新增网页任务进度、结果清单、完成/中断弹窗，调整顶部导航并默认打开全自动流水线页。
