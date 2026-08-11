@@ -34,6 +34,7 @@ body {
   background: rgba(255, 255, 255, 0.08);
 }
 .topnav a:hover, .topnav a.active { background: #1665c0; color: #fff; }
+.topnav .nav-right { margin-left: auto; }
 .wrap { max-width: 1180px; margin: 0 auto; padding: 28px; }
 h1 { font-size: 26px; margin: 0 0 6px; }
 h2 { font-size: 17px; margin: 0 0 10px; }
@@ -98,13 +99,49 @@ th { background: #eef2f7; position: sticky; top: 0; }
 .badge.ok { background: #dcfce7; color: #166534; }
 .badge.bad { background: #fee2e2; color: #991b1b; }
 a.file-link { color: #1665c0; text-decoration: none; margin-right: 12px; }
+.job-toast {
+  position: fixed;
+  top: 76px;
+  right: 24px;
+  z-index: 999;
+  max-width: 440px;
+  background: #ffffff;
+  border: 1px solid #d7dde4;
+  border-left: 6px solid #1665c0;
+  border-radius: 8px;
+  box-shadow: 0 12px 32px rgba(15, 23, 42, 0.28);
+  padding: 14px 16px;
+}
+.job-toast.ok { border-left-color: #047857; }
+.job-toast.error { border-left-color: #b91c1c; }
+.job-toast.paused { border-left-color: #b45309; }
+.job-toast-title { font-weight: 700; font-size: 15px; margin-bottom: 6px; }
+.job-toast-body {
+  font-size: 13px;
+  color: #334155;
+  white-space: pre-wrap;
+  word-break: break-all;
+  max-height: 190px;
+  overflow: auto;
+}
+.job-toast-close {
+  margin-top: 10px;
+  padding: 6px 14px;
+  border: 0;
+  border-radius: 6px;
+  background: #1665c0;
+  color: #fff;
+  cursor: pointer;
+}
 </style>
 </head>
 <body>
 <div class="topnav">
+  <a href="/full">全自动流水线</a>
   <a href="/">单细胞分析</a>
   <a href="/dock" class="active">虚拟筛选</a>
-  <a href="/full">全自动流水线</a>
+  <a href="/results">结果清单</a>
+  <a href="/tasks" class="nav-right">任务进度</a>
 </div>
 <div class="wrap">
 <h1>虚拟筛选流水线</h1>
@@ -279,6 +316,65 @@ a.file-link { color: #1665c0; text-decoration: none; margin-right: 12px; }
 <script>
 let currentJob = null;
 let pollTimer = null;
+let jobAlerted = false;
+const DOCK_JOB_KEY = 'liver_ui_dock_job';
+
+function saveJobRecord() {
+  try { sessionStorage.setItem(DOCK_JOB_KEY, currentJob); } catch (e) {}
+}
+
+function clearJobRecord() {
+  try { sessionStorage.removeItem(DOCK_JOB_KEY); } catch (e) {}
+}
+
+function clearJobRecordsOnReload() {
+  try {
+    const nav = performance.getEntriesByType('navigation')[0];
+    if (nav && nav.type === 'reload') {
+      sessionStorage.removeItem('liver_ui_single_job');
+      sessionStorage.removeItem('liver_ui_dock_job');
+      sessionStorage.removeItem('liver_ui_full_job');
+    }
+  } catch (e) {}
+}
+
+function restoreJobRecord() {
+  let saved = null;
+  let target = null;
+  try { saved = sessionStorage.getItem(DOCK_JOB_KEY); } catch (e) {}
+  try { target = new URLSearchParams(window.location.search).get('job'); } catch (e) {}
+  const job = target || saved;
+  if (!job) return;
+  currentJob = job;
+  saveJobRecord();
+  if (target) {
+    try {
+      const url = new URL(window.location.href);
+      url.searchParams.delete('job');
+      window.history.replaceState(null, '', url.toString());
+    } catch (e) {}
+  }
+  msg('已恢复正在运行的虚拟筛选任务，日志继续刷新。', 'ok');
+  document.getElementById('pauseBtn').disabled = false;
+  document.getElementById('resumeBtn').disabled = true;
+  if (pollTimer) clearInterval(pollTimer);
+  pollTimer = setInterval(poll, 1000);
+}
+
+function showJobToast(kind, title, body) {
+  const toast = document.getElementById('jobToast');
+  if (!toast) return;
+  toast.className = 'job-toast ' + (kind || 'info');
+  document.getElementById('jobToastTitle').textContent = title;
+  document.getElementById('jobToastBody').textContent = body || '';
+  toast.hidden = false;
+  jobAlerted = true;
+}
+
+function closeJobToast() {
+  const toast = document.getElementById('jobToast');
+  if (toast) toast.hidden = true;
+}
 
 function msg(text, cls) {
   const el = document.getElementById('message');
@@ -336,14 +432,17 @@ async function detectBox() {
 async function startRun() {
   const form = document.getElementById('form');
   const data = new URLSearchParams(new FormData(form));
-  const btn = document.getElementById('startBtn');
-  btn.disabled = true;
-  msg('正在启动...');
+    const btn = document.getElementById('startBtn');
+    btn.disabled = true;
+    jobAlerted = false;
+    closeJobToast();
+    msg('正在启动...');
   try {
     const resp = await fetch('/dock/start', {method: 'POST', body: data});
     const result = await resp.json();
     if (!resp.ok) throw new Error(result.error || '启动失败');
     currentJob = result.job;
+    saveJobRecord();
     document.getElementById('log').textContent = '';
     document.getElementById('resultTable').innerHTML = '';
     document.getElementById('gallery').innerHTML = '';
@@ -373,6 +472,12 @@ async function poll() {
     const status = await statusResp.json();
     const pauseBtn = document.getElementById('pauseBtn');
     const resumeBtn = document.getElementById('resumeBtn');
+    if (status.queued) {
+      pauseBtn.disabled = true;
+      resumeBtn.disabled = true;
+      msg('任务已进入队列，等待前面的任务完成...', 'ok');
+      return;
+    }
     if (status.running) {
       pauseBtn.disabled = false;
       resumeBtn.disabled = true;
@@ -389,12 +494,26 @@ async function poll() {
       if (status.paused) {
         m.className = 'ok';
         m.textContent = '任务已暂停，可点击继续任务。';
+        if (!jobAlerted) {
+          showJobToast('paused', '任务已暂停', '当前阶段：' + (status.stage || '未知'));
+        }
       } else {
         m.className = status.ok ? 'ok' : 'error';
-        m.textContent = status.ok ? '任务已完成' : '任务失败，请查看日志';
+        if (status.ok) {
+          m.textContent = '任务已完成';
+          if (!jobAlerted) showJobToast('ok', '任务已完成', '虚拟筛选任务已全部完成。');
+        } else {
+          m.textContent = '任务失败，请查看日志';
+          if (!jobAlerted) {
+            showJobToast('error', '任务中断', '运行到阶段：' + (status.stage || '未知') + '\n原因：' + (status.error || '请查看日志'));
+          }
+        }
       }
       if (status.ok) await loadResults(currentJob);
-      if (!status.paused) currentJob = null;
+      if (!status.paused) {
+        currentJob = null;
+        clearJobRecord();
+      }
     }
   } catch (e) {
     // keep polling on transient errors
@@ -422,6 +541,8 @@ async function resumeDockJob() {
     const data = await resp.json();
     if (!resp.ok) throw new Error(data.error || '恢复失败');
     msg('任务已恢复。', 'ok');
+    jobAlerted = false;
+    closeJobToast();
     document.getElementById('pauseBtn').disabled = false;
     document.getElementById('resumeBtn').disabled = true;
     if (pollTimer) clearInterval(pollTimer);
@@ -706,6 +827,13 @@ function renderKnockout(data) {
 loadDockHistory();
 loadDockEnv();
 loadValidationReport();
+clearJobRecordsOnReload();
+restoreJobRecord();
 </script>
+<div id="jobToast" class="job-toast" hidden>
+  <div class="job-toast-title" id="jobToastTitle"></div>
+  <div class="job-toast-body" id="jobToastBody"></div>
+  <button type="button" class="job-toast-close" onclick="closeJobToast()">知道了</button>
+</div>
 </body>
 </html>

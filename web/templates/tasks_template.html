@@ -1,0 +1,358 @@
+<!DOCTYPE html>
+<html lang="zh-CN">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1">
+<title>任务进度</title>
+<style>
+body {
+  font-family: "Segoe UI", Arial, sans-serif;
+  margin: 0;
+  color: #1f2933;
+  background: url('/static/background.png') no-repeat center center fixed;
+  background-size: cover;
+}
+.topnav {
+  position: sticky;
+  top: 0;
+  z-index: 100;
+  background: #0f172a;
+  padding: 12px 28px;
+  display: flex;
+  gap: 18px;
+  align-items: center;
+  flex-wrap: wrap;
+  box-shadow: 0 2px 8px rgba(15, 23, 42, 0.35);
+}
+.topnav a {
+  color: #ffffff;
+  text-decoration: none;
+  font-size: 15px;
+  font-weight: 600;
+  padding: 6px 10px;
+  border-radius: 6px;
+  background: rgba(255, 255, 255, 0.08);
+}
+.topnav a:hover, .topnav a.active { background: #1665c0; color: #fff; }
+.topnav .nav-right { margin-left: auto; }
+.wrap { max-width: 1100px; margin: 0 auto; padding: 28px; }
+h1 { font-size: 26px; margin: 0 0 6px; }
+.sub { color: #52606d; font-size: 14px; margin: 0 0 16px; }
+.muted { color: #6b7280; font-size: 13px; }
+.card {
+  background: rgba(255, 255, 255, 0.96);
+  border: 1px solid #d7dde4;
+  border-radius: 8px;
+  padding: 20px;
+  margin-bottom: 18px;
+  box-shadow: 0 1px 4px rgba(15, 23, 42, 0.08);
+}
+.statusline { margin-bottom: 14px; }
+.task-list { display: flex; flex-direction: column; gap: 14px; }
+.task-card {
+  background: rgba(255, 255, 255, 0.97);
+  border: 1px solid #d7dde4;
+  border-radius: 8px;
+  padding: 16px 18px;
+  box-shadow: 0 1px 4px rgba(15, 23, 42, 0.07);
+}
+.task-head {
+  display: flex;
+  align-items: center;
+  gap: 10px;
+  flex-wrap: wrap;
+  margin-bottom: 8px;
+}
+.badge {
+  display: inline-block;
+  padding: 3px 10px;
+  border-radius: 10px;
+  font-size: 12px;
+  font-weight: 600;
+}
+.badge.page { background: #e0f2fe; color: #075985; }
+.badge.queued { background: #f1f5f9; color: #475569; }
+.badge.running { background: #dcfce7; color: #166534; }
+.badge.paused { background: #fef3c7; color: #92400e; }
+.task-id { margin-left: auto; color: #94a3b8; font-size: 12px; font-family: Consolas, monospace; }
+.task-title { font-size: 17px; font-weight: 700; margin-bottom: 4px; }
+.task-detail {
+  color: #52606d;
+  font-size: 12px;
+  font-family: Consolas, "Courier New", monospace;
+  word-break: break-all;
+  margin-bottom: 12px;
+}
+.progress-row { display: flex; align-items: center; gap: 10px; margin-bottom: 8px; }
+.progress {
+  flex: 1;
+  height: 12px;
+  background: #e2e8f0;
+  border-radius: 6px;
+  overflow: hidden;
+}
+.progress-bar {
+  height: 100%;
+  background: #1665c0;
+  border-radius: 6px;
+  transition: width .4s ease;
+}
+.progress-text { width: 44px; text-align: right; font-size: 13px; font-weight: 700; color: #1665c0; }
+.meta { color: #64748b; font-size: 12px; margin-bottom: 10px; }
+.log-preview {
+  background: #0f172a;
+  color: #dbeafe;
+  border-radius: 8px;
+  padding: 10px 12px;
+  height: 110px;
+  overflow: auto;
+  font-size: 11px;
+  line-height: 1.5;
+  white-space: pre-wrap;
+  word-break: break-all;
+  margin: 0 0 12px;
+}
+.jump {
+  display: inline-block;
+  padding: 8px 16px;
+  border-radius: 6px;
+  background: #1665c0;
+  color: #fff;
+  font-size: 14px;
+  font-weight: 600;
+  text-decoration: none;
+}
+.jump:hover { background: #1d4ed8; }
+.empty {
+  background: rgba(255, 255, 255, 0.9);
+  border: 1px dashed #cbd2d9;
+  border-radius: 8px;
+  padding: 46px 20px;
+  text-align: center;
+  color: #64748b;
+  font-size: 15px;
+}
+footer { color: #64748b; font-size: 12px; margin: 26px 0 8px; }
+.job-toast {
+  position: fixed;
+  top: 76px;
+  right: 24px;
+  z-index: 999;
+  max-width: 440px;
+  background: #ffffff;
+  border: 1px solid #d7dde4;
+  border-left: 6px solid #1665c0;
+  border-radius: 8px;
+  box-shadow: 0 12px 32px rgba(15, 23, 42, 0.28);
+  padding: 14px 16px;
+}
+.job-toast.ok { border-left-color: #047857; }
+.job-toast.error { border-left-color: #b91c1c; }
+.job-toast.paused { border-left-color: #b45309; }
+.job-toast-title { font-weight: 700; font-size: 15px; margin-bottom: 6px; }
+.job-toast-body {
+  font-size: 13px;
+  color: #334155;
+  white-space: pre-wrap;
+  word-break: break-all;
+  max-height: 190px;
+  overflow: auto;
+}
+.job-toast-close {
+  margin-top: 10px;
+  padding: 6px 14px;
+  border: 0;
+  border-radius: 6px;
+  background: #1665c0;
+  color: #fff;
+  cursor: pointer;
+}
+</style>
+</head>
+<body>
+<div class="topnav">
+  <a href="/full">全自动流水线</a>
+  <a href="/">单细胞分析</a>
+  <a href="/dock">虚拟筛选</a>
+  <a href="/results">结果清单</a>
+  <a href="/tasks" class="nav-right active">任务进度</a>
+</div>
+<div class="wrap">
+<h1>任务进度</h1>
+<p class="sub">集中显示三个页面启动的排队、运行和暂停任务；任务完成后自动从列表移除，跳转不会中断后台进程。</p>
+
+<div class="card">
+  <div id="statusline" class="statusline muted">正在刷新任务列表...</div>
+  <div id="taskList" class="task-list"></div>
+</div>
+
+<footer>列表每 2 秒自动刷新；刷新或关闭本页只会清除浏览器会话记录，后台任务继续运行。</footer>
+</div>
+
+<script>
+const listEl = document.getElementById('taskList');
+const statusEl = document.getElementById('statusline');
+const STATE_TEXT = {queued: '排队中', running: '运行中', paused: '已暂停'};
+
+function fmtDuration(seconds) {
+  seconds = Math.max(0, Number(seconds) || 0);
+  const h = Math.floor(seconds / 3600);
+  const m = Math.floor((seconds % 3600) / 60);
+  const s = Math.floor(seconds % 60);
+  if (h > 0) return h + ' 小时 ' + m + ' 分 ' + s + ' 秒';
+  if (m > 0) return m + ' 分 ' + s + ' 秒';
+  return s + ' 秒';
+}
+
+function buildCard(task) {
+  const card = document.createElement('div');
+  card.className = 'task-card';
+
+  const head = document.createElement('div');
+  head.className = 'task-head';
+
+  const pageBadge = document.createElement('span');
+  pageBadge.className = 'badge page';
+  pageBadge.textContent = task.page_label || task.page || '';
+  head.appendChild(pageBadge);
+
+  const stateBadge = document.createElement('span');
+  stateBadge.className = 'badge ' + (task.status || 'queued');
+  stateBadge.textContent = STATE_TEXT[task.status] || task.status || '未知';
+  head.appendChild(stateBadge);
+
+  const idSpan = document.createElement('span');
+  idSpan.className = 'task-id';
+  idSpan.textContent = '#' + (task.job || '');
+  head.appendChild(idSpan);
+  card.appendChild(head);
+
+  const title = document.createElement('div');
+  title.className = 'task-title';
+  title.textContent = task.title || task.page_label || '任务';
+  card.appendChild(title);
+
+  const detail = document.createElement('div');
+  detail.className = 'task-detail';
+  detail.textContent = task.detail || '';
+  card.appendChild(detail);
+
+  const progressRow = document.createElement('div');
+  progressRow.className = 'progress-row';
+  const track = document.createElement('div');
+  track.className = 'progress';
+  const bar = document.createElement('div');
+  bar.className = 'progress-bar';
+  const progress = Math.max(0, Math.min(100, Number(task.progress) || 0));
+  bar.style.width = progress + '%';
+  track.appendChild(bar);
+  const progressText = document.createElement('span');
+  progressText.className = 'progress-text';
+  progressText.textContent = progress + '%';
+  progressRow.appendChild(track);
+  progressRow.appendChild(progressText);
+  card.appendChild(progressRow);
+
+  const meta = document.createElement('div');
+  meta.className = 'meta';
+  const startedAt = task.started ? new Date(Number(task.started) * 1000).toLocaleTimeString() : '-';
+  const stageText = task.stage_label ? ' · 阶段：' + task.stage_label : '';
+  meta.textContent = '已运行 ' + fmtDuration(task.elapsed) + ' · 开始于 ' + startedAt + stageText;
+  card.appendChild(meta);
+
+  const log = document.createElement('pre');
+  log.className = 'log-preview';
+  log.textContent = task.log_tail || '暂无日志输出';
+  card.appendChild(log);
+
+  const link = document.createElement('a');
+  link.className = 'jump';
+  link.href = task.url || '/';
+  link.textContent = '前往任务';
+  card.appendChild(link);
+
+  return card;
+}
+
+function showJobToast(kind, title, body) {
+  const toast = document.getElementById('jobToast');
+  if (!toast) return;
+  toast.className = 'job-toast ' + (kind || 'info');
+  document.getElementById('jobToastTitle').textContent = title;
+  document.getElementById('jobToastBody').textContent = body || '';
+  toast.hidden = false;
+}
+
+function closeJobToast() {
+  const toast = document.getElementById('jobToast');
+  if (toast) toast.hidden = true;
+}
+
+async function refresh() {
+  try {
+    const resp = await fetch('/tasks/data');
+    if (!resp.ok) throw new Error('加载失败');
+    const data = await resp.json();
+    const tasks = data.tasks || [];
+    statusEl.textContent = '共 ' + tasks.length + ' 个进行中的任务 · 每 2 秒自动刷新';
+    listEl.innerHTML = '';
+    if (!tasks.length) {
+      const empty = document.createElement('div');
+      empty.className = 'empty';
+      empty.textContent = '当前没有进行中的任务。';
+      listEl.appendChild(empty);
+      return;
+    }
+    tasks.forEach(task => listEl.appendChild(buildCard(task)));
+  } catch (e) {
+    statusEl.textContent = '任务列表刷新失败：' + String(e.message || e);
+  }
+}
+
+async function pollNotifications() {
+  try {
+    const resp = await fetch('/tasks/notifications');
+    if (!resp.ok) return;
+    const data = await resp.json();
+    (data.notifications || []).forEach((n) => {
+      const status = n.status || 'interrupted';
+      const title = (n.page_label || '任务') + ' · ' +
+        (status === 'completed' ? '任务已完成' : status === 'paused' ? '任务已暂停' : '任务中断');
+      let body = '任务已完成。';
+      if (status === 'paused') {
+        body = '运行到阶段：' + (n.stage || '未知') + '\n任务已暂停。';
+      } else if (status !== 'completed') {
+        body = '运行到阶段：' + (n.stage || '未知') + '\n原因：' + (n.error || '请查看日志');
+      }
+      showJobToast(
+        status === 'completed' ? 'ok' : status === 'paused' ? 'paused' : 'error',
+        title,
+        body
+      );
+    });
+  } catch (e) {
+    // keep polling on transient errors
+  }
+}
+
+refresh();
+setInterval(refresh, 2000);
+pollNotifications();
+setInterval(pollNotifications, 2000);
+
+try {
+  const nav = performance.getEntriesByType('navigation')[0];
+  if (nav && nav.type === 'reload') {
+    sessionStorage.removeItem('liver_ui_single_job');
+    sessionStorage.removeItem('liver_ui_dock_job');
+    sessionStorage.removeItem('liver_ui_full_job');
+  }
+} catch (e) {}
+</script>
+<div id="jobToast" class="job-toast" hidden>
+  <div class="job-toast-title" id="jobToastTitle"></div>
+  <div class="job-toast-body" id="jobToastBody"></div>
+  <button type="button" class="job-toast-close" onclick="closeJobToast()">知道了</button>
+</div>
+</body>
+</html>
