@@ -30,6 +30,8 @@ INSTALL_LOG = WEB_DIR / "install_log.txt"
 INSTALL_JOB = {}
 FINISHED_NOTIFICATIONS: list[dict] = []
 NOTIFY_LOCK = threading.Lock()
+TASK_HISTORY_PATH = WEB_DIR / "task_history.json"
+TASK_HISTORY_LOCK = threading.Lock()
 
 SRC_DIR = APP_ROOT / "src"
 if str(SRC_DIR) not in sys.path:
@@ -1235,6 +1237,47 @@ def _finished_info(
     return stage, error
 
 
+def _load_task_history() -> list[dict]:
+    if not TASK_HISTORY_PATH.exists():
+        return []
+    try:
+        data = json.loads(TASK_HISTORY_PATH.read_text(encoding="utf-8"))
+        return data if isinstance(data, list) else []
+    except Exception:
+        return []
+
+
+def _save_task_history(records: list[dict]) -> None:
+    TASK_HISTORY_PATH.write_text(
+        json.dumps(records, ensure_ascii=False, indent=2),
+        encoding="utf-8",
+    )
+
+
+def _append_task_history(item: dict) -> None:
+    with TASK_HISTORY_LOCK:
+        records = _load_task_history()
+        records.insert(0, item)
+        if len(records) > 100:
+            del records[100:]
+        _save_task_history(records)
+
+
+def task_history_data() -> dict:
+    with TASK_HISTORY_LOCK:
+        records = _load_task_history()
+    return {"history": records, "count": len(records)}
+
+
+def clear_task_history() -> dict:
+    with TASK_HISTORY_LOCK:
+        try:
+            _save_task_history([])
+            return {"cleared": True, "count": 0}
+        except Exception as exc:
+            return {"cleared": False, "error": str(exc)}
+
+
 def _notify_finished(
     info: dict,
     page: str,
@@ -1259,10 +1302,17 @@ def _notify_finished(
         "exit_code": exit_code,
         "finished_at": time.time(),
     }
+    started_at = float(info.get("started") or time.time())
+    item["started_at"] = started_at
+    item["elapsed"] = max(0, int(time.time() - started_at))
     with NOTIFY_LOCK:
         FINISHED_NOTIFICATIONS.append(item)
         if len(FINISHED_NOTIFICATIONS) > 50:
             del FINISHED_NOTIFICATIONS[:-50]
+    try:
+        _append_task_history(item)
+    except Exception:
+        pass
 
 
 def running_tasks_data() -> dict:
@@ -1930,6 +1980,13 @@ class Handler(BaseHTTPRequestHandler):
             ).encode("utf-8")
             self._send(200, body, "application/json")
             return
+        if parsed.path == "/tasks/history":
+            body = json.dumps(
+                task_history_data(),
+                ensure_ascii=False,
+            ).encode("utf-8")
+            self._send(200, body, "application/json")
+            return
         if parsed.path == "/full/log":
             query = parse_qs(parsed.query)
             job = query.get("job", [""])[0]
@@ -2317,6 +2374,14 @@ class Handler(BaseHTTPRequestHandler):
                 json.dumps({"resumed": True}).encode("utf-8"),
                 "application/json",
             )
+            return
+
+        if parsed.path == "/tasks/history/clear":
+            body = json.dumps(
+                clear_task_history(),
+                ensure_ascii=False,
+            ).encode("utf-8")
+            self._send(200, body, "application/json")
             return
 
         if parsed.path == "/full/start":
