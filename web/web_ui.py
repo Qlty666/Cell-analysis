@@ -1327,6 +1327,12 @@ def start_full_job(data: dict) -> dict:
     ko_top_n = _int_field(data, "ko_top_n")
     if ko_top_n:
         cmd += ["--ko-top-n", str(ko_top_n)]
+    feedback_top_n = _int_field(data, "feedback_top_n")
+    if feedback_top_n:
+        cmd += ["--feedback-top-n", str(feedback_top_n)]
+    feedback_max_features = _int_field(data, "feedback_max_features")
+    if feedback_max_features:
+        cmd += ["--feedback-max-features", str(feedback_max_features)]
     ligand_library = _first(data, "ligand_library", "").strip()
     if ligand_library:
         cmd += ["--ligand-library", ligand_library]
@@ -1347,6 +1353,7 @@ def start_full_job(data: dict) -> dict:
         "skip_pseudobulk",
         "skip_knockout",
         "skip_docking",
+        "skip_cell_feedback",
         "keep_all_genes",
         "force",
     ]:
@@ -1565,7 +1572,8 @@ FULL_STAGE_LABELS = {
     "04": "敲除输入",
     "05": "虚拟敲除",
     "06": "分子对接",
-    "07": "集成报告",
+    "07": "细胞反馈",
+    "08": "集成报告",
 }
 
 
@@ -1947,6 +1955,7 @@ def full_results(workdir: Path) -> dict:
         "key_genes": [],
         "knockout": [],
         "docking": [],
+        "cell_feedback": [],
         "evidence": [],
     }
     if not out.exists():
@@ -1980,6 +1989,14 @@ def full_results(workdir: Path) -> dict:
     except Exception:
         result["docking"] = []
     try:
+        result["cell_feedback"] = json.loads(
+            pd_read_csv(
+                out / "cell_feedback" / "data" / "feedback_targets.csv"
+            ).to_json(orient="records")
+        )
+    except Exception:
+        result["cell_feedback"] = []
+    try:
         result["evidence"] = json.loads(
             pd_read_csv(out / "gene_evidence.csv").to_json(orient="records")
         )
@@ -2011,8 +2028,13 @@ def _full_file_path(workdir: Path, name: str) -> Path | None:
         return None
     if name.startswith("single_cell/") and single_cell_root:
         target = single_cell_root.joinpath(*name_path.parts[1:]).resolve()
-    else:
+    elif name.startswith(("outputs/", "work/", "data/")):
         target = (workdir / name_path).resolve()
+    else:
+        integration = (workdir / "outputs" / "integration").resolve()
+        target = integration.joinpath(*name_path.parts).resolve()
+        if not target.is_file() and (workdir / name_path).is_file():
+            target = (workdir / name_path).resolve()
     if not _is_result_file(target):
         return None
     if not any(target.is_relative_to(root) for root in allowed_roots):

@@ -1,6 +1,6 @@
 # Liver Cancer Bioinformatics Workflow
 
-> 当前版本：0.3.0
+> 当前版本：0.4.0
 
 面向肝癌研究的本地生信自动化工作流，整合三条可实际运行的流水线：
 
@@ -64,6 +64,7 @@
 | `report` | 生成 HTML 汇总报告 |
 | `virtual-knockout` | 基因敲除优先级和多维靶点评分 |
 | `export-validation` | 把排序后的靶点导出为湿实验验证方案 |
+| `cell-feedback` | 把虚拟敲除/对接结果返回 Seurat 单细胞对象做细胞级分析 |
 | `detect-box` | 从共晶配体自动检测对接盒并写回配置 |
 | `check-env` / `check-cadd` | 检查软件、库和数据库 skill 环境 |
 | `pipeline` | 按阶段执行准备、对接、分析、重对接、报告，支持断点续跑 |
@@ -79,10 +80,13 @@
 04 knockout_inputs       导出样本级伪 bulk 表达矩阵并生成敲除输入
 05 knockout              虚拟敲除 + 多维靶点评分 + 湿实验验证方案
 06 docking               对有 PDB 结构的靶点自动收集已知配体并跑 Vina 对接
-07 report                生成集成 HTML 报告和 run_manifest.json
+07 cell_feedback         把虚拟敲除/对接结果返回 Seurat 做细胞级反馈分析
+08 report                生成集成 HTML 报告和 run_manifest.json
 ```
 
 每一阶段写标记文件，重跑时自动断点续跑；`--start-stage` 可从任意阶段开始。
+
+细胞反馈阶段会把虚拟敲除评分和虚拟筛选命中合并成反馈清单，重新读取单细胞 Seurat 对象，为每个候选基因写入细胞级表达、计算筛选靶点模块评分，并输出细胞类型表达汇总、模块富集检验、条件×细胞类型汇总和 UMAP/DotPlot/热图等结果；同时生成 `feedback_targets.csv`，把筛选优先级与细胞表达特异性合并为 `cell_support_score`，用于下一轮靶点收敛。
 
 ### 2.4 虚拟敲除与多维靶点评分
 
@@ -109,6 +113,7 @@
 - 任务进度：`/tasks`
 
 网页端支持任务启动、实时日志、暂停/继续、结果表和文件下载、环境检查与自动补全。任务完成或中断时会弹窗提醒，中断提示会显示运行到的阶段和原因；“任务进度”页集中显示流水线页面启动的排队、运行和暂停任务，保存已完成任务的历史记录并支持一键清空，同时可直接跳转到对应页面继续查看。切换顶部导航不会清除正在运行的任务记录，返回原页面后会自动恢复日志轮询；刷新或关闭网页时才会清除会话中的任务记录。单细胞页的 GEO 数据集编号需手动输入，不再预填示例；全自动流水线页支持直接填写工作目录加载已有结果，工作目录需填到 `outputs` 的上一层目录，未找到结果时会明确提示。数据集搜索页支持疾病、研究方向或原始查询搜索 GEO 数据集，可选 ML/DL 模型重排序、CSV/JSON 结果下载与批量下载；单细胞分析完成后可在结果报告区直接打开包含逐文件分析的 `result_report.html`。
+全自动流水线页新增细胞反馈阶段的基因数、展示基因数和跳过选项，并在流程结果中显示 `feedback_targets.csv` 的细胞支持度排序表。
 
 ### 2.6 真实数据验证与可复现性
 
@@ -237,6 +242,16 @@ python scripts\run_docking.py virtual-knockout \
 python scripts\run_docking.py export-validation --validation-top-n 10
 ```
 
+把已有虚拟敲除/虚拟筛选结果返回单细胞分析：
+
+```bash
+python scripts\run_docking.py cell-feedback \
+  --workdir y3 \
+  --single-cell-root ../liver_cancer \
+  --feedback-top-n 12 \
+  --feedback-max-features 8
+```
+
 环境检查：
 
 ```bash
@@ -268,12 +283,15 @@ python scripts\run_full_pipeline.py \
 - `--skip-scrna`：复用已完成的单细胞结果，直接从关键基因筛选开始。
 - `--skip-docking`：只跑虚拟敲除和验证方案，跳过对接。
 - `--skip-evidence-fetch`：不联网，使用已有证据缓存或置零。
-- `--skip-download` / `--skip-deps` / `--skip-pseudobulk` / `--skip-knockout`。
+- `--skip-download` / `--skip-deps` / `--skip-pseudobulk` / `--skip-knockout` / `--skip-cell-feedback`。
 - `--top-genes`：关键基因数量，默认 50。
 - `--docking-targets`：参与对接的靶点数量，默认 3。
+- `--feedback-top-n`：进入细胞反馈的基因数，默认 12。
+- `--feedback-max-features`：细胞反馈图中展示的基因数，默认 8。
+- `--feedback-timeout`：细胞反馈 R 分析超时秒数，默认 3600。
 - `--ligand-library`：自定义配体库（`.smi` / `.sdf` / `.csv`），也可放到 `dock/data/ligands/`。
 - `--case-label` / `--normal-label`：虚拟敲除的病例/正常分组标签。
-- `--start-stage 07`：从指定阶段继续，之前阶段自动标记为跳过。
+- `--start-stage 08`：从指定阶段继续，之前阶段自动标记为跳过。
 
 查看阶段清单：
 
@@ -461,6 +479,7 @@ python scripts\validate_dataset_search.py \
 - `gene_evidence.csv`：每个基因的 UniProt、PDB、ChEMBL 证据。
 - `knockout_summary.json`：虚拟敲除与验证方案汇总。
 - `docking_targets.csv`：每个靶点的对接状态、命中数和最佳亲和力。
+- `cell_feedback/`：细胞反馈阶段输出，包括 `data/cell_scores.csv`、`data/feedback_targets.csv`、`data/celltype_summary.csv`、`data/celltype_enrichment.csv`、`data/condition_summary.csv`，以及 `fig_54` 至 `fig_58` 的结果图。
 - `integration_report.html`：全流程集成报告。
 - `integration_summary.json` / `run_manifest.json`：本次运行的汇总和溯源信息。
 
@@ -495,6 +514,7 @@ python scripts\validate_dataset_search.py \
 | `src/docking/*` | 对接、证据、敲除、验证、报告等实现 |
 | `src/pipeline/orchestrator.py` | 单细胞流水线编排 |
 | `src/pipeline/integration.py` | 全自动集成流水线编排 |
+| `src/pipeline/cell_feedback.py` / `cell_feedback.R` | 虚拟敲除/对接结果返回单细胞的闭环分析 |
 | `src/pipeline/export_pseudobulk.R` | 伪 bulk 表达矩阵导出 |
 | `src/report/*` | HTML/Word 报告生成 |
 | `web/web_ui.py` | 本地网页服务 |
@@ -557,6 +577,13 @@ GSE165816 和 TCGA PanCancer Atlas 仅用于真实数据验证。
 MIT License. See `LICENSE` for details.
 
 ## 9. 更新日志
+
+### v0.4.0
+
+- 新增细胞反馈闭环：全自动流水线新增 `07_cell_feedback` 阶段，把虚拟敲除评分和虚拟筛选命中重新写回 Seurat 单细胞对象，计算每细胞靶基因表达、筛选靶点模块评分、细胞类型表达汇总与富集检验，并输出 UMAP/DotPlot/箱线图/热图和 `feedback_targets.csv`。
+- 新增独立命令 `python scripts\run_docking.py cell-feedback --single-cell-root <单细胞结果目录>`，可对已有虚拟敲除/虚拟筛选结果单独执行细胞反馈分析。
+- 全自动流水线支持 `--feedback-top-n`、`--feedback-max-features`、`--feedback-timeout` 和 `--skip-cell-feedback`。
+- 网页版全自动流水线新增细胞反馈参数、阶段显示和结果表；结果清单页新增细胞反馈输出说明。
 
 ### v0.3.0
 

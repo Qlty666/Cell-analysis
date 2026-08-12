@@ -132,7 +132,8 @@ def rebuild_pseudobulk(workdir: Path) -> None:
         "04_knockout_inputs.done",
         "05_knockout.done",
         "06_docking.done",
-        "07_report.done",
+        "07_cell_feedback.done",
+        "08_report.done",
     ]:
         safe_delete(stage_dir / marker)
 

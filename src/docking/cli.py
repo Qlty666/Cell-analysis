@@ -52,6 +52,7 @@ def main(argv: list[str] | None = None) -> int:
         ("report", "generate HTML summary report"),
         ("virtual-knockout", "score virtual gene knockouts from expression/DepMap data"),
         ("export-validation", "export wet-lab validation plan for top targets"),
+        ("cell-feedback", "re-run single-cell analysis from knockout/docking results"),
         ("detect-box", "detect docking box from cocrystal ligand and save config"),
         ("check-env", "check Python packages and external tools"),
         ("check-cadd", "check CADD workflow skills and ML libraries"),
@@ -153,6 +154,24 @@ def main(argv: list[str] | None = None) -> int:
         knockout.run_knockout(cfg, log)
     elif args.command == "export-validation":
         validation.export_validation(cfg, log)
+    elif args.command == "cell-feedback":
+        from pipeline.cell_feedback import run_cell_feedback
+
+        single_cell_root = getattr(args, "single_cell_root", "")
+        if not single_cell_root:
+            parser.error("cell-feedback requires --single-cell-root")
+        summary = run_cell_feedback(
+            cfg.workdir,
+            Path(single_cell_root).resolve(),
+            top_n=args.feedback_top_n or 12,
+            max_features=args.feedback_max_features or 8,
+            timeout_seconds=args.feedback_timeout or 3600,
+        )
+        log.info(
+            "cell feedback %s: %s matched genes",
+            summary.get("status", "unknown"),
+            summary.get("genes_matched", 0),
+        )
     elif args.command == "detect-box":
         box.detect_and_update_config(cfg, log)
     else:
@@ -226,6 +245,21 @@ def _add_common(sub: argparse.ArgumentParser) -> None:
         "--validation-top-n",
         type=int,
         help="top N genes for the wet-lab validation plan",
+    )
+    sub.add_argument(
+        "--single-cell-root",
+        help="single-cell output root containing results/checkpoints",
+    )
+    sub.add_argument("--feedback-top-n", type=int, help="top N feedback genes")
+    sub.add_argument(
+        "--feedback-max-features",
+        type=int,
+        help="max genes shown in UMAP/DotPlot feedback figures",
+    )
+    sub.add_argument(
+        "--feedback-timeout",
+        type=int,
+        help="cell feedback R analysis timeout in seconds",
     )
     sub.add_argument("--force", action="store_true", help="rerun stages from scratch")
     sub.add_argument("--start-stage", default=None, help="stage code to start from")

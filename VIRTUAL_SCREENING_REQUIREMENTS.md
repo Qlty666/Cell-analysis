@@ -69,6 +69,8 @@ python -m pip install scikit-learn joblib torch
 
 详情见 `README.md` 和 `launchers/install_pipeline_dependencies.py`。
 
+- 细胞反馈阶段还需要 Seurat 对象（`results/checkpoints/seurat_annotated.rds` 或 `results/data/*.rds`）。
+
 ## 一键自动补全
 
 虚拟筛选：
