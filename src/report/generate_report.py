@@ -124,6 +124,7 @@ def main() -> int:
     links = "".join([
         data_link("fig_08_deg_all.csv", "全部差异表达基因"),
         data_link("fig_09_deg_significant.csv", "显著差异表达基因"),
+        data_link("fig_09_deg_horizontal_violin.csv", "Top DEG 横向小提琴图数据"),
         data_link("fig_01_qc_metrics.csv", "QC 指标"),
         data_link("fig_02_doublet_results.csv", "双细胞结果"),
         data_link("fig_05_16_17_cell_annotations.csv", "细胞注释"),
@@ -145,6 +146,8 @@ def main() -> int:
         data_link("fig_40_cellchat_communication.csv", "CellChat 通讯矩阵"),
         data_link("fig_40_cellchat_communication_weight.csv", "CellChat 通讯权重"),
         data_link("fig_42_cellchat_pathways.csv", "CellChat 通路表"),
+        data_link("fig_24_ml_feature_importance.csv", "ML 特征重要性"),
+        data_link("fig_43_44_45_ml_classification_results.csv", "ML 分类预测"),
         data_link("fig_43_44_45_ml_classification_report.csv", "ML 分类报告"),
         data_link("sample_annotations.csv", "样本分组"),
         data_link("liver_cancer_seurat.rds", "Seurat 对象"),
@@ -222,6 +225,7 @@ footer {{ margin-top: 40px; color: #7b8794; font-size: 12px; }}
 <h2>5. 差异表达与火山图</h2>
 {image_card('fig_08_volcano.png', '差异表达火山图')}
 {image_card('fig_09_deg_heatmap.png', 'Top DEG 热图')}
+{image_card('fig_09_deg_horizontal_violin.png', 'Top DEG 横向小提琴图（P 值）')}
 {image_card('fig_14_pca.png', 'PCA 分组图')}
 {image_card('fig_15_elbow.png', '主成分 Elbow 图')}
 <h3>Top 差异表达基因</h3>
