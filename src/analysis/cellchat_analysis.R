@@ -5,8 +5,9 @@ root <- args[1]
 species <- if (length(args) > 1) args[2] else "hs"
 
 if (!requireNamespace("CellChat", quietly = TRUE)) {
-  dir.create(file.path(root, "results", "data"), recursive = TRUE, showWarnings = FALSE)
-  writeLines("CellChat not installed", file.path(root, "results", "data", "cellchat_status.txt"))
+  status_dir <- file.path(root, "results", "data", "09_cellchat")
+  dir.create(status_dir, recursive = TRUE, showWarnings = FALSE)
+  writeLines("CellChat not installed", file.path(status_dir, "cellchat_status.txt"))
   quit(save = "no", status = 0)
 }
 
@@ -39,8 +40,8 @@ cellchat <- filterCommunication(cellchat, min.cells = 10)
 cellchat <- computeCommunProbPathway(cellchat)
 cellchat <- aggregateNet(cellchat)
 
-data_dir <- file.path(root, "results", "data")
-fig_dir <- file.path(root, "results", "figures")
+data_dir <- file.path(root, "results", "data", "09_cellchat")
+fig_dir <- file.path(root, "results", "figures", "09_cellchat")
 dir.create(data_dir, recursive = TRUE, showWarnings = FALSE)
 dir.create(fig_dir, recursive = TRUE, showWarnings = FALSE)
 
@@ -59,7 +60,7 @@ tryCatch(
     colnames(net_df) <- c("Source", "Target", "Count")
     write.csv(
       net_df,
-      file.path(data_dir, "cellchat_communication.csv"),
+      file.path(data_dir, "fig_40_cellchat_communication.csv"),
       row.names = FALSE
     )
     net_weight <- cellchat@net$weight
@@ -67,7 +68,7 @@ tryCatch(
     colnames(weight_df) <- c("Source", "Target", "Weight")
     write.csv(
       weight_df,
-      file.path(data_dir, "cellchat_communication_weight.csv"),
+      file.path(data_dir, "fig_40_cellchat_communication_weight.csv"),
       row.names = FALSE
     )
   },
@@ -81,7 +82,7 @@ tryCatch(
     path_df <- subsetCommunication(cellchat)
     write.csv(
       path_df,
-      file.path(data_dir, "cellchat_pathways.csv"),
+      file.path(data_dir, "fig_42_cellchat_pathways.csv"),
       row.names = FALSE
     )
   },
@@ -138,5 +139,5 @@ tryCatch(
   }
 )
 
-saveRDS(cellchat, file.path(root, "results", "data", "cellchat_object.rds"))
+saveRDS(cellchat, file.path(data_dir, "cellchat_object.rds"))
 writeLines("CellChat completed", file.path(data_dir, "cellchat_status.txt"))

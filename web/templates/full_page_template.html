@@ -240,6 +240,9 @@ a.file-link { color: #1665c0; text-decoration: none; margin-right: 12px; }
 </div>
 
 <script>
+function esc(value) {
+  return String(value == null ? '' : value).replace(/[&<>"']/g, c => ({'&':'&amp;','<':'&lt;','>':'&gt;','"':'&quot;',"'":'&#39;'}[c]));
+}
 let currentJob = null;
 let pollTimer = null;
 let jobAlerted = false;
@@ -462,11 +465,11 @@ function renderResults(data) {
   const ko = summary.knockout || {};
   const dock = summary.docking || {};
   document.getElementById('summaryRow').innerHTML =
-    '<p class="muted">单细胞：' + (summary.single_cell ? summary.single_cell.dataset || '' : '') +
-    '；关键基因：' + (summary.key_genes !== undefined ? summary.key_genes : data.key_genes.length) +
-    '；敲除评分基因数：' + (ko.genes_scored !== undefined ? ko.genes_scored : 0) +
-    '；对接成功：' + (dock.ok !== undefined ? dock.ok : 0) +
-    '；失败：' + (dock.failed !== undefined ? dock.failed : 0) + '</p>';
+    '<p class="muted">单细胞：' + esc(summary.single_cell ? summary.single_cell.dataset || '' : '') +
+    '；关键基因：' + esc(summary.key_genes !== undefined ? summary.key_genes : data.key_genes.length) +
+    '；敲除评分基因数：' + esc(ko.genes_scored !== undefined ? ko.genes_scored : 0) +
+    '；对接成功：' + esc(dock.ok !== undefined ? dock.ok : 0) +
+    '；失败：' + esc(dock.failed !== undefined ? dock.failed : 0) + '</p>';
   const links = document.getElementById('fileLinks');
   links.innerHTML = '';
   (data.files || []).forEach((name) => {

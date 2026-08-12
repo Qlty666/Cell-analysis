@@ -84,8 +84,12 @@ def export_external(cfg: ResolvedConfig, log) -> Path:
 
 def _pick_results(cfg: ResolvedConfig) -> Path:
     reports = cfg.reports_dir()
-    for name in ("ranked_results.csv", "diverse_hits.csv", "hits.csv"):
-        path = reports / name
+    for name in (
+        "fig_46_47_ranked_results.csv",
+        "fig_48_diverse_hits.csv",
+        "fig_47_top_hits.csv",
+    ):
+        path = reports / "01_analysis" / "data" / name
         if path.exists():
             return path
     if cfg.results_path().exists():

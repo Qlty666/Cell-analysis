@@ -327,7 +327,7 @@ def record_job(info: dict, ok: bool) -> None:
     fig_dir = info["out"] / "results" / "figures"
     figure_count = 0
     if fig_dir.exists():
-        figure_count = len(list(fig_dir.glob("*")))
+        figure_count = len(list(fig_dir.rglob("*.png")))
     record = {
         "job": info["log"].stem.replace("web_", ""),
         "accession": info["accession"],
@@ -477,6 +477,9 @@ pre { background: #0f172a; color: #dbeafe; padding: 14px; border-radius: 8px; he
 </div>
 
 <script>
+function esc(value) {
+  return String(value == null ? '' : value).replace(/[&<>"']/g, c => ({'&':'&amp;','<':'&lt;','>':'&gt;','"':'&quot;',"'":'&#39;'}[c]));
+}
 let currentJob = null;
 let pollTimer = null;
 let jobAlerted = false;
@@ -630,7 +633,7 @@ async function loadResults(job) {
       gallery.appendChild(figure);
     });
   } catch (e) {
-    gallery.innerHTML = '<p class="error">结果图加载失败：' + String(e.message || e) + '</p>';
+    gallery.innerHTML = '<p class="error">结果图加载失败：' + esc(e.message || e) + '</p>';
   }
 }
 
@@ -917,6 +920,9 @@ def start_full_job(data: dict) -> dict:
     workdir_value = _first(data, "workdir", "").strip()
     if not workdir_value:
         raise ValueError("\u5de5\u4f5c\u76ee\u5f55\u4e0d\u80fd\u4e3a\u7a7a\uff0c\u8bf7\u624b\u52a8\u8f93\u5165")
+    accession = _first(data, "accession", "").strip()
+    if accession:
+        accession = validate_accession(accession)
     workdir = Path(workdir_value).expanduser().resolve()
     workdir.mkdir(parents=True, exist_ok=True)
     job_id = uuid.uuid4().hex[:8]
@@ -931,7 +937,7 @@ def start_full_job(data: dict) -> dict:
         "--docking-config",
         str(APP_ROOT / "config" / "docking_config.json"),
     ]
-    accession = _first(data, "accession", "").strip()
+    cmd += ["--workdir", str(workdir)]
     if accession:
         cmd += ["--accession", accession]
     output = _first(data, "output", "").strip()
@@ -1508,10 +1514,10 @@ def full_results(workdir: Path) -> dict:
         if (out / name).exists():
             files.append(name)
     for rel in [
-        "outputs/run_001/knockout/ranked_knockout.csv",
-        "outputs/run_001/knockout/target_candidates.csv",
-        "outputs/run_001/validation/validation_plan.md",
-        "outputs/run_001/validation/validation_candidates.csv",
+        "outputs/run_001/results/04_knockout/data/fig_52_53_ranked_knockout.csv",
+        "outputs/run_001/results/04_knockout/data/fig_52_target_candidates.csv",
+        "outputs/run_001/results/05_validation/data/validation_plan.md",
+        "outputs/run_001/results/05_validation/data/validation_candidates.csv",
     ]:
         if (workdir / rel).exists():
             files.append(rel)
@@ -1524,7 +1530,15 @@ def full_results(workdir: Path) -> dict:
         result["key_genes"] = []
     try:
         result["knockout"] = json.loads(
-            pd_read_csv(workdir / "outputs" / "run_001" / "knockout" / "ranked_knockout.csv").to_json(orient="records")
+            pd_read_csv(
+                workdir
+                / "outputs"
+                / "run_001"
+                / "results"
+                / "04_knockout"
+                / "data"
+                / "fig_52_53_ranked_knockout.csv"
+            ).to_json(orient="records")
         )
     except Exception:
         result["knockout"] = []
@@ -1553,8 +1567,7 @@ def _full_file_path(workdir: Path, name: str) -> Path | None:
     workdir = Path(workdir).expanduser().resolve()
     allowed_roots = [
         (workdir / "outputs" / "integration").resolve(),
-        (workdir / "outputs" / "run_001" / "knockout").resolve(),
-        (workdir / "outputs" / "run_001" / "validation").resolve(),
+        (workdir / "outputs" / "run_001" / "results").resolve(),
         (workdir / "data" / "knockout").resolve(),
     ]
     name_path = Path(name)
@@ -1689,16 +1702,16 @@ def record_dock_job(info: dict, ok: bool) -> None:
 def dock_results(info: dict) -> dict:
     import csv as csv_module
 
-    reports = info["output_dir"] / "reports"
+    reports = info["output_dir"] / "results"
     summary = {}
-    summary_path = reports / "summary.json"
+    summary_path = reports / "01_analysis" / "summary.json"
     if summary_path.exists():
         try:
             summary = json.loads(summary_path.read_text(encoding="utf-8"))
         except Exception:
             summary = {}
     rows: list[dict] = []
-    ranked = reports / "ranked_results.csv"
+    ranked = reports / "01_analysis" / "data" / "fig_46_47_ranked_results.csv"
     if ranked.exists():
         with ranked.open("r", newline="", encoding="utf-8") as fh:
             for i, row in enumerate(csv_module.DictReader(fh)):
@@ -1706,12 +1719,19 @@ def dock_results(info: dict) -> dict:
                     break
                 rows.append(row)
     figures = (
-        sorted(p.name for p in reports.glob("*.png"))
+        sorted(
+            p.relative_to(reports).as_posix()
+            for p in reports.rglob("*.png")
+        )
         if reports.exists()
         else []
     )
     files = (
-        sorted(p.name for p in reports.iterdir() if p.is_file())
+        sorted(
+            p.relative_to(reports).as_posix()
+            for p in reports.rglob("*")
+            if p.is_file()
+        )
         if reports.exists()
         else []
     )
@@ -1727,11 +1747,15 @@ def dock_results(info: dict) -> dict:
 
 def _dock_file_path(info: dict, name: str):
     out = info["output_dir"].resolve()
+    results_root = (out / "results").resolve()
+    docked_root = (out / "docked").resolve()
+    target = (results_root / Path(name)).resolve()
+    if target.is_file() and results_root in target.parents:
+        return target
     base = Path(name).name
-    for folder in [(out / "reports").resolve(), (out / "docked").resolve()]:
-        target = (folder / base).resolve()
-        if target.is_file() and target.parent == folder:
-            return target
+    target = (docked_root / base).resolve()
+    if target.is_file() and target.parent == docked_root:
+        return target
     return None
 
 
@@ -1756,8 +1780,8 @@ def run_knockout_request(data: dict) -> dict:
     import logging
 
     summary = run_knockout(cfg, logging.getLogger("docking.web_knockout"))
-    ko_dir = cfg.output_dir / "knockout"
-    ranked = ko_dir / "ranked_knockout.csv"
+    ko_dir = cfg.knockout_dir()
+    ranked = ko_dir / "data" / "fig_52_53_ranked_knockout.csv"
     rows: list[dict] = []
     if ranked.exists():
         import csv as csv_module
@@ -1769,12 +1793,19 @@ def run_knockout_request(data: dict) -> dict:
                     break
                 rows.append(row)
     figures = (
-        sorted(p.name for p in ko_dir.glob("*.png"))
+        sorted(
+            p.relative_to(ko_dir).as_posix()
+            for p in ko_dir.rglob("*.png")
+        )
         if ko_dir.exists()
         else []
     )
     files = (
-        sorted(p.name for p in ko_dir.iterdir() if p.is_file())
+        sorted(
+            p.relative_to(ko_dir).as_posix()
+            for p in ko_dir.rglob("*")
+            if p.is_file()
+        )
         if ko_dir.exists()
         else []
     )
@@ -1803,9 +1834,13 @@ def run_validation_request(data: dict) -> dict:
     import logging
 
     summary = export_validation(cfg, logging.getLogger("docking.web_validation"))
-    val_dir = cfg.output_dir / "validation"
+    val_dir = cfg.validation_dir()
     files = (
-        sorted(p.name for p in val_dir.iterdir() if p.is_file())
+        sorted(
+            p.relative_to(val_dir).as_posix()
+            for p in val_dir.rglob("*")
+            if p.is_file()
+        )
         if val_dir.exists()
         else []
     )
@@ -1825,11 +1860,11 @@ def _ko_file_path(workdir: str, name: str):
         APP_ROOT / "config" / "docking_config.json",
         {"workdir": str(work)},
     )
-    folder = (cfg.output_dir / "knockout").resolve()
-    base = Path(name).name
-    target = (folder / base).resolve()
-    if target.is_file() and target.parent == folder:
-        return target
+    for folder in (cfg.knockout_dir(), cfg.validation_dir()):
+        folder = folder.resolve()
+        target = (folder / Path(name)).resolve()
+        if target.is_file() and folder in target.parents:
+            return target
     return None
 
 
@@ -1923,7 +1958,8 @@ class Handler(BaseHTTPRequestHandler):
                 return
             fig_dir = info["out"] / "results" / "figures"
             figures = sorted(
-                p.name for p in fig_dir.glob("*") if p.is_file()
+                p.relative_to(fig_dir).as_posix()
+                for p in fig_dir.rglob("*.png")
             ) if fig_dir.exists() else []
             body = json.dumps({"figures": figures}).encode("utf-8")
             self._send(200, body, "application/json")
@@ -1931,14 +1967,14 @@ class Handler(BaseHTTPRequestHandler):
         if parsed.path == "/figure":
             query = parse_qs(parsed.query)
             job = query.get("job", [""])[0]
-            name = Path(query.get("name", [""])[0]).name
+            name = Path(query.get("name", [""])[0])
             info = JOBS.get(job)
             if not info:
                 self._send(404, b"job not found", "text/plain; charset=utf-8")
                 return
             fig_dir = (info["out"] / "results" / "figures").resolve()
             target = (fig_dir / name).resolve()
-            if not target.is_file() or target.parent != fig_dir:
+            if not target.is_file() or fig_dir not in target.parents:
                 self._send(404, b"figure not found", "text/plain; charset=utf-8")
                 return
             suffix = target.suffix.lower()
@@ -2103,7 +2139,7 @@ class Handler(BaseHTTPRequestHandler):
         if parsed.path == "/dock/file":
             query = parse_qs(parsed.query)
             job = query.get("job", [""])[0]
-            name = Path(query.get("name", [""])[0]).name
+            name = Path(query.get("name", [""])[0])
             info = DOCK_JOBS.get(job)
             if not info:
                 self._send(404, b"job not found", "text/plain; charset=utf-8")

@@ -195,8 +195,20 @@ def _single_cell_outputs_ready(root: Path) -> bool:
     return (
         (root / "results" / "pipeline_complete.json").exists()
         and (
-            (root / "results" / "data" / "deg_significant.csv").exists()
-            or (root / "results" / "data" / "deg_all.csv").exists()
+            (
+                root
+                / "results"
+                / "data"
+                / "05_deg"
+                / "fig_09_deg_significant.csv"
+            ).exists()
+            or (
+                root
+                / "results"
+                / "data"
+                / "05_deg"
+                / "fig_08_deg_all.csv"
+            ).exists()
         )
     )
 
@@ -217,9 +229,9 @@ def extract_key_genes(
 ) -> pd.DataFrame:
     """Rank significant DEGs into a compact key-gene table."""
     data_dir = single_cell_root / "results" / "data"
-    deg_path = data_dir / "deg_significant.csv"
+    deg_path = data_dir / "05_deg" / "fig_09_deg_significant.csv"
     if not deg_path.exists():
-        deg_path = data_dir / "deg_all.csv"
+        deg_path = data_dir / "05_deg" / "fig_08_deg_all.csv"
     if not deg_path.exists():
         raise IntegrationError(f"DEG table not found under {data_dir}")
 
@@ -278,7 +290,7 @@ def extract_key_genes(
     frame = frame.reset_index(drop=True)
     frame["rank"] = np.arange(1, len(frame) + 1)
 
-    ml_path = data_dir / "ml_feature_importance.csv"
+    ml_path = data_dir / "07_ml" / "fig_24_ml_feature_importance.csv"
     if ml_path.exists():
         try:
             ml = pd.read_csv(ml_path, index_col=0)
@@ -1028,9 +1040,9 @@ def run_target_docking(
         base["uniprot"] = uniprot
         return base
 
-    report_dir = cfg.output_dir / "reports"
+    report_dir = cfg.analysis_dir()
     summary = _read_json(report_dir / "summary.json")
-    ranked = report_dir / "ranked_results.csv"
+    ranked = report_dir / "data" / "fig_46_47_ranked_results.csv"
     hits = 0
     best = ""
     if ranked.exists():
@@ -1183,11 +1195,23 @@ def generate_integrated_report(
     ko_summary = _read_json(out_dir / "knockout_summary.json")
     ko_top = pd.DataFrame()
     ko_ranked = (
-        workdir / "outputs" / "run_001" / "knockout" / "ranked_knockout.csv"
+        workdir
+        / "outputs"
+        / "run_001"
+        / "results"
+        / "04_knockout"
+        / "data"
+        / "fig_52_53_ranked_knockout.csv"
     )
     if not ko_ranked.exists():
         ko_ranked = (
-            workdir / "outputs" / "run_001" / "knockout" / "ranked_knockout.csv"
+            workdir
+            / "outputs"
+            / "run_001"
+            / "results"
+            / "04_knockout"
+            / "data"
+            / "fig_52_53_ranked_knockout.csv"
         )
     if ko_ranked.exists():
         ko_top = pd.read_csv(ko_ranked)
@@ -1299,7 +1323,7 @@ a {{ color: #1d4ed8; }}
   <h2>Outputs</h2>
   <ul>
     <li><a href="{rel(out_dir / 'key_genes.csv')}">key_genes.csv</a></li>
-    <li><a href="{rel(ko_ranked) if ko_ranked.exists() else '#'}">ranked_knockout.csv</a></li>
+    <li><a href="{rel(ko_ranked) if ko_ranked.exists() else '#'}">fig_52_53_ranked_knockout.csv</a></li>
     <li><a href="{rel(out_dir / 'docking_targets.csv') if (out_dir / 'docking_targets.csv').exists() else '#'}">docking_targets.csv</a></li>
   </ul>
 </div>
@@ -1605,6 +1629,9 @@ def _apply_defaults(args, config: dict) -> None:
         raise IntegrationError(
             "workdir is required; provide --workdir or set workdir in config"
         )
+    args.accession = str(args.accession or "").strip().upper()
+    if not re.fullmatch(r"GSE\d+", args.accession):
+        raise IntegrationError("GSE accession must look like GSE125449")
     if args.workdir:
         args.workdir = str(_resolve_path(args.workdir, APP_ROOT))
     if args.output:
