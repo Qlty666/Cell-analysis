@@ -448,7 +448,7 @@ pre { background: #0f172a; color: #dbeafe; padding: 14px; border-radius: 8px; he
     <input id="acc" name="accession" placeholder="GSE125449" required>
 
     <label for="out">结果保存路径</label>
-    <input id="out" name="output" placeholder="results\\out" required>
+    <input id="out" name="output" placeholder="请输入结果保存地址" required>
 
     <label for="sp">物种</label>
     <select id="sp" name="species">
@@ -911,9 +911,13 @@ def _dock_status(info: dict) -> dict:
 
 
 def start_full_job(data: dict) -> dict:
-    workdir = Path(
-        _first(data, "workdir", str(APP_ROOT / "dock"))
-    ).expanduser().resolve()
+    output_value = _first(data, "output", "").strip()
+    if not output_value:
+        raise ValueError("单细胞结果目录不能为空，请输入结果保存地址")
+    workdir_value = _first(data, "workdir", "").strip()
+    if not workdir_value:
+        raise ValueError("\u5de5\u4f5c\u76ee\u5f55\u4e0d\u80fd\u4e3a\u7a7a\uff0c\u8bf7\u624b\u52a8\u8f93\u5165")
+    workdir = Path(workdir_value).expanduser().resolve()
     workdir.mkdir(parents=True, exist_ok=True)
     job_id = uuid.uuid4().hex[:8]
     log_path = workdir / "logs" / f"web_full_{job_id}.log"
@@ -1052,18 +1056,47 @@ def _full_status(info: dict) -> dict:
         }
     running = info["proc"].poll() is None
     if not running:
+        paused = bool(info.get("paused")) or info["proc"].returncode == 98
+        if paused:
+            marker_dir = info["workdir"] / "outputs" / "integration" / ".stages"
+            stage, error = _finished_info(
+                marker_dir,
+                FULL_STAGE_LABELS,
+                [info["log"]],
+                True,
+            )
+            _notify_finished(
+                info,
+                "full",
+                "鍏ㄨ嚜鍔ㄦ祦姘寸嚎",
+                f"{info.get('accession') or '鍏ㄨ嚜鍔ㄦ祦姘寸嚎'} 鍏ㄨ嚜鍔ㄦ祦姘寸嚎",
+                "paused",
+                stage,
+                error,
+                exit_code=info["proc"].returncode,
+            )
+            return {
+                "running": False,
+                "ok": False,
+                "queued": False,
+                "paused": True,
+                "stage": stage,
+                "error": error,
+            }
         ok = info["proc"].returncode == 0
         _drain_full_queue()
-        marker_dir = info["workdir"] / "outputs" / "integration" / ".stages"
-        stage, error = _finished_info(
-            marker_dir,
-            FULL_STAGE_LABELS,
-            [info["log"]],
-            False,
-        )
         status = "completed" if ok else "interrupted"
-        if status == "completed":
+        if ok:
+            stage = "\u5168\u6d41\u7a0b\u5b8c\u6210"
             error = ""
+        else:
+            marker_dir = info["workdir"] / "outputs" / "integration" / ".stages"
+            stage, error = _finished_info(
+                marker_dir,
+                FULL_STAGE_LABELS,
+                [info["log"]],
+                False,
+            )
         _notify_finished(
             info,
             "full",
