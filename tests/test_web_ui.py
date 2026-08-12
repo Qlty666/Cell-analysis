@@ -3,6 +3,7 @@
 
 from __future__ import annotations
 
+import socket
 import sys
 import tempfile
 import time
@@ -23,8 +24,10 @@ from web_ui import (  # noqa: E402
     _dock_file_path,
     _full_file_path,
     _full_status,
+    _cleanup_stale_web_ui,
     _heartbeat_client_ids,
     _inject_heartbeat_script,
+    _port_is_listening,
     _purge_stale_heartbeats,
     dock_results,
     full_results,
@@ -40,6 +43,32 @@ class _FakeProc:
 
     def poll(self) -> int:
         return self.returncode
+
+
+class TestPortCleanup(unittest.TestCase):
+    def test_port_listening_detection(self):
+        with socket.socket(socket.AF_INET, socket.SOCK_STREAM) as sock:
+            sock.bind(("127.0.0.1", 0))
+            sock.listen()
+            port = sock.getsockname()[1]
+            self.assertTrue(_port_is_listening("127.0.0.1", port))
+        self.assertFalse(_port_is_listening("127.0.0.1", 0))
+
+    def test_cleanup_skips_when_port_free(self):
+        with (
+            mock.patch("web_ui._port_is_listening", return_value=False),
+            mock.patch("web_ui._stop_stale_web_ui") as stop,
+        ):
+            self.assertTrue(_cleanup_stale_web_ui("127.0.0.1", 8000))
+            stop.assert_not_called()
+
+    def test_cleanup_stops_when_port_busy(self):
+        with (
+            mock.patch("web_ui._port_is_listening", return_value=True),
+            mock.patch("web_ui._stop_stale_web_ui", return_value=True) as stop,
+        ):
+            self.assertTrue(_cleanup_stale_web_ui("127.0.0.1", 8000))
+            stop.assert_called_once_with("127.0.0.1", 8000)
 
 
 class TestHeartbeatAutoShutdown(unittest.TestCase):
