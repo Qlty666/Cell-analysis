@@ -44,6 +44,43 @@ fig_style <- function(name) {
   }
 }
 
+figure_stage <- function(name) {
+  num <- as.integer(sub("^fig_([0-9]+)_.*$", "\\1", name))
+  if (is.na(num)) return("00_other")
+  if (num <= 1) return("01_qc")
+  if (num == 2) return("02_doublets")
+  if (num %in% c(3, 4, 14, 15)) return("03_cluster")
+  if (num %in% c(5, 6, 7, 16, 17, 18, 19)) return("04_annotation")
+  if (num %in% c(8, 9)) return("05_deg")
+  if (num %in% c(10, 11, 12, 13, 20, 21, 22, 23)) return("06_enrichment")
+  if (num %in% c(24, 25, 43, 44, 45)) return("07_ml")
+  if (num >= 26 && num <= 39) return("08_publication")
+  if (num >= 40 && num <= 42) return("09_cellchat")
+  return("00_other")
+}
+
+stage_fig_file <- function(file) {
+  name <- basename(file)
+  out_dir <- file.path(dirname(file), figure_stage(name))
+  dir.create(out_dir, recursive = TRUE, showWarnings = FALSE)
+  file.path(out_dir, name)
+}
+
+stage_data_file <- function(name) {
+  num <- as.integer(sub("^fig_([0-9]+)_.*$", "\\1", name))
+  if (!is.na(num)) {
+    out_dir <- file.path(data_dir, figure_stage(name))
+  } else if (name == "sample_annotations.csv") {
+    out_dir <- file.path(data_dir, "01_qc")
+  } else if (name == "liver_cancer_seurat.rds") {
+    return(file.path(data_dir, name))
+  } else {
+    out_dir <- data_dir
+  }
+  dir.create(out_dir, recursive = TRUE, showWarnings = FALSE)
+  file.path(out_dir, name)
+}
+
 param_num <- function(name) {
   val <- Sys.getenv(name, unset = "")
   if (nzchar(val)) {
@@ -72,7 +109,7 @@ save_fig <- function(file, plot, width, height, dpi = 150) {
     log_msg("skip figure: ", name)
     return(invisible(NULL))
   }
-  ggsave(file, plot, width = width, height = height, dpi = dpi)
+  ggsave(stage_fig_file(file), plot, width = width, height = height, dpi = dpi)
   log_msg("saved figure: ", name)
 }
 
@@ -95,7 +132,7 @@ save_pheatmap <- function(file, fn, width, height, res = 150) {
     log_msg("skip figure: ", name)
     return(invisible(NULL))
   }
-  png(file, width = width, height = height, res = res)
+  png(stage_fig_file(file), width = width, height = height, res = res)
   on.exit(dev.off())
   fn()
   log_msg("saved figure: ", name)
@@ -829,7 +866,7 @@ if (stage_allowed("01")) run_stage("01_load_data", {
     }
   }
 
-  write.csv(ann, file.path(data_dir, "sample_annotations.csv"), row.names = FALSE)
+  write.csv(ann, stage_data_file("sample_annotations.csv"), row.names = FALSE)
 
   seurat_raw <- CreateSeuratObject(
     counts = counts,
@@ -923,7 +960,7 @@ if (stage_allowed("02")) run_stage("02_qc_filter", {
   )
   qc_metrics$sample <- seurat_qc$sample
   qc_metrics$condition <- seurat_qc$condition
-  write.csv(qc_metrics, file.path(data_dir, "qc_metrics.csv"))
+  write.csv(qc_metrics, stage_data_file("fig_01_qc_metrics.csv"))
 
   p_qc <- VlnPlot(
     seurat_qc,
@@ -975,7 +1012,7 @@ if (stage_allowed("03")) run_stage("03_doublets", {
     doublet_call = seurat_qc$doublet_call,
     stringsAsFactors = FALSE
   )
-  write.csv(doublet_tbl, file.path(data_dir, "doublet_results.csv"), row.names = FALSE)
+  write.csv(doublet_tbl, stage_data_file("fig_02_doublet_results.csv"), row.names = FALSE)
 
   p_dbl <- ggplot(
     doublet_tbl,
@@ -1032,7 +1069,7 @@ if (stage_allowed("04")) run_stage("04_cluster", {
         condition = seurat$condition,
         stringsAsFactors = FALSE
       )
-      write.csv(cc_tbl, file.path(data_dir, "cell_cycle_scores.csv"), row.names = FALSE)
+      write.csv(cc_tbl, stage_data_file("fig_26_27_cell_cycle_scores.csv"), row.names = FALSE)
       log_msg("cell cycle scoring applied")
       if (regress_cellcycle) {
         seurat <- ScaleData(
@@ -1121,14 +1158,14 @@ if (stage_allowed("04")) run_stage("04_cluster", {
   umap_tbl$seurat_clusters <- as.character(seurat$seurat_clusters)
   umap_tbl$condition <- seurat$condition
   umap_tbl$sample <- seurat$sample
-  write.csv(umap_tbl, file.path(data_dir, "umap_coordinates.csv"), row.names = FALSE)
+  write.csv(umap_tbl, stage_data_file("fig_03_04_05_umap_coordinates.csv"), row.names = FALSE)
 
   cluster_counts <- as.data.frame(table(
     seurat_clusters = seurat$seurat_clusters,
     condition = seurat$condition,
     sample = seurat$sample
   ))
-  write.csv(cluster_counts, file.path(data_dir, "cluster_composition.csv"), row.names = FALSE)
+  write.csv(cluster_counts, stage_data_file("fig_18_19_30_cluster_composition.csv"), row.names = FALSE)
 
   log_msg("number of clusters: ", length(unique(seurat$seurat_clusters)))
   saveRDS(seurat, ckpt_path("seurat_clustered.rds"))
@@ -1193,7 +1230,7 @@ if (stage_allowed("05")) run_stage("05_annotation", {
     sample = seurat$sample,
     stringsAsFactors = FALSE
   )
-  write.csv(annotation_tbl, file.path(data_dir, "cell_annotations.csv"), row.names = FALSE)
+  write.csv(annotation_tbl, stage_data_file("fig_05_16_17_cell_annotations.csv"), row.names = FALSE)
 
   p_clusters <- DimPlot(seurat, group.by = "seurat_clusters", label = TRUE) +
     ggtitle("Seurat clusters")
@@ -1304,7 +1341,7 @@ if (stage_allowed("05")) run_stage("05_annotation", {
   prop_stats_df$Padj <- p.adjust(prop_stats_df$Pvalue, method = "BH")
   write.csv(
     prop_stats_df,
-    file.path(data_dir, "celltype_proportion_stats.csv"),
+    stage_data_file("fig_18_19_celltype_proportion_stats.csv"),
     row.names = FALSE
   )
   p_cell_prop <- ggplot(prop_tbl, aes(x = CellType, y = Freq, fill = Condition)) +
@@ -1336,10 +1373,10 @@ if (stage_allowed("05")) run_stage("05_annotation", {
   )
 
   conf <- table(seurat$celltype_annot, seurat$published_type)
-  write.csv(as.data.frame.matrix(conf), file.path(data_dir, "annotation_confusion.csv"))
+  write.csv(as.data.frame.matrix(conf), stage_data_file("fig_07_annotation_confusion.csv"))
   if (!"fig_07_annotation_confusion_heatmap.png" %in% skip_figs) {
     png(
-      file.path(fig_dir, "fig_07_annotation_confusion_heatmap.png"),
+      stage_fig_file(file.path(fig_dir, "fig_07_annotation_confusion_heatmap.png")),
       width = 1200,
       height = 800,
       res = 150
@@ -1462,10 +1499,10 @@ if (stage_allowed("06")) run_stage("06_differential_expression", {
   deg$neg_log10_padj <- -log10(pmax(deg$p_val_adj, 1e-300))
   deg <- deg[order(deg$p_val_adj, -abs(deg$avg_log2FC)), ]
 
-  write.csv(deg, file.path(data_dir, "deg_all.csv"), row.names = FALSE)
+  write.csv(deg, stage_data_file("fig_08_deg_all.csv"), row.names = FALSE)
   write.csv(
     deg[deg$significant, ],
-    file.path(data_dir, "deg_significant.csv"),
+    stage_data_file("fig_09_deg_significant.csv"),
     row.names = FALSE
   )
 
@@ -1551,7 +1588,7 @@ if (stage_allowed("06")) run_stage("06_differential_expression", {
 })
 
 if (stage_allowed("07")) run_stage("07_enrichment", {
-  deg <- read.csv(file.path(data_dir, "deg_all.csv"), stringsAsFactors = FALSE)
+  deg <- read.csv(stage_data_file("fig_08_deg_all.csv"), stringsAsFactors = FALSE)
   deg_up <- deg[deg$significant & deg$avg_log2FC > 0, ]
   deg_down <- deg[deg$significant & deg$avg_log2FC < 0, ]
 
@@ -1622,24 +1659,24 @@ if (stage_allowed("07")) run_stage("07_enrichment", {
   up_res <- run_enrichment(deg_up, "up-regulated")
   down_res <- run_enrichment(deg_down, "down-regulated")
 
-  write_res <- function(res, prefix) {
+  write_res <- function(res, go_prefix, kegg_prefix) {
     if (!is.null(res$go)) {
       go_df <- as.data.frame(res$go)
-      write.csv(go_df, file.path(data_dir, paste0(prefix, "_go.csv")), row.names = FALSE)
+      write.csv(go_df, stage_data_file(paste0(go_prefix, "_go.csv")), row.names = FALSE)
     } else {
       write.csv(data.frame(note = "no significant GO terms"),
-                file.path(data_dir, paste0(prefix, "_go.csv")), row.names = FALSE)
+                stage_data_file(paste0(go_prefix, "_go.csv")), row.names = FALSE)
     }
     if (!is.null(res$kegg)) {
       kegg_df <- as.data.frame(res$kegg)
-      write.csv(kegg_df, file.path(data_dir, paste0(prefix, "_kegg.csv")), row.names = FALSE)
+      write.csv(kegg_df, stage_data_file(paste0(kegg_prefix, "_kegg.csv")), row.names = FALSE)
     } else {
       write.csv(data.frame(note = "no significant KEGG terms"),
-                file.path(data_dir, paste0(prefix, "_kegg.csv")), row.names = FALSE)
+                stage_data_file(paste0(kegg_prefix, "_kegg.csv")), row.names = FALSE)
     }
   }
-  write_res(up_res, "enrichment_up")
-  write_res(down_res, "enrichment_down")
+  write_res(up_res, "fig_10_enrichment_up", "fig_12_enrichment_up")
+  write_res(down_res, "fig_11_enrichment_down", "fig_13_enrichment_down")
 
   plot_res <- function(res, file, title) {
     if (is.null(res) || nrow(as.data.frame(res)) == 0) {
@@ -1774,7 +1811,7 @@ if (stage_allowed("08")) run_stage("08_publication_analyses", {
           condition = seurat$condition,
           stringsAsFactors = FALSE
         )
-        write.csv(cc_tbl, file.path(data_dir, "cell_cycle_scores.csv"), row.names = FALSE)
+        write.csv(cc_tbl, stage_data_file("fig_26_27_cell_cycle_scores.csv"), row.names = FALSE)
       }
     }
     if ("Phase" %in% colnames(seurat@meta.data)) {
@@ -1825,7 +1862,7 @@ if (stage_allowed("08")) run_stage("08_publication_analyses", {
     log_msg("skip figure: fig_28_umap_sample.png (single sample)")
   }
 
-  dbl_path <- file.path(data_dir, "doublet_results.csv")
+  dbl_path <- stage_data_file("fig_02_doublet_results.csv")
   if (file.exists(dbl_path)) {
     dbl <- read.csv(dbl_path, stringsAsFactors = FALSE)
     if (nrow(dbl) > 0 && "doublet_call" %in% colnames(dbl)) {
@@ -1840,7 +1877,7 @@ if (stage_allowed("08")) run_stage("08_publication_analyses", {
       dbl_rate$condition <- dbl$condition[match(dbl_rate$sample, dbl$sample)]
       write.csv(
         dbl_rate,
-        file.path(data_dir, "doublet_rate_by_sample.csv"),
+        stage_data_file("fig_29_doublet_rate_by_sample.csv"),
         row.names = FALSE
       )
       p_dbl_rate <- ggplot(
@@ -1915,7 +1952,7 @@ if (stage_allowed("08")) run_stage("08_publication_analyses", {
       }
       write.csv(
         markers,
-        file.path(data_dir, "cluster_markers.csv"),
+        stage_data_file("fig_16_17_31_32_cluster_markers.csv"),
         row.names = FALSE
       )
       cluster_col <- if ("cluster" %in% colnames(markers)) {
@@ -2029,7 +2066,7 @@ if (stage_allowed("08")) run_stage("08_publication_analyses", {
       colnames(sig_df) <- c("condition", "celltype_annot", names(sig_features))
       write.csv(
         sig_df,
-        file.path(data_dir, "signature_scores.csv"),
+        stage_data_file("fig_33_34_35_signature_scores.csv"),
         row.names = FALSE
       )
 
@@ -2094,7 +2131,7 @@ if (stage_allowed("08")) run_stage("08_publication_analyses", {
     }
   }
 
-  prop_stats_path <- file.path(data_dir, "celltype_proportion_stats.csv")
+  prop_stats_path <- stage_data_file("fig_18_19_celltype_proportion_stats.csv")
   if (file.exists(prop_stats_path)) {
     prop_stats <- read.csv(prop_stats_path, stringsAsFactors = FALSE)
     prop_stats$log2OR <- log2(prop_stats$OddsRatio)
@@ -2215,7 +2252,7 @@ if (stage_allowed("08")) run_stage("08_publication_analyses", {
           )
           write.csv(
             cnv_df,
-            file.path(data_dir, "cnv_heatmap.csv"),
+            stage_data_file("fig_36_cnv_heatmap.csv"),
             row.names = FALSE
           )
           ann_col <- data.frame(
@@ -2323,7 +2360,7 @@ if (stage_allowed("08")) run_stage("08_publication_analyses", {
               condition = seurat$condition,
               stringsAsFactors = FALSE
             ),
-            file.path(data_dir, "singleR_annotations.csv"),
+            stage_data_file("fig_37_singleR_annotations.csv"),
             row.names = FALSE
           )
           p_singler <- DimPlot(seurat, group.by = "singleR_label", label = TRUE) +
@@ -2341,7 +2378,7 @@ if (stage_allowed("08")) run_stage("08_publication_analyses", {
           )
           write.csv(
             as.data.frame.matrix(conf_singler),
-            file.path(data_dir, "singleR_confusion.csv")
+            stage_data_file("fig_38_singleR_confusion.csv")
           )
           if (nrow(conf_singler) > 0 && ncol(conf_singler) > 0) {
             save_pheatmap(
@@ -2396,7 +2433,7 @@ if (stage_allowed("08")) run_stage("08_publication_analyses", {
                 pseudotime = seurat$pseudotime,
                 stringsAsFactors = FALSE
               ),
-              file.path(data_dir, "trajectory_pseudotime.csv"),
+              stage_data_file("fig_39_trajectory_pseudotime.csv"),
               row.names = FALSE
             )
             p_pt <- FeaturePlot(seurat, features = "pseudotime") +
@@ -2462,13 +2499,13 @@ if (stage_allowed("09")) run_stage("09_summary_outputs", {
     seurat_raw <- readRDS(ckpt_path("seurat_raw.rds"))
   }
   if (!exists("qc_metrics")) {
-    qc_metrics <- read.csv(file.path(data_dir, "qc_metrics.csv"))
+    qc_metrics <- read.csv(stage_data_file("fig_01_qc_metrics.csv"))
   }
   saveRDS(seurat, file.path(data_dir, "liver_cancer_seurat.rds"))
 
-  deg <- read.csv(file.path(data_dir, "deg_all.csv"), stringsAsFactors = FALSE)
+  deg <- read.csv(stage_data_file("fig_08_deg_all.csv"), stringsAsFactors = FALSE)
   go_up <- tryCatch(
-    read.csv(file.path(data_dir, "enrichment_up_go.csv"), stringsAsFactors = FALSE),
+    read.csv(stage_data_file("fig_10_enrichment_up_go.csv"), stringsAsFactors = FALSE),
     error = function(e) data.frame()
   )
 

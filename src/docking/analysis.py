@@ -33,19 +33,23 @@ def analyze_results(cfg: ResolvedConfig, log):
     hits = ok[ok["affinity"] <= cutoff].copy()
     top = hits.head(top_n) if not hits.empty else ok.head(top_n)
 
-    reports_dir = cfg.reports_dir()
+    reports_dir = cfg.analysis_dir()
+    figures_dir = reports_dir / "figures"
+    data_dir = reports_dir / "data"
     reports_dir.mkdir(parents=True, exist_ok=True)
-    ok.to_csv(reports_dir / "ranked_results.csv", index=False)
-    hits.to_csv(reports_dir / "hits.csv", index=False)
+    figures_dir.mkdir(parents=True, exist_ok=True)
+    data_dir.mkdir(parents=True, exist_ok=True)
+    ok.to_csv(data_dir / "fig_46_47_ranked_results.csv", index=False)
+    hits.to_csv(data_dir / "fig_47_top_hits.csv", index=False)
 
     diverse = top
     if cfg.get("analysis", "diversity", True) and len(top) > 1:
         diverse = select_diverse(top, cfg, log)
-        diverse.to_csv(reports_dir / "diverse_hits.csv", index=False)
+        diverse.to_csv(data_dir / "fig_48_diverse_hits.csv", index=False)
 
     if cfg.get("analysis", "figures", True):
         try:
-            make_figures(ok, hits, top, diverse, reports_dir, cutoff)
+            make_figures(ok, hits, top, diverse, figures_dir, cutoff)
         except Exception as exc:
             log.warning("figure generation failed: %s", exc)
 
@@ -53,7 +57,7 @@ def analyze_results(cfg: ResolvedConfig, log):
         import openpyxl  # noqa: F401
 
         with pd.ExcelWriter(
-            reports_dir / "docking_results.xlsx", engine="openpyxl"
+            data_dir / "docking_results.xlsx", engine="openpyxl"
         ) as xw:
             ok.to_excel(xw, sheet_name="all", index=False)
             hits.to_excel(xw, sheet_name="hits", index=False)
@@ -120,7 +124,7 @@ def make_figures(
     hits: pd.DataFrame,
     top: pd.DataFrame,
     diverse: pd.DataFrame,
-    reports_dir: Path,
+    figures_dir: Path,
     cutoff: float,
 ) -> None:
     import matplotlib
@@ -135,7 +139,7 @@ def make_figures(
     ax.set_ylabel("Ligand count")
     ax.set_title("Docking affinity distribution")
     fig.tight_layout()
-    fig.savefig(reports_dir / "affinity_distribution.png", dpi=150)
+    fig.savefig(figures_dir / "fig_46_affinity_distribution.png", dpi=150)
     plt.close(fig)
 
     top20 = top.head(20).iloc[::-1]
@@ -147,7 +151,7 @@ def make_figures(
         ax.set_xlabel("Affinity (kcal/mol)")
         ax.set_title("Top ranked docking hits")
         fig.tight_layout()
-        fig.savefig(reports_dir / "top_hits.png", dpi=150)
+        fig.savefig(figures_dir / "fig_47_top_hits.png", dpi=150)
         plt.close(fig)
 
     if not diverse.empty:
@@ -160,5 +164,5 @@ def make_figures(
         ax.set_xlabel("Affinity (kcal/mol)")
         ax.set_title("Diverse hit selection")
         fig.tight_layout()
-        fig.savefig(reports_dir / "diverse_hits.png", dpi=150)
+        fig.savefig(figures_dir / "fig_48_diverse_hits.png", dpi=150)
         plt.close(fig)

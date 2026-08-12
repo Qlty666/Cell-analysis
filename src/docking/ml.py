@@ -114,10 +114,13 @@ def train_ml(
     )
     model.fit(X_train, y_train)
 
-    reports = cfg.reports_dir()
-    reports.mkdir(parents=True, exist_ok=True)
+    reports = cfg.ml_dir()
+    (reports / "data").mkdir(parents=True, exist_ok=True)
+    (reports / "figures").mkdir(parents=True, exist_ok=True)
     is_torch = model_type == "torch"
-    model_file = reports / ("ml_model.pt" if is_torch else "ml_model.joblib")
+    model_file = reports / "data" / (
+        "ml_model.pt" if is_torch else "ml_model.joblib"
+    )
     if is_torch:
         import torch
 
@@ -137,7 +140,7 @@ def train_ml(
     }
     if task == "classification":
         info["classes"] = encoder.classes_.tolist()
-    write_json(reports / "ml_model_info.json", info)
+    write_json(reports / "data" / "ml_model_info.json", info)
 
     if hasattr(model, "feature_importances_"):
         _save_importance(model, X.shape[1], reports)
@@ -154,8 +157,8 @@ def train_ml(
 
 
 def predict_ml(cfg: ResolvedConfig, log) -> dict:
-    reports = cfg.reports_dir()
-    info_path = reports / "ml_model_info.json"
+    reports = cfg.ml_dir()
+    info_path = reports / "data" / "ml_model_info.json"
     if not info_path.exists():
         raise DockingError("no trained ML model found; run ml-train first")
     info = _read_json(info_path)
@@ -178,7 +181,7 @@ def predict_ml(cfg: ResolvedConfig, log) -> dict:
         model = joblib.load(model_file)
     task = info["task"]
 
-    results_csv = reports / "ranked_results.csv"
+    results_csv = cfg.analysis_dir() / "data" / "fig_46_47_ranked_results.csv"
     if not results_csv.exists():
         results_csv = cfg.results_path()
     if not results_csv.exists():
@@ -203,14 +206,14 @@ def predict_ml(cfg: ResolvedConfig, log) -> dict:
     else:
         out["combined_rank"] = out["ml_rank"]
     out = out.sort_values("ml_rank")
-    out_path = reports / "ml_ranked_results.csv"
+    out_path = reports / "data" / "ml_ranked_results.csv"
     out.to_csv(out_path, index=False)
     summary = {
         "scored": int(len(out)),
         "task": task,
         "output": str(out_path),
     }
-    write_json(reports / "ml_predict_summary.json", summary)
+    write_json(reports / "data" / "ml_predict_summary.json", summary)
     log.info("ML prediction complete: %s ligands scored -> %s", len(out), out_path)
     return summary
 
@@ -369,7 +372,11 @@ def _save_importance(model, n_features, reports):
     names = feature_names()[:n_features]
     frame = pd.DataFrame({"feature": names, "importance": importance})
     frame = frame.sort_values("importance", ascending=False)
-    frame.to_csv(reports / "ml_feature_importance.csv", index=False)
+    data_dir = reports / "data"
+    figures_dir = reports / "figures"
+    data_dir.mkdir(parents=True, exist_ok=True)
+    figures_dir.mkdir(parents=True, exist_ok=True)
+    frame.to_csv(data_dir / "fig_50_ml_feature_importance.csv", index=False)
     top = frame.head(20).iloc[::-1]
     if not top.empty:
         import matplotlib
@@ -381,14 +388,25 @@ def _save_importance(model, n_features, reports):
         ax.barh(top["feature"], top["importance"], color="#1665c0")
         ax.set_title("ML feature importance")
         fig.tight_layout()
-        fig.savefig(reports / "ml_feature_importance.png", dpi=150)
+        fig.savefig(figures_dir / "fig_50_ml_feature_importance.png", dpi=150)
         plt.close(fig)
 
 
 def _save_roc(model, X_test, y_test, reports):
+    data_dir = reports / "data"
+    figures_dir = reports / "figures"
+    data_dir.mkdir(parents=True, exist_ok=True)
+    figures_dir.mkdir(parents=True, exist_ok=True)
     proba = model.predict_proba(X_test)[:, 1]
     fpr, tpr, _ = roc_curve(y_test, proba)
     auc = roc_auc_score(y_test, proba)
+    pd.DataFrame(
+        {
+            "false_positive_rate": fpr,
+            "true_positive_rate": tpr,
+            "auc": auc,
+        }
+    ).to_csv(data_dir / "fig_51_ml_roc.csv", index=False)
     import matplotlib
 
     matplotlib.use("Agg")
@@ -402,7 +420,7 @@ def _save_roc(model, X_test, y_test, reports):
     ax.set_title("ML/DL rescoring ROC")
     ax.legend()
     fig.tight_layout()
-    fig.savefig(reports / "ml_roc.png", dpi=150)
+    fig.savefig(figures_dir / "fig_51_ml_roc.png", dpi=150)
     plt.close(fig)
 
 

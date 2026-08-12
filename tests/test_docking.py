@@ -129,11 +129,11 @@ class TestEndToEndDockAndAnalyze(unittest.TestCase):
             self.assertTrue(any("ok" in row and "-8.3" in row for row in rows))
 
             analyze_results(cfg, LOG)
-            ranked = cfg.reports_dir() / "ranked_results.csv"
+            ranked = cfg.analysis_dir() / "data" / "fig_46_47_ranked_results.csv"
             self.assertTrue(ranked.exists())
-            hits = cfg.reports_dir() / "hits.csv"
+            hits = cfg.analysis_dir() / "data" / "fig_47_top_hits.csv"
             self.assertTrue(hits.exists())
-            self.assertTrue((cfg.reports_dir() / "summary.json").exists())
+            self.assertTrue((cfg.analysis_dir() / "summary.json").exists())
 
 
 _FAKE_VINA = r"""

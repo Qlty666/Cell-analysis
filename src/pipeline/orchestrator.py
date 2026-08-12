@@ -188,12 +188,16 @@ def verify_outputs() -> None:
     required = [
         OUTPUT_ROOT / "results" / "summary.json",
         OUTPUT_ROOT / "results" / "pipeline_complete.json",
-        OUTPUT_ROOT / "results" / "data" / "deg_all.csv",
-        OUTPUT_ROOT / "results" / "data" / "deg_significant.csv",
-        OUTPUT_ROOT / "results" / "data" / "qc_metrics.csv",
-        OUTPUT_ROOT / "results" / "data" / "cell_annotations.csv",
-        OUTPUT_ROOT / "results" / "figures" / "fig_08_volcano.png",
-        OUTPUT_ROOT / "results" / "figures" / "fig_10_go_up.png",
+        OUTPUT_ROOT / "results" / "data" / "05_deg" / "fig_08_deg_all.csv",
+        OUTPUT_ROOT / "results" / "data" / "05_deg" / "fig_09_deg_significant.csv",
+        OUTPUT_ROOT / "results" / "data" / "01_qc" / "fig_01_qc_metrics.csv",
+        OUTPUT_ROOT
+        / "results"
+        / "data"
+        / "04_annotation"
+        / "fig_05_16_17_cell_annotations.csv",
+        OUTPUT_ROOT / "results" / "figures" / "05_deg" / "fig_08_volcano.png",
+        OUTPUT_ROOT / "results" / "figures" / "06_enrichment" / "fig_10_go_up.png",
     ]
     missing = [str(p) for p in required if not p.exists()]
     if missing:

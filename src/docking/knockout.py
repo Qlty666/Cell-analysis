@@ -284,9 +284,13 @@ def run_knockout(cfg: ResolvedConfig, log) -> dict:
     frame.insert(0, "rank", np.arange(1, len(frame) + 1))
 
     top_n = int(ko.get("top_n", 50))
-    ko_dir = cfg.output_dir / "knockout"
+    ko_dir = cfg.knockout_dir()
+    data_dir = ko_dir / "data"
+    figures_dir = ko_dir / "figures"
     ko_dir.mkdir(parents=True, exist_ok=True)
-    ranked_path = ko_dir / "ranked_knockout.csv"
+    data_dir.mkdir(parents=True, exist_ok=True)
+    figures_dir.mkdir(parents=True, exist_ok=True)
+    ranked_path = data_dir / "fig_52_53_ranked_knockout.csv"
     frame.to_csv(ranked_path, index=False)
 
     candidate_cols = [
@@ -304,13 +308,13 @@ def run_knockout(cfg: ResolvedConfig, log) -> dict:
         "safety_concern",
     ]
     candidates = frame[candidate_cols].head(top_n)
-    candidates_path = ko_dir / "target_candidates.csv"
+    candidates_path = data_dir / "fig_52_target_candidates.csv"
     candidates.to_csv(candidates_path, index=False)
 
     figures: list[str] = []
     if ko.get("figures", True):
         try:
-            figures = _make_figures(frame, ko_dir, top_n)
+            figures = _make_figures(frame, figures_dir, top_n)
         except Exception as exc:
             log.warning("knockout figures failed: %s", exc)
 
@@ -363,8 +367,8 @@ def run_knockout(cfg: ResolvedConfig, log) -> dict:
         },
     )
     summary["manifest"] = str(manifest_path)
-    _write_markdown_report(ko_dir, frame, summary, top_n)
-    target_report = _write_target_report(ko_dir, frame, summary, top_n)
+    _write_markdown_report(data_dir, frame, summary, top_n)
+    target_report = _write_target_report(data_dir, frame, summary, top_n)
     summary["target_report"] = str(target_report)
     log.info(
         "virtual knockout complete: %s genes scored, output %s",
@@ -1043,12 +1047,13 @@ def _classify_targets(frame: pd.DataFrame) -> pd.Series:
     return frame.apply(classify, axis=1)
 
 
-def _make_figures(frame: pd.DataFrame, ko_dir: Path, top_n: int) -> list[str]:
+def _make_figures(frame: pd.DataFrame, fig_dir: Path, top_n: int) -> list[str]:
     import matplotlib
 
     matplotlib.use("Agg")
     import matplotlib.pyplot as plt
 
+    fig_dir.mkdir(parents=True, exist_ok=True)
     figures: list[str] = []
     top = frame.head(top_n).iloc[::-1]
     if not top.empty:
@@ -1062,9 +1067,9 @@ def _make_figures(frame: pd.DataFrame, ko_dir: Path, top_n: int) -> list[str]:
         ax.set_xlabel("Knockout priority score")
         ax.set_title(f"Top {len(top)} virtual knockout candidates")
         fig.tight_layout()
-        fig.savefig(ko_dir / "knockout_top_candidates.png", dpi=150)
+        fig.savefig(fig_dir / "fig_52_knockout_top_candidates.png", dpi=150)
         plt.close(fig)
-        figures.append("knockout_top_candidates.png")
+        figures.append("fig_52_knockout_top_candidates.png")
 
     fig, ax = plt.subplots(figsize=(7, 4))
     ax.hist(
@@ -1077,9 +1082,9 @@ def _make_figures(frame: pd.DataFrame, ko_dir: Path, top_n: int) -> list[str]:
     ax.set_ylabel("Gene count")
     ax.set_title("Virtual knockout score distribution")
     fig.tight_layout()
-    fig.savefig(ko_dir / "knockout_score_distribution.png", dpi=150)
+    fig.savefig(fig_dir / "fig_53_knockout_score_distribution.png", dpi=150)
     plt.close(fig)
-    figures.append("knockout_score_distribution.png")
+    figures.append("fig_53_knockout_score_distribution.png")
     return figures
 
 
@@ -1211,7 +1216,7 @@ def _write_markdown_report(
                 pri=row["priority"],
             )
         )
-    lines += ["", "## 输出文件", "", "- `ranked_knockout.csv`：全部基因评分表"]
+    lines += ["", "## 输出文件", "", "- `fig_52_53_ranked_knockout.csv`：全部基因评分表"]
     if summary["figures"]:
         for name in summary["figures"]:
             lines.append(f"- `{name}`：结果图")

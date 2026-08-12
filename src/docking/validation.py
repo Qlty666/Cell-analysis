@@ -56,8 +56,8 @@ LIVER_CELL_LINES = [
 
 def export_validation(cfg: ResolvedConfig, log) -> dict:
     """Generate wet-lab validation plan files from ranked knockout results."""
-    ko_dir = cfg.output_dir / "knockout"
-    ranked = ko_dir / "ranked_knockout.csv"
+    ko_dir = cfg.knockout_dir()
+    ranked = ko_dir / "data" / "fig_52_53_ranked_knockout.csv"
     if not ranked.exists():
         raise DockingError(
             f"ranked knockout CSV not found: {ranked}; "
@@ -69,8 +69,9 @@ def export_validation(cfg: ResolvedConfig, log) -> dict:
 
     top_n = min(int(cfg.get("validation", "top_n", 10)), len(frame))
     top = frame.head(top_n)
-    out_dir = cfg.output_dir / "validation"
-    out_dir.mkdir(parents=True, exist_ok=True)
+    out_dir = cfg.validation_dir()
+    out_data = out_dir / "data"
+    out_data.mkdir(parents=True, exist_ok=True)
 
     cols = [
         c
@@ -94,10 +95,10 @@ def export_validation(cfg: ResolvedConfig, log) -> dict:
     for phase, title, readout in PHASES:
         candidates[f"{phase}_assay"] = title
         candidates[f"{phase}_readout"] = readout
-    candidates_csv = out_dir / "validation_candidates.csv"
+    candidates_csv = out_data / "validation_candidates.csv"
     candidates.to_csv(candidates_csv, index=False)
 
-    plan_md = out_dir / "validation_plan.md"
+    plan_md = out_data / "validation_plan.md"
     plan_md.write_text(_render_plan(candidates), encoding="utf-8")
 
     summary = {
@@ -111,9 +112,9 @@ def export_validation(cfg: ResolvedConfig, log) -> dict:
         "validation_candidates_csv": str(candidates_csv),
         "validation_plan_md": str(plan_md),
     }
-    write_json(out_dir / "summary.json", summary)
+    write_json(out_data / "summary.json", summary)
     manifest = write_run_manifest(
-        out_dir,
+        out_data,
         cfg,
         "export-validation",
         {"ranked_knockout_csv": ranked},

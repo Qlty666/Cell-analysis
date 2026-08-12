@@ -28,6 +28,21 @@ def read_table(path: Path) -> list[dict]:
         return list(csv.DictReader(fh))
 
 
+def find_result(base: Path, name: str) -> Path | None:
+    direct = base / name
+    if direct.is_file():
+        return direct
+    for path in base.rglob(name):
+        if path.is_file():
+            return path
+    return None
+
+
+def read_named_table(name: str) -> list[dict]:
+    path = find_result(DATA, name)
+    return read_table(path) if path is not None else []
+
+
 def render_table(rows: list[dict], max_rows: int = 25, cols=None) -> str:
     if not rows:
         return "<p class='muted'>No data.</p>"
@@ -44,20 +59,22 @@ def render_table(rows: list[dict], max_rows: int = 25, cols=None) -> str:
 
 
 def image_card(name: str, title: str) -> str:
-    path = FIG / name
-    if not path.exists():
+    path = find_result(FIG, name)
+    if path is None:
         return ""
+    rel = path.relative_to(RES).as_posix()
     return (
-        f"<figure><img src='figures/{name}' alt='{esc(title)}'>"
+        f"<figure><img src='{rel}' alt='{esc(title)}'>"
         f"<figcaption>{esc(title)}</figcaption></figure>"
     )
 
 
 def data_link(name: str, label: str) -> str:
-    path = DATA / name
-    if not path.exists():
+    path = find_result(DATA, name)
+    if path is None:
         return ""
-    return f"<li><a href='data/{name}'>{esc(label)}</a></li>"
+    rel = path.relative_to(RES).as_posix()
+    return f"<li><a href='{rel}'>{esc(label)}</a></li>"
 
 
 def main() -> int:
@@ -82,10 +99,10 @@ def main() -> int:
         top_degs = [top_degs]
     deg_columns = ["gene", "avg_log2FC", "p_val_adj"]
 
-    go_up = read_table(DATA / "enrichment_up_go.csv")
-    go_down = read_table(DATA / "enrichment_down_go.csv")
-    kegg_up = read_table(DATA / "enrichment_up_kegg.csv")
-    kegg_down = read_table(DATA / "enrichment_down_kegg.csv")
+    go_up = read_named_table("fig_10_enrichment_up_go.csv")
+    go_down = read_named_table("fig_11_enrichment_down_go.csv")
+    kegg_up = read_named_table("fig_12_enrichment_up_kegg.csv")
+    kegg_down = read_named_table("fig_13_enrichment_down_kegg.csv")
 
     enrichment_cols = ["ID", "Description", "GeneRatio", "pvalue", "p.adjust"]
     if go_up and "Description" in go_up[0]:
@@ -105,29 +122,30 @@ def main() -> int:
         kegg_html = "<p class='muted'>未找到显著 KEGG 富集结果。</p>"
 
     links = "".join([
-        data_link("deg_all.csv", "全部差异表达基因"),
-        data_link("deg_significant.csv", "显著差异表达基因"),
-        data_link("qc_metrics.csv", "QC 指标"),
-        data_link("doublet_results.csv", "双细胞结果"),
-        data_link("cell_annotations.csv", "细胞注释"),
-        data_link("annotation_confusion.csv", "注释混淆矩阵"),
-        data_link("umap_coordinates.csv", "UMAP 坐标"),
-        data_link("cluster_composition.csv", "聚类组成"),
-        data_link("enrichment_up_go.csv", "上调 GO 富集"),
-        data_link("enrichment_down_go.csv", "下调 GO 富集"),
-        data_link("enrichment_up_kegg.csv", "上调 KEGG 富集"),
-        data_link("enrichment_down_kegg.csv", "下调 KEGG 富集"),
-        data_link("cell_cycle_scores.csv", "细胞周期打分"),
-        data_link("doublet_rate_by_sample.csv", "样本双细胞率"),
-        data_link("cluster_markers.csv", "聚类 marker 基因"),
-        data_link("signature_scores.csv", "功能签名打分"),
-        data_link("cnv_heatmap.csv", "推断 CNV 热图矩阵"),
-        data_link("singleR_annotations.csv", "SingleR 注释"),
-        data_link("singleR_confusion.csv", "SingleR 混淆矩阵"),
-        data_link("trajectory_pseudotime.csv", "拟时序结果"),
-        data_link("cellchat_communication.csv", "CellChat 通讯矩阵"),
-        data_link("cellchat_pathways.csv", "CellChat 通路表"),
-        data_link("ml_classification_report.csv", "ML 分类报告"),
+        data_link("fig_08_deg_all.csv", "全部差异表达基因"),
+        data_link("fig_09_deg_significant.csv", "显著差异表达基因"),
+        data_link("fig_01_qc_metrics.csv", "QC 指标"),
+        data_link("fig_02_doublet_results.csv", "双细胞结果"),
+        data_link("fig_05_16_17_cell_annotations.csv", "细胞注释"),
+        data_link("fig_07_annotation_confusion.csv", "注释混淆矩阵"),
+        data_link("fig_03_04_05_umap_coordinates.csv", "UMAP 坐标"),
+        data_link("fig_18_19_30_cluster_composition.csv", "聚类组成"),
+        data_link("fig_10_enrichment_up_go.csv", "上调 GO 富集"),
+        data_link("fig_11_enrichment_down_go.csv", "下调 GO 富集"),
+        data_link("fig_12_enrichment_up_kegg.csv", "上调 KEGG 富集"),
+        data_link("fig_13_enrichment_down_kegg.csv", "下调 KEGG 富集"),
+        data_link("fig_26_27_cell_cycle_scores.csv", "细胞周期打分"),
+        data_link("fig_29_doublet_rate_by_sample.csv", "样本双细胞率"),
+        data_link("fig_16_17_31_32_cluster_markers.csv", "聚类 marker 基因"),
+        data_link("fig_33_34_35_signature_scores.csv", "功能签名打分"),
+        data_link("fig_36_cnv_heatmap.csv", "推断 CNV 热图矩阵"),
+        data_link("fig_37_singleR_annotations.csv", "SingleR 注释"),
+        data_link("fig_38_singleR_confusion.csv", "SingleR 混淆矩阵"),
+        data_link("fig_39_trajectory_pseudotime.csv", "拟时序结果"),
+        data_link("fig_40_cellchat_communication.csv", "CellChat 通讯矩阵"),
+        data_link("fig_40_cellchat_communication_weight.csv", "CellChat 通讯权重"),
+        data_link("fig_42_cellchat_pathways.csv", "CellChat 通路表"),
+        data_link("fig_43_44_45_ml_classification_report.csv", "ML 分类报告"),
         data_link("sample_annotations.csv", "样本分组"),
         data_link("liver_cancer_seurat.rds", "Seurat 对象"),
     ])

@@ -322,9 +322,9 @@ python -m unittest discover -s tests -p "test_*.py" -v
 
 输出（以 `../liver_cancer` 为例）：
 
-- `results/figures/`：45 张结果图，覆盖 QC、双细胞、聚类注释、DEG、富集、细胞周期、聚类 marker、功能签名、CNV、SingleR、拟时序、CellChat 与 ML 解释。
-- `results/data/`：QC、双细胞、注释、差异表达、富集、ML 分类和可选 CellChat 表格；新增 `cell_cycle_scores.csv`、`cluster_markers.csv`、`signature_scores.csv`、`cnv_heatmap.csv`、`singleR_annotations.csv`、`trajectory_pseudotime.csv`、`cellchat_*.csv`、`ml_classification_report.csv`。
-- `results/data/deg_significant.csv`：显著差异基因表。
+- `results/figures/`：45 张结果图，按 `01_qc`、`02_doublets`、`03_cluster`、`04_annotation`、`05_deg`、`06_enrichment`、`07_ml`、`08_publication`、`09_cellchat` 阶段分子目录。
+- `results/data/`：QC、双细胞、注释、差异表达、富集、ML 分类和可选 CellChat 表格，按与 `figures/` 相同的阶段分子目录存放；数据文件名与对应结果图编号一致，例如 `data/01_qc/fig_01_qc_metrics.csv`、`data/02_doublets/fig_02_doublet_results.csv`、`data/05_deg/fig_09_deg_significant.csv`、`data/07_ml/fig_24_ml_feature_importance.csv`、`data/08_publication/fig_36_cnv_heatmap.csv`、`data/08_publication/fig_37_singleR_annotations.csv`、`data/08_publication/fig_39_trajectory_pseudotime.csv`、`data/09_cellchat/fig_40_cellchat_communication.csv`、`data/07_ml/fig_43_44_45_ml_classification_report.csv`。
+- `results/data/05_deg/fig_09_deg_significant.csv`：显著差异基因表。
 - `results/checkpoints/`：Seurat 断点对象。
 - `results/result_report.html`：最终 HTML 报告。
 
@@ -343,11 +343,12 @@ python -m unittest discover -s tests -p "test_*.py" -v
 - `data/receptors/receptor.pdbqt`：受体。
 - `data/ligands/prepared/`：配体准备结果和 `manifest.csv`。
 - `outputs/run_001/docked/results.csv`：对接结果。
-- `outputs/run_001/reports/ranked_results.csv`、`hits.csv`、`diverse_hits.csv`、`docking_results.xlsx` 和图。
-- `outputs/run_001/reports/docking_report.html`：HTML 报告。
-- `outputs/run_001/redock/results.csv`：精细重对接结果。
-- `outputs/run_001/knockout/ranked_knockout.csv`、`target_candidates.csv`、`target_report.md`。
-- `outputs/run_001/validation/validation_candidates.csv`、`validation_plan.md`。
+- `outputs/run_001/results/`：按阶段汇总的结果目录，`01_analysis`、`02_redock`、`03_ml`、`04_knockout`、`05_validation` 下分别用 `figures/` 和 `data/` 区分结果图与结果数据。
+- `outputs/run_001/results/01_analysis/data/fig_46_47_ranked_results.csv`、`fig_47_top_hits.csv`、`fig_48_diverse_hits.csv`、`docking_results.xlsx` 和编号 `fig_46` 至 `fig_49` 的结果图（含 `fig_49_redock_comparison.png` 与 `fig_49_redock_comparison.csv`）。
+- `outputs/run_001/results/docking_report.html`：HTML 报告。
+- `outputs/run_001/results/02_redock/data/fig_49_redock_results.csv`：精细重对接结果。
+- `outputs/run_001/results/04_knockout/data/fig_52_53_ranked_knockout.csv`、`fig_52_target_candidates.csv`、`target_report.md`，以及编号 `fig_52`、`fig_53` 的敲除结果图。
+- `outputs/run_001/results/05_validation/data/validation_candidates.csv`、`validation_plan.md`。
 - `evidence/evidence_report.md`、`known_ligands.csv`。
 
 附加数据文件格式：
