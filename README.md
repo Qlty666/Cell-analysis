@@ -584,6 +584,10 @@ MIT License. See `LICENSE` for details.
 - 新增独立命令 `python scripts\run_docking.py cell-feedback --single-cell-root <单细胞结果目录>`，可对已有虚拟敲除/虚拟筛选结果单独执行细胞反馈分析。
 - 全自动流水线支持 `--feedback-top-n`、`--feedback-max-features`、`--feedback-timeout` 和 `--skip-cell-feedback`。
 - 网页版全自动流水线新增细胞反馈参数、阶段显示和结果表；结果清单页新增细胞反馈输出说明。
+- 加固单细胞 R 流水线进程管理：运行前快照 `analysis_pipeline.R`，暂停或停滞时终止完整 R 进程树，避免残留子进程。
+- 优化停滞判断：日志长时间无更新但 R 进程仍在计算时延长等待，不再误杀活跃任务。
+- 补充流水线编排器单元测试，覆盖 R 脚本快照、CPU 采样和进程树终止。
+- `AGENTS.md` 明确任务分支隔离：不同任务必须创建不同功能分支，提交时只包含当前任务相关文件。
 
 ### v0.3.0
 
