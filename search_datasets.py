@@ -23,6 +23,8 @@ USER_AGENT = "Mozilla/5.0 (liver-cancer-pipeline; dataset-search)"
 
 CSV_COLUMNS = [
     "accession",
+    "disease",
+    "research_direction",
     "title",
     "summary",
     "organism",
@@ -84,12 +86,18 @@ def esummary(uid: str) -> dict:
     return _doc_summary(doc) if doc is not None else {}
 
 
-def to_row(raw: dict) -> dict:
+def to_row(
+    raw: dict,
+    disease: str = "",
+    research_direction: str = "",
+) -> dict:
     accession = str(raw.get("Accession", ""))
     match = re.search(r"(GSE\d+)", accession)
     gse = match.group(1) if match else accession
     return {
         "accession": gse,
+        "disease": disease,
+        "research_direction": research_direction,
         "title": str(raw.get("Title") or raw.get("title") or ""),
         "summary": str(raw.get("Summary") or raw.get("summary") or ""),
         "organism": str(raw.get("taxon", "")),
@@ -134,13 +142,32 @@ def search_datasets(
     max_results: int = 20,
     organism: str | None = None,
     keyword: str | None = None,
+    disease: str = "",
+    research_direction: str = "",
 ) -> list[dict]:
     ids = esearch(query, max_results)
     rows: list[dict] = []
     for uid in ids:
-        rows.append(to_row(esummary(uid)))
+        rows.append(
+            to_row(
+                esummary(uid),
+                disease=disease,
+                research_direction=research_direction,
+            )
+        )
         time.sleep(0.34)
     return filter_rows(rows, organism, keyword)
+
+
+def build_query(
+    disease: str,
+    research_direction: str,
+    query: str | None = None,
+) -> str:
+    if query:
+        return query
+    parts = [disease, research_direction]
+    return " ".join(part.strip() for part in parts if part.strip())
 
 
 def write_outputs(rows: list[dict], out_dir: Path) -> tuple[Path, Path]:
@@ -191,7 +218,15 @@ def main() -> int:
             "download matching GSE series."
         )
     )
-    parser.add_argument("--query", required=True, help="GEO search term")
+    parser.add_argument("--query", help="raw GEO search term")
+    parser.add_argument(
+        "--disease",
+        help="disease name, e.g. 'liver cancer'",
+    )
+    parser.add_argument(
+        "--research-direction",
+        help="research direction, e.g. 'single cell RNA-seq'",
+    )
     parser.add_argument("--max-results", type=int, default=20)
     parser.add_argument(
         "--organism",
@@ -222,18 +257,28 @@ def main() -> int:
         help="root directory used by ensure_geo_dataset",
     )
     args = parser.parse_args()
+    if not args.query and not args.disease:
+        parser.error("provide --query or --disease")
+    query = build_query(
+        args.disease or "",
+        args.research_direction or "",
+        args.query,
+    )
 
     rows = search_datasets(
-        args.query,
+        query,
         max_results=args.max_results,
         organism=args.organism,
         keyword=args.keyword,
+        disease=args.disease or "",
+        research_direction=args.research_direction or "",
     )
     if not rows:
         print("No datasets matched the search criteria.")
         return 0
 
     csv_path, json_path = write_outputs(rows, Path(args.output))
+    print(f"Search query: {query}")
     print(f"Matched {len(rows)} datasets.")
     print(f"CSV: {csv_path}")
     print(f"JSON: {json_path}")

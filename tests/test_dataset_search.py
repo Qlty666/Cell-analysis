@@ -28,8 +28,14 @@ class TestDatasetSearch(unittest.TestCase):
             "PDAT": "2024/01/01",
             "Type": "Expression profiling by high throughput sequencing",
         }
-        row = search_datasets.to_row(raw)
+        row = search_datasets.to_row(
+            raw,
+            disease="liver cancer",
+            research_direction="single cell",
+        )
         self.assertEqual(row["accession"], "GSE125449")
+        self.assertEqual(row["disease"], "liver cancer")
+        self.assertEqual(row["research_direction"], "single cell")
         self.assertEqual(row["organism"], "Homo sapiens")
         self.assertEqual(row["samples"], "8")
         self.assertIn("GSE125449", row["url"])
@@ -95,6 +101,19 @@ class TestDatasetSearch(unittest.TestCase):
         filtered = search_datasets.filter_rows(rows, keyword="mouse")
         self.assertEqual([r["accession"] for r in filtered], ["GSE100002"])
 
+    def test_build_query(self):
+        self.assertEqual(
+            search_datasets.build_query(
+                "liver cancer",
+                "single cell RNA-seq",
+            ),
+            "liver cancer single cell RNA-seq",
+        )
+        self.assertEqual(
+            search_datasets.build_query("", "", "custom term"),
+            "custom term",
+        )
+
     def test_search_datasets_mocks_ncbi_calls(self):
         summaries = {
             "1": {
@@ -131,14 +150,23 @@ class TestDatasetSearch(unittest.TestCase):
                 "liver cancer",
                 max_results=2,
                 organism="homo",
+                disease="liver cancer",
+                research_direction="single cell",
             )
         self.assertEqual(len(rows), 1)
         self.assertEqual(rows[0]["accession"], "GSE100001")
+        self.assertEqual(rows[0]["disease"], "liver cancer")
+        self.assertEqual(
+            rows[0]["research_direction"],
+            "single cell",
+        )
 
     def test_write_outputs(self):
         rows = [
             {
                 "accession": "GSE100001",
+                "disease": "liver cancer",
+                "research_direction": "single cell",
                 "title": "HCC tumor",
                 "summary": "human",
                 "organism": "Homo sapiens",
