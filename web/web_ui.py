@@ -83,6 +83,7 @@ FIGURES = [
     {"file": "fig_07_annotation_confusion_heatmap.png", "label": "注释混淆矩阵热图"},
     {"file": "fig_08_volcano.png", "label": "差异表达图", "styles": ["volcano", "maplot"]},
     {"file": "fig_09_deg_heatmap.png", "label": "Top DEG 热图"},
+    {"file": "fig_09_deg_horizontal_violin.png", "label": "Top DEG 横向小提琴图（P 值）"},
     {"file": "fig_10_go_up.png", "label": "GO BP 富集图（上调）", "styles": ["dotplot", "barplot", "cnetplot"]},
     {"file": "fig_11_go_down.png", "label": "GO BP 富集图（下调）", "styles": ["dotplot", "barplot", "cnetplot"]},
     {"file": "fig_12_kegg_up.png", "label": "KEGG 富集图（上调）", "styles": ["dotplot", "barplot", "cnetplot"]},
@@ -1486,6 +1487,84 @@ def _read_json(path: Path) -> dict:
         return {}
 
 
+RESULT_IMAGE_SUFFIXES = {".png", ".jpg", ".jpeg", ".svg"}
+RESULT_DATA_SUFFIXES = {".csv", ".xlsx", ".rds"}
+RESULT_FILE_SUFFIXES = RESULT_IMAGE_SUFFIXES | RESULT_DATA_SUFFIXES
+
+
+def _is_result_file(path: Path) -> bool:
+    return path.is_file() and path.suffix.lower() in RESULT_FILE_SUFFIXES
+
+
+def _list_result_files(root: Path) -> list[str]:
+    if not root.exists() or not root.is_dir():
+        return []
+    return sorted(
+        p.relative_to(root).as_posix()
+        for p in root.rglob("*")
+        if _is_result_file(p)
+    )
+
+
+def _list_result_images(root: Path) -> list[str]:
+    if not root.exists() or not root.is_dir():
+        return []
+    return sorted(
+        p.relative_to(root).as_posix()
+        for p in root.rglob("*")
+        if p.is_file() and p.suffix.lower() in RESULT_IMAGE_SUFFIXES
+    )
+
+
+def _single_cell_root_from_workdir(workdir: Path) -> Path | None:
+    context = _read_json(
+        workdir / "outputs" / "integration" / ".stages" / "run_context.json"
+    )
+    value = context.get("single_cell_root")
+    if not value:
+        return None
+    return Path(str(value)).expanduser().resolve()
+
+
+def _full_result_files(workdir: Path) -> list[str]:
+    files: list[str] = []
+    roots: list[tuple[Path, str]] = [
+        (workdir / "outputs" / "integration", ""),
+        (workdir / "outputs" / "run_001" / "results", "outputs/run_001/results"),
+        (workdir / "outputs" / "run_001" / "docked", "outputs/run_001/docked"),
+    ]
+    single_cell_root = _single_cell_root_from_workdir(workdir)
+    if single_cell_root:
+        roots.append(
+            (
+                single_cell_root / "results" / "figures",
+                "single_cell/results/figures",
+            )
+        )
+        roots.append(
+            (
+                single_cell_root / "results" / "data",
+                "single_cell/results/data",
+            )
+        )
+    targets = workdir / "work"
+    if targets.exists():
+        for gene_dir in sorted(
+            p for p in targets.iterdir() if p.is_dir()
+        ):
+            base = f"work/{gene_dir.name}/outputs/run_001"
+            roots.append(
+                (gene_dir / "outputs" / "run_001" / "docked", f"{base}/docked")
+            )
+            roots.append(
+                (gene_dir / "outputs" / "run_001" / "results", f"{base}/results")
+            )
+    for root, prefix in roots:
+        for rel in _list_result_files(root):
+            files.append(f"{prefix}/{rel}" if prefix else rel)
+    return sorted(set(files))
+
+
 def full_results(workdir: Path) -> dict:
     workdir = Path(workdir).expanduser().resolve()
     out = workdir / "outputs" / "integration"
@@ -1502,26 +1581,7 @@ def full_results(workdir: Path) -> dict:
     if not out.exists():
         return result
     result["summary"] = _read_json(out / "integration_summary.json")
-    files = []
-    for name in [
-        "key_genes.csv",
-        "gene_evidence.csv",
-        "docking_targets.csv",
-        "knockout_summary.json",
-        "integration_summary.json",
-        "integration_report.html",
-    ]:
-        if (out / name).exists():
-            files.append(name)
-    for rel in [
-        "outputs/run_001/results/04_knockout/data/fig_52_53_ranked_knockout.csv",
-        "outputs/run_001/results/04_knockout/data/fig_52_target_candidates.csv",
-        "outputs/run_001/results/05_validation/data/validation_plan.md",
-        "outputs/run_001/results/05_validation/data/validation_candidates.csv",
-    ]:
-        if (workdir / rel).exists():
-            files.append(rel)
-    result["files"] = files
+    result["files"] = _full_result_files(workdir)
     try:
         result["key_genes"] = json.loads(
             pd_read_csv(out / "key_genes.csv").to_json(orient="records")
@@ -1565,16 +1625,24 @@ def pd_read_csv(path: Path):
 
 def _full_file_path(workdir: Path, name: str) -> Path | None:
     workdir = Path(workdir).expanduser().resolve()
+    single_cell_root = _single_cell_root_from_workdir(workdir)
     allowed_roots = [
         (workdir / "outputs" / "integration").resolve(),
         (workdir / "outputs" / "run_001" / "results").resolve(),
+        (workdir / "outputs" / "run_001" / "docked").resolve(),
+        (workdir / "work").resolve(),
         (workdir / "data" / "knockout").resolve(),
     ]
+    if single_cell_root:
+        allowed_roots.append(single_cell_root.resolve())
     name_path = Path(name)
     if name_path.is_absolute():
         return None
-    target = (workdir / name_path).resolve()
-    if not target.is_file():
+    if name.startswith("single_cell/") and single_cell_root:
+        target = single_cell_root.joinpath(*name_path.parts[1:]).resolve()
+    else:
+        target = (workdir / name_path).resolve()
+    if not _is_result_file(target):
         return None
     if not any(target.is_relative_to(root) for root in allowed_roots):
         return None
@@ -1718,23 +1786,11 @@ def dock_results(info: dict) -> dict:
                 if i >= 200:
                     break
                 rows.append(row)
-    figures = (
-        sorted(
-            p.relative_to(reports).as_posix()
-            for p in reports.rglob("*.png")
-        )
-        if reports.exists()
-        else []
-    )
-    files = (
-        sorted(
-            p.relative_to(reports).as_posix()
-            for p in reports.rglob("*")
-            if p.is_file()
-        )
-        if reports.exists()
-        else []
-    )
+    figures = _list_result_images(reports)
+    files = _list_result_files(reports)
+    docked_files = _list_result_files(info["output_dir"] / "docked")
+    files.extend(f"docked/{rel}" for rel in docked_files)
+    files = sorted(set(files))
     return {
         "summary": summary,
         "rows": rows,
@@ -1750,11 +1806,11 @@ def _dock_file_path(info: dict, name: str):
     results_root = (out / "results").resolve()
     docked_root = (out / "docked").resolve()
     target = (results_root / Path(name)).resolve()
-    if target.is_file() and results_root in target.parents:
+    if _is_result_file(target) and results_root in target.parents:
         return target
     base = Path(name).name
     target = (docked_root / base).resolve()
-    if target.is_file() and target.parent == docked_root:
+    if _is_result_file(target) and target.parent == docked_root:
         return target
     return None
 
@@ -1792,23 +1848,8 @@ def run_knockout_request(data: dict) -> dict:
                 if i >= limit:
                     break
                 rows.append(row)
-    figures = (
-        sorted(
-            p.relative_to(ko_dir).as_posix()
-            for p in ko_dir.rglob("*.png")
-        )
-        if ko_dir.exists()
-        else []
-    )
-    files = (
-        sorted(
-            p.relative_to(ko_dir).as_posix()
-            for p in ko_dir.rglob("*")
-            if p.is_file()
-        )
-        if ko_dir.exists()
-        else []
-    )
+    figures = _list_result_images(ko_dir)
+    files = _list_result_files(ko_dir)
     return {
         "summary": summary,
         "rows": rows,
@@ -1835,15 +1876,7 @@ def run_validation_request(data: dict) -> dict:
 
     summary = export_validation(cfg, logging.getLogger("docking.web_validation"))
     val_dir = cfg.validation_dir()
-    files = (
-        sorted(
-            p.relative_to(val_dir).as_posix()
-            for p in val_dir.rglob("*")
-            if p.is_file()
-        )
-        if val_dir.exists()
-        else []
-    )
+    files = _list_result_files(val_dir)
     return {
         "summary": summary,
         "files": files,
@@ -1863,7 +1896,7 @@ def _ko_file_path(workdir: str, name: str):
     for folder in (cfg.knockout_dir(), cfg.validation_dir()):
         folder = folder.resolve()
         target = (folder / Path(name)).resolve()
-        if target.is_file() and folder in target.parents:
+        if _is_result_file(target) and folder in target.parents:
             return target
     return None
 
@@ -2658,6 +2691,8 @@ class Handler(BaseHTTPRequestHandler):
             "LIVER_CLUSTER_ALGORITHM",
             "LIVER_DE_LOGFc",
             "LIVER_DE_PADJ",
+            "LIVER_DE_VIOLIN_TOP_N",
+            "LIVER_DE_VIOLIN_MAX_CELLS",
         ]:
             if data.get(key):
                 params[key] = data[key][0]
