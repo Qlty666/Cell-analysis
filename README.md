@@ -321,6 +321,16 @@ python search_datasets.py \
   --organism "Homo sapiens"
 ```
 
+也可以直接指定疾病和研究方向，脚本会自动组合成搜索词：
+
+```bash
+python search_datasets.py \
+  --disease "liver cancer" \
+  --research-direction "single cell RNA-seq" \
+  --max-results 20 \
+  --organism "Homo sapiens"
+```
+
 搜索结束后会在 `data_cache/dataset_search/` 写出 `dataset_search_results.csv` 和 `dataset_search_results.json`。需要下载时追加下载参数：
 
 ```bash
