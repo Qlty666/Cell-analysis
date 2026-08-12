@@ -1,6 +1,6 @@
 # Liver Cancer Bioinformatics Workflow
 
-> 当前版本：0.3.0
+> 当前版本：0.4.0
 
 面向肝癌研究的本地生信自动化工作流，整合三条可实际运行的流水线：
 
@@ -27,10 +27,11 @@
 - 内置 GSE125449 适配；支持 `--species hs/mm/auto`。
 - QC、双细胞检测（`scDblFinder`）、PCA/UMAP 聚类和细胞注释。
 - 差异表达（DESeq2 pseudobulk 或 Seurat Wilcoxon 回退）与 GO/KEGG/GSEA 富集分析。
+- 按校正后 P 值排序输出差异最显著基因的横向小提琴图，并在图中标注 P 值。
 - 可选 CellChat 细胞通讯分析（设置 `LIVER_RUN_CELLCHAT=yes`）。
 - ML 疾病分类（XGBoost 或 RandomForest）、特征重要性和 SHAP 解释。
 - 发表级分析：细胞周期打分与回归校正、聚类 marker 发现、功能签名打分、推断 CNV、SingleR 自动注释，以及可选 slingshot 拟时序。
-- 输出 45 张分析图、HTML 报告，支持断点续跑、暂停/继续、停滞自动重启。
+- 输出 46 张分析图、HTML 报告，支持断点续跑、暂停/继续、停滞自动重启。
 
 新增分析可通过环境变量控制：
 
@@ -43,6 +44,8 @@
 | `LIVER_RUN_CNV` | `yes` | 基于染色体窗口均值的推断 CNV 热图 |
 | `LIVER_RUN_SINGLER` | `yes` | SingleR 参考注释与混淆矩阵 |
 | `LIVER_RUN_TRAJECTORY` | `no` | slingshot 拟时序轨迹（需安装 `slingshot`） |
+| `LIVER_DE_VIOLIN_TOP_N` | `12` | Top DEG 横向小提琴图展示的基因数 |
+| `LIVER_DE_VIOLIN_MAX_CELLS` | `1000` | 每个条件下用于该图的抽样细胞数 |
 
 ### 2.2 虚拟筛选（CADD）流水线
 
@@ -309,6 +312,7 @@ python -m unittest discover -s tests -p "test_*.py" -v
 | `validate_real_evidence.py` | 用 10 个真实 PDB 结构验证证据收集 |
 | `validate_real_random.py` | 随机真实数据验证证据收集和对接盒检测 |
 | `validate_new_features.py` | 用 20 个 TCGA PanCancer 队列 + GSE165816 验证靶点评分 |
+| `validate_dataset_search.py` | 用 50 轮随机疾病+研究方向组合验证 GEO 数据集搜索召回 |
 
 ### 4.6 自动搜索数据集
 
@@ -343,6 +347,46 @@ python search_datasets.py \
 
 也可以用 `--download-top N` 下载搜索结果的前 N 个数据集；下载状态写入 `data_cache/dataset_search/download_results.json`。
 
+批量随机验证搜索是否命中“疾病+研究方向”数据集：
+
+```bash
+python validate_dataset_search.py --rounds 50 --seed 20260812
+```
+
+验证结果写入 `data_cache/dataset_search/validation_50_rounds.csv` 和 `validation_50_rounds.json`；未命中时会自动用疾病名或研究方向名扩大搜索范围。
+
+当前 50 轮随机验证（`--seed 20260812`）命中率 100%（50/50），其中 4 轮通过扩大搜索范围命中。
+
+### 4.7 数据集搜索 ML/DL 相关性排序
+
+`dataset_search_ml.py` 用 TF-IDF 特征训练机器学习/深度学习模型，对搜索结果按“疾病 + 研究方向”相关性重新排序：
+
+```bash
+python validate_dataset_search.py --rounds 50 --seed 20260812
+python dataset_search_ml.py \
+  --train \
+  --samples data_cache/dataset_search/training_samples.csv \
+  --output data_cache/dataset_search/relevance_model.joblib \
+  --model-type mlp
+```
+
+训练完成后，普通搜索和批量验证都可以传入模型：
+
+```bash
+python search_datasets.py \
+  --disease "liver cancer" \
+  --research-direction "single cell RNA-seq" \
+  --model data_cache/dataset_search/relevance_model.joblib
+
+python validate_dataset_search.py \
+  --rounds 50 \
+  --seed 20260812 \
+  --model data_cache/dataset_search/relevance_model.joblib \
+  --rerank-top 5
+```
+
+支持 `lr`、`rf`、`gbm`、`mlp` 四种模型；其中 `mlp` 为多层感知机。可用 `--eval` 对标注样本做交叉验证，例如当前 285 条样本上 MLP 的 ROC AUC 为 0.81。
+
 ## 5. 输入输出示例
 
 ### 5.1 单细胞分析
@@ -355,9 +399,11 @@ python search_datasets.py \
 
 输出（以 `../liver_cancer` 为例）：
 
-- `results/figures/`：45 张结果图，按 `01_qc`、`02_doublets`、`03_cluster`、`04_annotation`、`05_deg`、`06_enrichment`、`07_ml`、`08_publication`、`09_cellchat` 阶段分子目录。
-- `results/data/`：QC、双细胞、注释、差异表达、富集、ML 分类和可选 CellChat 表格，按与 `figures/` 相同的阶段分子目录存放；数据文件名与对应结果图编号一致，例如 `data/01_qc/fig_01_qc_metrics.csv`、`data/02_doublets/fig_02_doublet_results.csv`、`data/05_deg/fig_09_deg_significant.csv`、`data/07_ml/fig_24_ml_feature_importance.csv`、`data/08_publication/fig_36_cnv_heatmap.csv`、`data/08_publication/fig_37_singleR_annotations.csv`、`data/08_publication/fig_39_trajectory_pseudotime.csv`、`data/09_cellchat/fig_40_cellchat_communication.csv`、`data/07_ml/fig_43_44_45_ml_classification_report.csv`。
+- `results/figures/`：46 张结果图，按 `01_qc`、`02_doublets`、`03_cluster`、`04_annotation`、`05_deg`、`06_enrichment`、`07_ml`、`08_publication`、`09_cellchat` 阶段分子目录。
+- `results/data/`：QC、双细胞、注释、差异表达、富集、ML 分类和可选 CellChat 表格，按与 `figures/` 相同的阶段分子目录存放；数据文件名与对应结果图编号一致，例如 `data/01_qc/fig_01_qc_metrics.csv`、`data/02_doublets/fig_02_doublet_results.csv`、`data/05_deg/fig_09_deg_significant.csv`、`data/05_deg/fig_09_deg_horizontal_violin.csv`、`data/07_ml/fig_24_ml_feature_importance.csv`、`data/08_publication/fig_36_cnv_heatmap.csv`、`data/08_publication/fig_37_singleR_annotations.csv`、`data/08_publication/fig_39_trajectory_pseudotime.csv`、`data/09_cellchat/fig_40_cellchat_communication.csv`、`data/07_ml/fig_43_44_45_ml_classification_report.csv`。
 - `results/data/05_deg/fig_09_deg_significant.csv`：显著差异基因表。
+- `results/figures/05_deg/fig_09_deg_horizontal_violin.png`：按校正 P 值排序的差异最显著基因横向小提琴图。
+- `results/data/05_deg/fig_09_deg_horizontal_violin.csv`：该图对应的基因与 P 值数据。
 - `results/checkpoints/`：Seurat 断点对象。
 - `results/result_report.html`：最终 HTML 报告。
 
@@ -497,3 +543,10 @@ GSE125449: Tumor cell biodiversity drives microenvironmental reprogramming in li
 GSE165816 和 TCGA PanCancer Atlas 仅用于真实数据验证。
 
 MIT License. See `LICENSE` for details.
+
+## 9. 更新日志
+
+### v0.4.0
+
+- 单细胞分析新增 `fig_09_deg_horizontal_violin.png`：按校正 P 值排序的差异最显著基因横向小提琴图，并在图中标注 P 值。
+- 新增 `LIVER_DE_VIOLIN_TOP_N` 和 `LIVER_DE_VIOLIN_MAX_CELLS` 环境变量，分别控制展示基因数和每个条件抽样细胞数。

@@ -35,11 +35,130 @@ CSV_COLUMNS = [
     "url",
 ]
 
+DISEASE_SYNONYMS = {
+    "liver cancer": [
+        "hepatocellular carcinoma",
+        "hcc",
+        "hepatic",
+    ],
+    "breast cancer": [
+        "breast cancer",
+        "breast carcinoma",
+        "brca",
+    ],
+    "lung cancer": ["lung cancer", "nsclc", "lung carcinoma"],
+    "colorectal cancer": ["colorectal cancer", "colon cancer", "crc"],
+    "gastric cancer": ["gastric cancer", "stomach cancer"],
+    "pancreatic cancer": [
+        "pancreatic cancer",
+        "pdac",
+        "pancreatic ductal adenocarcinoma",
+    ],
+    "kidney cancer": [
+        "renal cell carcinoma",
+        "renal carcinoma",
+        "rcc",
+    ],
+    "ovarian cancer": ["ovarian cancer", "ovarian carcinoma"],
+    "melanoma": ["melanoma", "skin cancer"],
+    "glioma": ["glioma", "glioblastoma", "gbm", "brain tumor"],
+    "alzheimer's disease": ["alzheimer", "alzheimer's disease"],
+    "diabetes": ["diabetes", "type 2 diabetes"],
+    "covid-19": ["covid-19", "sars-cov-2", "covid 19"],
+    "rheumatoid arthritis": ["rheumatoid arthritis"],
+    "atherosclerosis": ["atherosclerosis", "atherosclerotic"],
+}
 
-def _http_get(url: str, timeout: int = 90) -> str:
-    req = urllib.request.Request(url, headers={"User-Agent": USER_AGENT})
-    with urllib.request.urlopen(req, timeout=timeout) as resp:
-        return resp.read().decode("utf-8", "replace")
+DIRECTION_SYNONYMS = {
+    "single cell RNA-seq": [
+        "single cell",
+        "single-cell",
+        "scrna",
+        "scrna-seq",
+        "rna-seq",
+    ],
+    "bulk RNA-seq": ["bulk rna-seq", "rna-seq", "bulk rna"],
+    "spatial transcriptomics": [
+        "spatial transcriptomic",
+        "spatial",
+        "visium",
+        "stereo-seq",
+    ],
+    "tumor microenvironment": [
+        "tumor microenvironment",
+        "tumour microenvironment",
+        "microenvironment",
+        "immune infiltration",
+    ],
+    "drug resistance": [
+        "drug resistance",
+        "chemoresistance",
+        "resistance",
+    ],
+    "immunotherapy": [
+        "immunotherapy",
+        "immune checkpoint",
+        "pd-1",
+        "pd-l1",
+        "car-t",
+    ],
+    "DNA methylation": ["dna methylation", "methylation", "epigenetic"],
+    "copy number variation": ["copy number", "cnv"],
+    "prognosis": ["prognosis", "prognostic", "survival"],
+    "metastasis": [
+        "metastasis",
+        "metastatic",
+        "invasion",
+        "migration",
+    ],
+    "cell differentiation": ["differentiation", "cell fate", "lineage"],
+    "cellular senescence": ["senescence", "aging", "ageing"],
+}
+
+
+def build_expanded_query(disease: str, direction: str) -> str:
+    disease_terms = [disease] + _mapping_values(
+        DISEASE_SYNONYMS,
+        disease,
+    )
+    direction_terms = [direction] + _mapping_values(
+        DIRECTION_SYNONYMS,
+        direction,
+    )
+    parts: list[str] = []
+    if any(disease_terms):
+        parts.append(
+            "(" + " OR ".join(f'"{term}"' for term in disease_terms) + ")"
+        )
+    if any(direction_terms):
+        parts.append(
+            "(" + " OR ".join(f'"{term}"' for term in direction_terms) + ")"
+        )
+    return " AND ".join(parts)
+
+
+def _mapping_values(mapping: dict, key: str) -> list[str]:
+    target = key.lower()
+    for name, values in mapping.items():
+        if name.lower() == target:
+            return values
+    return []
+
+
+def _http_get(url: str, timeout: int = 90, retries: int = 3) -> str:
+    last_error: Exception | None = None
+    for attempt in range(retries):
+        try:
+            req = urllib.request.Request(url, headers={"User-Agent": USER_AGENT})
+            with urllib.request.urlopen(req, timeout=timeout) as resp:
+                return resp.read().decode("utf-8", "replace")
+        except Exception as exc:  # noqa: BLE001
+            last_error = exc
+            if attempt < retries - 1:
+                time.sleep(1 + attempt * 2)
+    if last_error is not None:
+        raise last_error
+    raise RuntimeError(f"failed to fetch: {url}")
 
 
 def esearch(query: str, max_results: int = 20) -> list[str]:
@@ -84,6 +203,25 @@ def esummary(uid: str) -> dict:
     root = ET.fromstring(_http_get(f"{EUTILS}/esummary.fcgi?{params}"))
     doc = root.find(".//DocSum")
     return _doc_summary(doc) if doc is not None else {}
+
+
+def esummary_many(uids: list[str]) -> dict[str, dict]:
+    if not uids:
+        return {}
+    params = urllib.parse.urlencode(
+        {
+            "db": "gds",
+            "id": ",".join(uids),
+            "retmode": "xml",
+        }
+    )
+    root = ET.fromstring(_http_get(f"{EUTILS}/esummary.fcgi?{params}"))
+    rows: dict[str, dict] = {}
+    for doc in root.findall(".//DocSum"):
+        uid = doc.findtext("Id") or ""
+        if uid:
+            rows[uid] = _doc_summary(doc)
+    return rows
 
 
 def to_row(
@@ -147,15 +285,20 @@ def search_datasets(
 ) -> list[dict]:
     ids = esearch(query, max_results)
     rows: list[dict] = []
+    summaries = (
+        {ids[0]: esummary(ids[0])}
+        if len(ids) == 1
+        else esummary_many(ids)
+    )
     for uid in ids:
         rows.append(
             to_row(
-                esummary(uid),
+                summaries.get(uid, {}),
                 disease=disease,
                 research_direction=research_direction,
             )
         )
-        time.sleep(0.34)
+    time.sleep(0.34)
     return filter_rows(rows, organism, keyword)
 
 
@@ -256,6 +399,11 @@ def main() -> int:
         default=str(APP_ROOT.parent / "liver_cancer"),
         help="root directory used by ensure_geo_dataset",
     )
+    parser.add_argument(
+        "--model",
+        default="",
+        help="ML/DL relevance model (joblib) for reranking results",
+    )
     args = parser.parse_args()
     if not args.query and not args.disease:
         parser.error("provide --query or --disease")
@@ -273,6 +421,17 @@ def main() -> int:
         disease=args.disease or "",
         research_direction=args.research_direction or "",
     )
+    if args.model:
+        from dataset_search_ml import load_model, rerank
+
+        model = load_model(Path(args.model))
+        rows = rerank(
+            rows,
+            args.disease or "",
+            args.research_direction or "",
+            model=model,
+        )
+        print(f"ML reranking applied: {Path(args.model).name}")
     if not rows:
         print("No datasets matched the search criteria.")
         return 0
