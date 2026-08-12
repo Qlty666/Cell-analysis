@@ -29,6 +29,7 @@ def main() -> int:
     root = Path(sys.argv[1] if len(sys.argv) > 1 else ".")
     data_dir = root / "results" / "data" / "07_ml"
     fig_dir = root / "results" / "figures" / "07_ml"
+    data_dir.mkdir(parents=True, exist_ok=True)
     fig_dir.mkdir(parents=True, exist_ok=True)
 
     status = {
