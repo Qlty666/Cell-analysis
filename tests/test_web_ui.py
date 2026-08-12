@@ -14,14 +14,23 @@ APP_ROOT = Path(__file__).resolve().parent.parent
 if str(APP_ROOT / "web") not in sys.path:
     sys.path.insert(0, str(APP_ROOT / "web"))
 
+import web_ui as web_ui_module  # noqa: E402
+
 from web_ui import (  # noqa: E402
     FULL_JOBS,
+    HEARTBEAT_CLIENTS,
+    HEARTBEAT_LOCK,
     _dock_file_path,
     _full_file_path,
     _full_status,
+    _heartbeat_client_ids,
+    _inject_heartbeat_script,
+    _purge_stale_heartbeats,
     dock_results,
     full_results,
+    register_heartbeat,
     start_full_job,
+    unregister_heartbeat,
 )
 
 
@@ -31,6 +40,49 @@ class _FakeProc:
 
     def poll(self) -> int:
         return self.returncode
+
+
+class TestHeartbeatAutoShutdown(unittest.TestCase):
+    def setUp(self) -> None:
+        with HEARTBEAT_LOCK:
+            HEARTBEAT_CLIENTS.clear()
+            web_ui_module.HEARTBEAT_LAST_SEEN_AT = None
+
+    def tearDown(self) -> None:
+        with HEARTBEAT_LOCK:
+            HEARTBEAT_CLIENTS.clear()
+            web_ui_module.HEARTBEAT_LAST_SEEN_AT = None
+
+    def test_heartbeat_script_injected_into_html(self):
+        html = b"<html><body>test</body></html>"
+        out = _inject_heartbeat_script(html)
+        self.assertIn(b"navigator.sendBeacon", out)
+        self.assertEqual(out.count(b"</body>"), 1)
+        self.assertTrue(out.startswith(b"<html><body>test"))
+
+    def test_heartbeat_script_not_injected_into_json(self):
+        body = b'{"ok": true}'
+        self.assertEqual(_inject_heartbeat_script(body), body)
+
+    def test_register_and_unregister_clients(self):
+        register_heartbeat("tab-a", now=100.0)
+        register_heartbeat("tab-b", now=100.0)
+        self.assertEqual(_heartbeat_client_ids(), {"tab-a", "tab-b"})
+        unregister_heartbeat("tab-a")
+        self.assertEqual(_heartbeat_client_ids(), {"tab-b"})
+
+    def test_heartbeat_records_last_seen(self):
+        self.assertIsNone(web_ui_module.HEARTBEAT_LAST_SEEN_AT)
+        register_heartbeat("tab", now=100.0)
+        self.assertEqual(web_ui_module.HEARTBEAT_LAST_SEEN_AT, 100.0)
+        unregister_heartbeat("tab")
+        self.assertEqual(web_ui_module.HEARTBEAT_LAST_SEEN_AT, 100.0)
+
+    def test_stale_heartbeats_are_purged(self):
+        register_heartbeat("old", now=10.0)
+        register_heartbeat("new", now=100.0)
+        _purge_stale_heartbeats(now=100.0, timeout=15.0)
+        self.assertEqual(_heartbeat_client_ids(), {"new"})
 
 
 def _make_info(tmp: Path, returncode: int) -> dict:
