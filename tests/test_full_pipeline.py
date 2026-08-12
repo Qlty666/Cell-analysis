@@ -50,8 +50,11 @@ def _write_deg(root: Path) -> None:
             "significant",
         ],
     )
-    (root / "results" / "data").mkdir(parents=True, exist_ok=True)
-    frame.to_csv(root / "results" / "data" / "deg_significant.csv", index=False)
+    (root / "results" / "data" / "05_deg").mkdir(parents=True, exist_ok=True)
+    frame.to_csv(
+        root / "results" / "data" / "05_deg" / "fig_09_deg_significant.csv",
+        index=False,
+    )
 
 
 def _write_pseudobulk(workdir: Path, n_genes: int = 24) -> None:
@@ -108,7 +111,7 @@ class TestExtractKeyGenes(unittest.TestCase):
         with tempfile.TemporaryDirectory() as tmp:
             root = Path(tmp) / "single_cell"
             data_dir = root / "results" / "data"
-            data_dir.mkdir(parents=True)
+            (data_dir / "05_deg").mkdir(parents=True)
             frame = pd.DataFrame(
                 {
                     "gene": ["GENE1", "GENE2"],
@@ -121,7 +124,10 @@ class TestExtractKeyGenes(unittest.TestCase):
                     "significant": [True, True],
                 }
             )
-            frame.to_csv(data_dir / "deg_significant.csv", index=False)
+            frame.to_csv(
+                data_dir / "05_deg" / "fig_09_deg_significant.csv",
+                index=False,
+            )
             out = root / "integration_out"
             result = extract_key_genes(root, out, top_n=10)
             self.assertEqual(result.iloc[0]["gene"], "GENE1")
@@ -229,7 +235,13 @@ class TestFullPipelineMarkers(unittest.TestCase):
                 json.dumps(
                     {
                         "deg_table": str(
-                            old_root / "results" / "data" / "deg_significant.csv"
+            (
+                old_root
+                / "results"
+                / "data"
+                / "05_deg"
+                / "fig_09_deg_significant.csv"
+            )
                         )
                     }
                 ),
@@ -393,10 +405,26 @@ class TestFullPipeline(unittest.TestCase):
             self.assertTrue((out / "key_genes.csv").exists())
             self.assertTrue((out / "gene_evidence.csv").exists())
             self.assertTrue(
-                (workdir / "outputs" / "run_001" / "knockout" / "ranked_knockout.csv").exists()
+                (
+                    workdir
+                    / "outputs"
+                    / "run_001"
+                    / "results"
+                    / "04_knockout"
+                    / "data"
+                    / "fig_52_53_ranked_knockout.csv"
+                ).exists()
             )
             self.assertTrue(
-                (workdir / "outputs" / "run_001" / "validation" / "validation_plan.md").exists()
+                (
+                    workdir
+                    / "outputs"
+                    / "run_001"
+                    / "results"
+                    / "05_validation"
+                    / "data"
+                    / "validation_plan.md"
+                ).exists()
             )
             self.assertTrue((out / "integration_report.html").exists())
             self.assertTrue((out / "integration_summary.json").exists())

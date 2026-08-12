@@ -53,6 +53,9 @@ REQUIRED_FIGURES = [
 
 
 def verify_outputs(out: Path, accession: str) -> bool:
+    def find_figure(fig_dir: Path, name: str) -> bool:
+        return any(p.is_file() for p in fig_dir.rglob(name))
+
     problems = []
     for rel in [
         "results/pipeline_complete.json",
@@ -63,7 +66,7 @@ def verify_outputs(out: Path, accession: str) -> bool:
             problems.append(rel)
     fig_dir = out / "results" / "figures"
     for name in REQUIRED_FIGURES:
-        if not (fig_dir / name).exists():
+        if not find_figure(fig_dir, name):
             problems.append(name)
     if problems:
         print(f"[{accession}] missing: {', '.join(problems[:20])}")

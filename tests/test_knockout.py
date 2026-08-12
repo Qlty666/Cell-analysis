@@ -109,11 +109,11 @@ class TestRunKnockout(unittest.TestCase):
                 },
             )
             summary = run_knockout(cfg, LOG)
-            ko_dir = cfg.output_dir / "knockout"
-            ranked = ko_dir / "ranked_knockout.csv"
+            ko_dir = cfg.knockout_dir()
+            ranked = ko_dir / "data" / "fig_52_53_ranked_knockout.csv"
             self.assertTrue(ranked.exists())
             self.assertTrue((ko_dir / "summary.json").exists())
-            self.assertTrue((ko_dir / "knockout_report.md").exists())
+            self.assertTrue((ko_dir / "data" / "knockout_report.md").exists())
 
             frame = pd.read_csv(ranked)
             self.assertEqual(len(frame), 40)
@@ -162,7 +162,7 @@ class TestRunKnockout(unittest.TestCase):
                 },
             )
             summary = run_knockout(cfg, LOG)
-            ranked = cfg.output_dir / "knockout" / "ranked_knockout.csv"
+            ranked = cfg.knockout_dir() / "data" / "fig_52_53_ranked_knockout.csv"
             frame = pd.read_csv(ranked)
             self.assertEqual(len(frame), len(genes))
             self.assertFalse(summary["depmap_included"])

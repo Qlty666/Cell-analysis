@@ -13,7 +13,7 @@ from .utils import DockingError, ToolNotFoundError, find_tool, write_json
 
 
 def run_redock(cfg: ResolvedConfig, log) -> dict:
-    ranked = cfg.reports_dir() / "ranked_results.csv"
+    ranked = cfg.analysis_dir() / "data" / "fig_46_47_ranked_results.csv"
     if not ranked.exists():
         raise DockingError(f"ranked results not found: {ranked}; run analyze first")
     manifest = cfg.manifest_path()
@@ -37,9 +37,10 @@ def run_redock(cfg: ResolvedConfig, log) -> dict:
     if not vina:
         raise ToolNotFoundError("AutoDock Vina not found; run check-env")
 
-    redock_dir = cfg.output_dir / "redock"
-    redock_dir.mkdir(parents=True, exist_ok=True)
-    results_path = redock_dir / "results.csv"
+    redock_dir = cfg.redock_dir()
+    redock_data = redock_dir / "data"
+    redock_data.mkdir(parents=True, exist_ok=True)
+    results_path = redock_data / "fig_49_redock_results.csv"
 
     done: set[str] = set()
     if cfg.get("redock", "resume", True) and results_path.exists():
@@ -113,8 +114,8 @@ def make_redock_figure(cfg: ResolvedConfig, log) -> None:
     import matplotlib.pyplot as plt
     import pandas as pd
 
-    ranked = cfg.reports_dir() / "ranked_results.csv"
-    redock_csv = cfg.output_dir / "redock" / "results.csv"
+    ranked = cfg.analysis_dir() / "data" / "fig_46_47_ranked_results.csv"
+    redock_csv = cfg.redock_dir() / "data" / "fig_49_redock_results.csv"
     if not ranked.exists() or not redock_csv.exists():
         return
     initial = pd.read_csv(ranked, dtype={"id": str})
@@ -130,6 +131,10 @@ def make_redock_figure(cfg: ResolvedConfig, log) -> None:
     merged = merged.dropna(subset=["affinity_initial", "affinity_redock"])
     if merged.empty:
         return
+    merged.to_csv(
+        cfg.redock_dir() / "data" / "fig_49_redock_comparison.csv",
+        index=False,
+    )
 
     delta = merged["affinity_redock"] - merged["affinity_initial"]
     lo = (
@@ -160,7 +165,9 @@ def make_redock_figure(cfg: ResolvedConfig, log) -> None:
     axes[1].set_ylabel("Ligand count")
     axes[1].set_title("Redock affinity change")
     fig.tight_layout()
-    out_path = cfg.reports_dir() / "redock_comparison.png"
+    figures_dir = cfg.redock_dir() / "figures"
+    figures_dir.mkdir(parents=True, exist_ok=True)
+    out_path = figures_dir / "fig_49_redock_comparison.png"
     fig.savefig(out_path, dpi=150)
     plt.close(fig)
     log.info("redock comparison figure saved: %s", out_path)

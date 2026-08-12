@@ -200,7 +200,22 @@ class ResolvedConfig:
         return self.output_dir / "docked"
 
     def reports_dir(self) -> Path:
-        return self.output_dir / "reports"
+        return self.output_dir / "results"
+
+    def analysis_dir(self) -> Path:
+        return self.reports_dir() / "01_analysis"
+
+    def redock_dir(self) -> Path:
+        return self.reports_dir() / "02_redock"
+
+    def ml_dir(self) -> Path:
+        return self.reports_dir() / "03_ml"
+
+    def knockout_dir(self) -> Path:
+        return self.reports_dir() / "04_knockout"
+
+    def validation_dir(self) -> Path:
+        return self.reports_dir() / "05_validation"
 
     def logs_dir(self) -> Path:
         return self.output_dir / "logs"

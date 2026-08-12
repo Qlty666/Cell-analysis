@@ -728,9 +728,9 @@ def run_dataset(dataset: dict, gene_evidence: pd.DataFrame) -> dict:
     started = time.time()
     val_summary = export_validation(cfg, LOG)
     val_time = time.time() - started
-    ko_dir = cfg.output_dir / "knockout"
-    val_dir = cfg.output_dir / "validation"
-    frame = pd.read_csv(ko_dir / "ranked_knockout.csv")
+    ko_dir = cfg.knockout_dir()
+    val_dir = cfg.validation_dir()
+    frame = pd.read_csv(ko_dir / "data" / "fig_52_53_ranked_knockout.csv")
     return {
         "dataset": dataset_id,
         "samples": dataset.get("samples"),
@@ -741,7 +741,7 @@ def run_dataset(dataset: dict, gene_evidence: pd.DataFrame) -> dict:
         ),
         "manifest": bool((ko_dir / "run_manifest.json").exists()),
         "validation_files": sorted(
-            p.name for p in val_dir.glob("*") if p.is_file()
+            p.name for p in (val_dir / "data").glob("*") if p.is_file()
         ),
         "ko_seconds": round(ko_time, 1),
         "validation_seconds": round(val_time, 1),
