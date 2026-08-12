@@ -99,9 +99,13 @@ cluster_resolution <- param_num("LIVER_CLUSTER_RESOLUTION")
 cluster_algorithm <- param_num("LIVER_CLUSTER_ALGORITHM")
 de_logfc <- param_num("LIVER_DE_LOGFc")
 de_padj <- param_num("LIVER_DE_PADJ")
+deg_violin_top_n <- param_num("LIVER_DE_VIOLIN_TOP_N")
+deg_violin_max_cells <- param_num("LIVER_DE_VIOLIN_MAX_CELLS")
 if (is.na(cluster_resolution)) cluster_resolution <- 0.6
 if (is.na(de_logfc)) de_logfc <- 0.25
 if (is.na(de_padj)) de_padj <- 0.05
+if (is.na(deg_violin_top_n)) deg_violin_top_n <- 12
+if (is.na(deg_violin_max_cells)) deg_violin_max_cells <- 1000
 
 save_fig <- function(file, plot, width, height, dpi = 150) {
   name <- basename(file)
@@ -1600,6 +1604,118 @@ if (stage_allowed("06")) run_stage("06_differential_expression", {
     height = 7,
     dpi = 150
   )
+
+  top_deg <- deg[deg$significant %in% TRUE, ]
+  if (nrow(top_deg) < 1) {
+    top_deg <- deg[is.finite(deg$p_val_adj), ]
+  }
+  top_deg <- head(top_deg, deg_violin_top_n)
+  top_genes <- intersect(top_deg$gene, rownames(seurat))
+  if (length(top_genes) >= 2) {
+    conds <- unique(as.character(seurat$condition))
+    if (length(conds) >= 2) {
+      keep_cells <- unlist(lapply(conds, function(cc) {
+        cells <- colnames(seurat)[seurat$condition == cc]
+        set.seed(20260812)
+        if (length(cells) > deg_violin_max_cells) {
+          cells <- sample(cells, deg_violin_max_cells)
+        }
+        cells
+      }))
+      expr_mat <- GetAssayData(seurat, layer = "data")[
+        top_genes,
+        keep_cells,
+        drop = FALSE
+      ]
+      expr_long <- data.frame(
+        cell = rep(colnames(expr_mat), each = nrow(expr_mat)),
+        gene = rep(rownames(expr_mat), times = ncol(expr_mat)),
+        expr = as.numeric(as.matrix(expr_mat)),
+        stringsAsFactors = FALSE
+      )
+      expr_long$condition <- seurat$condition[
+        match(expr_long$cell, colnames(seurat))
+      ]
+      expr_long <- expr_long[!is.na(expr_long$condition), , drop = FALSE]
+      expr_long$gene <- factor(expr_long$gene, levels = rev(top_genes))
+
+      deg_top <- top_deg[top_deg$gene %in% top_genes, , drop = FALSE]
+      deg_top$p_label <- ifelse(
+        deg_top$p_val_adj < 0.001,
+        formatC(pmax(deg_top$p_val_adj, 1e-300), format = "e", digits = 1),
+        sprintf("%.3f", deg_top$p_val_adj)
+      )
+      label_map <- setNames(
+        paste0(deg_top$gene, "\nP = ", deg_top$p_label),
+        deg_top$gene
+      )
+      cond_colors <- hcl.colors(length(conds), palette = "Set 2")
+      p_deg_violin <- ggplot(
+        expr_long,
+        aes(x = expr, y = gene, fill = condition)
+      ) +
+        geom_violin(
+          position = position_dodge(0.8),
+          scale = "width",
+          alpha = 0.75,
+          trim = TRUE
+        ) +
+        geom_boxplot(
+          width = 0.12,
+          position = position_dodge(0.8),
+          outlier.shape = NA,
+          alpha = 0.9
+        ) +
+        geom_point(
+          alpha = 0.18,
+          size = 0.4,
+          position = position_jitterdodge(
+            jitter.width = 0.08,
+            dodge.width = 0.8,
+            seed = 20260812
+          )
+        ) +
+        scale_y_discrete(labels = label_map) +
+        scale_fill_manual(values = cond_colors) +
+        labs(
+          x = "Normalized expression",
+          y = NULL,
+          fill = "Condition",
+          title = paste0(
+            "Top differential genes by adjusted p value (",
+            cond_levels[1], " vs ", cond_levels[2], ")"
+          )
+        ) +
+        theme_minimal(base_size = 13) +
+        theme(
+          axis.text.y = element_text(size = 8, face = "italic"),
+          legend.position = "top"
+        )
+      save_fig(
+        file.path(fig_dir, "fig_09_deg_horizontal_violin.png"),
+        p_deg_violin,
+        width = 11,
+        height = max(7, 0.55 * length(top_genes) + 2),
+        dpi = 150
+      )
+      write.csv(
+        deg_top[, intersect(
+          c(
+            "gene", "avg_log2FC", "p_val", "p_val_adj",
+            "pct.1", "pct.2", "significant", "direction"
+          ),
+          colnames(deg_top)
+        ), drop = FALSE],
+        stage_data_file("fig_09_deg_horizontal_violin.csv"),
+        row.names = FALSE
+      )
+      log_msg("saved DEG horizontal violin table: ", nrow(deg_top), " genes")
+    } else {
+      log_msg("skip DEG horizontal violin: need at least 2 conditions")
+    }
+  } else {
+    log_msg("skip DEG horizontal violin: too few genes in Seurat object")
+  }
 
   top30 <- intersect(
     deg$gene[seq_len(min(30, nrow(deg)))],
