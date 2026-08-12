@@ -33,6 +33,7 @@ CSV_COLUMNS = [
     "date",
     "type",
     "url",
+    "relevance_score",
 ]
 
 DISEASE_SYNONYMS = {
@@ -331,13 +332,14 @@ def write_outputs(rows: list[dict], out_dir: Path) -> tuple[Path, Path]:
 def download_accessions(
     accessions: list[str],
     root: Path,
+    log=print,
 ) -> dict[str, str]:
     from data.geo_downloader import ensure_geo_dataset
 
     results: dict[str, str] = {}
     for accession in accessions:
         try:
-            ensure_geo_dataset(accession, root, print)
+            ensure_geo_dataset(accession, root, log)
             results[accession] = "ok"
         except Exception as exc:  # noqa: BLE001
             results[accession] = f"error: {exc}"

@@ -185,6 +185,20 @@ class TestDatasetSearch(unittest.TestCase):
             text = csv_path.read_text(encoding="utf-8")
             self.assertIn("GSE100001", text)
 
+    def test_write_outputs_includes_relevance_score(self):
+        rows = [
+            {
+                "accession": "GSE100002",
+                "relevance_score": 0.912,
+            }
+        ]
+        with tempfile.TemporaryDirectory() as tmp:
+            out = Path(tmp) / "results"
+            csv_path, json_path = search_datasets.write_outputs(rows, out)
+            text = csv_path.read_text(encoding="utf-8")
+            self.assertIn("relevance_score", text)
+            self.assertIn("0.912", text)
+
 
 if __name__ == "__main__":
     unittest.main()

@@ -36,6 +36,8 @@ TASK_HISTORY_LOCK = threading.Lock()
 SRC_DIR = APP_ROOT / "src"
 if str(SRC_DIR) not in sys.path:
     sys.path.insert(0, str(SRC_DIR))
+if str(APP_ROOT) not in sys.path:
+    sys.path.insert(0, str(APP_ROOT))
 
 DOCK_TEMPLATE_PATH = TEMPLATE_DIR / "dock_page_template.html"
 DOCK_JOBS = {}
@@ -45,6 +47,10 @@ DOCK_HISTORY_PATH = WEB_DIR / "dock_history.json"
 FULL_TEMPLATE_PATH = TEMPLATE_DIR / "full_page_template.html"
 RESULTS_TEMPLATE_PATH = TEMPLATE_DIR / "results_manifest_optimized.html"
 TASKS_TEMPLATE_PATH = TEMPLATE_DIR / "tasks_template.html"
+DATASET_TEMPLATE_PATH = TEMPLATE_DIR / "datasets_template.html"
+DATASET_SEARCH_DIR = APP_ROOT / "data_cache" / "dataset_search"
+DATASET_DOWNLOAD_JOBS = {}
+DATASET_DOWNLOAD_LOCK = threading.Lock()
 FULL_JOBS = {}
 FULL_QUEUE = []
 FULL_QUEUE_LOCK = threading.Lock()
@@ -56,6 +62,7 @@ NAV_HTML = (
     '<div class="topnav">'
     '<a href="/full">全自动流水线</a>'
     '<a href="/">单细胞分析</a>'
+    '<a href="/datasets">数据集搜索</a>'
     '<a href="/dock">虚拟筛选</a>'
     '<a href="/results">结果清单</a>'
     '<a href="/tasks" class="nav-right">任务进度</a>'
@@ -733,6 +740,15 @@ def render_tasks_page() -> str:
     )
 
 
+def render_datasets_page() -> str:
+    if DATASET_TEMPLATE_PATH.exists():
+        return DATASET_TEMPLATE_PATH.read_text(encoding="utf-8")
+    return (
+        "<html><body><h1>datasets template missing</h1>"
+        "<p>web/templates/datasets_template.html not found</p></body></html>"
+    )
+
+
 def _first(data: dict, key: str, default: str = "") -> str:
     values = data.get(key)
     if not values:
@@ -763,6 +779,195 @@ def _float_field(data: dict, key: str):
     if str(value).strip() == "":
         return None
     return float(value)
+
+
+def dataset_search_request(data: dict) -> dict:
+    disease = _first(data, "disease", "").strip()
+    research_direction = _first(data, "research_direction", "").strip()
+    query = _first(data, "query", "").strip()
+    if not disease and not query:
+        raise ValueError("疾病名称或原始查询至少填写一项")
+    max_results = 20
+    try:
+        max_results = max(
+            1,
+            min(100, int(float(_first(data, "max_results", "20") or 20))),
+        )
+    except ValueError:
+        pass
+    organism = _first(data, "organism", "").strip() or None
+    keyword = _first(data, "keyword", "").strip() or None
+    model_value = _first(data, "model", "").strip()
+
+    import search_datasets as sd
+
+    query_text = sd.build_query(disease, research_direction, query or None)
+    rows = sd.search_datasets(
+        query_text,
+        max_results=max_results,
+        organism=organism,
+        keyword=keyword,
+        disease=disease,
+        research_direction=research_direction,
+    )
+    model_applied = False
+    model_path = ""
+    if model_value:
+        model_file = Path(model_value).expanduser()
+        if not model_file.is_file():
+            raise ValueError(f"模型文件不存在：{model_file}")
+        from dataset_search_ml import load_model, rerank
+
+        rows = rerank(
+            rows,
+            disease,
+            research_direction,
+            model=load_model(model_file),
+        )
+        model_applied = True
+        model_path = str(model_file)
+
+    DATASET_SEARCH_DIR.mkdir(parents=True, exist_ok=True)
+    csv_path, json_path = sd.write_outputs(rows, DATASET_SEARCH_DIR)
+    return {
+        "query": query_text,
+        "disease": disease,
+        "research_direction": research_direction,
+        "model_applied": model_applied,
+        "model_path": model_path,
+        "count": len(rows),
+        "results": rows,
+        "output_dir": str(DATASET_SEARCH_DIR),
+        "csv_url": f"/datasets/file?name={csv_path.name}",
+        "json_url": f"/datasets/file?name={json_path.name}",
+    }
+
+
+def start_dataset_download(data: dict) -> dict:
+    accessions: list[str] = []
+    for value in data.get("accessions", []):
+        accessions.extend(
+            acc.strip().upper()
+            for acc in str(value).split(",")
+            if acc.strip()
+        )
+    if not accessions:
+        for value in data.get("accession", []):
+            accessions.extend(
+                acc.strip().upper()
+                for acc in str(value).split(",")
+                if acc.strip()
+            )
+    if not accessions:
+        raise ValueError("至少选择一个数据集")
+    accessions = list(dict.fromkeys(validate_accession(acc) for acc in accessions))
+    download_root = Path(
+        _first(data, "download_root", str(APP_ROOT.parent / "liver_cancer"))
+    ).expanduser().resolve()
+    DATASET_SEARCH_DIR.mkdir(parents=True, exist_ok=True)
+    job_id = uuid.uuid4().hex[:8]
+    log_path = DATASET_SEARCH_DIR / f"download_{job_id}.log"
+    info = {
+        "job_id": job_id,
+        "log": log_path,
+        "results": {},
+        "error": "",
+        "running": True,
+        "started": time.time(),
+    }
+    with DATASET_DOWNLOAD_LOCK:
+        DATASET_DOWNLOAD_JOBS[job_id] = info
+    threading.Thread(
+        target=_run_dataset_download,
+        args=(info, accessions, download_root),
+        daemon=True,
+    ).start()
+    return {
+        "job": job_id,
+        "status_url": f"/datasets/download/status?job={job_id}",
+    }
+
+
+def _run_dataset_download(
+    info: dict,
+    accessions: list[str],
+    download_root: Path,
+) -> None:
+    import search_datasets as sd
+
+    log_path = info["log"]
+    log_path.parent.mkdir(parents=True, exist_ok=True)
+    try:
+        with log_path.open("w", encoding="utf-8", errors="replace") as log_handle:
+            log_handle.write(f"starting download: {', '.join(accessions)}\n")
+            log_handle.flush()
+            def log(*args):
+                log_handle.write(
+                    " ".join(str(arg) for arg in args) + "\n"
+                )
+                log_handle.flush()
+            try:
+                results = sd.download_accessions(
+                    accessions,
+                    download_root,
+                    log=log,
+                )
+                info["results"] = results
+                (DATASET_SEARCH_DIR / "download_results.json").write_text(
+                    json.dumps(results, ensure_ascii=False, indent=2),
+                    encoding="utf-8",
+                )
+                log_handle.write("download results:\n")
+                log_handle.write(
+                    json.dumps(results, ensure_ascii=False, indent=2)
+                )
+                log_handle.write("\n")
+            except Exception as exc:  # noqa: BLE001
+                info["error"] = str(exc)
+                log_handle.write(f"download error: {exc}\n")
+    finally:
+        info["running"] = False
+
+
+def dataset_download_status(job_id: str) -> dict:
+    with DATASET_DOWNLOAD_LOCK:
+        info = DATASET_DOWNLOAD_JOBS.get(job_id)
+    if not info:
+        raise ValueError("下载任务不存在")
+    running = bool(info.get("running"))
+    log_text = (
+        info["log"].read_text(encoding="utf-8", errors="replace")
+        if info["log"].exists()
+        else ""
+    )
+    return {
+        "job": job_id,
+        "running": running,
+        "ok": not running and not info.get("error"),
+        "error": info.get("error", ""),
+        "results": info.get("results", {}),
+        "log": log_text[-8000:],
+    }
+
+
+def dataset_file_path(name: str) -> Path | None:
+    target = (DATASET_SEARCH_DIR / Path(name).name).resolve()
+    if target.parent != DATASET_SEARCH_DIR.resolve() or not target.is_file():
+        return None
+    return target
+
+
+def _single_report_path(info: dict | None = None, output: str = "") -> Path | None:
+    if info is not None:
+        out = Path(info["out"]).resolve()
+    elif output:
+        out = Path(output).expanduser().resolve()
+    else:
+        return None
+    target = (out / "results" / "result_report.html").resolve()
+    if target.is_file() and target.is_relative_to(out):
+        return target
+    return None
 
 
 def start_dock_job(data: dict) -> dict:
@@ -1953,6 +2158,13 @@ class Handler(BaseHTTPRequestHandler):
         if parsed.path == "/":
             self._send(200, get_page().encode("utf-8"), "text/html; charset=utf-8")
             return
+        if parsed.path == "/datasets":
+            self._send(
+                200,
+                render_datasets_page().encode("utf-8"),
+                "text/html; charset=utf-8",
+            )
+            return
         if parsed.path == "/dock":
             self._send(200, render_dock_page().encode("utf-8"), "text/html; charset=utf-8")
             return
@@ -2021,6 +2233,50 @@ class Handler(BaseHTTPRequestHandler):
                 ".pdf": "application/pdf",
             }.get(suffix, "application/octet-stream")
             self._send(200, target.read_bytes(), content_type)
+            return
+        if parsed.path == "/report":
+            query = parse_qs(parsed.query)
+            job = query.get("job", [""])[0]
+            output = query.get("output", [""])[0]
+            info = JOBS.get(job) if job else None
+            target = (
+                _single_report_path(info)
+                if info is not None
+                else _single_report_path(None, output)
+            )
+            if not target:
+                self._send(404, b"report not found", "text/plain; charset=utf-8")
+                return
+            self._send(200, target.read_bytes(), "text/html; charset=utf-8")
+            return
+        if parsed.path == "/datasets/file":
+            query = parse_qs(parsed.query)
+            name = query.get("name", [""])[0]
+            target = dataset_file_path(name)
+            if not target:
+                self._send(404, b"file not found", "text/plain; charset=utf-8")
+                return
+            content_type = {
+                ".csv": "text/csv; charset=utf-8",
+                ".json": "application/json",
+            }.get(target.suffix.lower(), "application/octet-stream")
+            self._send(200, target.read_bytes(), content_type)
+            return
+        if parsed.path == "/datasets/download/status":
+            query = parse_qs(parsed.query)
+            job = query.get("job", [""])[0]
+            try:
+                body = json.dumps(
+                    dataset_download_status(job),
+                    ensure_ascii=False,
+                ).encode("utf-8")
+                self._send(200, body, "application/json")
+            except ValueError as exc:
+                self._send(
+                    404,
+                    json.dumps({"error": str(exc)}).encode("utf-8"),
+                    "application/json",
+                )
             return
         if parsed.path == "/dock/log":
             query = parse_qs(parsed.query)
@@ -2504,6 +2760,42 @@ class Handler(BaseHTTPRequestHandler):
                 )
             return
 
+        if parsed.path == "/datasets/search":
+            try:
+                result = dataset_search_request(data)
+                self._send(
+                    200,
+                    json.dumps(result, ensure_ascii=False).encode("utf-8"),
+                    "application/json",
+                )
+            except Exception as exc:
+                self._send(
+                    400,
+                    json.dumps({"error": str(exc)}, ensure_ascii=False).encode(
+                        "utf-8"
+                    ),
+                    "application/json",
+                )
+            return
+
+        if parsed.path == "/datasets/download":
+            try:
+                result = start_dataset_download(data)
+                self._send(
+                    200,
+                    json.dumps(result, ensure_ascii=False).encode("utf-8"),
+                    "application/json",
+                )
+            except Exception as exc:
+                self._send(
+                    400,
+                    json.dumps({"error": str(exc)}, ensure_ascii=False).encode(
+                        "utf-8"
+                    ),
+                    "application/json",
+                )
+            return
+
         if parsed.path == "/dock/check-env":
             from docking.environment import check_environment
 
@@ -2721,7 +3013,7 @@ def main() -> int:
     parser.add_argument("--port", type=int, default=8000)
     parser.add_argument(
         "--page",
-        choices=["single", "dock", "full", "results", "tasks"],
+        choices=["single", "dock", "full", "results", "tasks", "datasets"],
         default="full",
         help="page to open in the browser",
     )
@@ -2742,6 +3034,8 @@ def main() -> int:
         open_url = url + "/results"
     elif args.page == "tasks":
         open_url = url + "/tasks"
+    elif args.page == "datasets":
+        open_url = url + "/datasets"
     else:
         open_url = url
     threading.Timer(1.0, lambda: webbrowser.open(open_url)).start()
