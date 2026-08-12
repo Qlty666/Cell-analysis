@@ -314,6 +314,9 @@ a.file-link { color: #1665c0; text-decoration: none; margin-right: 12px; }
 </div>
 
 <script>
+function esc(value) {
+  return String(value == null ? '' : value).replace(/[&<>"']/g, c => ({'&':'&amp;','<':'&lt;','>':'&gt;','"':'&quot;',"'":'&#39;'}[c]));
+}
 let currentJob = null;
 let pollTimer = null;
 let jobAlerted = false;
@@ -558,23 +561,23 @@ async function loadResults(job) {
     const data = await resp.json();
     const summary = data.summary || {};
     const summaryRow = document.getElementById('summaryRow');
-    summaryRow.innerHTML = '<p class="muted">成功对接 ' + (summary.total_docked || 0) +
-      ' 个配体，命中 ' + (summary.hits || 0) +
-      ' 个，最佳亲和力 ' + (summary.best_affinity === null || summary.best_affinity === undefined ? '-' : summary.best_affinity) +
-      ' kcal/mol。输出目录：' + data.output_dir + '</p>';
+    summaryRow.innerHTML = '<p class="muted">成功对接 ' + esc(summary.total_docked || 0) +
+      ' 个配体，命中 ' + esc(summary.hits || 0) +
+      ' 个，最佳亲和力 ' + esc(summary.best_affinity === null || summary.best_affinity === undefined ? '-' : summary.best_affinity) +
+      ' kcal/mol。输出目录：' + esc(data.output_dir) + '</p>';
 
     const links = document.getElementById('fileLinks');
     links.innerHTML = (data.files || []).map(name =>
-      '<a class="file-link" href="/dock/file?job=' + job + '&name=' + encodeURIComponent(name) + '" download>' + name + '</a>'
+      '<a class="file-link" href="/dock/file?job=' + job + '&name=' + encodeURIComponent(name) + '" download>' + esc(name) + '</a>'
     ).join('');
 
     const table = document.getElementById('resultTable');
     if (data.rows && data.rows.length) {
       table.innerHTML = '<thead><tr><th>排名</th><th>ID</th><th>亲和力</th><th>模式</th><th>SMILES</th></tr></thead><tbody>' +
         data.rows.map(r =>
-          '<tr><td>' + (r.rank || '') + '</td><td>' + r.id + '</td><td>' +
-          r.affinity + '</td><td>' + (r.mode || '') + '</td><td style="max-width:280px;word-break:break-all;">' +
-          (r.smiles || '') + '</td></tr>'
+          '<tr><td>' + esc(r.rank || '') + '</td><td>' + esc(r.id) + '</td><td>' +
+          esc(r.affinity) + '</td><td>' + esc(r.mode || '') + '</td><td style="max-width:280px;word-break:break-all;">' +
+          esc(r.smiles || '') + '</td></tr>'
         ).join('') + '</tbody>';
     } else {
       table.innerHTML = '<tbody><tr><td>暂无结果</td></tr></tbody>';
@@ -582,10 +585,10 @@ async function loadResults(job) {
 
     const gallery = document.getElementById('gallery');
     gallery.innerHTML = (data.figures || []).map(name =>
-      '<figure><img src="/dock/file?job=' + job + '&name=' + encodeURIComponent(name) + '"><figcaption>' + name + '</figcaption></figure>'
+      '<figure><img src="/dock/file?job=' + job + '&name=' + encodeURIComponent(name) + '"><figcaption>' + esc(name) + '</figcaption></figure>'
     ).join('');
   } catch (e) {
-    document.getElementById('summaryRow').innerHTML = '<div class="error">结果加载失败：' + String(e.message || e) + '</div>';
+    document.getElementById('summaryRow').innerHTML = '<div class="error">结果加载失败：' + esc(e.message || e) + '</div>';
   }
 }
 
@@ -599,9 +602,9 @@ async function loadDockHistory() {
       return;
     }
     const rows = items.map(item =>
-      '<tr><td>' + (item.stage || '') + '</td><td>' + item.status + '</td><td>' +
+      '<tr><td>' + esc(item.stage || '') + '</td><td>' + esc(item.status) + '</td><td>' +
       new Date(item.finished * 1000).toLocaleString() + '</td><td>' +
-      item.output + '</td></tr>'
+      esc(item.output) + '</td></tr>'
     ).join('');
     box.innerHTML = '<table><thead><tr><th>阶段</th><th>状态</th><th>完成时间</th><th>输出路径</th></tr></thead><tbody>' + rows + '</tbody></table>';
   } catch (e) {
@@ -622,12 +625,12 @@ async function loadDockEnv() {
     const software = data.checks.filter(c => c.kind === 'software');
     const packages = data.checks.filter(c => c.kind !== 'software');
     const softwareRows = software.map(c =>
-      '<tr><td>' + c.name + '</td><td>' + c.version + '</td><td>' + badge(c) +
-      '</td><td><a href="' + c.url + '" target="_blank" rel="noopener">' + c.url + '</a></td></tr>'
+      '<tr><td>' + esc(c.name) + '</td><td>' + esc(c.version) + '</td><td>' + badge(c) +
+      '</td><td><a href="' + esc(c.url) + '" target="_blank" rel="noopener">' + esc(c.url) + '</a></td></tr>'
     ).join('');
     const packageRows = packages.map(c =>
-      '<tr><td>' + c.name + '</td><td>' + c.version + '</td><td>' + badge(c) +
-      '</td><td><code>' + (c.install || '') + '</code></td></tr>'
+      '<tr><td>' + esc(c.name) + '</td><td>' + esc(c.version) + '</td><td>' + badge(c) +
+      '</td><td><code>' + esc(c.install || '') + '</code></td></tr>'
     ).join('');
     let html = '<h3>软件</h3>';
     html += '<table><thead><tr><th>软件</th><th>版本/路径</th><th>状态</th><th>下载地址</th></tr></thead><tbody>' + softwareRows + '</tbody></table>';
@@ -657,20 +660,20 @@ async function installEnv(btn) {
           const ok = data.ok;
           box.innerHTML = '<div class="' + (ok ? 'ok' : 'error') + '">' +
             (ok ? '环境补全完成。' : '环境补全失败，请查看日志。') +
-            '</div>' + (data.log ? '<pre style="height:220px;">' + data.log + '</pre>' : '');
+            '</div>' + (data.log ? '<pre style="height:220px;">' + esc(data.log) + '</pre>' : '');
           await loadDockEnv();
           btn.disabled = false;
         } else {
-          box.innerHTML = '<pre style="height:220px;">' + (data.log || '正在安装...') + '</pre>';
+          box.innerHTML = '<pre style="height:220px;">' + esc(data.log || '正在安装...') + '</pre>';
         }
       } catch (e) {
         clearInterval(timer);
-        box.innerHTML = '<div class="error">状态读取失败：' + String(e.message || e) + '</div>';
+        box.innerHTML = '<div class="error">状态读取失败：' + esc(e.message || e) + '</div>';
         btn.disabled = false;
       }
     }, 1000);
   } catch (e) {
-    box.innerHTML = '<div class="error">环境补全启动失败：' + String(e.message || e) + '</div>';
+    box.innerHTML = '<div class="error">环境补全启动失败：' + esc(e.message || e) + '</div>';
     btn.disabled = false;
   }
 }
@@ -712,13 +715,13 @@ async function exportValidation(btn) {
     if (!resp.ok) throw new Error(result.error || '验证方案导出失败');
     const linkBase = '/dock/knockout/file?workdir=' +
       encodeURIComponent(result.workdir) + '&name=';
-    box.innerHTML = '<p class="muted">验证方案已导出：' + result.output_dir + '</p>' +
+    box.innerHTML = '<p class="muted">验证方案已导出：' + esc(result.output_dir) + '</p>' +
       (result.files || []).map(name =>
         '<a class="file-link" href="' + linkBase + encodeURIComponent(name) +
-        '" download>' + name + '</a>'
+        '" download>' + esc(name) + '</a>'
       ).join('');
   } catch (e) {
-    box.innerHTML = '<p class="error">' + String(e.message || e) + '</p>';
+    box.innerHTML = '<p class="error">' + esc(e.message || e) + '</p>';
   } finally {
     btn.disabled = false;
   }
@@ -776,19 +779,19 @@ function renderKnockout(data) {
   const classText = Object.keys(classes).map(k =>
     k + ' ' + classes[k]
   ).join('；');
-  summaryEl.innerHTML = '<p class="muted">评分基因 ' + (summary.genes_scored || 0) +
-    ' 个，病例样本 ' + (summary.case_samples || 0) +
-    '，正常样本 ' + (summary.normal_samples || 0) +
-    '，DepMap 细胞系 ' + (summary.depmap_lines || 0) +
+  summaryEl.innerHTML = '<p class="muted">评分基因 ' + esc(summary.genes_scored || 0) +
+    ' 个，病例样本 ' + esc(summary.case_samples || 0) +
+    '，正常样本 ' + esc(summary.normal_samples || 0) +
+    '，DepMap 细胞系 ' + esc(summary.depmap_lines || 0) +
     '，多维评分 ' + (summary.multidimensional_scoring ? '是' : '否') +
-    '。分类：' + (classText || '无') +
-    '。输出目录：' + data.output_dir + '</p>';
+    '。分类：' + esc(classText || '无') +
+    '。输出目录：' + esc(data.output_dir) + '</p>';
 
   const linkBase = '/dock/knockout/file?workdir=' +
     encodeURIComponent(data.workdir) + '&name=';
   document.getElementById('koFiles').innerHTML = (data.files || []).map(name =>
     '<a class="file-link" href="' + linkBase + encodeURIComponent(name) +
-    '" download>' + name + '</a>'
+    '" download>' + esc(name) + '</a>'
   ).join('');
 
   const headers = ['排名', '基因', '靶点评分', '分类', '敲除分', '逆转分', '通路分',
@@ -811,7 +814,7 @@ function renderKnockout(data) {
           value = Number(value).toFixed(3);
         }
         if (value === '' || value === undefined || value === null) value = '-';
-        return '<td>' + value + '</td>';
+        return '<td>' + esc(value) + '</td>';
       }).join('') + '</tr>';
     }).join('') + '</tbody>';
   } else {
@@ -820,7 +823,7 @@ function renderKnockout(data) {
 
   document.getElementById('koGallery').innerHTML = (data.figures || []).map(name =>
     '<figure><img src="' + linkBase + encodeURIComponent(name) +
-    '"><figcaption>' + name + '</figcaption></figure>'
+    '"><figcaption>' + esc(name) + '</figcaption></figure>'
   ).join('');
 }
 

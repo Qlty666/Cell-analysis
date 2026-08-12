@@ -271,6 +271,9 @@ def run_pipeline(
     species: str = "hs",
 ) -> int:
     global OUTPUT_ROOT
+    accession = accession.strip().upper()
+    if not re.fullmatch(r"GSE\d+", accession):
+        raise RuntimeError("GSE accession must look like GSE125449")
     if output_root:
         OUTPUT_ROOT = Path(output_root).resolve()
         OUTPUT_ROOT.mkdir(parents=True, exist_ok=True)

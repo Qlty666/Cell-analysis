@@ -477,6 +477,9 @@ pre { background: #0f172a; color: #dbeafe; padding: 14px; border-radius: 8px; he
 </div>
 
 <script>
+function esc(value) {
+  return String(value == null ? '' : value).replace(/[&<>"']/g, c => ({'&':'&amp;','<':'&lt;','>':'&gt;','"':'&quot;',"'":'&#39;'}[c]));
+}
 let currentJob = null;
 let pollTimer = null;
 let jobAlerted = false;
@@ -630,7 +633,7 @@ async function loadResults(job) {
       gallery.appendChild(figure);
     });
   } catch (e) {
-    gallery.innerHTML = '<p class="error">结果图加载失败：' + String(e.message || e) + '</p>';
+    gallery.innerHTML = '<p class="error">结果图加载失败：' + esc(e.message || e) + '</p>';
   }
 }
 
@@ -917,6 +920,9 @@ def start_full_job(data: dict) -> dict:
     workdir_value = _first(data, "workdir", "").strip()
     if not workdir_value:
         raise ValueError("\u5de5\u4f5c\u76ee\u5f55\u4e0d\u80fd\u4e3a\u7a7a\uff0c\u8bf7\u624b\u52a8\u8f93\u5165")
+    accession = _first(data, "accession", "").strip()
+    if accession:
+        accession = validate_accession(accession)
     workdir = Path(workdir_value).expanduser().resolve()
     workdir.mkdir(parents=True, exist_ok=True)
     job_id = uuid.uuid4().hex[:8]
@@ -931,7 +937,7 @@ def start_full_job(data: dict) -> dict:
         "--docking-config",
         str(APP_ROOT / "config" / "docking_config.json"),
     ]
-    accession = _first(data, "accession", "").strip()
+    cmd += ["--workdir", str(workdir)]
     if accession:
         cmd += ["--accession", accession]
     output = _first(data, "output", "").strip()

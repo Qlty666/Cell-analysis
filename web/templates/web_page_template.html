@@ -192,6 +192,9 @@ a { color: #1665c0; text-decoration: none; }
 </div>
 
 <script>
+function esc(value) {
+  return String(value == null ? '' : value).replace(/[&<>"']/g, c => ({'&':'&amp;','<':'&lt;','>':'&gt;','"':'&quot;',"'":'&#39;'}[c]));
+}
 let currentJob = null;
 let pollTimer = null;
 let figTimer = null;
@@ -464,12 +467,12 @@ async function loadVersions() {
       ? '<span style="padding:2px 8px;border-radius:10px;font-size:12px;background:#dcfce7;color:#166534;">OK</span>'
       : '<span style="padding:2px 8px;border-radius:10px;font-size:12px;background:#fee2e2;color:#991b1b;">FAIL</span>';
     const softwareRows = software.map(item => (
-      '<tr><td>' + item.name + '</td><td>' + item.version + '</td><td>' + badge(item) +
-      '</td><td><a href="' + item.url + '" target="_blank" rel="noopener">' + item.url + '</a></td></tr>'
+      '<tr><td>' + esc(item.name) + '</td><td>' + esc(item.version) + '</td><td>' + badge(item) +
+      '</td><td><a href="' + esc(item.url) + '" target="_blank" rel="noopener">' + esc(item.url) + '</a></td></tr>'
     )).join('');
     const packageRows = packages.map(item => (
-      '<tr><td>' + item.name + '</td><td>' + item.version + '</td><td>' + badge(item) +
-      '</td><td><code>' + (item.install || '') + '</code></td></tr>'
+      '<tr><td>' + esc(item.name) + '</td><td>' + esc(item.version) + '</td><td>' + badge(item) +
+      '</td><td><code>' + esc(item.install || '') + '</code></td></tr>'
     )).join('');
     let html = '<h3>软件</h3>';
     html += '<table><thead><tr><th>软件</th><th>版本</th><th>状态</th><th>下载地址</th></tr></thead><tbody>' + softwareRows + '</tbody></table>';
@@ -491,10 +494,10 @@ async function loadHistory() {
       return;
     }
     const rows = items.map(item => (
-      '<tr><td>' + item.accession + '</td><td>' + item.species + '</td><td>' +
-      item.status + '</td><td>' + item.figures + '</td><td>' +
+      '<tr><td>' + esc(item.accession) + '</td><td>' + esc(item.species) + '</td><td>' +
+      esc(item.status) + '</td><td>' + esc(item.figures) + '</td><td>' +
       new Date(item.finished * 1000).toLocaleString() + '</td><td>' +
-      item.output + '</td></tr>'
+      esc(item.output) + '</td></tr>'
     )).join('');
     box.innerHTML = '<table><thead><tr><th>数据集</th><th>物种</th><th>状态</th><th>图数量</th><th>完成时间</th><th>输出路径</th></tr></thead><tbody>' + rows + '</tbody></table>';
   } catch (e) {

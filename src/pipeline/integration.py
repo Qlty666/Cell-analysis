@@ -1605,6 +1605,9 @@ def _apply_defaults(args, config: dict) -> None:
         raise IntegrationError(
             "workdir is required; provide --workdir or set workdir in config"
         )
+    args.accession = str(args.accession or "").strip().upper()
+    if not re.fullmatch(r"GSE\d+", args.accession):
+        raise IntegrationError("GSE accession must look like GSE125449")
     if args.workdir:
         args.workdir = str(_resolve_path(args.workdir, APP_ROOT))
     if args.output:
