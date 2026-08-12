@@ -27,6 +27,10 @@ from pipeline.integration import (  # noqa: E402
     main,
 )
 from pipeline.integration import IntegrationError  # noqa: E402
+from pipeline.cell_feedback import (  # noqa: E402
+    build_feedback_manifest,
+    run_cell_feedback,
+)
 
 
 def _write_deg(root: Path) -> None:
@@ -200,6 +204,67 @@ class TestBuildKnockoutInputs(unittest.TestCase):
             )
 
 
+class TestCellFeedbackManifest(unittest.TestCase):
+    def _write_screen_results(self, workdir: Path) -> None:
+        ko_dir = (
+            workdir
+            / "outputs"
+            / "run_001"
+            / "results"
+            / "04_knockout"
+            / "data"
+        )
+        ko_dir.mkdir(parents=True)
+        pd.DataFrame(
+            {
+                "rank": [1, 2],
+                "gene": ["GENE1", "GENE2"],
+                "target_score": [0.9, 0.7],
+                "knockout_score": [0.8, 0.6],
+                "target_class": ["core_driver", "biomarker"],
+            }
+        ).to_csv(ko_dir / "fig_52_53_ranked_knockout.csv", index=False)
+        integration = workdir / "outputs" / "integration"
+        integration.mkdir(parents=True)
+        pd.DataFrame(
+            {
+                "gene": ["GENE1", "GENE2"],
+                "status": ["ok", "failed"],
+                "hits": [5, 0],
+                "best_affinity": ["-8.5", ""],
+                "pdb_id": ["1ABC", ""],
+            }
+        ).to_csv(integration / "docking_targets.csv", index=False)
+
+    def test_manifest_merges_knockout_and_docking(self):
+        with tempfile.TemporaryDirectory() as tmp:
+            workdir = Path(tmp) / "work"
+            self._write_screen_results(workdir)
+            frame = build_feedback_manifest(workdir, top_n=10)
+            self.assertEqual(frame.iloc[0]["gene"], "GENE1")
+            self.assertIn("knockout", frame.iloc[0]["source"])
+            self.assertIn("docking", frame.iloc[0]["source"])
+            self.assertEqual(int(frame.iloc[0]["docking_hits"]), 5)
+            self.assertGreater(frame.iloc[0]["feedback_score"], 0.9)
+            self.assertEqual(int(frame.iloc[1]["docking_hits"]), 0)
+
+    def test_run_cell_feedback_skips_without_screen_results(self):
+        with tempfile.TemporaryDirectory() as tmp:
+            workdir = Path(tmp) / "work"
+            root = Path(tmp) / "single_cell"
+            summary = run_cell_feedback(workdir, root, top_n=10)
+            self.assertEqual(summary["status"], "skipped")
+            self.assertTrue(
+                (
+                    workdir
+                    / "outputs"
+                    / "integration"
+                    / "cell_feedback"
+                    / "cell_feedback_summary.json"
+                ).exists()
+            )
+
+
 class TestFullPipelineMarkers(unittest.TestCase):
     def _write_markers(self, workdir: Path) -> None:
         stage_dir = workdir / "outputs" / "integration" / ".stages"
@@ -292,6 +357,7 @@ class TestFullPipeline(unittest.TestCase):
                     "--skip-scrna",
                     "--skip-docking",
                     "--skip-evidence-fetch",
+                    "--skip-cell-feedback",
                     "--docking-config",
                     str(APP_ROOT / "config" / "docking_config.json"),
                 ]
@@ -322,6 +388,7 @@ class TestFullPipeline(unittest.TestCase):
                     "--skip-scrna",
                     "--skip-docking",
                     "--skip-evidence-fetch",
+                    "--skip-cell-feedback",
                     "--docking-config",
                     str(APP_ROOT / "config" / "docking_config.json"),
                 ]
@@ -396,6 +463,7 @@ class TestFullPipeline(unittest.TestCase):
                     "--skip-scrna",
                     "--skip-docking",
                     "--skip-evidence-fetch",
+                    "--skip-cell-feedback",
                     "--docking-config",
                     str(APP_ROOT / "config" / "docking_config.json"),
                 ]
@@ -428,7 +496,7 @@ class TestFullPipeline(unittest.TestCase):
             )
             self.assertTrue((out / "integration_report.html").exists())
             self.assertTrue((out / "integration_summary.json").exists())
-            self.assertTrue((out / ".stages" / "07_report.done").exists())
+            self.assertTrue((out / ".stages" / "08_report.done").exists())
 
     def test_stale_stage01_marker_reruns_when_outputs_missing(self):
         with tempfile.TemporaryDirectory() as tmp:

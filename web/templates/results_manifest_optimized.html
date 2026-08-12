@@ -147,7 +147,7 @@ footer { color: #64748b; font-size: 12px; margin: 30px 0 8px; }
 &lt;workdir&gt;/                       # 全自动流水线工作目录
 ├─ data/knockout/               # 04 阶段敲除输入（不列入结果清单）
 ├─ outputs/
-│  ├─ integration/              # 02/03/06/07 阶段结果数据与汇总
+│  ├─ integration/              # 02/03/06/07/08 阶段结果数据与汇总
 │  └─ run_001/results/
 │     ├─ 01_analysis/           # 单靶点对接分析：figures + data
 │     ├─ 02_redock/             # 精修重对接：figures + data
@@ -331,7 +331,27 @@ footer { color: #64748b; font-size: 12px; margin: 30px 0 8px; }
 </div>
 
 <div class="card">
-  <h2>07 集成报告与溯源</h2>
+  <h2>07 细胞反馈</h2>
+  <p class="muted">位置：<span class="path">&lt;workdir&gt;/outputs/integration/cell_feedback/</span></p>
+  <table>
+    <thead><tr><th>文件</th><th>内容</th><th>类型</th><th>用途</th></tr></thead>
+    <tbody>
+      <tr><td><code>figures/fig_54_feedback_module_umap.png</code></td><td>筛选靶点模块评分 UMAP</td><td><span class="badge fig">结果图</span></td><td>查看靶点模块在细胞图谱中的分布</td></tr>
+      <tr><td><code>figures/fig_55_feedback_target_expression_umap.png</code></td><td>Top 靶基因表达 UMAP</td><td><span class="badge fig">结果图</span></td><td>查看敲除/对接靶基因的细胞定位</td></tr>
+      <tr><td><code>figures/fig_56_feedback_celltype_dotplot.png</code></td><td>靶基因细胞类型 DotPlot</td><td><span class="badge fig">结果图</span></td><td>比较靶基因在各细胞类型的表达</td></tr>
+      <tr><td><code>figures/fig_57_feedback_celltype_boxplot.png</code></td><td>模块评分细胞类型箱线图</td><td><span class="badge fig">结果图</span></td><td>比较分组间模块评分</td></tr>
+      <tr><td><code>figures/fig_58_feedback_celltype_heatmap.png</code></td><td>靶基因细胞类型热图</td><td><span class="badge fig">结果图</span></td><td>查看细胞类型表达模式</td></tr>
+      <tr><td><code>data/feedback_targets.csv</code></td><td>细胞支持度重排序靶点</td><td><span class="badge data">结果数据</span></td><td>筛选结果返回单细胞后的精细化靶点</td></tr>
+      <tr><td><code>data/cell_scores.csv</code></td><td>每细胞靶基因表达与模块评分</td><td><span class="badge data">结果数据</span></td><td>细胞级反馈分析主表</td></tr>
+      <tr><td><code>data/celltype_summary.csv</code></td><td>细胞类型表达汇总</td><td><span class="badge data">结果数据</span></td><td>查看靶基因的细胞类型偏好</td></tr>
+      <tr><td><code>data/celltype_enrichment.csv</code></td><td>细胞类型模块富集检验</td><td><span class="badge data">结果数据</span></td><td>比较细胞类型间模块评分</td></tr>
+      <tr><td><code>data/condition_summary.csv</code></td><td>条件×细胞类型表达汇总</td><td><span class="badge data">结果数据</span></td><td>查看分组间细胞类型靶点活性</td></tr>
+    </tbody>
+  </table>
+</div>
+
+<div class="card">
+  <h2>08 集成报告与溯源</h2>
   <p class="muted">位置：<span class="path">&lt;workdir&gt;/outputs/integration/</span></p>
   <p class="muted">无结果图/结果数据。本阶段仅生成 HTML 报告、汇总与溯源文件，不列入本清单。</p>
 </div>

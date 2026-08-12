@@ -45,7 +45,7 @@ from docking.provenance import write_run_manifest  # noqa: E402
 from docking.utils import DockingError, ToolNotFoundError, safe_name, write_json  # noqa: E402
 from docking.validation import export_validation  # noqa: E402
 
-from . import orchestrator  # noqa: E402
+from . import cell_feedback, orchestrator  # noqa: E402
 
 log = logging.getLogger("full_pipeline")
 
@@ -56,7 +56,8 @@ STAGES = [
     ("04", "knockout_inputs", "build pseudobulk expression and knockout inputs"),
     ("05", "knockout", "virtual knockout and multidimensional target scoring"),
     ("06", "docking", "per-target virtual screening with AutoDock Vina"),
-    ("07", "report", "integrated HTML report and provenance manifest"),
+    ("07", "cell_feedback", "re-score single-cell targets from knockout/docking results"),
+    ("08", "report", "integrated HTML report and provenance manifest"),
 ]
 
 DEFAULT_GENE_BLACKLIST = [
@@ -1218,6 +1219,17 @@ def generate_integrated_report(
     docking_summary = _read_json(out_dir / "docking_summary.json")
     docking = pd.read_csv(out_dir / "docking_targets.csv") if (out_dir / "docking_targets.csv").exists() else pd.DataFrame()
     evidence = pd.read_csv(out_dir / "gene_evidence.csv") if (out_dir / "gene_evidence.csv").exists() else pd.DataFrame()
+    feedback_summary = _read_json(out_dir / "cell_feedback" / "cell_feedback_summary.json")
+    feedback_targets = (
+        pd.read_csv(out_dir / "cell_feedback" / "data" / "feedback_targets.csv")
+        if (out_dir / "cell_feedback" / "data" / "feedback_targets.csv").exists()
+        else pd.DataFrame()
+    )
+    feedback_enrichment = (
+        pd.read_csv(out_dir / "cell_feedback" / "data" / "celltype_enrichment.csv")
+        if (out_dir / "cell_feedback" / "data" / "celltype_enrichment.csv").exists()
+        else pd.DataFrame()
+    )
 
     sc_html = _render_table(
         pd.DataFrame(
@@ -1268,6 +1280,27 @@ def generate_integrated_report(
         ]
         if c in evidence.columns
     ]
+    feedback_cols = [
+        c
+        for c in [
+            "gene",
+            "source",
+            "feedback_score",
+            "target_score",
+            "knockout_score",
+            "docking_hits",
+            "cell_detection_rate",
+            "celltype_specificity",
+            "cell_support_score",
+            "top_celltype",
+        ]
+        if c in feedback_targets.columns
+    ]
+    feedback_enrichment_cols = [
+        c
+        for c in ["celltype", "n_cells", "module_mean", "module_diff", "p_adjust"]
+        if c in feedback_enrichment.columns
+    ]
 
     def rel(path):
         try:
@@ -1316,6 +1349,14 @@ a {{ color: #1d4ed8; }}
   {_render_table(docking, dock_cols)}
 </div>
 <div class="card">
+  <h2>Cell feedback targets</h2>
+  {_render_table(feedback_targets, feedback_cols)}
+</div>
+<div class="card">
+  <h2>Cell type enrichment</h2>
+  {_render_table(feedback_enrichment, feedback_enrichment_cols)}
+</div>
+<div class="card">
   <h2>Gene evidence</h2>
   {_render_table(evidence, ev_cols)}
 </div>
@@ -1325,6 +1366,8 @@ a {{ color: #1d4ed8; }}
     <li><a href="{rel(out_dir / 'key_genes.csv')}">key_genes.csv</a></li>
     <li><a href="{rel(ko_ranked) if ko_ranked.exists() else '#'}">fig_52_53_ranked_knockout.csv</a></li>
     <li><a href="{rel(out_dir / 'docking_targets.csv') if (out_dir / 'docking_targets.csv').exists() else '#'}">docking_targets.csv</a></li>
+    <li><a href="{rel(out_dir / 'cell_feedback' / 'data' / 'feedback_targets.csv') if (out_dir / 'cell_feedback' / 'data' / 'feedback_targets.csv').exists() else '#'}">cell_feedback_targets.csv</a></li>
+    <li><a href="{rel(out_dir / 'cell_feedback' / 'figures' / 'fig_54_feedback_module_umap.png') if (out_dir / 'cell_feedback' / 'figures' / 'fig_54_feedback_module_umap.png').exists() else '#'}">fig_54_feedback_module_umap.png</a></li>
   </ul>
 </div>
 </body>
@@ -1341,6 +1384,13 @@ a {{ color: #1d4ed8; }}
             "validation_candidates": (ko_summary.get("validation") or {}).get("candidates", 0),
         },
         "docking": docking_summary,
+        "cell_feedback": {
+            "status": feedback_summary.get("status", "skipped"),
+            "genes_matched": feedback_summary.get("genes_matched", 0),
+            "n_celltypes": feedback_summary.get("n_celltypes", 0),
+            "top_celltypes": feedback_summary.get("top_celltypes", []),
+            "figures": feedback_summary.get("figures", []),
+        },
         "evidence_genes": len(evidence),
         "report_html": str(report_path),
         "finished_at": datetime.now().isoformat(timespec="seconds"),
@@ -1471,6 +1521,27 @@ def _stage_docking(args, workdir: Path, ctx: dict) -> None:
     )
 
 
+def _stage_cell_feedback(args, workdir: Path, ctx: dict) -> None:
+    if args.skip_cell_feedback:
+        summary = {
+            "status": "skipped",
+            "reason": "cell feedback disabled by arguments",
+        }
+        write_json(
+            _integration_dir(workdir) / "cell_feedback" / "cell_feedback_summary.json",
+            summary,
+        )
+        ctx["cell_feedback"] = summary
+        return
+    ctx["cell_feedback"] = cell_feedback.run_cell_feedback(
+        workdir,
+        ctx["single_cell_root"],
+        top_n=args.feedback_top_n,
+        max_features=args.feedback_max_features,
+        timeout_seconds=args.feedback_timeout,
+    )
+
+
 def _stage_report(args, workdir: Path, ctx: dict) -> None:
     ctx["report"] = generate_integrated_report(
         workdir,
@@ -1535,7 +1606,8 @@ def run_full_pipeline(args) -> int:
             "04": _stage_knockout_inputs,
             "05": _stage_knockout,
             "06": _stage_docking,
-            "07": _stage_report,
+            "07": _stage_cell_feedback,
+            "08": _stage_report,
         }[code]
         try:
             fn(args, workdir, ctx)
@@ -1571,6 +1643,12 @@ def load_full_config(path: Path) -> dict:
         "ligand_library": None,
         "ko_top_n": None,
         "depmap_csv": None,
+        "cell_feedback": {
+            "enabled": True,
+            "top_n": 12,
+            "max_features": 8,
+            "timeout_seconds": 3600,
+        },
         "evidence": {"fetch": True, "max_workers": 6, "timeout": 90},
         "gene_blacklist": DEFAULT_GENE_BLACKLIST,
     }
@@ -1579,6 +1657,8 @@ def load_full_config(path: Path) -> dict:
         raw = json.loads(path.read_text(encoding="utf-8"))
     config = dict(defaults)
     config.update(raw or {})
+    config["cell_feedback"] = dict(defaults["cell_feedback"])
+    config["cell_feedback"].update((raw.get("cell_feedback") or {}))
     config["evidence"] = dict(defaults["evidence"])
     config["evidence"].update((raw.get("evidence") or {}))
     config["gene_blacklist"] = (
@@ -1610,6 +1690,22 @@ def _apply_defaults(args, config: dict) -> None:
         args.ko_top_n = config.get("ko_top_n")
     if args.depmap_csv is None:
         args.depmap_csv = config.get("depmap_csv")
+    if args.skip_cell_feedback is None:
+        args.skip_cell_feedback = not bool(
+            config.get("cell_feedback", {}).get("enabled", True)
+        )
+    if args.feedback_top_n is None:
+        args.feedback_top_n = int(
+            config.get("cell_feedback", {}).get("top_n", 12)
+        )
+    if args.feedback_max_features is None:
+        args.feedback_max_features = int(
+            config.get("cell_feedback", {}).get("max_features", 8)
+        )
+    if args.feedback_timeout is None:
+        args.feedback_timeout = int(
+            config.get("cell_feedback", {}).get("timeout_seconds", 3600)
+        )
     if args.keep_all_genes is None:
         args.keep_all_genes = bool(config.get("keep_all_genes", False))
     if args.skip_evidence_fetch is None:
@@ -1677,6 +1773,10 @@ def build_parser() -> argparse.ArgumentParser:
     parser.add_argument("--skip-pseudobulk", action="store_true")
     parser.add_argument("--skip-knockout", action="store_true")
     parser.add_argument("--skip-docking", action="store_true")
+    parser.add_argument("--skip-cell-feedback", action="store_true", default=None)
+    parser.add_argument("--feedback-top-n", type=int, default=None)
+    parser.add_argument("--feedback-max-features", type=int, default=None)
+    parser.add_argument("--feedback-timeout", type=int, default=None)
     parser.add_argument("--keep-all-genes", action="store_true", default=None)
     parser.add_argument("--force", action="store_true", help="rerun stages from scratch")
     parser.add_argument("--start-stage", default=None, help="stage code to start from")

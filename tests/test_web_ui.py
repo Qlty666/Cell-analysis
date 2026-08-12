@@ -132,7 +132,8 @@ def _make_info(tmp: Path, returncode: int) -> dict:
         ("04", "knockout_inputs"),
         ("05", "knockout"),
         ("06", "docking"),
-        ("07", "report"),
+        ("07", "cell_feedback"),
+        ("08", "report"),
     ]:
         (marker_dir / f"{code}_{name}.done").write_text(
             "done",
@@ -216,6 +217,13 @@ class TestResultDirectoryQueries(unittest.TestCase):
         (integration / "integration_report.html").write_text(
             "<html></html>", encoding="utf-8"
         )
+        feedback_data = integration / "cell_feedback" / "data"
+        feedback_data.mkdir(parents=True)
+        (feedback_data / "feedback_targets.csv").write_text(
+            "gene,source,feedback_score,cell_support_score,top_celltype\n"
+            "EGFR,knockout|docking,0.9,0.92,Hepatocyte\n",
+            encoding="utf-8",
+        )
 
         ko_data = (
             workdir
@@ -285,6 +293,8 @@ class TestResultDirectoryQueries(unittest.TestCase):
                 "validation_candidates.csv",
                 files,
             )
+            self.assertIn("cell_feedback/data/feedback_targets.csv", files)
+            self.assertEqual(data["cell_feedback"][0]["gene"], "EGFR")
             self.assertIn(
                 "work/EGFR/outputs/run_001/docked/results.csv",
                 files,
@@ -320,6 +330,12 @@ class TestResultDirectoryQueries(unittest.TestCase):
                 _full_file_path(
                     workdir,
                     "work/EGFR/outputs/run_001/docked/results.csv",
+                )
+            )
+            self.assertIsNotNone(
+                _full_file_path(
+                    workdir,
+                    "cell_feedback/data/feedback_targets.csv",
                 )
             )
             self.assertIsNone(
