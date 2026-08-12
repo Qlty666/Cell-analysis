@@ -17,6 +17,11 @@ import threading
 import time
 from pathlib import Path
 
+try:
+    import psutil
+except ImportError:  # pragma: no cover - fallback keeps stall detection working
+    psutil = None
+
 ROOT = Path(__file__).resolve().parent.parent.parent
 OUTPUT_ROOT = Path(
     os.environ.get("LIVER_OUTPUT_ROOT", str(ROOT.parent / "liver_cancer"))
@@ -92,6 +97,83 @@ def read_tail(path: Path, limit: int = 4000) -> str:
     return data[-limit:]
 
 
+def _snapshot_r_script(log_dir: Path) -> Path:
+    """Copy the R script so live edits cannot corrupt a running parse."""
+    log_dir.mkdir(parents=True, exist_ok=True)
+    source = ROOT / "src" / "analysis" / "analysis_pipeline.R"
+    snapshot = log_dir / "pipeline_analysis.R"
+    shutil.copy2(source, snapshot)
+    log(f"R script snapshot: {snapshot}")
+    return snapshot
+
+
+def _cpu_seconds(pid: int) -> float:
+    if psutil is None:
+        return 0.0
+    try:
+        proc = psutil.Process(pid)
+        total = sum(proc.cpu_times()[:2])
+        for child in proc.children(recursive=True):
+            try:
+                times = child.cpu_times()
+                total += times.user + times.system
+            except (psutil.Error, OSError):
+                continue
+        return total
+    except (psutil.Error, OSError):
+        return 0.0
+
+
+def _process_using_cpu(pid: int, sample_seconds: float = 2.0) -> bool:
+    if psutil is None:
+        return False
+    start = _cpu_seconds(pid)
+    time.sleep(sample_seconds)
+    end = _cpu_seconds(pid)
+    return end - start >= 0.2
+
+
+def _terminate_process_tree(proc: subprocess.Popen, timeout: float = 20) -> None:
+    if psutil is None:
+        proc.terminate()
+        try:
+            proc.wait(timeout=timeout)
+        except subprocess.TimeoutExpired:
+            proc.kill()
+            proc.wait()
+        return
+    try:
+        root = psutil.Process(proc.pid)
+        children = root.children(recursive=True)
+        for child in children:
+            try:
+                child.terminate()
+            except (psutil.Error, OSError):
+                continue
+        try:
+            root.terminate()
+        except (psutil.Error, OSError):
+            pass
+        try:
+            proc.wait(timeout=timeout)
+            return
+        except subprocess.TimeoutExpired:
+            for process in [*children, root]:
+                try:
+                    process.kill()
+                except (psutil.Error, OSError):
+                    continue
+            proc.wait(timeout=5)
+            return
+    except (psutil.Error, OSError):
+        proc.terminate()
+        try:
+            proc.wait(timeout=timeout)
+        except subprocess.TimeoutExpired:
+            proc.kill()
+            proc.wait()
+
+
 def run_r_pipeline(
     accession: str,
     force: bool,
@@ -102,7 +184,8 @@ def run_r_pipeline(
     log_dir.mkdir(parents=True, exist_ok=True)
     log_path = log_dir / "pipeline_r.log"
 
-    cmd = [find_rscript(), str(ROOT / "src" / "analysis" / "analysis_pipeline.R")]
+    script = _snapshot_r_script(log_dir)
+    cmd = [find_rscript(), str(script)]
     if force:
         cmd.append("--force")
     cmd.append(f"--start-stage={start_stage}")
@@ -134,12 +217,7 @@ def run_r_pipeline(
                 if pause_path.exists():
                     log("pause requested; stopping current run")
                     paused["flag"] = True
-                    proc.terminate()
-                    try:
-                        proc.wait(timeout=20)
-                    except subprocess.TimeoutExpired:
-                        proc.kill()
-                        proc.wait()
+                    _terminate_process_tree(proc)
                     return
                 time.sleep(POLL_INTERVAL)
                 try:
@@ -147,15 +225,19 @@ def run_r_pipeline(
                 except OSError:
                     continue
                 if age > STALL_SECONDS:
-                    log(f"progress stalled for {int(age)}s; killing and restarting")
-                    stalled["flag"] = True
-                    proc.terminate()
-                    try:
-                        proc.wait(timeout=20)
-                    except subprocess.TimeoutExpired:
-                        proc.kill()
-                        proc.wait()
-                    return
+                    if _process_using_cpu(proc.pid):
+                        log(
+                            f"no log output for {int(age)}s but R is still "
+                            "computing; extending stall grace"
+                        )
+                    else:
+                        log(
+                            f"progress stalled for {int(age)}s; "
+                            "killing and restarting"
+                        )
+                        stalled["flag"] = True
+                        _terminate_process_tree(proc)
+                        return
 
         watcher = threading.Thread(target=watch_stall, daemon=True)
         watcher.start()
