@@ -7,7 +7,7 @@ import subprocess
 import sys
 from pathlib import Path
 
-ROOT = Path(__file__).resolve().parent
+ROOT = Path(__file__).resolve().parent.parent
 
 DATASETS = [
     ("GSE125449", "HCC vs iCCA", "hs"),
@@ -80,7 +80,7 @@ def run_one(accession: str, out: Path, species: str, timeout: int) -> bool:
     result = subprocess.run(
         [
             sys.executable,
-            str(ROOT / "run_pipeline.py"),
+            str(ROOT / "scripts" / "run_pipeline.py"),
             accession,
             "--output",
             str(out),

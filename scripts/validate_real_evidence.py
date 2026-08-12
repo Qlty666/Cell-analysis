@@ -8,7 +8,8 @@ import sys
 from pathlib import Path
 
 SKILLS = Path.home() / ".codex" / "skills"
-OUT_DIR = Path(__file__).resolve().parent / "dock" / "validation_real"
+ROOT = Path(__file__).resolve().parent.parent
+OUT_DIR = ROOT / "dock" / "validation_real"
 TARGETS = [
     ("1M17", "EGFR"),
     ("1XKK", "BRAF"),

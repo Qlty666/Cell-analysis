@@ -11,6 +11,9 @@ from unittest.mock import patch
 APP_ROOT = Path(__file__).resolve().parent.parent
 if str(APP_ROOT) not in sys.path:
     sys.path.insert(0, str(APP_ROOT))
+SCRIPTS_DIR = APP_ROOT / "scripts"
+if str(SCRIPTS_DIR) not in sys.path:
+    sys.path.insert(0, str(SCRIPTS_DIR))
 
 import validate_dataset_search  # noqa: E402
 

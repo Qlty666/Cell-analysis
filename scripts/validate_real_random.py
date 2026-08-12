@@ -9,7 +9,8 @@ import sys
 import urllib.request
 from pathlib import Path
 
-SRC = Path(__file__).resolve().parent / "src"
+ROOT = Path(__file__).resolve().parent.parent
+SRC = ROOT / "src"
 if str(SRC) not in sys.path:
     sys.path.insert(0, str(SRC))
 
@@ -24,7 +25,7 @@ SKILL_NAMES = {
     "pubchem": "pubchem-pug-skill",
     "chebi": "chebi-skill",
 }
-OUT_DIR = Path(__file__).resolve().parent / "dock" / "validation_real_random"
+OUT_DIR = ROOT / "dock" / "validation_real_random"
 POOL = [
     "1M17",
     "1XKK",

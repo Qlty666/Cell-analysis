@@ -1,5 +1,5 @@
 @echo off
 cd /d "%~dp0.."
-python run_docking.py %*
+python scripts\run_docking.py %*
 echo.
 pause
