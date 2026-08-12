@@ -83,6 +83,7 @@ FIGURES = [
     {"file": "fig_07_annotation_confusion_heatmap.png", "label": "注释混淆矩阵热图"},
     {"file": "fig_08_volcano.png", "label": "差异表达图", "styles": ["volcano", "maplot"]},
     {"file": "fig_09_deg_heatmap.png", "label": "Top DEG 热图"},
+    {"file": "fig_09_deg_horizontal_violin.png", "label": "Top DEG 横向小提琴图（P 值）"},
     {"file": "fig_10_go_up.png", "label": "GO BP 富集图（上调）", "styles": ["dotplot", "barplot", "cnetplot"]},
     {"file": "fig_11_go_down.png", "label": "GO BP 富集图（下调）", "styles": ["dotplot", "barplot", "cnetplot"]},
     {"file": "fig_12_kegg_up.png", "label": "KEGG 富集图（上调）", "styles": ["dotplot", "barplot", "cnetplot"]},
@@ -2690,6 +2691,8 @@ class Handler(BaseHTTPRequestHandler):
             "LIVER_CLUSTER_ALGORITHM",
             "LIVER_DE_LOGFc",
             "LIVER_DE_PADJ",
+            "LIVER_DE_VIOLIN_TOP_N",
+            "LIVER_DE_VIOLIN_MAX_CELLS",
         ]:
             if data.get(key):
                 params[key] = data[key][0]

@@ -33,6 +33,7 @@ REQUIRED_FIGURES = [
     "fig_07_annotation_confusion_heatmap.png",
     "fig_08_volcano.png",
     "fig_09_deg_heatmap.png",
+    "fig_09_deg_horizontal_violin.png",
     "fig_10_go_up.png",
     "fig_11_go_down.png",
     "fig_12_kegg_up.png",
