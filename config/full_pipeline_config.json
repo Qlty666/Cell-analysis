@@ -11,6 +11,12 @@
   "ligand_library": null,
   "ko_top_n": 50,
   "depmap_csv": null,
+  "cell_feedback": {
+    "enabled": true,
+    "top_n": 12,
+    "max_features": 8,
+    "timeout_seconds": 3600
+  },
   "evidence": {
     "fetch": true,
     "max_workers": 6,

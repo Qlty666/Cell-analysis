@@ -138,7 +138,7 @@ a.file-link { color: #1665c0; text-decoration: none; margin-right: 12px; }
 </div>
 <div class="wrap">
 <h1>全自动流水线</h1>
-<p class="muted">单细胞分析 → 关键基因/蛋白筛选 → 证据富集 → 虚拟敲除 → 虚拟筛选 → 集成报告。</p>
+<p class="muted">单细胞分析 → 关键基因/蛋白筛选 → 证据富集 → 虚拟敲除 → 虚拟筛选 → 细胞反馈 → 集成报告。</p>
 
 <div class="card">
   <form id="form">
@@ -173,6 +173,12 @@ a.file-link { color: #1665c0; text-decoration: none; margin-right: 12px; }
       <label>敲除报告 Top N
         <input name="ko_top_n" type="number" min="1" value="50">
       </label>
+      <label>反馈基因数
+        <input name="feedback_top_n" type="number" min="1" value="12">
+      </label>
+      <label>反馈展示基因数
+        <input name="feedback_max_features" type="number" min="1" value="8">
+      </label>
       <label>病例标签（可选）
         <input name="case_label" placeholder="Tumor / iCCA">
       </label>
@@ -188,7 +194,8 @@ a.file-link { color: #1665c0; text-decoration: none; margin-right: 12px; }
           <option value="04">04 敲除输入</option>
           <option value="05">05 虚拟敲除</option>
           <option value="06">06 虚拟筛选</option>
-          <option value="07">07 集成报告</option>
+          <option value="07">07 细胞反馈</option>
+          <option value="08">08 集成报告</option>
         </select>
       </label>
     </div>
@@ -200,6 +207,7 @@ a.file-link { color: #1665c0; text-decoration: none; margin-right: 12px; }
       <label class="toggle"><input type="checkbox" name="skip_pseudobulk" value="1"> 跳过伪 bulk 导出</label>
       <label class="toggle"><input type="checkbox" name="skip_knockout" value="1"> 跳过虚拟敲除</label>
       <label class="toggle"><input type="checkbox" name="skip_docking" value="1"> 跳过虚拟筛选</label>
+      <label class="toggle"><input type="checkbox" name="skip_cell_feedback" value="1"> 跳过细胞反馈</label>
       <label class="toggle"><input type="checkbox" name="keep_all_genes" value="1"> 保留全部基因</label>
       <label class="toggle"><input type="checkbox" name="force" value="1"> 强制重跑</label>
     </div>
@@ -237,6 +245,7 @@ a.file-link { color: #1665c0; text-decoration: none; margin-right: 12px; }
   <div class="tablebox"><table id="keyTable"><caption>关键基因</caption></table></div>
   <div class="tablebox"><table id="koTable"><caption>虚拟敲除 Top</caption></table></div>
   <div class="tablebox"><table id="dockTable"><caption>虚拟筛选</caption></table></div>
+  <div class="tablebox"><table id="feedbackTable"><caption>细胞反馈靶点</caption></table></div>
 </div>
 </div>
 
@@ -465,12 +474,14 @@ function renderResults(data) {
   const summary = data.summary || {};
   const ko = summary.knockout || {};
   const dock = summary.docking || {};
+  const fb = summary.cell_feedback || {};
   document.getElementById('summaryRow').innerHTML =
     '<p class="muted">单细胞：' + esc(summary.single_cell ? summary.single_cell.dataset || '' : '') +
     '；关键基因：' + esc(summary.key_genes !== undefined ? summary.key_genes : data.key_genes.length) +
     '；敲除评分基因数：' + esc(ko.genes_scored !== undefined ? ko.genes_scored : 0) +
     '；对接成功：' + esc(dock.ok !== undefined ? dock.ok : 0) +
-    '；失败：' + esc(dock.failed !== undefined ? dock.failed : 0) + '</p>';
+    '；失败：' + esc(dock.failed !== undefined ? dock.failed : 0) +
+    '；细胞反馈匹配基因：' + esc(fb.genes_matched !== undefined ? fb.genes_matched : 0) + '</p>';
   const links = document.getElementById('fileLinks');
   links.innerHTML = '';
   (data.files || []).forEach((name) => {
@@ -483,6 +494,7 @@ function renderResults(data) {
   renderTable('keyTable', data.key_genes, ['rank', 'gene', 'direction', 'avg_log2fc', 'p_val_adj']);
   renderTable('koTable', data.knockout, ['rank', 'gene', 'target_class', 'target_score', 'knockout_score']);
   renderTable('dockTable', data.docking, ['gene', 'status', 'pdb_id', 'ligand_count', 'hits', 'best_affinity']);
+  renderTable('feedbackTable', data.cell_feedback, ['gene', 'source', 'feedback_score', 'knockout_score', 'docking_hits', 'cell_detection_rate', 'celltype_specificity', 'cell_support_score', 'top_celltype']);
 }
 
 async function pauseFullJob() {
