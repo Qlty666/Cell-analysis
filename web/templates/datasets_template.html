@@ -1,0 +1,298 @@
+<!DOCTYPE html>
+<html lang="zh-CN">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1">
+<title>GEO 数据集搜索</title>
+<style>
+body {
+  font-family: "Segoe UI", Arial, sans-serif;
+  margin: 0;
+  color: #1f2933;
+  background: url('/static/background.png') no-repeat center center fixed;
+  background-size: cover;
+}
+.topnav {
+  position: sticky;
+  top: 0;
+  z-index: 100;
+  background: #0f172a;
+  padding: 12px 28px;
+  display: flex;
+  gap: 18px;
+  align-items: center;
+  flex-wrap: wrap;
+  box-shadow: 0 2px 8px rgba(15, 23, 42, 0.35);
+}
+.topnav a {
+  color: #ffffff;
+  text-decoration: none;
+  font-size: 15px;
+  font-weight: 600;
+  padding: 6px 10px;
+  border-radius: 6px;
+  background: rgba(255, 255, 255, 0.08);
+}
+.topnav a:hover, .topnav a.active { background: #1665c0; color: #fff; }
+.topnav .nav-right { margin-left: auto; }
+.wrap { max-width: 1280px; margin: 0 auto; padding: 28px; }
+h1 { font-size: 26px; margin: 0 0 6px; }
+h2 { font-size: 17px; margin: 0 0 10px; }
+.muted { color: #6b7280; font-size: 13px; }
+.card {
+  background: rgba(255, 255, 255, 0.96);
+  border: 1px solid #d7dde4;
+  border-radius: 8px;
+  padding: 20px;
+  margin-bottom: 18px;
+  box-shadow: 0 1px 4px rgba(15, 23, 42, 0.08);
+}
+.grid {
+  display: grid;
+  grid-template-columns: repeat(auto-fit, minmax(220px, 1fr));
+  gap: 10px;
+}
+label { display: block; margin: 10px 0 4px; font-weight: 600; font-size: 13px; }
+input, select {
+  width: 100%;
+  padding: 9px;
+  border: 1px solid #cbd2d9;
+  border-radius: 6px;
+  box-sizing: border-box;
+  font-size: 13px;
+}
+.actions { display: flex; gap: 12px; margin-top: 18px; flex-wrap: wrap; align-items: center; }
+button {
+  padding: 10px 18px;
+  border: 0;
+  border-radius: 6px;
+  background: #1665c0;
+  color: #fff;
+  font-size: 14px;
+  cursor: pointer;
+}
+button.secondary { background: #475569; }
+button:disabled { background: #9aa5b1; cursor: not-allowed; }
+#topN { width: 72px; display: inline-block; margin: 0 6px; padding: 6px; }
+table { width: 100%; border-collapse: collapse; background: #fff; font-size: 12px; }
+th, td {
+  border: 1px solid #e5e7eb;
+  padding: 6px 8px;
+  text-align: left;
+  vertical-align: top;
+}
+th { background: #eef2f7; }
+.tablebox {
+  max-height: 520px;
+  overflow: auto;
+  border: 1px solid #e5e7eb;
+  border-radius: 6px;
+  margin-top: 8px;
+}
+.summary { max-width: 360px; word-break: break-word; }
+pre {
+  background: #0f172a;
+  color: #dbeafe;
+  padding: 14px;
+  border-radius: 8px;
+  height: 220px;
+  overflow: auto;
+  font-size: 12px;
+  white-space: pre-wrap;
+}
+.error { color: #b91c1c; margin-top: 10px; }
+.ok { color: #047857; margin-top: 10px; }
+.file-link { color: #1665c0; text-decoration: none; margin-right: 14px; }
+a { color: #1665c0; text-decoration: none; }
+@media (max-width: 720px) {
+  .wrap { padding: 14px; }
+  .topnav { padding: 10px 14px; }
+  table { font-size: 11px; }
+  th, td { padding: 5px 6px; }
+  .summary { max-width: 220px; }
+}
+</style>
+</head>
+<body>
+<div class="topnav">
+  <a href="/full">全自动流水线</a>
+  <a href="/">单细胞分析</a>
+  <a href="/datasets" class="active">数据集搜索</a>
+  <a href="/dock">虚拟筛选</a>
+  <a href="/results">结果清单</a>
+  <a href="/tasks" class="nav-right">任务进度</a>
+</div>
+<div class="wrap">
+<h1>GEO 数据集搜索</h1>
+
+<div class="card">
+  <form id="searchForm">
+    <div class="grid">
+      <label>疾病名称 <input name="disease" placeholder="liver cancer"></label>
+      <label>研究方向 <input name="research_direction" placeholder="single cell RNA-seq"></label>
+      <label>原始查询 <input name="query" placeholder="可选"></label>
+      <label>最大结果数 <input type="number" name="max_results" value="20" min="1" max="100"></label>
+      <label>物种过滤 <input name="organism" placeholder="Homo sapiens"></label>
+      <label>关键词过滤 <input name="keyword" placeholder="可选"></label>
+      <label>ML/DL 模型路径 <input name="model" placeholder="data_cache\dataset_search\relevance_model.joblib"></label>
+      <label>下载根目录 <input name="download_root" placeholder="默认 ../liver_cancer"></label>
+    </div>
+    <div class="actions">
+      <button id="searchBtn" type="button" onclick="searchDatasets()">搜索数据集</button>
+      <button id="downloadTopBtn" class="secondary" type="button" onclick="downloadTop()" disabled>
+        下载前 <input id="topN" type="number" min="1" value="3" onclick="event.stopPropagation()"> 个
+      </button>
+    </div>
+  </form>
+  <div id="message"></div>
+</div>
+
+<div class="card">
+  <h2>搜索结果</h2>
+  <div id="resultMeta" class="muted"></div>
+  <div class="tablebox">
+    <table>
+      <thead>
+        <tr>
+          <th>#</th><th>编号</th><th>标题</th><th>摘要</th><th>物种</th>
+          <th>样本</th><th>平台</th><th>日期</th><th>类型</th><th>相关度</th><th>操作</th>
+        </tr>
+      </thead>
+      <tbody id="resultBody"><tr><td colspan="11" class="muted">暂无结果</td></tr></tbody>
+    </table>
+  </div>
+</div>
+
+<div class="card">
+  <h2>下载进度</h2>
+  <pre id="downloadLog">等待下载...</pre>
+</div>
+</div>
+
+<script>
+function esc(value) {
+  return String(value == null ? '' : value).replace(/[&<>"']/g, c => ({'&':'&amp;','<':'&lt;','>':'&gt;','"':'&quot;',"'":'&#39;'}[c]));
+}
+let lastResults = [];
+let downloadTimer = null;
+
+async function searchDatasets() {
+  const form = document.getElementById('searchForm');
+  const data = new URLSearchParams(new FormData(form));
+  const btn = document.getElementById('searchBtn');
+  const msg = document.getElementById('message');
+  btn.disabled = true;
+  msg.className = '';
+  msg.textContent = '正在搜索...';
+  try {
+    const resp = await fetch('/datasets/search', {method: 'POST', body: data});
+    const result = await resp.json();
+    if (!resp.ok) throw new Error(result.error || '搜索失败');
+    lastResults = result.results || [];
+    renderResults(result);
+    msg.className = 'ok';
+    msg.textContent = '匹配数据集：' + result.count;
+    document.getElementById('downloadTopBtn').disabled = lastResults.length === 0;
+  } catch (e) {
+    msg.className = 'error';
+    msg.textContent = String(e.message || e);
+    document.getElementById('resultBody').innerHTML = '<tr><td colspan="11" class="muted">暂无结果</td></tr>';
+    document.getElementById('resultMeta').textContent = '';
+  } finally {
+    btn.disabled = false;
+  }
+}
+
+function renderResults(data) {
+  const meta = document.getElementById('resultMeta');
+  const parts = ['查询：' + esc(data.query)];
+  if (data.model_applied) parts.push('ML/DL 重排序：' + esc(data.model_path));
+  parts.push('CSV：<a class="file-link" href="' + esc(data.csv_url) + '">下载</a>');
+  parts.push('JSON：<a class="file-link" href="' + esc(data.json_url) + '">下载</a>');
+  meta.innerHTML = parts.join(' | ');
+  const body = document.getElementById('resultBody');
+  if (!data.results || !data.results.length) {
+    body.innerHTML = '<tr><td colspan="11" class="muted">未找到匹配数据集</td></tr>';
+    return;
+  }
+  body.innerHTML = data.results.map((row, index) => {
+    const score = row.relevance_score == null ? '' : Number(row.relevance_score).toFixed(3);
+    return '<tr><td>' + (index + 1) + '</td>' +
+      '<td><a href="' + esc(row.url) + '" target="_blank" rel="noopener">' + esc(row.accession) + '</a></td>' +
+      '<td>' + esc(row.title) + '</td>' +
+      '<td class="summary">' + esc(row.summary) + '</td>' +
+      '<td>' + esc(row.organism) + '</td>' +
+      '<td>' + esc(row.samples) + '</td>' +
+      '<td>' + esc(row.platform) + '</td>' +
+      '<td>' + esc(row.date) + '</td>' +
+      '<td>' + esc(row.type) + '</td>' +
+      '<td>' + score + '</td>' +
+      '<td><button class="secondary" type="button" onclick="startDownload(\'' + esc(row.accession) + '\')">下载</button></td></tr>';
+  }).join('');
+}
+
+async function startDownload(accession) {
+  const form = new URLSearchParams();
+  form.append('accessions', accession);
+  await launchDownload(form);
+}
+
+async function downloadTop() {
+  const n = Math.max(1, parseInt(document.getElementById('topN').value || '1', 10));
+  const rows = lastResults.slice(0, n);
+  if (!rows.length) return;
+  const form = new URLSearchParams();
+  rows.forEach(row => form.append('accessions', row.accession));
+  await launchDownload(form);
+}
+
+async function launchDownload(form) {
+  const msg = document.getElementById('message');
+  const log = document.getElementById('downloadLog');
+  msg.className = '';
+  msg.textContent = '正在启动下载...';
+  log.textContent = '正在启动下载...';
+  try {
+    const resp = await fetch('/datasets/download', {method: 'POST', body: form});
+    const result = await resp.json();
+    if (!resp.ok) throw new Error(result.error || '下载启动失败');
+    if (downloadTimer) clearInterval(downloadTimer);
+    pollDownload(result.job);
+  } catch (e) {
+    msg.className = 'error';
+    msg.textContent = String(e.message || e);
+  }
+}
+
+function pollDownload(job) {
+  const log = document.getElementById('downloadLog');
+  const msg = document.getElementById('message');
+  downloadTimer = setInterval(async () => {
+    try {
+      const resp = await fetch('/datasets/download/status?job=' + encodeURIComponent(job));
+      const data = await resp.json();
+      if (!resp.ok) throw new Error(data.error || '状态读取失败');
+      log.textContent = data.log || '';
+      if (!data.running) {
+        clearInterval(downloadTimer);
+        if (data.ok) {
+          msg.className = 'ok';
+          msg.textContent = '下载完成';
+        } else {
+          msg.className = 'error';
+          msg.textContent = '下载失败：' + (data.error || '请查看日志');
+        }
+      } else {
+        msg.className = 'ok';
+        msg.textContent = '下载中...';
+      }
+    } catch (e) {
+      clearInterval(downloadTimer);
+      msg.className = 'error';
+      msg.textContent = '下载状态读取失败：' + String(e.message || e);
+    }
+  }, 2000);
+}
+</script>
+</body>
+</html>
