@@ -1,7 +1,7 @@
 {
   "accession": "GSE125449",
-  "single_cell_output": "../liver_cancer",
-  "workdir": "dock",
+  "single_cell_output": "",
+  "workdir": "",
   "species": "auto",
   "top_genes": 50,
   "docking_targets": 3,

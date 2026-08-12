@@ -253,7 +253,7 @@ launchers\run_full_pipeline.bat
 python run_full_pipeline.py \
   --accession GSE125449 \
   --output ../liver_cancer \
-  --workdir dock \
+  --workdir y3 \
   --top-genes 50 \
   --docking-targets 3
 ```
@@ -291,7 +291,7 @@ launchers\run_web_ui.bat --page results
 launchers\run_web_ui.bat --page tasks
 ```
 
-全自动流水线页的“工作目录”应填到包含 `outputs` 的上一层目录；目录中没有结果时页面会显示错误提示。单细胞页需要手动填写 GEO 数据集编号。“结果清单”页展示 `run_full_pipeline.py` 成功且完整运行后应输出的图片、数据、报告、断点和溯源文件清单；“任务进度”页支持查看任务进度并跳转到对应任务页面。
+全自动流水线页的“单细胞结果目录”和“工作目录”均为必填项，须手动填写；工作目录需填到包含 `outputs` 的上一层目录，目录中没有结果时页面会显示错误提示。单细胞页需要手动填写 GEO 数据集编号和结果保存地址。“结果清单”页展示 `run_full_pipeline.py` 成功且完整运行后应输出的图片、数据、报告、断点和溯源文件清单；“任务进度”页支持查看任务进度并跳转到对应任务页面。
 
 ### 4.5 验证脚本与测试
 
@@ -366,11 +366,11 @@ python -m unittest discover -s tests -p "test_*.py" -v
 输入：
 
 - GSE 编号（默认 `GSE125449`）。
-- 单细胞输出目录（默认 `../liver_cancer`）。
-- 工作目录（默认 `dock`）。
+- 单细胞输出目录（必填，例如 `y2`）。
+- 工作目录（必填，例如 `y3`）。
 - 可选配体库、病例/正常标签、DepMap CSV。
 
-输出（`dock/outputs/integration/`）：
+输出（`<workdir>/outputs/integration/`）：
 
 - `key_genes.csv`：关键基因排序表。
 - `gene_evidence.csv`：每个基因的 UniProt、PDB、ChEMBL 证据。
@@ -379,7 +379,7 @@ python -m unittest discover -s tests -p "test_*.py" -v
 - `integration_report.html`：全流程集成报告。
 - `integration_summary.json` / `run_manifest.json`：本次运行的汇总和溯源信息。
 
-每个靶点的对接在独立目录 `dock/work/<gene>/` 下运行，支持单独断点续跑；配体优先使用 ChEMBL/BindingDB 已知活性分子，无数据库配体时自动提取共晶配体作为对照，最后回退到用户提供的配体库。
+每个靶点的对接在独立目录 `<workdir>/work/<gene>/` 下运行，支持单独断点续跑；配体优先使用 ChEMBL/BindingDB 已知活性分子，无数据库配体时自动提取共晶配体作为对照，最后回退到用户提供的配体库。
 
 ## 6. 脚本文件一览
 

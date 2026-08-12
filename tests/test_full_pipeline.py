@@ -17,7 +17,11 @@ if str(APP_ROOT / "src") not in sys.path:
     sys.path.insert(0, str(APP_ROOT / "src"))
 
 from pipeline.integration import (  # noqa: E402
+    STAGES,
+    _clear_downstream_markers,
     _extract_cocrystal_ligands,
+    _invalidate_markers_for_changed_root,
+    _write_run_context,
     build_knockout_inputs,
     extract_key_genes,
     main,
@@ -190,7 +194,127 @@ class TestBuildKnockoutInputs(unittest.TestCase):
             )
 
 
+class TestFullPipelineMarkers(unittest.TestCase):
+    def _write_markers(self, workdir: Path) -> None:
+        stage_dir = workdir / "outputs" / "integration" / ".stages"
+        stage_dir.mkdir(parents=True, exist_ok=True)
+        for code, name, _description in STAGES:
+            (stage_dir / f"{code}_{name}.done").write_text(
+                "done",
+                encoding="utf-8",
+            )
+
+    def test_changed_single_cell_root_resets_stage_markers(self):
+        with tempfile.TemporaryDirectory() as tmp:
+            base = Path(tmp)
+            workdir = base / "work"
+            self._write_markers(workdir)
+            _write_run_context(workdir, base / "old_root")
+            changed = _invalidate_markers_for_changed_root(
+                workdir,
+                base / "new_root",
+            )
+            self.assertTrue(changed)
+            stage_dir = workdir / "outputs" / "integration" / ".stages"
+            self.assertEqual(list(stage_dir.glob("*.done")), [])
+
+    def test_changed_root_detected_from_key_genes_summary(self):
+        with tempfile.TemporaryDirectory() as tmp:
+            base = Path(tmp)
+            workdir = base / "work"
+            self._write_markers(workdir)
+            integration = workdir / "outputs" / "integration"
+            old_root = base / "old_root"
+            (integration / "key_genes_summary.json").write_text(
+                json.dumps(
+                    {
+                        "deg_table": str(
+                            old_root / "results" / "data" / "deg_significant.csv"
+                        )
+                    }
+                ),
+                encoding="utf-8",
+            )
+            changed = _invalidate_markers_for_changed_root(
+                workdir,
+                base / "new_root",
+            )
+            self.assertTrue(changed)
+            stage_dir = workdir / "outputs" / "integration" / ".stages"
+            self.assertEqual(list(stage_dir.glob("*.done")), [])
+
+    def test_clear_downstream_markers_keeps_stage01(self):
+        with tempfile.TemporaryDirectory() as tmp:
+            workdir = Path(tmp) / "work"
+            self._write_markers(workdir)
+            _clear_downstream_markers(workdir)
+            stage_dir = workdir / "outputs" / "integration" / ".stages"
+            remaining = {path.stem for path in stage_dir.glob("*.done")}
+            self.assertEqual(remaining, {"01_single_cell"})
+
+
 class TestFullPipeline(unittest.TestCase):
+    def test_single_cell_output_required_when_config_empty(self):
+        with tempfile.TemporaryDirectory() as tmp:
+            workdir = Path(tmp) / "work"
+            cfg = Path(tmp) / "full_pipeline_config.json"
+            cfg.write_text(
+                json.dumps(
+                    {
+                        "accession": "GSE_TEST",
+                        "single_cell_output": "",
+                        "workdir": str(workdir),
+                        "top_genes": 10,
+                        "docking_targets": 2,
+                        "species": "hs",
+                    }
+                ),
+                encoding="utf-8",
+            )
+            code = main(
+                [
+                    "--config",
+                    str(cfg),
+                    "--skip-scrna",
+                    "--skip-docking",
+                    "--skip-evidence-fetch",
+                    "--docking-config",
+                    str(APP_ROOT / "config" / "docking_config.json"),
+                ]
+            )
+            self.assertEqual(code, 1)
+
+    def test_workdir_required_when_config_empty(self):
+        with tempfile.TemporaryDirectory() as tmp:
+            root = Path(tmp) / "single_cell"
+            root.mkdir(parents=True)
+            cfg = Path(tmp) / "full_pipeline_config.json"
+            cfg.write_text(
+                json.dumps(
+                    {
+                        "accession": "GSE_TEST",
+                        "single_cell_output": str(root),
+                        "workdir": "",
+                        "top_genes": 10,
+                        "docking_targets": 2,
+                        "species": "hs",
+                    }
+                ),
+                encoding="utf-8",
+            )
+            code = main(
+                [
+                    "--config",
+                    str(cfg),
+                    "--skip-scrna",
+                    "--skip-docking",
+                    "--skip-evidence-fetch",
+                    "--docking-config",
+                    str(APP_ROOT / "config" / "docking_config.json"),
+                ]
+            )
+            self.assertEqual(code, 1)
+
     def test_end_to_end_without_docking(self):
         with tempfile.TemporaryDirectory() as tmp:
             root = Path(tmp) / "single_cell"
