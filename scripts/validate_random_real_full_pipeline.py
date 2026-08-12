@@ -22,7 +22,7 @@ import time
 from datetime import datetime
 from pathlib import Path
 
-ROOT = Path(__file__).resolve().parent
+ROOT = Path(__file__).resolve().parent.parent
 DEFAULT_RESULT_ROOT = ROOT.parent / "y1"
 
 # Real GEO single-cell datasets with public count matrices small enough for
@@ -251,7 +251,7 @@ def run_one(
         log(f"{accession} attempt {attempt}/{args.max_attempts}")
         cmd = [
             sys.executable,
-            str(ROOT / "run_full_pipeline.py"),
+            str(ROOT / "scripts" / "run_full_pipeline.py"),
             "--accession",
             accession,
             "--output",

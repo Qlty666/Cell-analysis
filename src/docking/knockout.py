@@ -1153,7 +1153,7 @@ def _write_target_report(
         "",
         "## Handoff",
         "",
-        "Run `python run_docking.py export-validation` to generate the staged "
+        "Run `python scripts\\run_docking.py export-validation` to generate the staged "
         "wet-lab validation plan for these candidates.",
         "",
     ]

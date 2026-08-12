@@ -14,7 +14,7 @@ import urllib.request
 import xml.etree.ElementTree as ET
 from pathlib import Path
 
-APP_ROOT = Path(__file__).resolve().parent
+APP_ROOT = Path(__file__).resolve().parent.parent
 if str(APP_ROOT / "src") not in sys.path:
     sys.path.insert(0, str(APP_ROOT / "src"))
 
