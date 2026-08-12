@@ -33,6 +33,14 @@ NOTIFY_LOCK = threading.Lock()
 TASK_HISTORY_PATH = WEB_DIR / "task_history.json"
 TASK_HISTORY_LOCK = threading.Lock()
 
+HEARTBEAT_CLIENTS: dict[str, float] = {}
+HEARTBEAT_LAST_SEEN_AT: float | None = None
+HEARTBEAT_LOCK = threading.Lock()
+HEARTBEAT_INTERVAL_SECONDS = 5
+HEARTBEAT_IDLE_TIMEOUT_SECONDS = 120
+HEARTBEAT_START_GRACE_SECONDS = 20
+HEARTBEAT_SHUTDOWN_GRACE_SECONDS = 5
+
 SRC_DIR = APP_ROOT / "src"
 if str(SRC_DIR) not in sys.path:
     sys.path.insert(0, str(SRC_DIR))
@@ -78,6 +86,106 @@ NAV_CSS = (
     ".topnav a:hover,.topnav a.active{background:#1665c0;color:#fff;}"
     ".topnav .nav-right{margin-left:auto;}"
 )
+
+HEARTBEAT_SCRIPT = """
+<script>
+(function () {
+  var clientId = "";
+  try {
+    clientId = crypto.randomUUID ? crypto.randomUUID() : "c" + Date.now().toString(36) + Math.random().toString(36).slice(2);
+  } catch (e) {
+    clientId = "c" + Date.now().toString(36) + Math.random().toString(36).slice(2);
+  }
+  var heartbeatUrl = "/heartbeat?client=" + encodeURIComponent(clientId);
+  function sendHeartbeat(left) {
+    var url = left ? heartbeatUrl + "&left=1" : heartbeatUrl;
+    try {
+      if (navigator.sendBeacon) {
+        navigator.sendBeacon(url);
+      } else {
+        fetch(url, {method: "GET", keepalive: true, credentials: "same-origin"}).catch(function () {});
+      }
+    } catch (e) {}
+  }
+  sendHeartbeat(false);
+  window.setInterval(function () { sendHeartbeat(false); }, __HEARTBEAT_MS__);
+  window.addEventListener("pagehide", function () { sendHeartbeat(true); });
+  document.addEventListener("visibilitychange", function () {
+    if (!document.hidden) sendHeartbeat(false);
+  });
+})();
+</script>
+""".replace("__HEARTBEAT_MS__", str(HEARTBEAT_INTERVAL_SECONDS * 1000)).encode("utf-8")
+
+
+def register_heartbeat(client_id: str, now: float | None = None) -> None:
+    global HEARTBEAT_LAST_SEEN_AT
+    client_id = (client_id or "").strip()
+    if not client_id or len(client_id) > 128:
+        return
+    with HEARTBEAT_LOCK:
+        seen_at = time.monotonic() if now is None else now
+        HEARTBEAT_CLIENTS[client_id] = seen_at
+        HEARTBEAT_LAST_SEEN_AT = seen_at
+
+
+def unregister_heartbeat(client_id: str) -> None:
+    client_id = (client_id or "").strip()
+    if not client_id:
+        return
+    with HEARTBEAT_LOCK:
+        HEARTBEAT_CLIENTS.pop(client_id, None)
+
+
+def _heartbeat_client_ids() -> set[str]:
+    with HEARTBEAT_LOCK:
+        return set(HEARTBEAT_CLIENTS)
+
+
+def _heartbeat_last_seen_at() -> float | None:
+    with HEARTBEAT_LOCK:
+        return HEARTBEAT_LAST_SEEN_AT
+
+
+def _purge_stale_heartbeats(
+    now: float,
+    timeout: float = HEARTBEAT_IDLE_TIMEOUT_SECONDS,
+) -> None:
+    cutoff = now - timeout
+    with HEARTBEAT_LOCK:
+        for client_id, seen in list(HEARTBEAT_CLIENTS.items()):
+            if seen < cutoff:
+                HEARTBEAT_CLIENTS.pop(client_id, None)
+
+
+def _inject_heartbeat_script(body: bytes) -> bytes:
+    if b"</body>" not in body:
+        return body
+    return body.replace(b"</body>", HEARTBEAT_SCRIPT + b"</body>", 1)
+
+
+def _run_idle_shutdown_monitor(
+    server: ThreadingHTTPServer,
+    started_at: float,
+) -> None:
+    idle_since: float | None = None
+    while True:
+        now = time.monotonic()
+        _purge_stale_heartbeats(now)
+        if _heartbeat_client_ids():
+            idle_since = None
+        else:
+            if idle_since is None:
+                idle_since = now
+            if (
+                _heartbeat_last_seen_at() is not None
+                or now - started_at >= HEARTBEAT_START_GRACE_SECONDS
+            ) and now - idle_since >= HEARTBEAT_SHUTDOWN_GRACE_SECONDS:
+                print("No web page connected; stopping web UI")
+                server.shutdown()
+                return
+        time.sleep(1.0)
+
 
 FIGURES = [
     {"file": "fig_01_qc_raw_violin.png", "label": "QC 小提琴图（原始）"},
@@ -2146,6 +2254,8 @@ class Handler(BaseHTTPRequestHandler):
         pass
 
     def _send(self, code: int, body: bytes, content_type: str) -> None:
+        if content_type.startswith("text/html"):
+            body = _inject_heartbeat_script(body)
         self.send_response(code)
         self.send_header("Content-Type", content_type)
         self.send_header("Content-Length", str(len(body)))
@@ -2153,8 +2263,20 @@ class Handler(BaseHTTPRequestHandler):
         self.end_headers()
         self.wfile.write(body)
 
+    def _handle_heartbeat(self, params: dict) -> None:
+        client_id = _first(params, "client")
+        if _first(params, "left", "0") == "1":
+            register_heartbeat(client_id)
+            unregister_heartbeat(client_id)
+        else:
+            register_heartbeat(client_id)
+        self._send(200, b'{"ok": true}', "application/json")
+
     def do_GET(self):
         parsed = urlparse(self.path)
+        if parsed.path == "/heartbeat":
+            self._handle_heartbeat(parse_qs(parsed.query))
+            return
         if parsed.path == "/":
             self._send(200, get_page().encode("utf-8"), "text/html; charset=utf-8")
             return
@@ -2602,6 +2724,12 @@ class Handler(BaseHTTPRequestHandler):
         body = self.rfile.read(length).decode("utf-8", "replace")
         data = parse_qs(body)
 
+        if parsed.path == "/heartbeat":
+            params = parse_qs(parsed.query)
+            params.update(data)
+            self._handle_heartbeat(params)
+            return
+
         if parsed.path == "/pause":
             job = data.get("job", [""])[0]
             info = JOBS.get(job)
@@ -3026,6 +3154,12 @@ def main() -> int:
     server = ThreadingHTTPServer((args.host, args.port), Handler)
     url = f"http://{args.host}:{args.port}"
     print(f"Web UI started: {url}")
+    threading.Thread(
+        target=_run_idle_shutdown_monitor,
+        args=(server, time.monotonic()),
+        daemon=True,
+        name="web-ui-idle-shutdown",
+    ).start()
     if args.page == "dock":
         open_url = url + "/dock"
     elif args.page == "full":
