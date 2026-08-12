@@ -174,6 +174,11 @@ a { color: #1665c0; text-decoration: none; }
 </div>
 
 <div class="card">
+  <h2>结果报告</h2>
+  <div id="reportBox"></div>
+</div>
+
+<div class="card">
   <h2>分析历史</h2>
   <div id="history">正在加载历史记录...</div>
 </div>
@@ -363,6 +368,7 @@ async function pollLog() {
       if (status.ok) {
         msg.textContent = '分析已完成';
         if (!jobAlerted) showJobToast('ok', '任务已完成', '单细胞分析任务已全部完成。');
+        await loadReport(currentJob);
       } else {
         msg.textContent = '分析运行失败，请查看日志';
         if (!jobAlerted) {
@@ -486,6 +492,21 @@ async function loadVersions() {
   }
 }
 
+async function loadReport(job) {
+  const box = document.getElementById('reportBox');
+  try {
+    const resp = await fetch('/report?job=' + encodeURIComponent(job));
+    if (resp.ok) {
+      box.innerHTML = '<a href="/report?job=' + encodeURIComponent(job) +
+        '" target="_blank" rel="noopener">打开结果报告</a>';
+    } else {
+      box.textContent = '';
+    }
+  } catch (e) {
+    box.textContent = '';
+  }
+}
+
 async function loadHistory() {
   const box = document.getElementById('history');
   try {
@@ -499,9 +520,10 @@ async function loadHistory() {
       '<tr><td>' + esc(item.accession) + '</td><td>' + esc(item.species) + '</td><td>' +
       esc(item.status) + '</td><td>' + esc(item.figures) + '</td><td>' +
       new Date(item.finished * 1000).toLocaleString() + '</td><td>' +
-      esc(item.output) + '</td></tr>'
+      esc(item.output) + '</td><td><a href="/report?output=' +
+      encodeURIComponent(item.output) + '" target="_blank" rel="noopener">打开</a></td></tr>'
     )).join('');
-    box.innerHTML = '<table><thead><tr><th>数据集</th><th>物种</th><th>状态</th><th>图数量</th><th>完成时间</th><th>输出路径</th></tr></thead><tbody>' + rows + '</tbody></table>';
+    box.innerHTML = '<table><thead><tr><th>数据集</th><th>物种</th><th>状态</th><th>图数量</th><th>完成时间</th><th>输出路径</th><th>报告</th></tr></thead><tbody>' + rows + '</tbody></table>';
   } catch (e) {
     box.textContent = '历史记录加载失败：' + String(e.message || e);
   }
