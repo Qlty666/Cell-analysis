@@ -1220,11 +1220,27 @@ if (stage_allowed("05")) run_stage("05_annotation", {
 
   seurat$celltype_annot <- seurat$celltype_annot_cell
 
+  cluster_ids <- unique(as.character(seurat$seurat_clusters))
+  if (all(grepl("^[0-9]+$", cluster_ids))) {
+    cluster_ids <- as.character(sort(as.integer(cluster_ids)))
+  }
+  cluster_labels <- vapply(cluster_ids, function(cl) {
+    labs <- seurat$celltype_annot[
+      as.character(seurat$seurat_clusters) == cl
+    ]
+    names(sort(table(labs), decreasing = TRUE))[1]
+  }, character(1))
+  seurat$cluster_label <- unname(cluster_labels[match(
+    as.character(seurat$seurat_clusters),
+    cluster_ids
+  )])
+
   annotation_tbl <- data.frame(
     cell = colnames(seurat),
     seurat_clusters = as.character(seurat$seurat_clusters),
     celltype_annot = seurat$celltype_annot,
     celltype_annot_cell = seurat$celltype_annot_cell,
+    cluster_label = seurat$cluster_label,
     published_type = seurat$published_type,
     condition = seurat$condition,
     sample = seurat$sample,
@@ -1232,8 +1248,31 @@ if (stage_allowed("05")) run_stage("05_annotation", {
   )
   write.csv(annotation_tbl, stage_data_file("fig_05_16_17_cell_annotations.csv"), row.names = FALSE)
 
-  p_clusters <- DimPlot(seurat, group.by = "seurat_clusters", label = TRUE) +
-    ggtitle("Seurat clusters")
+  p_clusters <- DimPlot(seurat, group.by = "seurat_clusters", label = FALSE) +
+    ggtitle("Seurat clusters (marker-based names)")
+  p_clusters <- tryCatch(
+    {
+      p_clusters$data$seurat_clusters <- factor(
+        as.character(p_clusters$data$seurat_clusters),
+        levels = unique(c(cluster_ids, cluster_labels))
+      )
+      LabelClusters(
+        p_clusters,
+        id = "seurat_clusters",
+        clusters = cluster_ids,
+        labels = cluster_labels,
+        size = 4
+      )
+    },
+    error = function(e) {
+      log_msg(
+        "custom cluster labels failed, using numeric labels: ",
+        conditionMessage(e)
+      )
+      DimPlot(seurat, group.by = "seurat_clusters", label = TRUE) +
+        ggtitle("Seurat clusters")
+    }
+  )
   p_condition <- DimPlot(seurat, group.by = "condition") +
     ggtitle(paste(sort(unique(as.character(seurat$condition))), collapse = " vs "))
   p_annot <- DimPlot(seurat, group.by = "celltype_annot", label = TRUE) +
