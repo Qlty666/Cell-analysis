@@ -141,8 +141,8 @@ class TestDatasetSearch(unittest.TestCase):
             patch.object(search_datasets, "esearch", return_value=["1", "2"]),
             patch.object(
                 search_datasets,
-                "esummary",
-                side_effect=lambda uid: summaries[uid],
+                "esummary_many",
+                return_value=summaries,
             ),
             patch.object(search_datasets.time, "sleep"),
         ):
