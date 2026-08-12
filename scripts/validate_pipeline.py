@@ -6,7 +6,7 @@ import subprocess
 import sys
 from pathlib import Path
 
-ROOT = Path(__file__).resolve().parent
+ROOT = Path(__file__).resolve().parent.parent
 if str(ROOT / "src") not in sys.path:
     sys.path.insert(0, str(ROOT / "src"))
 
@@ -115,7 +115,7 @@ def main() -> int:
             result = subprocess.run(
                 [
                     sys.executable,
-                    str(ROOT / "run_pipeline.py"),
+                    str(ROOT / "scripts" / "run_pipeline.py"),
                     accession,
                     "--output",
                     str(out),

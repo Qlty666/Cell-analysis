@@ -70,7 +70,7 @@
 
 ### 2.3 全自动集成流水线
 
-`run_full_pipeline.py` 把单细胞分析、关键基因筛选、证据富集、虚拟敲除和虚拟筛选串成一条流水线：
+`scripts/run_full_pipeline.py` 把单细胞分析、关键基因筛选、证据富集、虚拟敲除和虚拟筛选串成一条流水线：
 
 ```text
 01 single_cell           GEO 单细胞分析（下载、QC、注释、差异表达、富集）
@@ -112,8 +112,8 @@
 
 ### 2.6 真实数据验证与可复现性
 
-- `validate_new_features.py` 使用 20 个 TCGA PanCancer Atlas 队列和 GSE165816 真实单细胞数据运行虚拟敲除与验证方案导出。
-- 其余 `validate_*.py` 分别验证合成数据流水线、对接流水线、真实 GEO 数据、证据收集和随机真实数据。
+- `scripts/validate_new_features.py` 使用 20 个 TCGA PanCancer Atlas 队列和 GSE165816 真实单细胞数据运行虚拟敲除与验证方案导出。
+- 其余 `scripts/validate_*.py` 分别验证合成数据流水线、对接流水线、真实 GEO 数据、证据收集和随机真实数据。
 - 每次评分/导出写入 `run_manifest.json`，记录配置、输入哈希、软件版本和参数。
 
 ## 3. 安装方法
@@ -154,15 +154,15 @@ conda env create -f environment_dock.yml
 ### 4.1 单细胞分析命令行
 
 ```bash
-python run_pipeline.py GSE125449 --output ../liver_cancer --species auto
+python scripts\run_pipeline.py GSE125449 --output ../liver_cancer --species auto
 ```
 
 常用参数：
 
 ```bash
-python run_pipeline.py GSE125449 --output ../liver_cancer --species hs --force
-python run_pipeline.py GSE125449 --output ../liver_cancer --skip-download
-python run_pipeline.py GSE125449 --output ../liver_cancer --skip-deps
+python scripts\run_pipeline.py GSE125449 --output ../liver_cancer --species hs --force
+python scripts\run_pipeline.py GSE125449 --output ../liver_cancer --skip-download
+python scripts\run_pipeline.py GSE125449 --output ../liver_cancer --skip-deps
 ```
 
 Windows 下也可以直接使用：
@@ -177,45 +177,45 @@ launchers\run_pipeline_prompt.bat
 先初始化工作目录：
 
 ```bash
-python run_docking.py init
+python scripts\run_docking.py init
 ```
 
 运行完整对接流程（准备受体、准备配体、对接、分析、精细重对接、HTML 报告，支持断点续跑）：
 
 ```bash
-python run_docking.py pipeline --config config/docking_config.json
+python scripts\run_docking.py pipeline --config config/docking_config.json
 ```
 
 分阶段运行：
 
 ```bash
-python run_docking.py evidence --uniprot P00533 --pdb 1M17 --target-name EGFR
-python run_docking.py prepare-receptor
-python run_docking.py prepare-ligands
-python run_docking.py dock
-python run_docking.py analyze
-python run_docking.py redock
-python run_docking.py report
+python scripts\run_docking.py evidence --uniprot P00533 --pdb 1M17 --target-name EGFR
+python scripts\run_docking.py prepare-receptor
+python scripts\run_docking.py prepare-ligands
+python scripts\run_docking.py dock
+python scripts\run_docking.py analyze
+python scripts\run_docking.py redock
+python scripts\run_docking.py report
 ```
 
 ML/DL 重打分：
 
 ```bash
-python run_docking.py ml-train --training-csv data/ml/training.csv --model rf
-python run_docking.py ml-predict
+python scripts\run_docking.py ml-train --training-csv data/ml/training.csv --model rf
+python scripts\run_docking.py ml-predict
 ```
 
 导出 MD/外部交接模板：
 
 ```bash
-python run_docking.py export-md
-python run_docking.py export-external
+python scripts\run_docking.py export-md
+python scripts\run_docking.py export-external
 ```
 
 虚拟敲除（基础评分）：
 
 ```bash
-python run_docking.py virtual-knockout \
+python scripts\run_docking.py virtual-knockout \
   --expression-csv data/knockout/expression.csv \
   --metadata-csv data/knockout/metadata.csv \
   --depmap-csv data/knockout/depmap_gene_effect.csv \
@@ -225,7 +225,7 @@ python run_docking.py virtual-knockout \
 多维评分与验证方案导出：
 
 ```bash
-python run_docking.py virtual-knockout \
+python scripts\run_docking.py virtual-knockout \
   --expression-csv data/knockout/expression.csv \
   --metadata-csv data/knockout/metadata.csv \
   --prognosis-csv data/knockout/prognosis.csv \
@@ -234,14 +234,14 @@ python run_docking.py virtual-knockout \
   --cell-type-column cell_type \
   --case-label Tumor --normal-label Normal
 
-python run_docking.py export-validation --validation-top-n 10
+python scripts\run_docking.py export-validation --validation-top-n 10
 ```
 
 环境检查：
 
 ```bash
-python run_docking.py check-env
-python run_docking.py check-cadd
+python scripts\run_docking.py check-env
+python scripts\run_docking.py check-cadd
 ```
 
 ### 4.3 全自动集成流水线
@@ -255,7 +255,7 @@ launchers\run_full_pipeline.bat
 或直接运行：
 
 ```bash
-python run_full_pipeline.py \
+python scripts\run_full_pipeline.py \
   --accession GSE125449 \
   --output ../liver_cancer \
   --workdir y3 \
@@ -278,7 +278,7 @@ python run_full_pipeline.py \
 查看阶段清单：
 
 ```bash
-python run_full_pipeline.py --list-stages
+python scripts\run_full_pipeline.py --list-stages
 ```
 
 ### 4.4 网页版
@@ -296,7 +296,7 @@ launchers\run_web_ui.bat --page results
 launchers\run_web_ui.bat --page tasks
 ```
 
-全自动流水线页的“单细胞结果目录”和“工作目录”均为必填项，须手动填写；工作目录需填到包含 `outputs` 的上一层目录，目录中没有结果时页面会显示错误提示。单细胞页需要手动填写 GEO 数据集编号和结果保存地址。“结果清单”页展示 `run_full_pipeline.py` 成功且完整运行后应输出的图片、数据、报告、断点和溯源文件清单；“任务进度”页支持查看任务进度并跳转到对应任务页面。
+全自动流水线页的“单细胞结果目录”和“工作目录”均为必填项，须手动填写；工作目录需填到包含 `outputs` 的上一层目录，目录中没有结果时页面会显示错误提示。单细胞页需要手动填写 GEO 数据集编号和结果保存地址。“结果清单”页展示 `scripts/run_full_pipeline.py` 成功且完整运行后应输出的图片、数据、报告、断点和溯源文件清单；“任务进度”页支持查看任务进度并跳转到对应任务页面。
 
 关闭所有网页标签后，本地网页服务会在数秒内自动退出并释放端口；正常退出时启动窗口也会自动关闭。若端口仍被其他进程占用导致启动失败，窗口会保留错误信息等待确认后关闭。
 
@@ -310,20 +310,21 @@ python -m unittest discover -s tests -p "test_*.py" -v
 
 | 脚本 | 用途 |
 | --- | --- |
-| `validate_pipeline.py` | 用 10 个合成单细胞数据集跑通完整单细胞流水线 |
-| `validate_dock_pipeline.py` | 用假 Vina 可执行文件验证对接流水线 |
-| `validate_real_pipeline.py` | 用 10 个真实肝病 GEO 数据集跑通完整流水线 |
-| `validate_real_evidence.py` | 用 10 个真实 PDB 结构验证证据收集 |
-| `validate_real_random.py` | 随机真实数据验证证据收集和对接盒检测 |
-| `validate_new_features.py` | 用 20 个 TCGA PanCancer 队列 + GSE165816 验证靶点评分 |
-| `validate_dataset_search.py` | 用 50 轮随机疾病+研究方向组合验证 GEO 数据集搜索召回 |
+| `scripts/validate_pipeline.py` | 用 10 个合成单细胞数据集跑通完整单细胞流水线 |
+| `scripts/validate_dock_pipeline.py` | 用假 Vina 可执行文件验证对接流水线 |
+| `scripts/validate_real_pipeline.py` | 用 10 个真实肝病 GEO 数据集跑通完整流水线 |
+| `scripts/validate_real_evidence.py` | 用 10 个真实 PDB 结构验证证据收集 |
+| `scripts/validate_real_random.py` | 随机真实数据验证证据收集和对接盒检测 |
+| `scripts/validate_new_features.py` | 用 20 个 TCGA PanCancer 队列 + GSE165816 验证靶点评分 |
+| `scripts/validate_random_real_full_pipeline.py` | 随机真实 GSE 数据集跑通全自动流水线 |
+| `scripts/validate_dataset_search.py` | 用 50 轮随机疾病+研究方向组合验证 GEO 数据集搜索召回 |
 
 ### 4.6 自动搜索数据集
 
-`search_datasets.py` 通过 NCBI E-utilities 自动搜索 GEO 数据集，并可按需下载命中的 GSE 系列：
+`scripts/search_datasets.py` 通过 NCBI E-utilities 自动搜索 GEO 数据集，并可按需下载命中的 GSE 系列：
 
 ```bash
-python search_datasets.py \
+python scripts\search_datasets.py \
   --query "hepatocellular carcinoma single cell" \
   --max-results 20 \
   --organism "Homo sapiens"
@@ -332,7 +333,7 @@ python search_datasets.py \
 也可以直接指定疾病和研究方向，脚本会自动组合成搜索词：
 
 ```bash
-python search_datasets.py \
+python scripts\search_datasets.py \
   --disease "liver cancer" \
   --research-direction "single cell RNA-seq" \
   --max-results 20 \
@@ -342,7 +343,7 @@ python search_datasets.py \
 搜索结束后会在 `data_cache/dataset_search/` 写出 `dataset_search_results.csv` 和 `dataset_search_results.json`。需要下载时追加下载参数：
 
 ```bash
-python search_datasets.py \
+python scripts\search_datasets.py \
   --query "liver cancer scRNA-seq" \
   --keyword "HCC" \
   --download GSE125449 \
@@ -354,7 +355,7 @@ python search_datasets.py \
 批量随机验证搜索是否命中“疾病+研究方向”数据集：
 
 ```bash
-python validate_dataset_search.py --rounds 50 --seed 20260812
+python scripts\validate_dataset_search.py --rounds 50 --seed 20260812
 ```
 
 验证结果写入 `data_cache/dataset_search/validation_50_rounds.csv` 和 `validation_50_rounds.json`；未命中时会自动用疾病名或研究方向名扩大搜索范围。
@@ -363,11 +364,11 @@ python validate_dataset_search.py --rounds 50 --seed 20260812
 
 ### 4.7 数据集搜索 ML/DL 相关性排序
 
-`dataset_search_ml.py` 用 TF-IDF 特征训练机器学习/深度学习模型，对搜索结果按“疾病 + 研究方向”相关性重新排序：
+`scripts/dataset_search_ml.py` 用 TF-IDF 特征训练机器学习/深度学习模型，对搜索结果按“疾病 + 研究方向”相关性重新排序：
 
 ```bash
-python validate_dataset_search.py --rounds 50 --seed 20260812
-python dataset_search_ml.py \
+python scripts\validate_dataset_search.py --rounds 50 --seed 20260812
+python scripts\dataset_search_ml.py \
   --train \
   --samples data_cache/dataset_search/training_samples.csv \
   --output data_cache/dataset_search/relevance_model.joblib \
@@ -377,12 +378,12 @@ python dataset_search_ml.py \
 训练完成后，普通搜索和批量验证都可以传入模型：
 
 ```bash
-python search_datasets.py \
+python scripts\search_datasets.py \
   --disease "liver cancer" \
   --research-direction "single cell RNA-seq" \
   --model data_cache/dataset_search/relevance_model.joblib
 
-python validate_dataset_search.py \
+python scripts\validate_dataset_search.py \
   --rounds 50 \
   --seed 20260812 \
   --model data_cache/dataset_search/relevance_model.joblib \
@@ -469,15 +470,19 @@ python validate_dataset_search.py \
 
 | 脚本 | 说明 |
 | --- | --- |
-| `run_pipeline.py` | 单细胞分析 CLI 入口 |
-| `run_docking.py` | 虚拟筛选 CLI 入口 |
-| `run_full_pipeline.py` | 全自动集成流水线 CLI 入口 |
-| `validate_pipeline.py` | 合成数据单细胞流水线验证 |
-| `validate_dock_pipeline.py` | 假 Vina 对接流水线验证 |
-| `validate_real_pipeline.py` | 真实 GEO 数据流水线验证 |
-| `validate_real_evidence.py` | 真实 PDB 证据收集验证 |
-| `validate_real_random.py` | 随机真实数据验证 |
-| `validate_new_features.py` | 真实数据靶点评分/验证方案验证 |
+| `scripts/run_pipeline.py` | 单细胞分析 CLI 入口 |
+| `scripts/run_docking.py` | 虚拟筛选 CLI 入口 |
+| `scripts/run_full_pipeline.py` | 全自动集成流水线 CLI 入口 |
+| `scripts/search_datasets.py` | GEO 数据集搜索与下载 |
+| `scripts/dataset_search_ml.py` | 数据集搜索 ML/DL 相关性重排序 |
+| `scripts/validate_pipeline.py` | 合成数据单细胞流水线验证 |
+| `scripts/validate_dock_pipeline.py` | 假 Vina 对接流水线验证 |
+| `scripts/validate_real_pipeline.py` | 真实 GEO 数据流水线验证 |
+| `scripts/validate_real_evidence.py` | 真实 PDB 证据收集验证 |
+| `scripts/validate_real_random.py` | 随机真实数据验证 |
+| `scripts/validate_new_features.py` | 真实数据靶点评分/验证方案验证 |
+| `scripts/validate_random_real_full_pipeline.py` | 随机真实 GSE 全流程验证 |
+| `scripts/validate_dataset_search.py` | GEO 数据集搜索随机验证 |
 | `launchers/check_*.bat/.py` | 环境检查 |
 | `launchers/install_*.bat/.py` | 环境自动补全 |
 | `launchers/run_web_ui.bat` | 启动网页端 |
@@ -501,10 +506,13 @@ python validate_dataset_search.py \
 
 ```text
 Script/
-├── run_pipeline.py
-├── run_docking.py
-├── run_full_pipeline.py
-├── validate_*.py
+├── scripts/
+│   ├── run_pipeline.py
+│   ├── run_docking.py
+│   ├── run_full_pipeline.py
+│   ├── search_datasets.py
+│   ├── dataset_search_ml.py
+│   └── validate_*.py
 ├── README.md
 ├── AGENTS.md            # Codex 项目执行规则
 ├── VIRTUAL_SCREENING_REQUIREMENTS.md
@@ -560,4 +568,4 @@ MIT License. See `LICENSE` for details.
 - 结果清单页优化为仅展示结果图和结果数据，并按阶段目录整理全流程输出。
 - 网页任务进度页支持历史记录、一键清空与完成/中断弹窗提醒。
 - 统一结果文件名与阶段输出目录，增强路径处理和网页端安全校验。
-- 自动 GEO 数据集搜索脚本 `search_datasets.py` 与 ML/DL 重排序脚本 `dataset_search_ml.py` 上线。
+- 自动 GEO 数据集搜索脚本 `scripts/search_datasets.py` 与 ML/DL 重排序脚本 `scripts/dataset_search_ml.py` 上线。

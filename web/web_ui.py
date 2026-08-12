@@ -18,6 +18,7 @@ from urllib.parse import parse_qs, urlparse
 
 WEB_DIR = Path(__file__).resolve().parent
 APP_ROOT = WEB_DIR.parent
+SCRIPTS_DIR = APP_ROOT / "scripts"
 JOBS = {}
 QUEUE = []
 QUEUE_LOCK = threading.Lock()
@@ -46,6 +47,8 @@ if str(SRC_DIR) not in sys.path:
     sys.path.insert(0, str(SRC_DIR))
 if str(APP_ROOT) not in sys.path:
     sys.path.insert(0, str(APP_ROOT))
+if str(SCRIPTS_DIR) not in sys.path:
+    sys.path.insert(0, str(SCRIPTS_DIR))
 
 DOCK_TEMPLATE_PATH = TEMPLATE_DIR / "dock_page_template.html"
 DOCK_JOBS = {}
@@ -356,7 +359,7 @@ def start_job(
 
     cmd = [
         sys.executable,
-        str(APP_ROOT / "run_pipeline.py"),
+        str(SCRIPTS_DIR / "run_pipeline.py"),
         acc,
         "--output",
         str(out),
@@ -1109,7 +1112,7 @@ def start_dock_job(data: dict) -> dict:
     log_path.parent.mkdir(parents=True, exist_ok=True)
     cmd = [
         sys.executable,
-        str(APP_ROOT / "run_docking.py"),
+        str(SCRIPTS_DIR / "run_docking.py"),
         stage,
         "--config",
         str(cfg_path),
@@ -1245,7 +1248,7 @@ def start_full_job(data: dict) -> dict:
 
     cmd = [
         sys.executable,
-        str(APP_ROOT / "run_full_pipeline.py"),
+        str(SCRIPTS_DIR / "run_full_pipeline.py"),
         "--config",
         str(APP_ROOT / "config" / "full_pipeline_config.json"),
         "--docking-config",
@@ -1990,7 +1993,7 @@ def validation_report_text() -> str:
     return (
         "报告尚未生成。\n"
         "请在网页版点击“重新运行随机真实 GSE 验证”，"
-        "或在命令行运行：python validate_random_real_full_pipeline.py --count 10"
+        "或在命令行运行：python scripts\\validate_random_real_full_pipeline.py --count 10"
     )
 
 
@@ -2003,7 +2006,7 @@ def start_validation_job() -> dict:
     proc = subprocess.Popen(
         [
             sys.executable,
-            str(APP_ROOT / "validate_random_real_full_pipeline.py"),
+            str(SCRIPTS_DIR / "validate_random_real_full_pipeline.py"),
             "--result-root",
             str(APP_ROOT.parent / "y1"),
             "--count",

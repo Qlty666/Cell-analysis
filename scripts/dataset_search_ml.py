@@ -8,9 +8,12 @@ import json
 import sys
 from pathlib import Path
 
-APP_ROOT = Path(__file__).resolve().parent
-if str(APP_ROOT) not in sys.path:
-    sys.path.insert(0, str(APP_ROOT))
+SCRIPTS_DIR = Path(__file__).resolve().parent
+APP_ROOT = SCRIPTS_DIR.parent
+if str(SCRIPTS_DIR) not in sys.path:
+    sys.path.insert(0, str(SCRIPTS_DIR))
+if str(APP_ROOT / "src") not in sys.path:
+    sys.path.insert(0, str(APP_ROOT / "src"))
 
 import joblib
 import numpy as np
