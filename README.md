@@ -1,6 +1,6 @@
 # Liver Cancer Bioinformatics Workflow
 
-> 当前版本：0.4.0
+> 当前版本：0.5.0
 
 面向肝癌研究的本地生信自动化工作流，整合三条可实际运行的流水线：
 
@@ -28,6 +28,7 @@
 - QC、双细胞检测（`scDblFinder`）、PCA/UMAP 聚类和细胞注释。
 - 差异表达（DESeq2 pseudobulk 或 Seurat Wilcoxon 回退）与 GO/KEGG/GSEA 富集分析。
 - 按校正后 P 值排序输出差异最显著基因的横向小提琴图，并在图中标注 P 值。
+- 报告生成器会对每个结果图和结果数据文件生成逐文件分析，并汇总为一份总报告。
 - 可选 CellChat 细胞通讯分析（设置 `LIVER_RUN_CELLCHAT=yes`）。
 - ML 疾病分类（XGBoost 或 RandomForest）、特征重要性和 SHAP 解释。
 - 发表级分析：细胞周期打分与回归校正、聚类 marker 发现、功能签名打分、推断 CNV、SingleR 自动注释，以及可选 slingshot 拟时序。
@@ -545,6 +546,11 @@ GSE165816 和 TCGA PanCancer Atlas 仅用于真实数据验证。
 MIT License. See `LICENSE` for details.
 
 ## 9. 更新日志
+
+### v0.5.0
+
+- 单细胞报告升级为总报告：对 `results/figures` 和 `results/data` 下每个结果文件生成独立分析，包括文件说明、表格规模、关键字段统计、P 值/差异方向/样本分组等结论，并汇总到 `result_report.html`。
+- DOCX/PDF 导出同步加入结果文件清单与数量统计。
 
 ### v0.4.0
 
