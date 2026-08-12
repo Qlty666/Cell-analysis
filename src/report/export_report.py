@@ -101,6 +101,24 @@ def main() -> int:
         f"Up DEGs: {summary.get('deg_up', '')}",
         f"Down DEGs: {summary.get('deg_down', '')}",
     ]
+    result_root = root / "results"
+    fig_dir = result_root / "figures"
+    data_dir = result_root / "data"
+    figures = (
+        sorted(p.relative_to(fig_dir).as_posix() for p in fig_dir.rglob("*") if p.is_file())
+        if fig_dir.exists()
+        else []
+    )
+    data_files = (
+        sorted(p.relative_to(data_dir).as_posix() for p in data_dir.rglob("*") if p.is_file())
+        if data_dir.exists()
+        else []
+    )
+    lines.append(f"Result figures: {len(figures)}")
+    lines.append(f"Result data files: {len(data_files)}")
+    lines.append("Result files:")
+    lines.extend(f"- {rel}" for rel in figures)
+    lines.extend(f"- {rel}" for rel in data_files)
     top = summary.get("top_degs", [])
     if isinstance(top, dict):
         top = [top]
