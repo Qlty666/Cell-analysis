@@ -29,7 +29,7 @@ def main() -> int:
     print()
     print("Python dependencies ready.")
     print("AutoDock Vina should be placed in dock/tools/vina.exe or added to PATH.")
-    print("Run: python run_docking.py check-env")
+    print("Run: python scripts\\run_docking.py check-env")
     return 0
 
 

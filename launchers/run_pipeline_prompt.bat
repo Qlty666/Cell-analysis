@@ -7,7 +7,7 @@ set /p SP=Input species: hs=human, mm=mouse, default hs:
 if "%ACC%"=="" goto err_acc
 if "%OUT%"=="" goto err_out
 if "%SP%"=="" set SP=hs
-python run_pipeline.py "%ACC%" --output "%OUT%" --species %SP%
+python scripts\run_pipeline.py "%ACC%" --output "%OUT%" --species %SP%
 echo.
 pause
 exit /b 0
