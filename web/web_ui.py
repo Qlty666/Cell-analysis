@@ -1740,7 +1740,7 @@ def dock_results(info: dict) -> dict:
         "rows": rows,
         "figures": figures,
         "files": files,
-        "output_dir": str(info["output_dir"]),
+        "output_dir": str(reports),
         "stage": info.get("stage", ""),
     }
 
@@ -1958,8 +1958,7 @@ class Handler(BaseHTTPRequestHandler):
                 return
             fig_dir = info["out"] / "results" / "figures"
             figures = sorted(
-                p.relative_to(fig_dir).as_posix()
-                for p in fig_dir.rglob("*.png")
+                p.name for p in fig_dir.rglob("*.png")
             ) if fig_dir.exists() else []
             body = json.dumps({"figures": figures}).encode("utf-8")
             self._send(200, body, "application/json")
@@ -1967,14 +1966,17 @@ class Handler(BaseHTTPRequestHandler):
         if parsed.path == "/figure":
             query = parse_qs(parsed.query)
             job = query.get("job", [""])[0]
-            name = Path(query.get("name", [""])[0])
+            name = Path(query.get("name", [""])[0]).name
             info = JOBS.get(job)
             if not info:
                 self._send(404, b"job not found", "text/plain; charset=utf-8")
                 return
             fig_dir = (info["out"] / "results" / "figures").resolve()
-            target = (fig_dir / name).resolve()
-            if not target.is_file() or fig_dir not in target.parents:
+            target = next(
+                (p for p in fig_dir.rglob(name) if p.is_file()),
+                None,
+            )
+            if target is None:
                 self._send(404, b"figure not found", "text/plain; charset=utf-8")
                 return
             suffix = target.suffix.lower()
