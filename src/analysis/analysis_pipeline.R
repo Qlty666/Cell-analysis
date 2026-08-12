@@ -773,6 +773,39 @@ read_generic_dataset <- function(manifest) {
   loaded <- read_generic_counts(manifest)
   counts <- loaded$counts
   meta <- read_generic_metadata(manifest, colnames(counts))
+  ann <- parse_series_generic(manifest)
+
+  if (!is.null(ann) && "sample" %in% colnames(ann)) {
+    ann_samples <- as.character(ann$sample)
+    count_samples <- colnames(counts)
+    idx <- match(count_samples, ann_samples)
+    if (sum(!is.na(idx)) < 5) {
+      idx <- match(sub("_[^_]+$", "", count_samples), ann_samples)
+    }
+    if (sum(!is.na(idx)) < 5) {
+      idx <- match(count_samples, sub("^[^ ]+ ", "", ann_samples))
+    }
+    if (sum(!is.na(idx)) < 5) {
+      idx <- match(count_samples, sub("^[^_]+_", "", ann_samples))
+    }
+    if (sum(!is.na(idx)) < 5) {
+      idx <- match(
+        sub("^.*(G[0-9]+[A-Z]?).*$", "\\1", count_samples),
+        sub("^.*(G[0-9]+[A-Z]?).*$", "\\1", ann_samples)
+      )
+    }
+    if (sum(!is.na(idx)) >= 2) {
+      sample_vals <- loaded$cell_sample
+      matched <- !is.na(idx)
+      sample_vals[matched] <- ann_samples[idx[matched]]
+      meta$sample <- sample_vals
+      log_msg(
+        "matched series matrix sample labels: ",
+        sum(matched), "/", length(idx)
+      )
+    }
+  }
+
   if (!"sample" %in% colnames(meta)) {
     meta$sample <- loaded$cell_sample
   }
@@ -786,7 +819,6 @@ read_generic_dataset <- function(manifest) {
       paste(head(as.character(meta$sample), 20), collapse = ", ")
     )
   }
-  ann <- parse_series_generic(manifest)
   log_msg(
     "generic sample labels: ",
     paste(head(as.character(meta$sample), 20), collapse = ", ")
@@ -942,6 +974,18 @@ if (stage_allowed("02")) run_stage("02_qc_filter", {
     min(30, as.numeric(quantile(qc_data$percent.mt, 0.99)))
   }
 
+  if (lo_feature > hi_feature || lo_count > hi_count) {
+    log_msg(
+      "QC bounds are incompatible for this dataset; ",
+      "relaxing thresholds to keep all samples"
+    )
+    lo_feature <- 0
+    hi_feature <- max(qc_data$nFeature_RNA) + 1
+    lo_count <- 0
+    hi_count <- max(qc_data$nCount_RNA) + 1
+    hi_mt <- 100
+  }
+
   log_msg(
     "QC thresholds: nFeature ",
     round(lo_feature, 1), "-", round(hi_feature, 1),
@@ -1092,7 +1136,9 @@ if (stage_allowed("04")) run_stage("04_cluster", {
   } else {
     seurat <- ScaleData(seurat, features = VariableFeatures(seurat), verbose = FALSE)
   }
-  seurat <- RunPCA(seurat, npcs = 30, verbose = FALSE)
+  npcs <- min(30, ncol(seurat) - 1)
+  dims_use <- seq_len(max(1, min(20, npcs)))
+  seurat <- RunPCA(seurat, npcs = npcs, verbose = FALSE)
   reduction <- "pca"
   if (
     requireNamespace("harmony", quietly = TRUE) &&
@@ -1104,7 +1150,7 @@ if (stage_allowed("04")) run_stage("04_cluster", {
           seurat,
           group.by.vars = "sample",
           reduction.use = "pca",
-          dims.use = 1:20,
+          dims.use = dims_use,
           verbose = FALSE
         )
         reduction <- "harmony"
@@ -1118,7 +1164,7 @@ if (stage_allowed("04")) run_stage("04_cluster", {
   seurat <- FindNeighbors(
     seurat,
     reduction = reduction,
-    dims = 1:20,
+    dims = dims_use,
     verbose = FALSE
   )
   seurat <- FindClusters(
@@ -1134,7 +1180,8 @@ if (stage_allowed("04")) run_stage("04_cluster", {
   seurat <- RunUMAP(
     seurat,
     reduction = reduction,
-    dims = 1:20,
+    dims = dims_use,
+    n.neighbors = min(30, ncol(seurat) - 1),
     seed.use = 42,
     verbose = FALSE
   )
@@ -1148,7 +1195,7 @@ if (stage_allowed("04")) run_stage("04_cluster", {
     height = 7
   )
 
-  p_elbow <- ElbowPlot(seurat, ndims = 30) +
+  p_elbow <- ElbowPlot(seurat, ndims = npcs) +
     ggtitle("Principal component standard deviation")
   save_fig(
     file.path(fig_dir, "fig_15_elbow.png"),
@@ -1313,15 +1360,19 @@ if (stage_allowed("05")) run_stage("05_annotation", {
     "ACTA2", "AFP", "GPC3"
   ))
   dot_features <- intersect(dot_features, rownames(seurat))
-  p_dot <- DotPlot(seurat, features = dot_features, group.by = "celltype_annot") +
-    RotatedAxis()
-  save_fig(
-    file.path(fig_dir, "fig_06_dotplot_markers.png"),
-    p_dot,
-    width = 11,
-    height = 7,
-    dpi = 150
-  )
+  if (length(dot_features) > 0) {
+    p_dot <- DotPlot(seurat, features = dot_features, group.by = "celltype_annot") +
+      RotatedAxis()
+    save_fig(
+      file.path(fig_dir, "fig_06_dotplot_markers.png"),
+      p_dot,
+      width = 11,
+      height = 7,
+      dpi = 150
+    )
+  } else {
+    log_msg("skip DotPlot: no marker genes present in dataset")
+  }
 
   feature_genes <- expand_genes(c(
     "CD3D", "NKG7", "CD79A", "LYZ", "ALB", "KRT19",
@@ -1424,7 +1475,7 @@ if (stage_allowed("05")) run_stage("05_annotation", {
       height = 800,
       res = 150
     )
-    if (nrow(conf) > 0 && ncol(conf) > 0 && !all(is.na(conf))) {
+    if (nrow(conf) > 1 && ncol(conf) > 1 && !all(is.na(conf))) {
       pheatmap(
         conf,
         display_numbers = TRUE,
@@ -1754,6 +1805,16 @@ if (stage_allowed("07")) run_stage("07_enrichment", {
     deg_down <- deg[deg$p_val_adj < 0.1 & deg$avg_log2FC < -0.1, ]
   }
 
+  gene_id_type <- function(ids) {
+    ids <- na.omit(ids)
+    if (length(ids) == 0) return("SYMBOL")
+    if (grepl("^ENSG\\d+", ids[1]) || grepl("^ENSMUSG\\d+", ids[1])) {
+      "ENSEMBL"
+    } else {
+      "SYMBOL"
+    }
+  }
+
   org_db <- if (species == "mm") {
     if (!requireNamespace("org.Mm.eg.db", quietly = TRUE)) {
       stop("org.Mm.eg.db is required for mouse enrichment analysis.")
@@ -1770,10 +1831,11 @@ if (stage_allowed("07")) run_stage("07_enrichment", {
       return(list(go = NULL, kegg = NULL))
     }
 
+    id_type <- gene_id_type(deg_sub$gene)
     eg <- tryCatch(
       bitr(
         deg_sub$gene,
-        fromType = "SYMBOL",
+        fromType = id_type,
         toType = "ENTREZID",
         OrgDb = org_db
       ),
@@ -1860,40 +1922,51 @@ if (stage_allowed("07")) run_stage("07_enrichment", {
   rank_vec <- deg$avg_log2FC
   names(rank_vec) <- deg$gene
   rank_vec <- sort(rank_vec[!is.na(rank_vec) & is.finite(rank_vec)], decreasing = TRUE)
-  eg_all <- bitr(
-    names(rank_vec),
-    fromType = "SYMBOL",
-    toType = "ENTREZID",
-    OrgDb = org_db
-  )
-  ranked <- rank_vec[eg_all$SYMBOL]
-  names(ranked) <- eg_all$ENTREZID
-  ranked <- sort(ranked, decreasing = TRUE)
-
-  gsea_go <- tryCatch(
-    gseGO(
-      geneList = ranked,
-      OrgDb = org_db,
-      keyType = "ENTREZID",
-      ont = "BP",
-      minGSSize = 10,
-      maxGSSize = 500,
-      pvalueCutoff = 0.1,
-      verbose = FALSE
+  id_type <- gene_id_type(names(rank_vec))
+  mapped_col <- if (id_type == "SYMBOL") "SYMBOL" else "ENSEMBL"
+  eg_all <- tryCatch(
+    bitr(
+      names(rank_vec),
+      fromType = id_type,
+      toType = "ENTREZID",
+      OrgDb = org_db
     ),
-    error = function(e) NULL
+    error = function(e) data.frame()
   )
-  gsea_kegg <- tryCatch({
-    options(timeout = 600)
-    gseKEGG(
-      geneList = ranked,
-      organism = kegg_org,
-      minGSSize = 10,
-      maxGSSize = 500,
-      pvalueCutoff = 0.1,
-      verbose = FALSE
+  if (nrow(eg_all) == 0) {
+    log_msg("no Entrez mapping for GSEA; skipping")
+    gsea_go <- NULL
+    gsea_kegg <- NULL
+  } else {
+    ranked <- rank_vec[eg_all[[mapped_col]]]
+    names(ranked) <- eg_all$ENTREZID
+    ranked <- sort(ranked, decreasing = TRUE)
+
+    gsea_go <- tryCatch(
+      gseGO(
+        geneList = ranked,
+        OrgDb = org_db,
+        keyType = "ENTREZID",
+        ont = "BP",
+        minGSSize = 10,
+        maxGSSize = 500,
+        pvalueCutoff = 0.1,
+        verbose = FALSE
+      ),
+      error = function(e) NULL
     )
-  }, error = function(e) NULL)
+    gsea_kegg <- tryCatch({
+      options(timeout = 600)
+      gseKEGG(
+        geneList = ranked,
+        organism = kegg_org,
+        minGSSize = 10,
+        maxGSSize = 500,
+        pvalueCutoff = 0.1,
+        verbose = FALSE
+      )
+    }, error = function(e) NULL)
+  }
 
   plot_gsea <- function(res, file, title) {
     if (is.null(res) || nrow(as.data.frame(res)) == 0) {

@@ -99,7 +99,18 @@ def _select_files(names: list[str]) -> dict:
 
     for name in names:
         low = name.lower()
-        if "normalized" in low or "tpm" in low or "natural_log" in low:
+        if any(
+            token in low
+            for token in (
+                "normalized",
+                "tpm",
+                "fpkm",
+                "rpkm",
+                "cpm",
+                "natural_log",
+                "series_matrix",
+            )
+        ):
             continue
         if re.search(
             r"samples|metadata|cellinfo|cell_info|phenotype|celltype|annotation",
@@ -110,7 +121,11 @@ def _select_files(names: list[str]) -> dict:
             barcodes.append(name)
         elif "genes" in low or "features" in low:
             genes.append(name)
-        elif re.search(r"matrix|\.mtx|counts?|read_counts|umi_counts|\.rds$", low):
+        elif re.search(
+            r"matrix|\.mtx|counts?|read_counts|umi_counts|"
+            r"rna[-_ ]?seq|rnaseq|expression|\.rds$",
+            low,
+        ):
             matrices.append(name)
 
     return {
