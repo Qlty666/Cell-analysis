@@ -145,6 +145,8 @@ def main() -> int:
         data_link("fig_40_cellchat_communication.csv", "CellChat 通讯矩阵"),
         data_link("fig_40_cellchat_communication_weight.csv", "CellChat 通讯权重"),
         data_link("fig_42_cellchat_pathways.csv", "CellChat 通路表"),
+        data_link("fig_24_ml_feature_importance.csv", "ML 特征重要性"),
+        data_link("fig_43_44_45_ml_classification_results.csv", "ML 分类预测"),
         data_link("fig_43_44_45_ml_classification_report.csv", "ML 分类报告"),
         data_link("sample_annotations.csv", "样本分组"),
         data_link("liver_cancer_seurat.rds", "Seurat 对象"),
