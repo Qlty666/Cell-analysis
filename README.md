@@ -310,6 +310,39 @@ python -m unittest discover -s tests -p "test_*.py" -v
 | `validate_real_random.py` | 随机真实数据验证证据收集和对接盒检测 |
 | `validate_new_features.py` | 用 20 个 TCGA PanCancer 队列 + GSE165816 验证靶点评分 |
 
+### 4.6 自动搜索数据集
+
+`search_datasets.py` 通过 NCBI E-utilities 自动搜索 GEO 数据集，并可按需下载命中的 GSE 系列：
+
+```bash
+python search_datasets.py \
+  --query "hepatocellular carcinoma single cell" \
+  --max-results 20 \
+  --organism "Homo sapiens"
+```
+
+也可以直接指定疾病和研究方向，脚本会自动组合成搜索词：
+
+```bash
+python search_datasets.py \
+  --disease "liver cancer" \
+  --research-direction "single cell RNA-seq" \
+  --max-results 20 \
+  --organism "Homo sapiens"
+```
+
+搜索结束后会在 `data_cache/dataset_search/` 写出 `dataset_search_results.csv` 和 `dataset_search_results.json`。需要下载时追加下载参数：
+
+```bash
+python search_datasets.py \
+  --query "liver cancer scRNA-seq" \
+  --keyword "HCC" \
+  --download GSE125449 \
+  --download-root ../liver_cancer
+```
+
+也可以用 `--download-top N` 下载搜索结果的前 N 个数据集；下载状态写入 `data_cache/dataset_search/download_results.json`。
+
 ## 5. 输入输出示例
 
 ### 5.1 单细胞分析
