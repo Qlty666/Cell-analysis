@@ -43,7 +43,7 @@ DOCK_QUEUE = []
 DOCK_QUEUE_LOCK = threading.Lock()
 DOCK_HISTORY_PATH = WEB_DIR / "dock_history.json"
 FULL_TEMPLATE_PATH = TEMPLATE_DIR / "full_page_template.html"
-RESULTS_TEMPLATE_PATH = TEMPLATE_DIR / "results_manifest_template.html"
+RESULTS_TEMPLATE_PATH = TEMPLATE_DIR / "results_manifest_optimized.html"
 TASKS_TEMPLATE_PATH = TEMPLATE_DIR / "tasks_template.html"
 FULL_JOBS = {}
 FULL_QUEUE = []
@@ -719,7 +719,7 @@ def render_results_page() -> str:
         return RESULTS_TEMPLATE_PATH.read_text(encoding="utf-8")
     return (
         "<html><body><h1>results template missing</h1>"
-        "<p>web/templates/results_manifest_template.html not found</p></body></html>"
+        "<p>web/templates/results_manifest_optimized.html not found</p></body></html>"
     )
 
 
