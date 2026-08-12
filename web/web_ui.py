@@ -6,6 +6,7 @@ import json
 import os
 import re
 import shutil
+import socket
 import subprocess
 import sys
 import threading
@@ -188,6 +189,60 @@ def _run_idle_shutdown_monitor(
                 server.shutdown()
                 return
         time.sleep(1.0)
+
+
+def _port_is_listening(host: str, port: int) -> bool:
+    target = "127.0.0.1" if host in ("0.0.0.0", "::") else host
+    try:
+        with socket.socket(socket.AF_INET, socket.SOCK_STREAM) as sock:
+            sock.settimeout(0.3)
+            return sock.connect_ex((target, port)) == 0
+    except OSError:
+        return False
+
+
+def _stop_stale_web_ui(host: str, port: int) -> bool:
+    if os.name != "nt":
+        return True
+    current_pid = os.getpid()
+    script = f"""
+$ErrorActionPreference = 'SilentlyContinue'
+$conns = Get-NetTCPConnection -LocalPort {port} -State Listen
+$ids = @($conns | Select-Object -ExpandProperty OwningProcess -Unique)
+if ($ids.Count -eq 0) {{ exit 0 }}
+$procs = Get-CimInstance Win32_Process | Where-Object {{
+  $_.ProcessId -in $ids -and
+  $_.CommandLine -like '*web_ui.py*' -and
+  $_.ProcessId -ne {current_pid}
+}}
+foreach ($proc in $procs) {{
+  Stop-Process -Id $proc.ProcessId -Force
+}}
+"""
+    try:
+        subprocess.run(
+            ["powershell", "-NoProfile", "-NonInteractive", "-Command", script],
+            capture_output=True,
+            text=True,
+            encoding="utf-8",
+            errors="replace",
+            timeout=20,
+        )
+    except Exception:
+        return False
+    deadline = time.monotonic() + 6.0
+    while time.monotonic() < deadline:
+        if not _port_is_listening(host, port):
+            return True
+        time.sleep(0.2)
+    return False
+
+
+def _cleanup_stale_web_ui(host: str, port: int) -> bool:
+    if not _port_is_listening(host, port):
+        return True
+    print(f"Port {port} is in use; checking for stale web UI process...")
+    return _stop_stale_web_ui(host, port)
 
 
 FIGURES = [
@@ -3150,11 +3205,19 @@ def main() -> int:
     )
     args = parser.parse_args()
 
+    if not _cleanup_stale_web_ui(args.host, args.port):
+        print(f"ERROR: port {args.port} is still in use by another process.")
+        return 1
+
     INDEX_PATH.write_text(render_page(), encoding="utf-8")
     # On Windows, SO_REUSEADDR allows a second instance to bind the same port
     # and steal incoming connections, which surfaces as "connection refused".
     ThreadingHTTPServer.allow_reuse_address = False
-    server = ThreadingHTTPServer((args.host, args.port), Handler)
+    try:
+        server = ThreadingHTTPServer((args.host, args.port), Handler)
+    except OSError as exc:
+        print(f"ERROR: cannot bind {args.host}:{args.port}: {exc}")
+        return 1
     url = f"http://{args.host}:{args.port}"
     print(f"Web UI started: {url}")
     threading.Thread(
