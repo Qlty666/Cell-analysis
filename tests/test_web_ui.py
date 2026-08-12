@@ -7,13 +7,14 @@ import sys
 import tempfile
 import time
 import unittest
+from unittest import mock
 from pathlib import Path
 
 APP_ROOT = Path(__file__).resolve().parent.parent
 if str(APP_ROOT / "web") not in sys.path:
     sys.path.insert(0, str(APP_ROOT / "web"))
 
-from web_ui import _full_status, start_full_job  # noqa: E402
+from web_ui import FULL_JOBS, _full_status, start_full_job  # noqa: E402
 
 
 class _FakeProc:
@@ -53,7 +54,7 @@ def _make_info(tmp: Path, returncode: int) -> dict:
         "proc": _FakeProc(returncode),
         "workdir": workdir,
         "log": log_path,
-        "accession": "GSE_TEST",
+        "accession": "GSE999999",
         "notified": True,
         "paused": False,
         "started": time.time(),
@@ -68,6 +69,29 @@ class TestFullStatus(unittest.TestCase):
     def test_start_full_job_requires_workdir(self):
         with self.assertRaises(ValueError):
             start_full_job({"workdir": "", "output": "somewhere"})
+
+    def test_start_full_job_passes_workdir_to_pipeline(self):
+        with tempfile.TemporaryDirectory() as tmp:
+            base = Path(tmp)
+            output = base / "out"
+            workdir = base / "work"
+            with mock.patch("web_ui._drain_full_queue"):
+                result = start_full_job(
+                    {
+                        "output": [str(output)],
+                        "workdir": [str(workdir)],
+                    }
+                )
+            job_id = result["job"]
+            try:
+                cmd = FULL_JOBS[job_id]["cmd"]
+                self.assertIn("--workdir", cmd)
+                self.assertEqual(
+                    cmd[cmd.index("--workdir") + 1],
+                    str(workdir.resolve()),
+                )
+            finally:
+                FULL_JOBS.pop(job_id, None)
 
     def test_completed_full_pipeline_uses_full_flow_label(self):
         with tempfile.TemporaryDirectory() as tmp:

@@ -27,8 +27,8 @@ from sklearn.preprocessing import LabelEncoder
 
 def main() -> int:
     root = Path(sys.argv[1] if len(sys.argv) > 1 else ".")
-    data_dir = root / "results" / "data"
-    fig_dir = root / "results" / "figures"
+    data_dir = root / "results" / "data" / "07_ml"
+    fig_dir = root / "results" / "figures" / "07_ml"
     fig_dir.mkdir(parents=True, exist_ok=True)
 
     status = {
@@ -40,10 +40,14 @@ def main() -> int:
     }
 
     try:
-        ann_path = data_dir / "cell_annotations.csv"
-        qc_path = data_dir / "qc_metrics.csv"
+        sc_data_dir = root / "results" / "data"
+        ann_path = sc_data_dir / "04_annotation" / "fig_05_16_17_cell_annotations.csv"
+        qc_path = sc_data_dir / "01_qc" / "fig_01_qc_metrics.csv"
         if not ann_path.exists() or not qc_path.exists():
-            status["reason"] = "missing cell_annotations.csv or qc_metrics.csv"
+            status["reason"] = (
+                "missing fig_05_16_17_cell_annotations.csv "
+                "or fig_01_qc_metrics.csv"
+            )
             (data_dir / "ml_model_summary.json").write_text(
                 json.dumps(status, ensure_ascii=False, indent=2),
                 encoding="utf-8",
@@ -127,14 +131,17 @@ def main() -> int:
             "predicted_condition": le.inverse_transform(model.predict(X)),
             "confidence": proba.max(axis=1),
         })
-        confidence.to_csv(data_dir / "ml_classification_results.csv", index=False)
+        confidence.to_csv(
+            data_dir / "fig_43_44_45_ml_classification_results.csv",
+            index=False,
+        )
 
         importance = pd.Series(
             model.feature_importances_,
             index=X.columns,
             name="importance",
         ).sort_values(ascending=False)
-        importance.to_csv(data_dir / "ml_feature_importance.csv")
+        importance.to_csv(data_dir / "fig_24_ml_feature_importance.csv")
 
         fig, ax = plt.subplots(figsize=(8, 6))
         top = importance.head(15).iloc[::-1]
@@ -179,7 +186,7 @@ def main() -> int:
                 row.update(metrics)
                 report_rows.append(row)
         pd.DataFrame(report_rows).to_csv(
-            data_dir / "ml_classification_report.csv",
+            data_dir / "fig_43_44_45_ml_classification_report.csv",
             index=False,
         )
 

@@ -158,8 +158,8 @@ class TestTargetScoring(unittest.TestCase):
             workdir.mkdir()
             _make_inputs(workdir)
             cfg, summary = self._run(workdir)
-            ko_dir = cfg.output_dir / "knockout"
-            frame = pd.read_csv(ko_dir / "ranked_knockout.csv")
+            ko_dir = cfg.knockout_dir()
+            frame = pd.read_csv(ko_dir / "data" / "fig_52_53_ranked_knockout.csv")
 
             for col in [
                 "reversal_score",
@@ -179,8 +179,10 @@ class TestTargetScoring(unittest.TestCase):
             self.assertGreaterEqual(
                 summary["target_class_counts"].get("core_driver", 0), 1
             )
-            self.assertTrue((ko_dir / "target_candidates.csv").exists())
-            self.assertTrue((ko_dir / "target_report.md").exists())
+            self.assertTrue(
+                (ko_dir / "data" / "fig_52_target_candidates.csv").exists()
+            )
+            self.assertTrue((ko_dir / "data" / "target_report.md").exists())
             self.assertTrue((ko_dir / "run_manifest.json").exists())
 
             manifest = __import__("json").loads(
@@ -196,7 +198,9 @@ class TestTargetScoring(unittest.TestCase):
             workdir.mkdir()
             _make_inputs(workdir)
             cfg, _ = self._run(workdir, {"ko_top_n": 50})
-            frame = pd.read_csv(cfg.output_dir / "knockout" / "ranked_knockout.csv")
+            frame = pd.read_csv(
+                cfg.knockout_dir() / "data" / "fig_52_53_ranked_knockout.csv"
+            )
             flagged = frame.loc[frame["gene"] == "GENE01"].iloc[0]
             self.assertEqual(flagged["safety_concern"], 1)
             self.assertEqual(flagged["off_target_paralogs"], 2)
@@ -208,13 +212,13 @@ class TestTargetScoring(unittest.TestCase):
             _make_inputs(workdir)
             cfg, _ = self._run(workdir)
             summary = export_validation(cfg, LOG)
-            val_dir = cfg.output_dir / "validation"
-            self.assertTrue((val_dir / "validation_candidates.csv").exists())
-            self.assertTrue((val_dir / "validation_plan.md").exists())
-            self.assertTrue((val_dir / "summary.json").exists())
-            self.assertTrue((val_dir / "run_manifest.json").exists())
+            val_dir = cfg.validation_dir()
+            self.assertTrue((val_dir / "data" / "validation_candidates.csv").exists())
+            self.assertTrue((val_dir / "data" / "validation_plan.md").exists())
+            self.assertTrue((val_dir / "data" / "summary.json").exists())
+            self.assertTrue((val_dir / "data" / "run_manifest.json").exists())
             self.assertEqual(summary["candidates"], 10)
-            candidates = pd.read_csv(val_dir / "validation_candidates.csv")
+            candidates = pd.read_csv(val_dir / "data" / "validation_candidates.csv")
             self.assertIn("phase_1_cell_line_assay", candidates.columns)
             self.assertIn("target_class", candidates.columns)
 

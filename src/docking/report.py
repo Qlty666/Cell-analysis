@@ -15,15 +15,18 @@ from .utils import DockingError
 
 def generate_report(cfg: ResolvedConfig, log) -> Path:
     reports = cfg.reports_dir()
-    ranked = reports / "ranked_results.csv"
+    ranked = reports / "01_analysis" / "data" / "fig_46_47_ranked_results.csv"
     if not ranked.exists():
         raise DockingError(f"ranked results not found: {ranked}")
     top_n = int(cfg.get("report", "top_n", 20))
     frame = pd.read_csv(ranked, dtype={"id": str}).head(top_n)
 
-    summary = _read_json(reports / "summary.json")
-    ml_summary = _read_json(reports / "ml_predict_summary.json")
-    figures = sorted(p.name for p in reports.glob("*.png"))
+    summary = _read_json(reports / "01_analysis" / "summary.json")
+    ml_summary = _read_json(reports / "03_ml" / "data" / "ml_predict_summary.json")
+    figures = sorted(
+        p.relative_to(reports).as_posix()
+        for p in reports.rglob("*.png")
+    )
     rows_html = "".join(
         "<tr>"
         f"<td>{_esc(row.get('rank', ''))}</td>"
