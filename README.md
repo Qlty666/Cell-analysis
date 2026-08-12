@@ -1,6 +1,6 @@
 # Liver Cancer Bioinformatics Workflow
 
-> 当前版本：0.5.0
+> 当前版本：0.3.0
 
 面向肝癌研究的本地生信自动化工作流，整合三条可实际运行的流水线：
 
@@ -548,14 +548,14 @@ MIT License. See `LICENSE` for details.
 
 ## 9. 更新日志
 
-### v0.5.0
+### v0.3.0
 
-- 单细胞报告升级为总报告：对 `results/figures` 和 `results/data` 下每个结果文件生成独立分析，包括文件说明、表格规模、关键字段统计、P 值/差异方向/样本分组等结论，并汇总到 `result_report.html`。
-- DOCX/PDF 导出同步加入结果文件清单与数量统计。
-- 网页版新增 GEO 数据集搜索页：按疾病、研究方向或原始查询搜索，支持 ML/DL 模型重排序、CSV/JSON 结果下载与批量下载。
-- 单细胞分析完成后的网页结果报告入口：可直接打开包含逐文件分析的 `result_report.html`。
-
-### v0.4.0
-
-- 单细胞分析新增 `fig_09_deg_horizontal_violin.png`：按校正 P 值排序的差异最显著基因横向小提琴图，并在图中标注 P 值。
-- 新增 `LIVER_DE_VIOLIN_TOP_N` 和 `LIVER_DE_VIOLIN_MAX_CELLS` 环境变量，分别控制展示基因数和每个条件抽样细胞数。
+- 网页版统一界面新增 GEO 数据集搜索页：按疾病、研究方向或原始查询搜索，支持 ML/DL 相关性重排序、CSV/JSON 结果下载与批量下载。
+- 单细胞报告升级为总报告：对 `results/figures` 和 `results/data` 下每个结果文件生成独立分析，包括文件说明、表格规模、关键字段统计、P 值/差异方向/样本分组等结论，并汇总到 `result_report.html`；DOCX/PDF 导出同步加入结果文件清单与数量统计。
+- 单细胞分析新增 `fig_09_deg_horizontal_violin.png`：按校正 P 值排序的差异最显著基因横向小提琴图，并在图中标注 P 值；新增 `LIVER_DE_VIOLIN_TOP_N` 和 `LIVER_DE_VIOLIN_MAX_CELLS` 环境变量。
+- 网页版单细胞分析完成后的结果报告入口：可直接打开包含逐文件分析的 `result_report.html`。
+- UMAP 聚类图直接标注细胞类型名称。
+- 结果清单页优化为仅展示结果图和结果数据，并按阶段目录整理全流程输出。
+- 网页任务进度页支持历史记录、一键清空与完成/中断弹窗提醒。
+- 统一结果文件名与阶段输出目录，增强路径处理和网页端安全校验。
+- 自动 GEO 数据集搜索脚本 `search_datasets.py` 与 ML/DL 重排序脚本 `dataset_search_ml.py` 上线。
