@@ -159,7 +159,15 @@ def predict_ml(cfg: ResolvedConfig, log) -> dict:
     if not info_path.exists():
         raise DockingError("no trained ML model found; run ml-train first")
     info = _read_json(info_path)
-    model_file = Path(info["model_file"])
+    model_value = str(info.get("model_file") or "")
+    if not model_value:
+        raise DockingError("ml_model_info.json has no model_file")
+    model_file = Path(model_value).expanduser().resolve()
+    if (
+        not model_file.is_relative_to(reports.resolve())
+        or model_file.name not in ("ml_model.pt", "ml_model.joblib")
+    ):
+        raise DockingError("model file must be inside the project reports directory")
     if not model_file.exists():
         raise DockingError(f"model file not found: {model_file}")
     if info["model_type"] == "torch":

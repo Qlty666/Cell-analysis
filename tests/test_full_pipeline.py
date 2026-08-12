@@ -254,6 +254,38 @@ class TestFullPipelineMarkers(unittest.TestCase):
 
 
 class TestFullPipeline(unittest.TestCase):
+    def test_invalid_accession_rejected(self):
+        with tempfile.TemporaryDirectory() as tmp:
+            root = Path(tmp) / "single_cell"
+            root.mkdir(parents=True)
+            workdir = Path(tmp) / "work"
+            cfg = Path(tmp) / "full_pipeline_config.json"
+            cfg.write_text(
+                json.dumps(
+                    {
+                        "accession": "../../evil",
+                        "single_cell_output": str(root),
+                        "workdir": str(workdir),
+                        "top_genes": 10,
+                        "docking_targets": 2,
+                        "species": "hs",
+                    }
+                ),
+                encoding="utf-8",
+            )
+            code = main(
+                [
+                    "--config",
+                    str(cfg),
+                    "--skip-scrna",
+                    "--skip-docking",
+                    "--skip-evidence-fetch",
+                    "--docking-config",
+                    str(APP_ROOT / "config" / "docking_config.json"),
+                ]
+            )
+            self.assertEqual(code, 1)
+
     def test_single_cell_output_required_when_config_empty(self):
         with tempfile.TemporaryDirectory() as tmp:
             workdir = Path(tmp) / "work"
@@ -261,7 +293,7 @@ class TestFullPipeline(unittest.TestCase):
             cfg.write_text(
                 json.dumps(
                     {
-                        "accession": "GSE_TEST",
+                        "accession": "GSE999999",
                         "single_cell_output": "",
                         "workdir": str(workdir),
                         "top_genes": 10,
@@ -292,7 +324,7 @@ class TestFullPipeline(unittest.TestCase):
             cfg.write_text(
                 json.dumps(
                     {
-                        "accession": "GSE_TEST",
+                        "accession": "GSE999999",
                         "single_cell_output": str(root),
                         "workdir": "",
                         "top_genes": 10,
@@ -326,7 +358,7 @@ class TestFullPipeline(unittest.TestCase):
                 encoding="utf-8",
             )
             (root / "results" / "summary.json").write_text(
-                json.dumps({"dataset": "GSE_TEST", "n_genes": 100}),
+                json.dumps({"dataset": "GSE999999", "n_genes": 100}),
                 encoding="utf-8",
             )
             workdir = Path(tmp) / "work"
@@ -335,7 +367,7 @@ class TestFullPipeline(unittest.TestCase):
             cfg.write_text(
                 json.dumps(
                     {
-                        "accession": "GSE_TEST",
+                        "accession": "GSE999999",
                         "single_cell_output": str(root),
                         "workdir": str(workdir),
                         "top_genes": 10,
@@ -384,7 +416,7 @@ class TestFullPipeline(unittest.TestCase):
             cfg.write_text(
                 json.dumps(
                     {
-                        "accession": "GSE_TEST",
+                        "accession": "GSE999999",
                         "single_cell_output": str(root),
                         "workdir": str(workdir),
                         "top_genes": 10,

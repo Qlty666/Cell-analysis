@@ -77,10 +77,18 @@ def _download(url: str, out: Path, log) -> None:
 
 
 def series_prefix(accession: str) -> str:
-    digits = accession[3:]
+    acc = normalize_accession(accession)
+    digits = acc[3:]
     if len(digits) <= 3:
         return "GSE" + digits
     return "GSE" + digits[: len(digits) - 3] + "nnn"
+
+
+def normalize_accession(accession: str) -> str:
+    acc = accession.strip().upper()
+    if not re.fullmatch(r"GSE\d+", acc):
+        raise ValueError("GSE accession must look like GSE125449")
+    return acc
 
 
 def _select_files(names: list[str]) -> dict:
@@ -119,7 +127,7 @@ def _download_files(urls: dict, raw_dir: Path, log) -> dict:
         downloaded[category] = []
         files = urls[category]
         for name in files:
-            out = raw_dir / name
+            out = raw_dir / Path(name).name
             _download(urls["_base"] + name, out, log)
             downloaded[category].append(name)
     return downloaded
@@ -150,7 +158,16 @@ def _convert_downloaded(downloaded: dict, raw_dir: Path) -> dict:
 
 
 def _extract_archive(archive: Path, dest: Path) -> None:
+    dest = dest.resolve()
+    dest.mkdir(parents=True, exist_ok=True)
     with tarfile.open(archive, "r:*") as tf:
+        for member in tf.getmembers():
+            if member.issym() or member.islnk():
+                raise RuntimeError(f"unsafe tar member: {member.name}")
+            member_path = member.name.replace("\\", "/")
+            target = (dest / member_path).resolve()
+            if not target.is_relative_to(dest):
+                raise RuntimeError(f"unsafe tar member: {member.name}")
         tf.extractall(dest)
 
 
@@ -163,7 +180,7 @@ def _walk_relative(directory: Path) -> list[str]:
 
 
 def ensure_geo_dataset(accession: str, root: Path, log) -> dict:
-    acc = accession.upper()
+    acc = normalize_accession(accession)
     prefix = series_prefix(acc)
     base = f"https://ftp.ncbi.nlm.nih.gov/geo/series/{prefix}/{acc}/suppl/"
     raw_dir = root / "data" / "raw" / acc
@@ -249,7 +266,8 @@ def ensure_geo_dataset(accession: str, root: Path, log) -> dict:
                 f"No count matrix files found for {acc}; "
                 "this dataset may require additional manual configuration."
             )
-        archive_path = raw_dir / archive_names[0]
+        archive_name = Path(archive_names[0]).name
+        archive_path = raw_dir / archive_name
         _download(base + archive_names[0], archive_path, log)
         extract_dir = raw_dir / "_extracted"
         extract_dir.mkdir(parents=True, exist_ok=True)
@@ -272,9 +290,10 @@ def ensure_geo_dataset(accession: str, root: Path, log) -> dict:
 
     series_paths = []
     for name in series_files:
-        out = raw_dir / name
+        safe_name = Path(name).name
+        out = raw_dir / safe_name
         _download(matrix_url + name, out, log)
-        series_paths.append(name)
+        series_paths.append(safe_name)
 
     organism = "hs"
     for name in series_paths:

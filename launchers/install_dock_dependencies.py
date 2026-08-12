@@ -50,6 +50,12 @@ def _ensure_autodocktools() -> bool:
             return True
         print("Extracting AutoDockTools_py3...")
         with zipfile.ZipFile(zip_path) as archive:
+            tools_resolved = tools.resolve()
+            for member in archive.infolist():
+                member_name = member.filename.replace("\\", "/")
+                target = (tools_resolved / member_name).resolve()
+                if not target.is_relative_to(tools_resolved):
+                    raise RuntimeError(f"unsafe zip member: {member.filename}")
             archive.extractall(tools)
         extracted = tools / "AutoDockTools_py3-master"
         if extracted.exists() and not src.exists():
