@@ -126,6 +126,70 @@ def _read_json(path: Path, default=None) -> dict:
         return default or {}
 
 
+def _run_context_path(workdir: Path) -> Path:
+    return _stage_dir(workdir) / "run_context.json"
+
+
+def _read_run_context(workdir: Path) -> dict:
+    return _read_json(_run_context_path(workdir))
+
+
+def _write_run_context(workdir: Path, single_cell_root: Path) -> None:
+    stage_dir = _stage_dir(workdir)
+    stage_dir.mkdir(parents=True, exist_ok=True)
+    write_json(
+        _run_context_path(workdir),
+        {"single_cell_root": str(single_cell_root)},
+    )
+
+
+def _recorded_single_cell_root(workdir: Path) -> Path | None:
+    root = _read_run_context(workdir).get("single_cell_root")
+    if root:
+        return Path(str(root)).resolve()
+    summary = _read_json(_integration_dir(workdir) / "key_genes_summary.json")
+    deg_table = summary.get("deg_table")
+    if not deg_table:
+        return None
+    parts = Path(str(deg_table)).resolve().parts
+    for i in range(len(parts) - 2):
+        if parts[i].lower() == "results" and parts[i + 1].lower() == "data":
+            return Path(*parts[:i])
+    return None
+
+
+def _invalidate_markers_for_changed_root(
+    workdir: Path,
+    single_cell_root: Path,
+) -> bool:
+    recorded = _recorded_single_cell_root(workdir)
+    if recorded is None or recorded == single_cell_root.resolve():
+        return False
+    stage_dir = _stage_dir(workdir)
+    if not stage_dir.exists():
+        return False
+    for marker in stage_dir.glob("*.done"):
+        marker.unlink(missing_ok=True)
+    log.warning(
+        "single-cell output changed from %s to %s; resetting stage markers",
+        recorded,
+        single_cell_root,
+    )
+    return True
+
+
+def _clear_downstream_markers(workdir: Path) -> None:
+    for code, name, _description in STAGES[1:]:
+        marker = _marker(workdir, code, name)
+        if marker.exists():
+            marker.unlink()
+            log.warning(
+                "stage 01 rerun invalidates stage %s %s marker",
+                code,
+                name,
+            )
+
+
 def _single_cell_outputs_ready(root: Path) -> bool:
     """True when the single-cell stage produced the files later stages need."""
     return (
@@ -1402,6 +1466,9 @@ def run_full_pipeline(args) -> int:
         "workdir": workdir,
         "docking_config": cfg_path,
     }
+    if not args.force:
+        _invalidate_markers_for_changed_root(workdir, ctx["single_cell_root"])
+    reran_stage01 = False
 
     for code, name, _description in STAGES:
         marker = _marker(workdir, code, name)
@@ -1410,6 +1477,10 @@ def run_full_pipeline(args) -> int:
             marker.write_text("skipped by start-stage", encoding="utf-8")
             log.info("stage %s %s skipped by --start-stage", code, name)
             continue
+        if code == "01" and not _single_cell_outputs_ready(
+            ctx["single_cell_root"]
+        ):
+            reran_stage01 = True
         if not args.force and marker.exists():
             if code == "01" and not _single_cell_outputs_ready(
                 ctx["single_cell_root"]
@@ -1452,7 +1523,12 @@ def run_full_pipeline(args) -> int:
             datetime.now().isoformat(timespec="seconds"),
             encoding="utf-8",
         )
+        if code == "01":
+            _write_run_context(workdir, ctx["single_cell_root"])
+            if reran_stage01:
+                _clear_downstream_markers(workdir)
         log.info("stage %s %s complete", code, name)
+    _write_run_context(workdir, ctx["single_cell_root"])
     log.info("full pipeline complete: %s", _integration_dir(workdir))
     return 0
 
@@ -1460,8 +1536,8 @@ def run_full_pipeline(args) -> int:
 def load_full_config(path: Path) -> dict:
     defaults = {
         "accession": "GSE125449",
-        "single_cell_output": "../liver_cancer",
-        "workdir": "dock",
+        "single_cell_output": "",
+        "workdir": "",
         "species": "auto",
         "top_genes": 50,
         "docking_targets": 3,
@@ -1493,7 +1569,7 @@ def _apply_defaults(args, config: dict) -> None:
     if args.output is None:
         args.output = config.get("single_cell_output", "../liver_cancer")
     if args.workdir is None:
-        args.workdir = config.get("workdir", "dock")
+        args.workdir = config.get("workdir", "")
     if args.species is None:
         args.species = config.get("species", "auto")
     if args.top_genes is None:
@@ -1520,6 +1596,15 @@ def _apply_defaults(args, config: dict) -> None:
         args.evidence_workers = int(config.get("evidence", {}).get("max_workers", 6))
     if args.evidence_timeout is None:
         args.evidence_timeout = int(config.get("evidence", {}).get("timeout", 90))
+    if not str(args.output or "").strip():
+        raise IntegrationError(
+            "single-cell output is required; provide --output or set "
+            "single_cell_output in config"
+        )
+    if not str(args.workdir or "").strip():
+        raise IntegrationError(
+            "workdir is required; provide --workdir or set workdir in config"
+        )
     if args.workdir:
         args.workdir = str(_resolve_path(args.workdir, APP_ROOT))
     if args.output:
@@ -1586,10 +1671,9 @@ def main(argv: list[str] | None = None) -> int:
         format="%(asctime)s [%(levelname)s] %(message)s",
         datefmt="%H:%M:%S",
     )
-    config = load_full_config(Path(args.config))
-    _apply_defaults(args, config)
-
     try:
+        config = load_full_config(Path(args.config))
+        _apply_defaults(args, config)
         return run_full_pipeline(args)
     except (IntegrationError, DockingError, ToolNotFoundError) as exc:
         log.error("ERROR: %s", exc)
