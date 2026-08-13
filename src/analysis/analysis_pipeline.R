@@ -307,9 +307,9 @@ read_generic_counts <- function(manifest) {
     stop("No count matrix files found in dataset manifest.")
   }
 
-  count_list <- list()
-  cell_sample <- character()
-  cell_group <- character()
+  count_list_all <- list()
+  sample_list <- list()
+  group_list <- list()
   bc <- character()
   infer_cell_samples <- function(labels) {
     labels <- as.character(labels)
@@ -387,6 +387,7 @@ read_generic_counts <- function(manifest) {
         }
         g <- tab[[1]]
         m <- as.matrix(tab[, -1, with = FALSE])
+        if (is.character(m)) storage.mode(m) <- "double"
         rownames(m) <- make.unique(as.character(g))
         if (length(barcodes) == ncol(m)) {
           colnames(m) <- barcodes
@@ -400,6 +401,7 @@ read_generic_counts <- function(manifest) {
         }
         g <- tab[[1]]
         m <- as.matrix(tab[, -1, with = FALSE])
+        if (is.character(m)) storage.mode(m) <- "double"
         rownames(m) <- make.unique(as.character(g))
         colnames(m) <- colnames(tab)[-1]
       }
@@ -430,14 +432,24 @@ read_generic_counts <- function(manifest) {
     } else {
       colnames(m) <- make.unique(paste0(colnames(m), "_", sample_label))
     }
-    count_list[[i]] <- m
-    cell_sample <- c(cell_sample, sample_labels)
-    cell_group <- c(
-      cell_group,
-      rep(infer_group_from_filename(mat_file), ncol(m))
-    )
+    count_list_all[[i]] <- m
+    sample_list[[i]] <- sample_labels
+    group_list[[i]] <- rep(infer_group_from_filename(mat_file), ncol(m))
   }
 
+  keep <- rep(TRUE, length(count_list_all))
+  if (length(count_list_all) > 1) {
+    ref_genes <- rownames(count_list_all[[1]])
+    for (i in seq_along(count_list_all)[-1]) {
+      if (length(intersect(rownames(count_list_all[[i]]), ref_genes)) == 0) {
+        keep[i] <- FALSE
+        log_msg("excluding incompatible count matrix: ", matrices[i])
+      }
+    }
+  }
+  count_list <- count_list_all[keep]
+  cell_sample <- unlist(sample_list[keep], use.names = FALSE)
+  cell_group <- unlist(group_list[keep], use.names = FALSE)
   common <- Reduce(intersect, lapply(count_list, rownames))
   counts <- do.call(
     cbind,
@@ -701,14 +713,14 @@ infer_condition <- function(meta, sample_ann) {
     extract_key <- function(v) {
       v <- sub("^.*:", "", as.character(v))
       v <- sub("^\\s+|\\s+$", "", v)
-      keep_phrase <- grepl(
-        "primary CRC|primary colorectal cancer|liver metastases|PBMC",
-        v,
-        ignore.case = TRUE
-      )
       v_norm <- sub("_CRC$", " primary CRC", v)
       v_norm <- sub("_LM$", " liver metastases", v_norm)
       v_norm <- sub("_PBMC$", " PBMC", v_norm)
+      keep_phrase <- grepl(
+        "primary CRC|primary colorectal cancer|liver metastases|PBMC",
+        v_norm,
+        ignore.case = TRUE
+      )
       out <- sub("^.*\\b([A-Za-z]+[0-9]+).*$", "\\1", v_norm)
       out[keep_phrase] <- v_norm[keep_phrase]
       out
@@ -855,6 +867,11 @@ read_generic_dataset <- function(manifest) {
   meta$condition <- cond
   meta <- normalize_condition(meta)
   counts <- counts[, rownames(meta), drop = FALSE]
+  for (col in c("nCount_RNA", "nFeature_RNA", "percentMt", "percent.mt", "percent_mito")) {
+    if (col %in% colnames(meta)) {
+      meta[[col]] <- as.numeric(as.character(meta[[col]]))
+    }
+  }
   if (!"sample" %in% colnames(meta)) {
     meta$sample <- "Sample1"
   }
@@ -1556,7 +1573,23 @@ if (stage_allowed("06")) run_stage("06_differential_expression", {
       colData = bulk_meta,
       design = ~ condition
     )
-    dds <- DESeq(dds, quiet = TRUE)
+    dds <- tryCatch(
+      DESeq(dds, quiet = TRUE),
+      error = function(e) {
+        log_msg("pseudobulk DESeq2 failed: ", conditionMessage(e))
+        NULL
+      }
+    )
+    if (is.null(dds)) {
+      use_pseudobulk <- FALSE
+      writeLines(
+        "DESeq2 pseudobulk failed; used Seurat Wilcoxon",
+        file.path(data_dir, "pseudobulk_warning.txt")
+      )
+    }
+  }
+
+  if (use_pseudobulk) {
     res <- results(dds, contrast = c("condition", cond_levels[1], cond_levels[2]))
     deg <- as.data.frame(res)
     deg$gene <- rownames(deg)
@@ -1861,14 +1894,21 @@ if (stage_allowed("07")) run_stage("07_enrichment", {
     )
 
     kegg <- tryCatch({
-      httr::set_config(httr::timeout(600))
-      options(timeout = 600)
-      enrichKEGG(
-        gene = eg$ENTREZID,
-        organism = kegg_org,
-        pvalueCutoff = 0.1
+      httr::set_config(httr::timeout(60))
+      options(timeout = 60)
+      R.utils::withTimeout(
+        enrichKEGG(
+          gene = eg$ENTREZID,
+          organism = kegg_org,
+          pvalueCutoff = 0.1
+        ),
+        timeout = 60,
+        onTimeout = "error"
       )
-    }, error = function(e) NULL)
+    }, error = function(e) {
+      log_msg("KEGG enrichment unavailable: ", conditionMessage(e))
+      NULL
+    })
 
     list(go = go, kegg = kegg)
   }
@@ -1956,16 +1996,23 @@ if (stage_allowed("07")) run_stage("07_enrichment", {
       error = function(e) NULL
     )
     gsea_kegg <- tryCatch({
-      options(timeout = 600)
-      gseKEGG(
-        geneList = ranked,
-        organism = kegg_org,
-        minGSSize = 10,
-        maxGSSize = 500,
-        pvalueCutoff = 0.1,
-        verbose = FALSE
+      options(timeout = 60)
+      R.utils::withTimeout(
+        gseKEGG(
+          geneList = ranked,
+          organism = kegg_org,
+          minGSSize = 10,
+          maxGSSize = 500,
+          pvalueCutoff = 0.1,
+          verbose = FALSE
+        ),
+        timeout = 60,
+        onTimeout = "error"
       )
-    }, error = function(e) NULL)
+    }, error = function(e) {
+      log_msg("GSEA KEGG unavailable: ", conditionMessage(e))
+      NULL
+    })
   }
 
   plot_gsea <- function(res, file, title) {
