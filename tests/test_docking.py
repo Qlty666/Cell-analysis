@@ -16,6 +16,7 @@ if str(APP_ROOT / "src") not in sys.path:
 from docking.analysis import analyze_results  # noqa: E402
 from docking.config import load_config, save_config  # noqa: E402
 from docking.docking import build_vina_command, run_docking  # noqa: E402
+from docking.receptor import _sanitize_receptor_models  # noqa: E402
 from docking.utils import parse_vina_affinities, safe_name  # noqa: E402
 
 DEFAULT_CONFIG = APP_ROOT / "config" / "docking_config.json"
@@ -76,6 +77,34 @@ class TestCommandBuild(unittest.TestCase):
         self.assertIn("--center_x", cmd)
         self.assertIn("10.0", cmd)
         self.assertTrue(Path(cmd[0]).name.lower().startswith("python"))
+
+
+class TestReceptorSanitize(unittest.TestCase):
+    def test_keeps_only_first_model(self):
+        with tempfile.TemporaryDirectory() as tmp:
+            path = Path(tmp) / "receptor.pdbqt"
+            path.write_text(
+                "MODEL 1\n"
+                "ATOM      1  N   ALA A   1       0.000   0.000   0.000\n"
+                "ENDMDL\n"
+                "MODEL 2\n"
+                "ATOM      2  N   ALA A   2       1.000   1.000   1.000\n"
+                "ENDMDL\n",
+                encoding="utf-8",
+            )
+            _sanitize_receptor_models(path)
+            text = path.read_text(encoding="utf-8")
+            self.assertNotIn("MODEL", text)
+            self.assertIn("ALA A   1", text)
+            self.assertNotIn("ALA A   2", text)
+
+    def test_leaves_single_model_pdbqt_unchanged(self):
+        with tempfile.TemporaryDirectory() as tmp:
+            path = Path(tmp) / "receptor.pdbqt"
+            body = "ATOM      1  N   ALA A   1       0.000   0.000   0.000\n"
+            path.write_text(body, encoding="utf-8")
+            _sanitize_receptor_models(path)
+            self.assertEqual(path.read_text(encoding="utf-8"), body)
 
 
 class TestEndToEndDockAndAnalyze(unittest.TestCase):

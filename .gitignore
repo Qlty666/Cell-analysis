@@ -50,6 +50,7 @@ logs/*
 # Virtual screening workdir: generated data and binaries
 dock/evidence/
 dock/validation_real/
+dock/validation_real_random/
 dock/logs/
 dock/outputs/*
 !dock/outputs/.gitkeep
