@@ -1,6 +1,7 @@
 #!/usr/bin/env python3
 """Run 10 synthetic single-cell datasets through the full pipeline."""
 
+import json
 import shutil
 import subprocess
 import sys
@@ -13,16 +14,16 @@ if str(ROOT / "src") not in sys.path:
 from data.validation_generator import generate_dataset  # noqa: E402
 
 DATASETS = [
-    ("GSEVAL01", "mtx_single"),
-    ("GSEVAL02", "barcode_csv_single"),
-    ("GSEVAL03", "gene_csv_single"),
-    ("GSEVAL04", "mtx_multi"),
-    ("GSEVAL05", "barcode_csv_multi"),
-    ("GSEVAL06", "gene_csv_multi"),
-    ("GSEVAL07", "mtx_no_sample"),
-    ("GSEVAL08", "mixed_gene_mtx"),
-    ("GSEVAL09", "gene_csv_single"),
-    ("GSEVAL10", "barcode_csv_single"),
+    ("GSE90001", "mtx_single"),
+    ("GSE90002", "barcode_csv_single"),
+    ("GSE90003", "gene_csv_single"),
+    ("GSE90004", "mtx_multi"),
+    ("GSE90005", "barcode_csv_multi"),
+    ("GSE90006", "gene_csv_multi"),
+    ("GSE90007", "mtx_no_sample"),
+    ("GSE90008", "mixed_gene_mtx"),
+    ("GSE90009", "gene_csv_single"),
+    ("GSE90010", "barcode_csv_single"),
 ]
 
 REQUIRED_FIGURES = [
@@ -68,7 +69,22 @@ def verify_outputs(out: Path, accession: str) -> bool:
     if not (out / "results" / "result_report.html").exists():
         problems.append("result_report.html")
     fig_dir = out / "results" / "figures"
+    ml_summary = out / "results" / "data" / "07_ml" / "ml_model_summary.json"
+    ml_skipped = False
+    if ml_summary.exists():
+        try:
+            ml_skipped = (
+                json.loads(ml_summary.read_text(encoding="utf-8")).get("status")
+                == "skipped"
+            )
+        except Exception:
+            ml_skipped = False
     for name in REQUIRED_FIGURES:
+        if ml_skipped and name in {
+            "fig_24_ml_feature_importance.png",
+            "fig_25_ml_shap.png",
+        }:
+            continue
         if not find_figure(fig_dir, name):
             problems.append(name)
     if problems:

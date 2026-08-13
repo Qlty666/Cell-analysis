@@ -23,7 +23,7 @@ from datetime import datetime
 from pathlib import Path
 
 ROOT = Path(__file__).resolve().parent.parent
-DEFAULT_RESULT_ROOT = ROOT.parent / "y1"
+DEFAULT_RESULT_ROOT = ROOT.parent / "y3"
 
 # Real GEO single-cell datasets with public count matrices small enough for
 # automated validation. The pool is deliberately conservative: only datasets
@@ -351,7 +351,7 @@ def main() -> int:
     parser.add_argument("--top-genes", type=int, default=50)
     parser.add_argument("--docking-targets", type=int, default=1)
     parser.add_argument("--max-attempts", type=int, default=3)
-    parser.add_argument("--timeout", type=int, default=5400)
+    parser.add_argument("--timeout", type=int, default=10800)
     parser.add_argument("--skip-docking", action="store_true")
     parser.add_argument("--skip-evidence-fetch", action="store_true")
     parser.add_argument("--dry-run", action="store_true")

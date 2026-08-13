@@ -66,7 +66,7 @@ DATASET_DOWNLOAD_LOCK = threading.Lock()
 FULL_JOBS = {}
 FULL_QUEUE = []
 FULL_QUEUE_LOCK = threading.Lock()
-VALIDATION_REPORT_DIR = APP_ROOT.parent / "y1" / "validation"
+VALIDATION_REPORT_DIR = APP_ROOT.parent / "y3" / "validation"
 VALIDATION_REPORT_PATH = VALIDATION_REPORT_DIR / "validation_summary.json"
 VALIDATION_LOG = WEB_DIR / "validation_run.log"
 VALIDATION_JOB = {"proc": None, "log": None, "handle": None, "started": None}
@@ -2085,11 +2085,11 @@ def start_validation_job() -> dict:
             sys.executable,
             str(SCRIPTS_DIR / "validate_random_real_full_pipeline.py"),
             "--result-root",
-            str(APP_ROOT.parent / "y1"),
+            str(APP_ROOT.parent / "y3"),
             "--count",
             "10",
             "--seed",
-            "20260810",
+            "20260813",
         ],
         cwd=APP_ROOT,
         stdout=handle,
@@ -3225,6 +3225,11 @@ def main() -> int:
         default="full",
         help="page to open in the browser",
     )
+    parser.add_argument(
+        "--no-browser",
+        action="store_true",
+        help="start the server without opening a browser window",
+    )
     args = parser.parse_args()
 
     if not _cleanup_stale_web_ui(args.host, args.port):
@@ -3260,7 +3265,8 @@ def main() -> int:
         open_url = url + "/datasets"
     else:
         open_url = url
-    threading.Timer(1.0, lambda: webbrowser.open(open_url)).start()
+    if not args.no_browser:
+        threading.Timer(1.0, lambda: webbrowser.open(open_url)).start()
     try:
         server.serve_forever()
     except KeyboardInterrupt:

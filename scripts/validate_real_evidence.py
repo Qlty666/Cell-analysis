@@ -8,6 +8,14 @@ import sys
 from pathlib import Path
 
 SKILLS = Path.home() / ".codex" / "skills"
+SKILL_NAMES = {
+    "uniprot": "uniprot-skill",
+    "rcsb": "rcsb-pdb-skill",
+    "chembl": "chembl-skill",
+    "bindingdb": "bindingdb-skill",
+    "pubchem": "pubchem-pug-skill",
+    "chebi": "chebi-skill",
+}
 ROOT = Path(__file__).resolve().parent.parent
 OUT_DIR = ROOT / "dock" / "validation_real"
 TARGETS = [
@@ -25,7 +33,7 @@ TARGETS = [
 
 
 def call_skill(skill: str, payload: dict, timeout: int = 60) -> dict:
-    script = SKILLS / f"{skill}-skill" / "scripts" / "rest_request.py"
+    script = SKILLS / SKILL_NAMES[skill] / "scripts" / "rest_request.py"
     try:
         proc = subprocess.run(
             [sys.executable, str(script)],
