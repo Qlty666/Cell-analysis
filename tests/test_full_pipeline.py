@@ -44,6 +44,7 @@ from pipeline.cell_feedback import (  # noqa: E402
     build_feedback_manifest,
     run_cell_feedback,
 )
+from pipeline import orchestrator  # noqa: E402
 
 
 def _write_deg(root: Path) -> None:
@@ -390,6 +391,38 @@ class TestFullPipelineMarkers(unittest.TestCase):
 
 
 class TestFullPipeline(unittest.TestCase):
+    def test_bulk_manifest_rejected_by_single_cell_pipeline(self):
+        with tempfile.TemporaryDirectory() as tmp:
+            root = Path(tmp) / "single_cell"
+            (root / "data").mkdir(parents=True)
+            (root / "data" / "GSE299321_manifest.json").write_text(
+                json.dumps(
+                    {
+                        "accession": "GSE299321",
+                        "mode": "bulk",
+                        "organism": "hs",
+                        "files": {
+                            "matrix": ["GSM9037276_GC119559.txt.gz"],
+                            "barcodes": [],
+                            "genes": [],
+                            "metadata": [],
+                            "series_matrices": ["GSE299321_series_matrix.txt.gz"],
+                        },
+                    }
+                ),
+                encoding="utf-8",
+            )
+            with self.assertRaises(RuntimeError) as ctx:
+                orchestrator.run_pipeline(
+                    force=False,
+                    skip_download=True,
+                    skip_deps=True,
+                    accession="GSE299321",
+                    output_root=str(root),
+                    species="auto",
+                )
+            self.assertIn("bulk RNA-seq", str(ctx.exception))
+
     def test_invalid_accession_rejected(self):
         with tempfile.TemporaryDirectory() as tmp:
             root = Path(tmp) / "single_cell"
