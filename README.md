@@ -28,6 +28,7 @@
 - QC、双细胞检测（`scDblFinder`）、PCA/UMAP 聚类和细胞注释。
 - 差异表达（DESeq2 pseudobulk 或 Seurat Wilcoxon 回退）与 GO/KEGG/GSEA 富集分析。
 - 按校正后 P 值排序输出差异最显著基因的横向小提琴图，并在图中标注 P 值。
+- QC 阶段对原始/过滤后 `nFeature_RNA`、`nCount_RNA`、`percent.mt`、`percent.ribo` 按条件做 Wilcoxon 秩和检验并输出 P 值图，用于量化过滤对条件间质量差异的影响。
 - 报告生成器会对每个结果图和结果数据文件生成逐文件分析，并汇总为一份总报告。
 - 可选 CellChat 细胞通讯分析（设置 `LIVER_RUN_CELLCHAT=yes`）。
 - ML 疾病分类（XGBoost 或 RandomForest）、特征重要性和 SHAP 解释。
@@ -441,6 +442,7 @@ python scripts\validate_dataset_search.py \
 
 - `results/figures/`：48 张结果图，按 `01_qc`、`02_doublets`、`03_cluster`、`04_annotation`、`05_deg`、`06_enrichment`、`07_ml`、`08_publication`、`09_cellchat` 阶段分子目录。
 - `results/figures/06_enrichment/fig_46_go_top5.png` 与 `fig_47_kegg_top5.png`：上调基因 GO/KEGG 经 `p.adjust <= 0.05` 筛选后的前 5 条通路富集气泡图。
+- `results/figures/01_qc/fig_48_qc_pvalue_comparison.png` 与 `results/data/01_qc/fig_48_qc_pvalue_comparison.csv`：过滤前后 QC 指标在条件间的 Wilcoxon 秩和检验 P 值对比。
 - `results/data/`：QC、双细胞、注释、差异表达、富集、ML 分类和可选 CellChat 表格，按与 `figures/` 相同的阶段分子目录存放；数据文件名与对应结果图编号一致，例如 `data/01_qc/fig_01_qc_metrics.csv`、`data/02_doublets/fig_02_doublet_results.csv`、`data/05_deg/fig_09_deg_significant.csv`、`data/05_deg/fig_09_deg_horizontal_violin.csv`、`data/07_ml/fig_24_ml_feature_importance.csv`、`data/08_publication/fig_36_cnv_heatmap.csv`、`data/08_publication/fig_37_singleR_annotations.csv`、`data/08_publication/fig_39_trajectory_pseudotime.csv`、`data/09_cellchat/fig_40_cellchat_communication.csv`、`data/07_ml/fig_43_44_45_ml_classification_report.csv`。
 - `results/data/05_deg/fig_09_deg_significant.csv`：显著差异基因表。
 - `results/figures/05_deg/fig_09_deg_horizontal_violin.png`：按校正 P 值排序的差异最显著基因横向小提琴图。
@@ -604,7 +606,8 @@ MIT License. See `LICENSE` for details.
 - 补充网页端 bulk 链接与搜索数据类型的单元测试。
 - 单细胞富集分析优化 `fig_22_go_network.png` / `fig_23_kegg_network.png`：网络图先按 `p.adjust <= 0.05` 筛选，再取前 5 个通路，保留原图并降低网络杂乱度。
 - 新增 `fig_46_go_top5.png` / `fig_47_kegg_top5.png`：展示上调基因 GO BP / KEGG 筛选后 Top5 富集结果。
-- 同步报告、网页图开关和流水线输出校验。
+- 新增 `fig_48_qc_pvalue_comparison.png` / `fig_48_qc_pvalue_comparison.csv`：比较过滤前后 QC 指标在条件间的差异程度（Wilcoxon 秩和检验 + BH FDR）。
+- 同步报告、网页图开关、结果清单和流水线输出校验。
 
 ### v0.4.1
 

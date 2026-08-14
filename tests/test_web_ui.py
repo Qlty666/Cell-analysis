@@ -585,6 +585,16 @@ class TestTemplatePolish(unittest.TestCase):
         self.assertIn("resultFilter", html)
         self.assertIn("filterResults", html)
 
+    def test_results_manifest_includes_latest_figures(self):
+        html = self._read("results_manifest_optimized.html")
+        for token in [
+            "figures/01_qc/fig_48_qc_pvalue_comparison.png",
+            "data/01_qc/fig_48_qc_pvalue_comparison.csv",
+            "figures/06_enrichment/fig_46_go_top5.png",
+            "figures/06_enrichment/fig_47_kegg_top5.png",
+        ]:
+            self.assertIn(token, html)
+
 
 if __name__ == "__main__":
     unittest.main()
