@@ -1,6 +1,6 @@
 # Liver Cancer Bioinformatics Workflow
 
-> 当前版本：0.7.0
+> 当前版本：0.4.0
 
 面向肝癌研究的本地生信自动化工作流，整合三条可实际运行的流水线：
 
@@ -590,7 +590,7 @@ MIT License. See `LICENSE` for details.
 
 ## 9. 更新日志
 
-### v0.7.0
+### v0.4.0
 
 - 网页版整体布局优化：新增共享样式 `web/static/app.css`，统一卡片、按钮、表单、表格、状态卡片和移动端响应式细节；各页面统一页头、副标题与快捷入口。
 - 全自动流水线页表单按“基础设置 / 分析参数 / 反馈与起始阶段 / 运行开关”分组折叠，支持保存设置、恢复设置、恢复默认；结果区新增统计卡片，并保留 QC 门控与细胞类型差异丰度表。
@@ -600,9 +600,6 @@ MIT License. See `LICENSE` for details.
 - 结果清单页新增按文件名、内容或用途实时筛选的工具条。
 - 修复 `/static/app.css` 的 MIME 类型，浏览器可正确应用共享样式。
 - 补充网页模板布局与静态样式测试；全量单元/集成测试 99 个全部通过。
-
-### v0.6.0
-
 - 全自动流水线标记升级为“配置/输入指纹”标记：每个阶段记录签名，参数、物种、标签、配置或输入表变化时自动使当前及下游阶段失效，修复“改参数后仍跳过旧结果”的静默错误。
 - 新增阶段输出校验：每个阶段按必需输出清单验证，缺失或空输出不会写入完成标记，重跑时自动重建。
 - 新增 QC 门控：单细胞阶段后汇总 `qc_metrics.json`，按 `qc_gate` 阈值输出 `pass/warn/fail`，可配置最小细胞数、最小基因数、最大双细胞率和伪 bulk 强制要求。
@@ -611,9 +608,6 @@ MIT License. See `LICENSE` for details.
 - 全自动流水线新增 `--dry-run`、`--skip-qc-gate`、`--skip-differential-abundance`。
 - 集成报告新增 QC 门控和差异丰度结果表，汇总信息同步写入 `integration_summary.json`。
 - 补充阶段签名失效、QC 门控、差异丰度、对接盒校验、PDB 重试和 dry-run 单元测试。
-
-### v0.4.0
-
 - 新增细胞反馈闭环：全自动流水线新增 `07_cell_feedback` 阶段，把虚拟敲除评分和虚拟筛选命中重新写回 Seurat 单细胞对象，计算每细胞靶基因表达、筛选靶点模块评分、细胞类型表达汇总与富集检验，并输出 UMAP/DotPlot/箱线图/热图和 `feedback_targets.csv`。
 - 新增独立命令 `python scripts\run_docking.py cell-feedback --single-cell-root <单细胞结果目录>`，可对已有虚拟敲除/虚拟筛选结果单独执行细胞反馈分析。
 - 全自动流水线支持 `--feedback-top-n`、`--feedback-max-features`、`--feedback-timeout` 和 `--skip-cell-feedback`。
