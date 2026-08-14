@@ -58,6 +58,7 @@ DOCK_QUEUE_LOCK = threading.Lock()
 DOCK_HISTORY_PATH = WEB_DIR / "dock_history.json"
 FULL_TEMPLATE_PATH = TEMPLATE_DIR / "full_page_template.html"
 RESULTS_TEMPLATE_PATH = TEMPLATE_DIR / "results_manifest_optimized.html"
+RESULT_GUIDE_PATH = APP_ROOT / "docs" / "result_figure_guide.md"
 TASKS_TEMPLATE_PATH = TEMPLATE_DIR / "tasks_template.html"
 DATASET_TEMPLATE_PATH = TEMPLATE_DIR / "datasets_template.html"
 DATASET_SEARCH_DIR = APP_ROOT / "data_cache" / "dataset_search"
@@ -886,6 +887,65 @@ def render_results_page() -> str:
         "<html><body><h1>results template missing</h1>"
         "<p>web/templates/results_manifest_optimized.html not found</p></body></html>"
     )
+
+
+def result_guide_data() -> dict:
+    """Return the result-figure guide as searchable sections."""
+    if not RESULT_GUIDE_PATH.exists():
+        return {
+            "available": False,
+            "source": str(RESULT_GUIDE_PATH),
+            "sections": [],
+            "files": [],
+        }
+    text = RESULT_GUIDE_PATH.read_text(encoding="utf-8", errors="replace")
+    sections: list[dict] = []
+    title = "总览"
+    lines: list[str] = []
+
+    def flush_section() -> None:
+        body = "\n".join(lines).strip()
+        if body:
+            sections.append(
+                {
+                    "id": f"guide-{len(sections) + 1}",
+                    "title": title,
+                    "text": body,
+                    "files": sorted(
+                        set(
+                            re.findall(
+                                r"\b(fig_[A-Za-z0-9_.-]+\.(?:png|csv|json|rds|txt))\b",
+                                body,
+                                flags=re.IGNORECASE,
+                            )
+                        )
+                    ),
+                }
+            )
+        lines.clear()
+
+    for raw_line in text.splitlines():
+        line = raw_line.rstrip()
+        if line.startswith("## "):
+            flush_section()
+            title = line[3:].strip()
+        else:
+            lines.append(line)
+    flush_section()
+    return {
+        "available": True,
+        "source": str(RESULT_GUIDE_PATH),
+        "sections": sections,
+        "files": sorted(
+            set(
+                re.findall(
+                    r"\b(fig_[A-Za-z0-9_.-]+\.(?:png|csv|json|rds|txt))\b",
+                    text,
+                    flags=re.IGNORECASE,
+                )
+            )
+        ),
+    }
 
 
 def render_tasks_page() -> str:
@@ -2538,6 +2598,13 @@ class Handler(BaseHTTPRequestHandler):
                 200,
                 render_results_page().encode("utf-8"),
                 "text/html; charset=utf-8",
+            )
+            return
+        if parsed.path == "/result-guide":
+            self._send(
+                200,
+                json.dumps(result_guide_data(), ensure_ascii=False).encode("utf-8"),
+                "application/json; charset=utf-8",
             )
             return
         if parsed.path == "/tasks":

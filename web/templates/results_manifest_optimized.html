@@ -114,6 +114,119 @@ code {
   font-size: 13px;
   margin-top: 10px;
 }
+.toolbar {
+  display: flex;
+  gap: 8px;
+  align-items: center;
+  flex-wrap: wrap;
+  margin: 0 0 12px;
+}
+.toolbar input[type="search"] {
+  flex: 1 1 280px;
+  min-width: 220px;
+  padding: 9px 12px;
+  border: 1px solid #cbd5e1;
+  border-radius: 8px;
+  font-size: 14px;
+  background: #fff;
+}
+.filter-group {
+  display: flex;
+  gap: 6px;
+  flex-wrap: wrap;
+  align-items: center;
+}
+.filter-group .filter-label {
+  color: #52606d;
+  font-size: 12px;
+  margin-right: 2px;
+}
+.chip {
+  border: 1px solid #cbd5e1;
+  background: #fff;
+  color: #334155;
+  border-radius: 999px;
+  padding: 5px 10px;
+  font-size: 12px;
+  cursor: pointer;
+  transition: background 0.15s ease, color 0.15s ease;
+}
+.chip:hover { background: #f1f5f9; }
+.chip.active { background: #1665c0; border-color: #1665c0; color: #fff; }
+.search-stats {
+  min-height: 20px;
+  margin: 8px 0 2px;
+}
+.guide-card summary {
+  cursor: pointer;
+  font-size: 15px;
+  padding: 4px 0;
+}
+.guide-card summary strong { color: #0f172a; }
+.guide-card summary .guide-count {
+  color: #64748b;
+  font-size: 12px;
+  margin-left: 8px;
+}
+.guide-section {
+  border-top: 1px solid #e2e8f0;
+  margin-top: 12px;
+  padding-top: 12px;
+}
+.guide-section h3 { margin: 0 0 8px; }
+.guide-section.guide-hit {
+  background: #f8fafc;
+  border-left: 4px solid #1665c0;
+  padding-left: 12px;
+}
+.guide-md {
+  color: #334155;
+  font-size: 13px;
+  line-height: 1.75;
+  overflow-x: auto;
+}
+.guide-md p { margin: 6px 0; }
+.guide-md ul, .guide-md ol { margin: 6px 0 10px; padding-left: 24px; }
+.guide-md li { margin: 3px 0; }
+.guide-md table {
+  width: 100%;
+  font-size: 11px;
+  margin: 8px 0 12px;
+}
+.guide-md th, .guide-md td {
+  border: 1px solid #e5e7eb;
+  padding: 5px 7px;
+  text-align: left;
+  vertical-align: top;
+}
+.guide-md th { background: #eef2f7; }
+.guide-md blockquote {
+  margin: 8px 0;
+  padding: 6px 12px;
+  border-left: 4px solid #cbd5e1;
+  color: #475569;
+  background: #f8fafc;
+}
+.guide-code {
+  background: #0f172a;
+  color: #dbeafe;
+  border-radius: 8px;
+  padding: 12px 14px;
+  font-size: 12px;
+  overflow-x: auto;
+  white-space: pre;
+}
+mark { background: #fde047; color: #1f2933; padding: 0 2px; border-radius: 3px; }
+.no-match {
+  display: none;
+  background: #fff1f2;
+  border: 1px solid #fecdd3;
+  color: #881337;
+  border-radius: 8px;
+  padding: 12px 16px;
+  margin-top: 10px;
+  font-size: 13px;
+}
 a { color: #1665c0; text-decoration: none; }
 footer { color: #64748b; font-size: 12px; margin: 30px 0 8px; }
 @media (max-width: 720px) {
@@ -122,6 +235,7 @@ footer { color: #64748b; font-size: 12px; margin: 30px 0 8px; }
   table { font-size: 11px; }
   th, td { padding: 5px 6px; }
   .tree { font-size: 11px; }
+  .toolbar input[type="search"] { min-width: 100%; }
 }
 </style>
 </head>
@@ -147,8 +261,36 @@ footer { color: #64748b; font-size: 12px; margin: 30px 0 8px; }
 </div>
 
 <div class="toolbar">
-  <input type="search" id="resultFilter" placeholder="按文件名、内容或用途筛选..." oninput="filterResults(this.value)">
+  <input type="search" id="resultFilter" placeholder="搜索结果清单、解释文档或图名..." oninput="filterResults(this.value)">
   <button type="button" class="secondary" onclick="clearResultFilter()">清空筛选</button>
+  <div class="filter-group" id="stageFilters">
+    <span class="filter-label">阶段</span>
+    <button type="button" class="chip active" data-stage-filter="all">全部</button>
+    <button type="button" class="chip" data-stage-filter="single">01 单细胞</button>
+    <button type="button" class="chip" data-stage-filter="qc">QC 门控</button>
+    <button type="button" class="chip" data-stage-filter="key">02 关键基因</button>
+    <button type="button" class="chip" data-stage-filter="evidence">03 证据</button>
+    <button type="button" class="chip" data-stage-filter="ko">05 敲除</button>
+    <button type="button" class="chip" data-stage-filter="dock">06 对接</button>
+    <button type="button" class="chip" data-stage-filter="feedback">07 反馈</button>
+    <button type="button" class="chip" data-stage-filter="report">08 报告</button>
+  </div>
+  <div class="filter-group" id="typeFilters">
+    <span class="filter-label">类型</span>
+    <button type="button" class="chip active" data-type-filter="all">图+数据</button>
+    <button type="button" class="chip" data-type-filter="fig">结果图</button>
+    <button type="button" class="chip" data-type-filter="data">结果数据</button>
+  </div>
+</div>
+<div class="search-stats muted" id="searchStats"></div>
+<div class="no-match" id="noMatch">没有匹配的结果清单条目或解释文档章节，请尝试其他关键词。</div>
+
+<div class="card guide-card" id="guideCard">
+  <details id="guideDetails">
+    <summary><strong>结果图说明与判断指南</strong><span class="guide-count" id="guideCount">加载中...</span></summary>
+    <p class="muted">本区内容来自 <code>docs/result_figure_guide.md</code>。搜索时同时匹配结果清单和本指南，命中的指南章节会自动展开，并联动显示章节中提到的结果文件。</p>
+    <div id="guideResult"></div>
+  </details>
 </div>
 
 <div class="card">
@@ -395,17 +537,313 @@ footer { color: #64748b; font-size: 12px; margin: 30px 0 8px; }
 <footer>由 Codex 根据项目流水线代码生成 | 结果清单页</footer>
 </div>
 <script>
-function filterResults(query) {
-  query = (query || '').toLowerCase().trim();
-  document.querySelectorAll('.card table tbody tr').forEach((tr) => {
-    tr.style.display = tr.textContent.toLowerCase().includes(query) ? '' : 'none';
-  });
-}
-function clearResultFilter() {
-  const input = document.getElementById('resultFilter');
-  if (input) input.value = '';
-  filterResults('');
-}
+(function () {
+  const state = { query: '', stage: 'all', type: 'all' };
+  let guideSections = [];
+
+  function escapeHtml(value) {
+    return String(value == null ? '' : value)
+      .replace(/&/g, '&amp;')
+      .replace(/</g, '&lt;')
+      .replace(/>/g, '&gt;')
+      .replace(/"/g, '&quot;');
+  }
+
+  function inlineMarkdown(value) {
+    return String(value)
+      .replace(/`([^`]+)`/g, '<code>$1</code>')
+      .replace(/\*\*([^*]+)\*\*/g, '<strong>$1</strong>');
+  }
+
+  function renderTable(lines) {
+    const rows = lines.map(line => {
+      return line.trim().replace(/^\|/, '').replace(/\|$/, '').split('|').map(cell => inlineMarkdown(escapeHtml(cell.trim())));
+    });
+    let html = '<table class="guide-table"><thead><tr>' + rows[0].map(cell => '<th>' + cell + '</th>').join('') + '</tr></thead><tbody>';
+    for (let i = 2; i < rows.length; i++) {
+      html += '<tr>' + rows[i].map(cell => '<td>' + cell + '</td>').join('') + '</tr>';
+    }
+    return html + '</tbody></table>';
+  }
+
+  function renderMarkdown(raw) {
+    const lines = String(raw || '').replace(/\r/g, '').split('\n');
+    let html = '';
+    let i = 0;
+    while (i < lines.length) {
+      const line = lines[i];
+      if (!line.trim()) { i++; continue; }
+      if (line.trim().startsWith('```')) {
+        const buf = [];
+        i++;
+        while (i < lines.length && !lines[i].trim().startsWith('```')) {
+          buf.push(lines[i]);
+          i++;
+        }
+        i++;
+        html += '<pre class="guide-code">' + escapeHtml(buf.join('\n')) + '</pre>';
+        continue;
+      }
+      const heading = line.match(/^(#{1,6})\s+(.*)$/);
+      if (heading) {
+        const level = Math.min(6, heading[1].length + 1);
+        html += '<h' + level + '>' + inlineMarkdown(escapeHtml(heading[2])) + '</h' + level + '>';
+        i++;
+        continue;
+      }
+      if (line.trim().startsWith('|')) {
+        const table = [];
+        while (i < lines.length && lines[i].trim().startsWith('|')) {
+          table.push(lines[i]);
+          i++;
+        }
+        if (table.length >= 2) html += renderTable(table);
+        continue;
+      }
+      if (/^\s*[-*]\s+/.test(line)) {
+        const items = [];
+        while (i < lines.length && /^\s*[-*]\s+/.test(lines[i])) {
+          items.push(inlineMarkdown(escapeHtml(lines[i].replace(/^\s*[-*]\s+/, ''))));
+          i++;
+        }
+        html += '<ul>' + items.map(item => '<li>' + item + '</li>').join('') + '</ul>';
+        continue;
+      }
+      if (/^\s*\d+\.\s+/.test(line)) {
+        const items = [];
+        while (i < lines.length && /^\s*\d+\.\s+/.test(lines[i])) {
+          items.push(inlineMarkdown(escapeHtml(lines[i].replace(/^\s*\d+\.\s+/, ''))));
+          i++;
+        }
+        html += '<ol>' + items.map(item => '<li>' + item + '</li>').join('') + '</ol>';
+        continue;
+      }
+      if (line.trim().startsWith('>')) {
+        const quote = [];
+        while (i < lines.length && lines[i].trim().startsWith('>')) {
+          quote.push(inlineMarkdown(escapeHtml(lines[i].trim().replace(/^>\s?/, ''))));
+          i++;
+        }
+        html += '<blockquote>' + quote.join(' ') + '</blockquote>';
+        continue;
+      }
+      const paragraph = [];
+      while (
+        i < lines.length &&
+        lines[i].trim() &&
+        !lines[i].trim().startsWith('```') &&
+        !/^(#{1,6})\s+/.test(lines[i]) &&
+        !lines[i].trim().startsWith('|') &&
+        !/^\s*[-*]\s+/.test(lines[i]) &&
+        !/^\s*\d+\.\s+/.test(lines[i]) &&
+        !lines[i].trim().startsWith('>')
+      ) {
+        paragraph.push(inlineMarkdown(escapeHtml(lines[i].trim())));
+        i++;
+      }
+      html += '<p>' + paragraph.join(' ') + '</p>';
+    }
+    return html;
+  }
+
+  function stageKey(title) {
+    if (title.includes('01 单细胞') || title.includes('单细胞分析输出')) return 'single';
+    if (title.includes('QC 门控')) return 'qc';
+    if (title.includes('02 关键')) return 'key';
+    if (title.includes('03 证据')) return 'evidence';
+    if (title.includes('04 虚拟敲除输入')) return 'ko-input';
+    if (title.includes('05 虚拟敲除')) return 'ko';
+    if (title.includes('06 分子对接')) return 'dock';
+    if (title.includes('07 细胞反馈')) return 'feedback';
+    if (title.includes('08 集成')) return 'report';
+    if (title.includes('条件输出')) return 'conditions';
+    return 'other';
+  }
+
+  function indexRows() {
+    document.querySelectorAll('.card').forEach(card => {
+      const h2 = card.querySelector('h2');
+      const stage = stageKey(h2 ? h2.textContent : '');
+      card.dataset.stage = stage;
+      card.querySelectorAll('table tbody tr').forEach(tr => {
+        const fileCode = tr.querySelector('code');
+        const file = fileCode ? fileCode.textContent.trim() : '';
+        const badge = tr.querySelector('.badge');
+        const typeText = badge ? badge.textContent.trim() : '';
+        const type = typeText.includes('结果图') ? 'fig' : typeText.includes('结果数据') ? 'data' : 'other';
+        tr.dataset.file = file;
+        tr.dataset.stage = stage;
+        tr.dataset.type = type;
+        tr.dataset.search = (tr.textContent + ' ' + file + ' ' + type).toLowerCase();
+      });
+    });
+  }
+
+  function highlightText(text, query) {
+    const escaped = escapeHtml(text);
+    const needle = (query || '').trim();
+    if (!needle) return escaped;
+    const lowerEscaped = escaped.toLowerCase();
+    const lowerNeedle = needle.toLowerCase();
+    let out = '';
+    let from = 0;
+    let index = lowerEscaped.indexOf(lowerNeedle, from);
+    while (index >= 0) {
+      out += escaped.slice(from, index);
+      out += '<mark>' + escaped.slice(index, index + needle.length) + '</mark>';
+      from = index + needle.length;
+      index = lowerEscaped.indexOf(lowerNeedle, from);
+    }
+    out += escaped.slice(from);
+    return out;
+  }
+
+  function extractFiles(text) {
+    const re = /fig_[A-Za-z0-9_.-]+\.(?:png|csv|json|rds|txt)/g;
+    return Array.from(new Set(String(text || '').match(re) || []));
+  }
+
+  function renderGuide(sections) {
+    const container = document.getElementById('guideResult');
+    container.innerHTML = '';
+    sections.forEach(section => {
+      section.files = section.files && section.files.length ? section.files : extractFiles(section.text);
+      const el = document.createElement('section');
+      el.className = 'guide-section';
+      el.dataset.guideId = section.id;
+      const title = document.createElement('h3');
+      title.innerHTML = highlightText(section.title, state.query);
+      const body = document.createElement('div');
+      body.className = 'guide-md';
+      body.innerHTML = renderMarkdown(section.text);
+      el.appendChild(title);
+      el.appendChild(body);
+      container.appendChild(el);
+      section.el = el;
+    });
+  }
+
+  async function loadGuide() {
+    const countEl = document.getElementById('guideCount');
+    const container = document.getElementById('guideResult');
+    try {
+      const resp = await fetch('/result-guide');
+      const data = await resp.json();
+      guideSections = data.sections || [];
+      if (!guideSections.length) {
+        container.innerHTML = '<p class="muted">解释文档暂不可用。</p>';
+      } else {
+        renderGuide(guideSections);
+      }
+      if (countEl) countEl.textContent = '（' + guideSections.length + ' 个章节）';
+    } catch (error) {
+      guideSections = [];
+      container.innerHTML = '<p class="muted">解释文档加载失败：' + escapeHtml(String(error)) + '</p>';
+      if (countEl) countEl.textContent = '（不可用）';
+    }
+    applyFilters();
+  }
+
+  function updateChips() {
+    document.querySelectorAll('[data-stage-filter]').forEach(btn => {
+      btn.classList.toggle('active', btn.dataset.stageFilter === state.stage);
+    });
+    document.querySelectorAll('[data-type-filter]').forEach(btn => {
+      btn.classList.toggle('active', btn.dataset.typeFilter === state.type);
+    });
+  }
+
+  function applyFilters() {
+    const q = state.query.trim().toLowerCase();
+    const matchedFiles = new Set();
+    let guideHits = 0;
+    guideSections.forEach(section => {
+      if (!section.el) return;
+      const hay = (section.title + '\n' + section.text).toLowerCase();
+      const hit = !q || hay.includes(q);
+      section.el.style.display = hit ? '' : 'none';
+      section.el.classList.toggle('guide-hit', Boolean(q) && hit);
+      const title = section.el.querySelector('h3');
+      if (title) title.innerHTML = highlightText(section.title, state.query);
+      if (hit) {
+        guideHits++;
+        (section.files || []).forEach(file => matchedFiles.add(file.toLowerCase()));
+      }
+    });
+
+    let rowHits = 0;
+    const rows = Array.from(document.querySelectorAll('.card table tbody tr'));
+    rows.forEach(tr => {
+      const queryOk = !q || (tr.dataset.search || '').includes(q);
+      const guideOk = Array.from(matchedFiles).some(file => (tr.dataset.file || '').toLowerCase().includes(file));
+      const show =
+        (state.stage === 'all' || tr.dataset.stage === state.stage) &&
+        (state.type === 'all' || tr.dataset.type === state.type) &&
+        (queryOk || guideOk);
+      tr.style.display = show ? '' : 'none';
+      if (show && q) rowHits++;
+    });
+
+    const filterActive = Boolean(q) || state.stage !== 'all' || state.type !== 'all';
+    document.querySelectorAll('.card').forEach(card => {
+      if (card.id === 'guideCard') return;
+      const tableRows = card.querySelectorAll('table tbody tr');
+      const hasVisible = Array.from(tableRows).some(tr => tr.style.display !== 'none');
+      card.style.display = !filterActive || hasVisible ? '' : 'none';
+    });
+
+    const figCount = rows.filter(tr => tr.dataset.type === 'fig').length;
+    const dataCount = rows.filter(tr => tr.dataset.type === 'data').length;
+    const condCount = rows.filter(tr => tr.textContent.includes('条件')).length;
+    const stats = document.getElementById('searchStats');
+    if (q) {
+      stats.textContent = '搜索“' + state.query + '”：结果清单命中 ' + rowHits + ' 条，指南命中 ' + guideHits + ' 个章节。';
+    } else {
+      stats.textContent = '结果清单共 ' + rows.length + ' 条：' + figCount + ' 张结果图，' + dataCount + ' 份结果数据，' + condCount + ' 个条件输出；指南共 ' + guideSections.length + ' 个章节。';
+    }
+
+    const noMatch = document.getElementById('noMatch');
+    noMatch.style.display = filterActive && rowHits === 0 && guideHits === 0 ? 'block' : 'none';
+    const guideDetails = document.getElementById('guideDetails');
+    if (q) guideDetails.open = guideHits > 0;
+    updateChips();
+  }
+
+  function filterResults(query) {
+    state.query = String(query || '');
+    applyFilters();
+  }
+
+  function clearResultFilter() {
+    const input = document.getElementById('resultFilter');
+    if (input) input.value = '';
+    state.query = '';
+    state.stage = 'all';
+    state.type = 'all';
+    applyFilters();
+  }
+
+  function bindFilters() {
+    document.querySelectorAll('[data-stage-filter]').forEach(btn => {
+      btn.addEventListener('click', () => {
+        state.stage = btn.dataset.stageFilter;
+        applyFilters();
+      });
+    });
+    document.querySelectorAll('[data-type-filter]').forEach(btn => {
+      btn.addEventListener('click', () => {
+        state.type = btn.dataset.typeFilter;
+        applyFilters();
+      });
+    });
+  }
+
+  window.filterResults = filterResults;
+  window.clearResultFilter = clearResultFilter;
+  indexRows();
+  bindFilters();
+  loadGuide();
+})();
 </script>
 </body>
 </html>
