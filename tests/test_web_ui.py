@@ -183,6 +183,30 @@ class TestFullStatus(unittest.TestCase):
             finally:
                 FULL_JOBS.pop(job_id, None)
 
+    def test_start_full_job_passes_new_optimization_flags(self):
+        with tempfile.TemporaryDirectory() as tmp:
+            base = Path(tmp)
+            output = base / "out"
+            workdir = base / "work"
+            with mock.patch("web_ui._drain_full_queue"):
+                result = start_full_job(
+                    {
+                        "output": [str(output)],
+                        "workdir": [str(workdir)],
+                        "skip_qc_gate": ["1"],
+                        "skip_differential_abundance": ["1"],
+                        "dry_run": ["1"],
+                    }
+                )
+            job_id = result["job"]
+            try:
+                cmd = FULL_JOBS[job_id]["cmd"]
+                self.assertIn("--skip-qc-gate", cmd)
+                self.assertIn("--skip-differential-abundance", cmd)
+                self.assertIn("--dry-run", cmd)
+            finally:
+                FULL_JOBS.pop(job_id, None)
+
     def test_completed_full_pipeline_uses_full_flow_label(self):
         with tempfile.TemporaryDirectory() as tmp:
             status = _full_status(_make_info(Path(tmp), 0))
@@ -216,6 +240,15 @@ class TestResultDirectoryQueries(unittest.TestCase):
         )
         (integration / "integration_report.html").write_text(
             "<html></html>", encoding="utf-8"
+        )
+        (integration / "qc_metrics.json").write_text(
+            '{"qc_gate": {"status": "fail", "checks": []}}',
+            encoding="utf-8",
+        )
+        (integration / "differential_abundance.csv").write_text(
+            "celltype,n_cells,chi2,p_value,p_adjust,significant,direction\n"
+            "T_cell,50,9.0,0.002,0.002,true,enriched_in_Tumor\n",
+            encoding="utf-8",
         )
         feedback_data = integration / "cell_feedback" / "data"
         feedback_data.mkdir(parents=True)
@@ -400,6 +433,23 @@ class TestResultDirectoryQueries(unittest.TestCase):
                     workdir,
                     "single_cell/results/summary.json",
                 )
+            )
+
+    def test_full_results_includes_qc_and_differential_abundance(self):
+        with tempfile.TemporaryDirectory() as tmp:
+            workdir = self._make_full_workdir(Path(tmp))
+            data = full_results(workdir)
+            self.assertEqual(
+                data["qc_metrics"]["qc_gate"]["status"],
+                "fail",
+            )
+            self.assertEqual(
+                data["differential_abundance"][0]["celltype"],
+                "T_cell",
+            )
+            self.assertIn(
+                "differential_abundance.csv",
+                data["files"],
             )
 
     def test_dock_results_only_returns_result_figures_and_data(self):
