@@ -187,6 +187,7 @@ footer { color: #64748b; font-size: 12px; margin: 30px 0 8px; }
     <tbody>
       <tr><td><code>figures/01_qc/fig_01_qc_raw_violin.png</code></td><td>QC 指标原始分布</td><td><span class="badge fig">结果图</span></td><td>查看过滤前数据质量</td></tr>
       <tr><td><code>figures/01_qc/fig_01_qc_filtered_violin.png</code></td><td>QC 指标过滤后分布</td><td><span class="badge fig">结果图</span></td><td>确认过滤后数据质量</td></tr>
+      <tr><td><code>figures/01_qc/fig_48_qc_pvalue_comparison.png</code></td><td>QC 质控差异度 P 值</td><td><span class="badge fig">结果图</span></td><td>比较过滤前后 QC 指标在条件间的差异程度</td></tr>
       <tr><td><code>figures/02_doublets/fig_02_doublet_scores.png</code></td><td>双细胞得分分布</td><td><span class="badge fig">结果图</span></td><td>判断双细胞判定效果</td></tr>
       <tr><td><code>figures/03_cluster/fig_03_umap_clusters.png</code></td><td>UMAP 聚类图</td><td><span class="badge fig">结果图</span></td><td>展示聚类结构</td></tr>
       <tr><td><code>figures/03_cluster/fig_04_umap_condition.png</code></td><td>UMAP 分组图</td><td><span class="badge fig">结果图</span></td><td>对比组间分布</td></tr>
@@ -210,6 +211,8 @@ footer { color: #64748b; font-size: 12px; margin: 30px 0 8px; }
       <tr><td><code>figures/06_enrichment/fig_21_gsea_kegg.png</code></td><td>GSEA KEGG 图</td><td><span class="badge fig">结果图</span></td><td>查看 KEGG 富集趋势</td></tr>
       <tr><td><code>figures/06_enrichment/fig_22_go_network.png</code></td><td>GO 通路网络图</td><td><span class="badge fig">结果图</span></td><td>查看 GO 通路关系</td></tr>
       <tr><td><code>figures/06_enrichment/fig_23_kegg_network.png</code></td><td>KEGG 通路网络图</td><td><span class="badge fig">结果图</span></td><td>查看 KEGG 通路关系</td></tr>
+      <tr><td><code>figures/06_enrichment/fig_46_go_top5.png</code></td><td>GO BP 筛选后 Top5 富集</td><td><span class="badge fig">结果图</span></td><td>查看筛选后 Top5 上调 GO 通路</td></tr>
+      <tr><td><code>figures/06_enrichment/fig_47_kegg_top5.png</code></td><td>KEGG 筛选后 Top5 富集</td><td><span class="badge fig">结果图</span></td><td>查看筛选后 Top5 上调 KEGG 通路</td></tr>
       <tr><td><code>figures/07_ml/fig_24_ml_feature_importance.png</code></td><td>ML 特征重要性图</td><td><span class="badge fig">结果图</span></td><td>查看分类关键特征</td></tr>
       <tr><td><code>figures/07_ml/fig_25_ml_shap.png</code></td><td>SHAP 可解释性图</td><td><span class="badge fig">结果图</span></td><td>查看特征对预测贡献</td></tr>
       <tr><td><code>figures/08_publication/fig_26_cellcycle_umap.png</code></td><td>细胞周期 UMAP</td><td><span class="badge fig">结果图</span></td><td>查看细胞周期分布 <span class="badge opt">条件</span></td></tr>
@@ -240,6 +243,7 @@ footer { color: #64748b; font-size: 12px; margin: 30px 0 8px; }
     <thead><tr><th>文件</th><th>内容</th><th>类型</th><th>用途</th></tr></thead>
     <tbody>
       <tr><td><code>data/01_qc/fig_01_qc_metrics.csv</code></td><td>QC 指标表</td><td><span class="badge data">结果数据</span></td><td>复现质控结果</td></tr>
+      <tr><td><code>data/01_qc/fig_48_qc_pvalue_comparison.csv</code></td><td>QC 质控差异度 P 值数据</td><td><span class="badge data">结果数据</span></td><td>Wilcoxon 秩和检验与 BH FDR 结果</td></tr>
       <tr><td><code>data/01_qc/sample_annotations.csv</code></td><td>样本分组注释</td><td><span class="badge data">结果数据</span></td><td>对应样本与分组</td></tr>
       <tr><td><code>data/02_doublets/fig_02_doublet_results.csv</code></td><td>双细胞检测结果</td><td><span class="badge data">结果数据</span></td><td>每细胞双细胞得分和判定</td></tr>
       <tr><td><code>data/03_cluster/fig_03_04_05_umap_coordinates.csv</code></td><td>UMAP 坐标</td><td><span class="badge data">结果数据</span></td><td>复现聚类和注释图</td></tr>
