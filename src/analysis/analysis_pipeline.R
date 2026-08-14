@@ -59,6 +59,22 @@ figure_stage <- function(name) {
   return("00_other")
 }
 
+wrap_labels <- function(x, width = 20) {
+  vapply(
+    as.character(x),
+    function(s) paste(strwrap(s, width = width), collapse = "\n"),
+    character(1)
+  )
+}
+
+add_plot_margin <- function(plot, plot_margin) {
+  if (inherits(plot, "patchwork")) {
+    plot & theme(plot.margin = plot_margin)
+  } else {
+    plot + theme(plot.margin = plot_margin)
+  }
+}
+
 stage_fig_file <- function(file) {
   name <- basename(file)
   out_dir <- file.path(dirname(file), figure_stage(name))
@@ -107,13 +123,24 @@ if (is.na(de_padj)) de_padj <- 0.05
 if (is.na(deg_violin_top_n)) deg_violin_top_n <- 12
 if (is.na(deg_violin_max_cells)) deg_violin_max_cells <- 1000
 
-save_fig <- function(file, plot, width, height, dpi = 150) {
+save_fig <- function(file, plot, width, height, dpi = 150, plot_margin = NULL) {
   name <- basename(file)
   if (name %in% skip_figs) {
     log_msg("skip figure: ", name)
     return(invisible(NULL))
   }
-  ggsave(stage_fig_file(file), plot, width = width, height = height, dpi = dpi)
+  if (is.null(plot_margin)) {
+    plot_margin <- ggplot2::margin(26, 26, 24, 18, "pt")
+  }
+  plot <- add_plot_margin(plot, plot_margin)
+  ggsave(
+    stage_fig_file(file),
+    plot,
+    width = width,
+    height = height,
+    dpi = dpi,
+    bg = "white"
+  )
   log_msg("saved figure: ", name)
 }
 
@@ -1784,7 +1811,8 @@ if (stage_allowed("06")) run_stage("06_differential_expression", {
         cond_levels[1], " vs ", cond_levels[2], ")"
       )
     ) +
-    theme_minimal()
+    theme_minimal() +
+    coord_cartesian(clip = "off")
   if (fig_style("fig_08_volcano.png") == "maplot") {
     expr_genes <- intersect(deg$gene, rownames(seurat))
     expr_mat <- GetAssayData(seurat, layer = "data")[
@@ -1807,14 +1835,16 @@ if (stage_allowed("06")) run_stage("06_differential_expression", {
           "MA plot (", cond_levels[1], " vs ", cond_levels[2], ")"
         )
       ) +
-      theme_minimal()
+      theme_minimal() +
+      coord_cartesian(clip = "off")
   }
   save_fig(
     file.path(fig_dir, "fig_08_volcano.png"),
     p_volcano,
     width = 9,
     height = 7,
-    dpi = 150
+    dpi = 150,
+    plot_margin = ggplot2::margin(20, 60, 24, 20, "pt")
   )
 
   top_deg <- deg[deg$significant %in% TRUE, ]
@@ -1908,7 +1938,8 @@ if (stage_allowed("06")) run_stage("06_differential_expression", {
         p_deg_violin,
         width = 11,
         height = max(7, 0.55 * length(top_genes) + 2),
-        dpi = 150
+        dpi = 150,
+        plot_margin = ggplot2::margin(20, 40, 26, 20, "pt")
       )
       write.csv(
         deg_top[, intersect(
@@ -1948,7 +1979,8 @@ if (stage_allowed("06")) run_stage("06_differential_expression", {
     p_heat,
     width = 10,
     height = 8,
-    dpi = 150
+    dpi = 150,
+    plot_margin = ggplot2::margin(32, 24, 24, 18, "pt")
   )
 
   log_msg("significant DEGs: ", sum(deg$significant, na.rm = TRUE))
@@ -2190,8 +2222,18 @@ if (stage_allowed("07")) run_stage("07_enrichment", {
         p <- cnetplot(filtered, showCategory = 5) +
           ggtitle(title)
       }
+      p <- tryCatch(
+        p + coord_cartesian(clip = "off"),
+        error = function(e) p
+      )
     }
-    save_fig(file, p, width = 10, height = 8)
+    save_fig(
+      file,
+      p,
+      width = 10,
+      height = 8,
+      plot_margin = ggplot2::margin(30, 70, 40, 70, "pt")
+    )
   }
 
   plot_top5 <- function(res, file, title) {
@@ -2291,15 +2333,37 @@ if (stage_allowed("08")) run_stage("08_publication_analyses", {
   }
 
   if (length(unique(seurat$sample)) > 1) {
-    p_sample <- DimPlot(seurat, group.by = "sample", label = FALSE) +
-      ggtitle("UMAP by sample")
+    sample_levels <- unique(as.character(seurat$sample))
+    sample_labels <- wrap_labels(sample_levels, width = 22)
+    seurat$sample_label <- factor(
+      sample_labels[match(as.character(seurat$sample), sample_levels)],
+      levels = sample_labels
+    )
+    legend_cols <- if (length(sample_levels) > 80) {
+      3
+    } else if (length(sample_levels) > 30) {
+      2
+    } else {
+      1
+    }
+    p_sample <- DimPlot(seurat, group.by = "sample_label", label = FALSE) +
+      labs(color = "Sample") +
+      ggtitle("UMAP by sample") +
+      guides(color = guide_legend(ncol = legend_cols)) +
+      theme(
+        legend.text = element_text(size = 6.5),
+        legend.key.size = grid::unit(0.45, "cm"),
+        legend.spacing.y = grid::unit(0.03, "cm")
+      )
     save_fig(
       file.path(fig_dir, "fig_28_umap_sample.png"),
       p_sample,
       width = 8,
       height = 7,
-      dpi = 150
+      dpi = 150,
+      plot_margin = ggplot2::margin(16, 30, 22, 30, "pt")
     )
+    seurat$sample_label <- NULL
   } else {
     log_msg("skip figure: fig_28_umap_sample.png (single sample)")
   }
@@ -2334,6 +2398,7 @@ if (stage_allowed("08")) run_stage("08_publication_analyses", {
         ) +
         theme_minimal() +
         theme(axis.text.x = element_text(angle = 45, hjust = 1)) +
+        scale_x_discrete(labels = function(x) wrap_labels(x, 18)) +
         labs(
           x = "Sample",
           y = "Doublet rate",
@@ -2362,6 +2427,7 @@ if (stage_allowed("08")) run_stage("08_publication_analyses", {
     scale_y_continuous(labels = scales::percent) +
     theme_minimal() +
     theme(axis.text.x = element_text(angle = 45, hjust = 1)) +
+    scale_x_discrete(labels = function(x) wrap_labels(x, 18)) +
     labs(
       x = "Sample",
       y = "Proportion",
@@ -2592,7 +2658,8 @@ if (stage_allowed("08")) run_stage("08_publication_analyses", {
         color = "Cell type",
         title = "Cell type abundance shift"
       ) +
-      theme_minimal()
+      theme_minimal() +
+      coord_cartesian(clip = "off")
     save_fig(
       file.path(fig_dir, "fig_35_celltype_abundance_effect.png"),
       p_abundance,

@@ -22,6 +22,18 @@ fig_dir <- file.path(out_dir, "figures")
 dir.create(data_dir, recursive = TRUE, showWarnings = FALSE)
 dir.create(fig_dir, recursive = TRUE, showWarnings = FALSE)
 
+save_fig <- function(file, plot, width, height, dpi = 150, plot_margin = NULL) {
+  if (is.null(plot_margin)) {
+    plot_margin <- ggplot2::margin(26, 26, 24, 18, "pt")
+  }
+  if (inherits(plot, "patchwork")) {
+    plot <- plot & theme(plot.margin = plot_margin)
+  } else {
+    plot <- plot + theme(plot.margin = plot_margin)
+  }
+  ggsave(file, plot, width = width, height = height, dpi = dpi, bg = "white")
+}
+
 write_summary <- function(x) {
   writeLines(
     jsonlite::toJSON(x, auto_unbox = TRUE, pretty = TRUE),
@@ -304,7 +316,7 @@ if (!is.null(umap) && module_col %in% colnames(obj@meta.data)) {
     cols = c("grey90", "#B31B1B")
   ) + ggtitle("Screening feedback module score")
   fig_module <- file.path(fig_dir, "fig_54_feedback_module_umap.png")
-  ggsave(fig_module, p_module, width = 8, height = 7, dpi = 150)
+  save_fig(fig_module, p_module, width = 8, height = 7)
   figures <- c(figures, basename(fig_module))
 }
 
@@ -317,12 +329,11 @@ if (length(feature_genes) > 0 && !is.null(umap)) {
     cols = c("grey90", "#2E86AB")
   )
   fig_features <- file.path(fig_dir, "fig_55_feedback_target_expression_umap.png")
-  ggsave(
+  save_fig(
     fig_features,
     p_features,
     width = 12,
-    height = 4 * ceiling(length(feature_genes) / 3),
-    dpi = 150
+    height = 4 * ceiling(length(feature_genes) / 3)
   )
   figures <- c(figures, basename(fig_features))
 }
@@ -332,7 +343,7 @@ if (length(feature_genes) > 0) {
     RotatedAxis() +
     ggtitle("Screening target expression by cell type")
   fig_dot <- file.path(fig_dir, "fig_56_feedback_celltype_dotplot.png")
-  ggsave(fig_dot, p_dot, width = 11, height = 7, dpi = 150)
+  save_fig(fig_dot, p_dot, width = 11, height = 7)
   figures <- c(figures, basename(fig_dot))
 }
 
@@ -351,7 +362,7 @@ if (length(celltypes) >= 2) {
       title = "Screening feedback module by cell type"
     )
   fig_box <- file.path(fig_dir, "fig_57_feedback_celltype_boxplot.png")
-  ggsave(fig_box, p_box, width = 10, height = 7, dpi = 150)
+  save_fig(fig_box, p_box, width = 10, height = 7)
   figures <- c(figures, basename(fig_box))
 }
 
