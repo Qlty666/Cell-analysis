@@ -232,8 +232,11 @@ a.file-link { color: #1665c0; text-decoration: none; margin-right: 12px; }
       <label class="toggle"><input type="checkbox" name="skip_knockout" value="1"> 跳过虚拟敲除</label>
       <label class="toggle"><input type="checkbox" name="skip_docking" value="1"> 跳过虚拟筛选</label>
       <label class="toggle"><input type="checkbox" name="skip_cell_feedback" value="1"> 跳过细胞反馈</label>
+      <label class="toggle"><input type="checkbox" name="skip_qc_gate" value="1"> 跳过 QC 门控</label>
+      <label class="toggle"><input type="checkbox" name="skip_differential_abundance" value="1"> 跳过差异丰度检验</label>
       <label class="toggle"><input type="checkbox" name="keep_all_genes" value="1"> 保留全部基因</label>
       <label class="toggle"><input type="checkbox" name="force" value="1"> 强制重跑</label>
+      <label class="toggle"><input type="checkbox" name="dry_run" value="1"> 仅预演（dry run）</label>
     </div>
     <div id="datasetPrefillNote" class="ok"></div>
     <div class="actions">
@@ -267,6 +270,8 @@ a.file-link { color: #1665c0; text-decoration: none; margin-right: 12px; }
   <h2>流程结果</h2>
   <div id="summaryRow"></div>
   <div id="fileLinks"></div>
+  <div class="tablebox"><table id="qcGateTable"><caption>QC 门控</caption></table></div>
+  <div class="tablebox"><table id="diffAbundanceTable"><caption>细胞类型差异丰度</caption></table></div>
   <div class="tablebox"><table id="keyTable"><caption>关键基因</caption></table></div>
   <div class="tablebox"><table id="koTable"><caption>虚拟敲除 Top</caption></table></div>
   <div class="tablebox"><table id="dockTable"><caption>虚拟筛选</caption></table></div>
@@ -569,13 +574,16 @@ function renderResults(data) {
   const ko = summary.knockout || {};
   const dock = summary.docking || {};
   const fb = summary.cell_feedback || {};
+  const qc = data.qc_metrics || {};
+  const qcGate = qc.qc_gate || summary.qc_gate || {};
   document.getElementById('summaryRow').innerHTML =
     '<p class="muted">单细胞：' + esc(summary.single_cell ? summary.single_cell.dataset || '' : '') +
     '；关键基因：' + esc(summary.key_genes !== undefined ? summary.key_genes : data.key_genes.length) +
     '；敲除评分基因数：' + esc(ko.genes_scored !== undefined ? ko.genes_scored : 0) +
     '；对接成功：' + esc(dock.ok !== undefined ? dock.ok : 0) +
     '；失败：' + esc(dock.failed !== undefined ? dock.failed : 0) +
-    '；细胞反馈匹配基因：' + esc(fb.genes_matched !== undefined ? fb.genes_matched : 0) + '</p>';
+    '；细胞反馈匹配基因：' + esc(fb.genes_matched !== undefined ? fb.genes_matched : 0) +
+    '；QC 门控：' + esc(qcGate.status || 'skipped') + '</p>';
   const links = document.getElementById('fileLinks');
   links.innerHTML = '';
   (data.files || []).forEach((name) => {
@@ -585,6 +593,24 @@ function renderResults(data) {
     a.textContent = name.split('/').pop();
     links.appendChild(a);
   });
+  const qcChecks = (qcGate.checks || []).map((c) => ({
+    name: c.name,
+    level: c.level,
+    ok: c.ok ? '通过' : '未通过',
+    message: c.message,
+  }));
+  const qcRows = qcChecks.length
+    ? qcChecks
+    : [{
+        name: 'QC 门控',
+        level: qcGate.status || 'skipped',
+        ok: qcGate.status === 'pass' ? '通过' : qcGate.status,
+        message: qcGate.summary || '',
+      }];
+  renderTable('qcGateTable', qcRows, ['name', 'level', 'ok', 'message']);
+  renderTable('diffAbundanceTable', data.differential_abundance, [
+    'celltype', 'n_cells', 'chi2', 'p_value', 'p_adjust', 'significant', 'direction'
+  ]);
   renderTable('keyTable', data.key_genes, ['rank', 'gene', 'direction', 'avg_log2fc', 'p_val_adj']);
   renderTable('koTable', data.knockout, ['rank', 'gene', 'target_class', 'target_score', 'knockout_score']);
   renderTable('dockTable', data.docking, ['gene', 'status', 'pdb_id', 'ligand_count', 'hits', 'best_affinity']);

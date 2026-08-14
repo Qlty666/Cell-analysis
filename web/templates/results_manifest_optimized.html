@@ -147,7 +147,7 @@ footer { color: #64748b; font-size: 12px; margin: 30px 0 8px; }
 &lt;workdir&gt;/                       # 全自动流水线工作目录
 ├─ data/knockout/               # 04 阶段敲除输入（不列入结果清单）
 ├─ outputs/
-│  ├─ integration/              # 02/03/06/07/08 阶段结果数据与汇总
+│  ├─ integration/              # 02/03/06/07/08 阶段结果数据、QC 门控与差异丰度
 │  └─ run_001/results/
 │     ├─ 01_analysis/           # 单靶点对接分析：figures + data
 │     ├─ 02_redock/             # 精修重对接：figures + data
@@ -256,6 +256,18 @@ footer { color: #64748b; font-size: 12px; margin: 30px 0 8px; }
       <tr><td><code>data/09_cellchat/fig_40_cellchat_communication_weight.csv</code></td><td>CellChat 通讯权重</td><td><span class="badge data">结果数据</span></td><td>通讯强度 <span class="badge opt">条件</span></td></tr>
       <tr><td><code>data/09_cellchat/fig_42_cellchat_pathways.csv</code></td><td>CellChat 通路结果</td><td><span class="badge data">结果数据</span></td><td>通路通讯结果 <span class="badge opt">条件</span></td></tr>
       <tr><td><code>data/09_cellchat/cellchat_object.rds</code></td><td>CellChat 对象</td><td><span class="badge data">结果数据</span></td><td>完整通讯分析对象 <span class="badge opt">条件</span></td></tr>
+    </tbody>
+  </table>
+</div>
+
+<div class="card">
+  <h2>QC 门控与细胞类型差异丰度</h2>
+  <p class="muted">位置：<span class="path">&lt;workdir&gt;/outputs/integration/</span></p>
+  <table>
+    <thead><tr><th>文件</th><th>内容</th><th>类型</th><th>用途</th></tr></thead>
+    <tbody>
+      <tr><td><code>differential_abundance.csv</code></td><td>条件间细胞类型组成差异检验（2×2 卡方 + BH FDR）</td><td><span class="badge data">结果数据</span></td><td>检查细胞比例偏移</td></tr>
+      <tr><td><code>qc_metrics.json</code></td><td>QC 汇总与门控结果（pass/warn/fail）</td><td><span class="badge data">结果数据</span></td><td>数据质量门控</td></tr>
     </tbody>
   </table>
 </div>
