@@ -3,11 +3,13 @@
 
 from __future__ import annotations
 
+import argparse
 import json
 import sys
 import tempfile
 import unittest
 from pathlib import Path
+from unittest import mock
 
 import numpy as np
 import pandas as pd
@@ -19,12 +21,23 @@ if str(APP_ROOT / "src") not in sys.path:
 from pipeline.integration import (  # noqa: E402
     STAGES,
     _clear_downstream_markers,
+    _download_pdb,
     _extract_cocrystal_ligands,
     _invalidate_markers_for_changed_root,
+    _stage_outdated,
+    _stage_output_paths,
+    _stage_outputs_ready,
+    _stage_signature,
+    _valid_docking_box,
+    _write_stage_marker,
     _write_run_context,
     build_knockout_inputs,
+    collect_qc_metrics,
+    evaluate_qc_gate,
     extract_key_genes,
     main,
+    run_differential_abundance,
+    write_qc_metrics,
 )
 from pipeline.integration import IntegrationError  # noqa: E402
 from pipeline.cell_feedback import (  # noqa: E402
@@ -93,6 +106,52 @@ def _write_pseudobulk(workdir: Path, n_genes: int = 24) -> None:
             "cell_type": ["Hepatocyte", "T_NK", "Hepatocyte", "T_NK"],
         }
     ).to_csv(pseudo / "pseudobulk_metadata.csv", index=False)
+
+
+def _pipeline_args(
+    config_path: Path,
+    docking_config: Path,
+    output: Path,
+    workdir: Path,
+    **overrides,
+) -> argparse.Namespace:
+    values = {
+        "config": str(config_path),
+        "docking_config": str(docking_config),
+        "accession": "GSE999999",
+        "species": "hs",
+        "skip_scrna": True,
+        "skip_download": False,
+        "skip_deps": True,
+        "qc_gate": {"enabled": True},
+        "differential_abundance": {"enabled": True},
+        "top_genes": 10,
+        "keep_all_genes": False,
+        "gene_blacklist": [],
+        "skip_evidence_fetch": True,
+        "evidence_workers": 2,
+        "evidence_timeout": 30,
+        "skip_pseudobulk": False,
+        "case_label": None,
+        "normal_label": None,
+        "ko_top_n": None,
+        "depmap_csv": None,
+        "skip_knockout": True,
+        "docking_targets": 0,
+        "ligand_library": None,
+        "skip_docking": True,
+        "feedback_top_n": 5,
+        "feedback_max_features": 3,
+        "feedback_timeout": 60,
+        "skip_cell_feedback": True,
+        "dry_run": False,
+        "force": False,
+        "start_stage": None,
+        "output": str(output),
+        "workdir": str(workdir),
+    }
+    values.update(overrides)
+    return argparse.Namespace(**values)
 
 
 class TestExtractKeyGenes(unittest.TestCase):
@@ -535,6 +594,287 @@ class TestFullPipeline(unittest.TestCase):
             )
             self.assertEqual(code, 1)
             self.assertFalse((stage_dir / "01_single_cell.done").exists())
+
+
+class TestStageProvenance(unittest.TestCase):
+    def test_signature_change_invalidates_stage(self):
+        with tempfile.TemporaryDirectory() as tmp:
+            base = Path(tmp)
+            cfg = base / "full_pipeline_config.json"
+            cfg.write_text(
+                json.dumps({"accession": "GSE999999"}),
+                encoding="utf-8",
+            )
+            dock = base / "docking_config.json"
+            dock.write_text("{}", encoding="utf-8")
+            workdir = base / "work"
+            output = base / "single_cell"
+            output.mkdir()
+            args = _pipeline_args(cfg, dock, output, workdir)
+            ctx = {
+                "single_cell_root": output,
+                "workdir": workdir,
+                "docking_config": dock,
+            }
+            signature = _stage_signature("02", args, workdir, ctx)
+            _write_stage_marker(workdir, "02", "key_targets", signature)
+            outdated, _ = _stage_outdated(
+                workdir,
+                "02",
+                "key_targets",
+                signature,
+                True,
+            )
+            self.assertFalse(outdated)
+
+            args.top_genes = 25
+            new_signature = _stage_signature("02", args, workdir, ctx)
+            self.assertNotEqual(signature, new_signature)
+            outdated, reason = _stage_outdated(
+                workdir,
+                "02",
+                "key_targets",
+                new_signature,
+                True,
+            )
+            self.assertTrue(outdated)
+            self.assertIn("parameters", reason)
+
+    def test_legacy_plain_marker_is_outdated(self):
+        with tempfile.TemporaryDirectory() as tmp:
+            base = Path(tmp)
+            cfg = base / "full_pipeline_config.json"
+            cfg.write_text(
+                json.dumps({"accession": "GSE999999"}),
+                encoding="utf-8",
+            )
+            dock = base / "docking_config.json"
+            dock.write_text("{}", encoding="utf-8")
+            workdir = base / "work"
+            output = base / "single_cell"
+            output.mkdir()
+            args = _pipeline_args(cfg, dock, output, workdir)
+            marker_dir = (
+                workdir / "outputs" / "integration" / ".stages"
+            )
+            marker_dir.mkdir(parents=True, exist_ok=True)
+            (marker_dir / "03_evidence.done").write_text(
+                "old plain marker",
+                encoding="utf-8",
+            )
+            signature = _stage_signature("03", args, workdir, {})
+            outdated, reason = _stage_outdated(
+                workdir,
+                "03",
+                "evidence",
+                signature,
+                True,
+            )
+            self.assertTrue(outdated)
+            self.assertIn("no marker", reason)
+
+
+class TestQcGate(unittest.TestCase):
+    def _write_summary(self, root: Path) -> None:
+        (root / "results").mkdir(parents=True, exist_ok=True)
+        (root / "results" / "summary.json").write_text(
+            json.dumps(
+                {
+                    "n_cells_after_qc": 50,
+                    "n_genes": 500,
+                    "deg_total": 10,
+                }
+            ),
+            encoding="utf-8",
+        )
+
+    def test_fail_when_thresholds_violated(self):
+        with tempfile.TemporaryDirectory() as tmp:
+            root = Path(tmp) / "single_cell"
+            workdir = Path(tmp) / "work"
+            self._write_summary(root)
+            config = {
+                "enabled": True,
+                "min_cells_after_qc": 100,
+                "min_genes": 1000,
+                "min_deg_genes": 5,
+                "max_doublet_rate": 0.3,
+                "require_pseudobulk": False,
+                "fail_on_missing_metrics": False,
+            }
+            metrics = collect_qc_metrics(root, workdir)
+            gate = evaluate_qc_gate(metrics, config)
+            self.assertEqual(gate["status"], "fail")
+            written = write_qc_metrics(workdir, root, config)
+            self.assertEqual(written["qc_gate"]["status"], "fail")
+            self.assertTrue(
+                (
+                    workdir / "outputs" / "integration" / "qc_metrics.json"
+                ).exists()
+            )
+
+    def test_pass_when_metrics_ok(self):
+        with tempfile.TemporaryDirectory() as tmp:
+            root = Path(tmp) / "single_cell"
+            workdir = Path(tmp) / "work"
+            self._write_summary(root)
+            config = {
+                "enabled": True,
+                "min_cells_after_qc": 10,
+                "min_genes": 100,
+                "min_deg_genes": 1,
+                "max_doublet_rate": None,
+                "require_pseudobulk": False,
+                "fail_on_missing_metrics": False,
+            }
+            gate = evaluate_qc_gate(collect_qc_metrics(root, workdir), config)
+            self.assertEqual(gate["status"], "pass")
+
+
+class TestDifferentialAbundance(unittest.TestCase):
+    def test_composition_shift_detected(self):
+        with tempfile.TemporaryDirectory() as tmp:
+            root = Path(tmp) / "single_cell"
+            ann_dir = root / "results" / "data" / "04_annotation"
+            ann_dir.mkdir(parents=True)
+            rows = []
+            for i in range(40):
+                rows.append(
+                    {
+                        "cell": f"t{i}",
+                        "celltype_annot": "T_cell",
+                        "condition": "Tumor",
+                    }
+                )
+            for i in range(10):
+                rows.append(
+                    {
+                        "cell": f"h{i}",
+                        "celltype_annot": "Hepatocyte",
+                        "condition": "Tumor",
+                    }
+                )
+            for i in range(10):
+                rows.append(
+                    {
+                        "cell": f"n{i}",
+                        "celltype_annot": "T_cell",
+                        "condition": "Normal",
+                    }
+                )
+            for i in range(40):
+                rows.append(
+                    {
+                        "cell": f"nh{i}",
+                        "celltype_annot": "Hepatocyte",
+                        "condition": "Normal",
+                    }
+                )
+            pd.DataFrame(rows).to_csv(
+                ann_dir / "fig_05_16_17_cell_annotations.csv",
+                index=False,
+            )
+            out = Path(tmp) / "integration"
+            summary = run_differential_abundance(
+                root,
+                out,
+                {"min_cells": 5, "fdr": 0.05},
+            )
+            self.assertEqual(summary["status"], "completed")
+            self.assertGreaterEqual(summary["celltypes_tested"], 2)
+            self.assertGreaterEqual(summary["significant_celltypes"], 1)
+            frame = pd.read_csv(out / "differential_abundance.csv")
+            self.assertLessEqual(frame["p_adjust"].max(), 1.0)
+            self.assertGreaterEqual(frame["p_adjust"].min(), 0.0)
+
+
+class TestDockingRobustness(unittest.TestCase):
+    def test_valid_docking_box(self):
+        self.assertTrue(_valid_docking_box([1.0, 2.0, 3.0], [20, 20, 20]))
+        self.assertFalse(_valid_docking_box([0, 0, 0], [0, 0, 0]))
+        self.assertFalse(_valid_docking_box([float("nan"), 0, 0], [20, 20, 20]))
+
+    def test_pdb_download_retries_and_writes(self):
+        class FakeResponse:
+            def __enter__(self):
+                return self
+
+            def __exit__(self, *args):
+                return False
+
+            def read(self):
+                return (
+                    b"ATOM      1  N   MET A   1       1.000   2.000   3.000"
+                    b"  1.00 20.00           N\nEND\n"
+                )
+
+        with tempfile.TemporaryDirectory() as tmp:
+            with mock.patch("pipeline.integration.time.sleep", return_value=None):
+                with mock.patch(
+                    "pipeline.integration.urllib.request.urlopen",
+                    side_effect=[OSError("boom"), FakeResponse()],
+                ) as urlopen:
+                    out = _download_pdb("1ABC", Path(tmp), timeout=5)
+            self.assertIsNotNone(out)
+            self.assertEqual(urlopen.call_count, 2)
+            self.assertTrue(out.read_text(encoding="utf-8").startswith("ATOM"))
+
+
+class TestDryRun(unittest.TestCase):
+    def test_dry_run_returns_zero_without_outputs(self):
+        with tempfile.TemporaryDirectory() as tmp:
+            base = Path(tmp)
+            root = base / "single_cell"
+            workdir = base / "work"
+            cfg = base / "full_pipeline_config.json"
+            cfg.write_text(
+                json.dumps(
+                    {
+                        "accession": "GSE999999",
+                        "single_cell_output": str(root),
+                        "workdir": str(workdir),
+                        "species": "hs",
+                    }
+                ),
+                encoding="utf-8",
+            )
+            dock = base / "docking_config.json"
+            dock.write_text("{}", encoding="utf-8")
+            code = main(
+                [
+                    "--config",
+                    str(cfg),
+                    "--docking-config",
+                    str(dock),
+                    "--skip-scrna",
+                    "--dry-run",
+                ]
+            )
+            self.assertEqual(code, 0)
+
+
+class TestStageOutputVerification(unittest.TestCase):
+    def test_output_paths_are_checked(self):
+        with tempfile.TemporaryDirectory() as tmp:
+            base = Path(tmp)
+            cfg = base / "full_pipeline_config.json"
+            cfg.write_text(
+                json.dumps({"accession": "GSE999999"}),
+                encoding="utf-8",
+            )
+            dock = base / "docking_config.json"
+            dock.write_text("{}", encoding="utf-8")
+            workdir = base / "work"
+            output = base / "single_cell"
+            output.mkdir()
+            args = _pipeline_args(cfg, dock, output, workdir)
+            ctx = {"single_cell_root": output}
+            paths = _stage_output_paths("03", workdir, ctx, args)
+            self.assertEqual(len(paths), 1)
+            self.assertFalse(_stage_outputs_ready("03", workdir, ctx, args))
+            paths[0].parent.mkdir(parents=True, exist_ok=True)
+            paths[0].write_text("evidence", encoding="utf-8")
+            self.assertTrue(_stage_outputs_ready("03", workdir, ctx, args))
 
 
 if __name__ == "__main__":

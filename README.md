@@ -1,6 +1,6 @@
 # Liver Cancer Bioinformatics Workflow
 
-> 当前版本：0.4.0
+> 当前版本：0.6.0
 
 面向肝癌研究的本地生信自动化工作流，整合三条可实际运行的流水线：
 
@@ -84,7 +84,13 @@
 08 report                生成集成 HTML 报告和 run_manifest.json
 ```
 
-每一阶段写标记文件，重跑时自动断点续跑；`--start-stage` 可从任意阶段开始。
+每一阶段写标记文件，重跑时自动断点续跑；`--start-stage` 可从任意阶段开始。标记文件不再只是时间戳：每个阶段会记录配置和输入指纹（`signature`），当 `top_genes`、物种、标签、证据/对接配置、关键基因表或证据表发生变化时，会自动使当前阶段及下游阶段失效，避免“参数改了但结果仍是旧值”的静默错误。每个阶段完成后还会按 `STAGE_OUTPUTS` 校验必需输出，缺失或空文件不会写入完成标记。
+
+新增 `--dry-run`，不执行任何阶段，只打印每个阶段会 `RUN` 还是 `DONE` 及原因；新增 `--skip-qc-gate` 和 `--skip-differential-abundance` 可分别关闭 QC 门控和细胞组成差异检验。
+
+单细胞阶段完成后会汇总 `qc_metrics.json`，包括细胞数、基因数、双细胞率、伪 bulk 使用情况和下游阶段统计，并按 `config/full_pipeline_config.json` 中的 `qc_gate` 阈值给出 `pass/warn/fail` 门控结果；默认阈值不强制拦截，需要拦截时在配置中填写阈值即可。差异表达阶段同时补做细胞类型组成差异检验（2×2 卡方 + Benjamini-Hochberg FDR），输出 `differential_abundance.csv` 并写入集成报告，避免“表达没变但比例变了”的组成偏移被漏掉。
+
+虚拟筛选阶段增加对接盒有效性校验：中心/尺寸非有限值或尺寸非正数时跳过该靶点并写明原因；PDB 下载失败会自动重试 3 次，避免单次网络抖动直接丢弃有结构靶点。
 
 细胞反馈阶段会把虚拟敲除评分和虚拟筛选命中合并成反馈清单，重新读取单细胞 Seurat 对象，为每个候选基因写入细胞级表达、计算筛选靶点模块评分，并输出细胞类型表达汇总、模块富集检验、条件×细胞类型汇总和 UMAP/DotPlot/热图等结果；同时生成 `feedback_targets.csv`，把筛选优先级与细胞表达特异性合并为 `cell_support_score`，用于下一轮靶点收敛。
 
@@ -292,6 +298,8 @@ python scripts\run_full_pipeline.py \
 - `--ligand-library`：自定义配体库（`.smi` / `.sdf` / `.csv`），也可放到 `dock/data/ligands/`。
 - `--case-label` / `--normal-label`：虚拟敲除的病例/正常分组标签。
 - `--start-stage 08`：从指定阶段继续，之前阶段自动标记为跳过。
+- `--dry-run`：不执行任何阶段，只打印每个阶段会运行还是跳过及原因。
+- `--skip-qc-gate` / `--skip-differential-abundance`：分别关闭 QC 门控和细胞组成差异检验。
 
 查看阶段清单：
 
@@ -579,6 +587,17 @@ GSE165816 和 TCGA PanCancer Atlas 仅用于真实数据验证。
 MIT License. See `LICENSE` for details.
 
 ## 9. 更新日志
+
+### v0.6.0
+
+- 全自动流水线标记升级为“配置/输入指纹”标记：每个阶段记录签名，参数、物种、标签、配置或输入表变化时自动使当前及下游阶段失效，修复“改参数后仍跳过旧结果”的静默错误。
+- 新增阶段输出校验：每个阶段按必需输出清单验证，缺失或空输出不会写入完成标记，重跑时自动重建。
+- 新增 QC 门控：单细胞阶段后汇总 `qc_metrics.json`，按 `qc_gate` 阈值输出 `pass/warn/fail`，可配置最小细胞数、最小基因数、最大双细胞率和伪 bulk 强制要求。
+- 新增细胞类型组成差异检验：基于单细胞注释表计算条件间细胞比例变化（2×2 卡方 + BH FDR），输出 `differential_abundance.csv`，与差异表达配对防止漏掉组成偏移。
+- 虚拟筛选加固：对接盒中心/尺寸校验、非法盒自动跳过并记录原因；PDB 下载失败自动重试 3 次。
+- 全自动流水线新增 `--dry-run`、`--skip-qc-gate`、`--skip-differential-abundance`。
+- 集成报告新增 QC 门控和差异丰度结果表，汇总信息同步写入 `integration_summary.json`。
+- 补充阶段签名失效、QC 门控、差异丰度、对接盒校验、PDB 重试和 dry-run 单元测试。
 
 ### v0.4.0
 
