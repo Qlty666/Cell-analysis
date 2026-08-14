@@ -88,6 +88,28 @@ class TestSingleCellFigureList(unittest.TestCase):
             self.assertIn("barplot", by_name[name]["styles"])
 
 
+class TestJobRecordPersistence(unittest.TestCase):
+    def test_web_pages_do_not_clear_job_records_on_reload(self):
+        web_ui_source = (APP_ROOT / "web" / "web_ui.py").read_text(
+            encoding="utf-8"
+        )
+        self.assertNotIn("clearJobRecordsOnReload", web_ui_source)
+        self.assertNotIn("nav.type === 'reload'", web_ui_source)
+
+        for name in (
+            "full_page_template.html",
+            "web_page_template.html",
+            "dock_page_template.html",
+            "tasks_template.html",
+            "results_manifest_optimized.html",
+        ):
+            template = (APP_ROOT / "web" / "templates" / name).read_text(
+                encoding="utf-8"
+            )
+            self.assertNotIn("clearJobRecordsOnReload", template)
+            self.assertNotIn("nav.type === 'reload'", template)
+
+
 class TestHeartbeatAutoShutdown(unittest.TestCase):
     def setUp(self) -> None:
         with HEARTBEAT_LOCK:

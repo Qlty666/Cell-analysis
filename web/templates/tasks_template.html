@@ -245,7 +245,7 @@ button.danger:hover { background: #991b1b; }
   <div id="historyList"></div>
 </div>
 
-<footer>列表每 2 秒自动刷新；刷新或关闭本页只会清除浏览器会话记录，后台任务继续运行。</footer>
+<footer>列表每 2 秒自动刷新；刷新本页不会清除浏览器会话记录，后台任务继续运行。</footer>
 </div>
 
 <script>
@@ -491,14 +491,6 @@ setInterval(pollNotifications, 2000);
 loadHistory();
 setInterval(loadHistory, 5000);
 
-try {
-  const nav = performance.getEntriesByType('navigation')[0];
-  if (nav && nav.type === 'reload') {
-    sessionStorage.removeItem('liver_ui_single_job');
-    sessionStorage.removeItem('liver_ui_dock_job');
-    sessionStorage.removeItem('liver_ui_full_job');
-  }
-} catch (e) {}
 </script>
 <div id="jobToast" class="job-toast" hidden>
   <div class="job-toast-title" id="jobToastTitle"></div>
