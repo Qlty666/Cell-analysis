@@ -248,6 +248,7 @@ def _cleanup_stale_web_ui(host: str, port: int) -> bool:
 FIGURES = [
     {"file": "fig_01_qc_raw_violin.png", "label": "QC 小提琴图（原始）"},
     {"file": "fig_01_qc_filtered_violin.png", "label": "QC 小提琴图（过滤后）"},
+    {"file": "fig_48_qc_pvalue_comparison.png", "label": "QC 质控差异度 P 值"},
     {"file": "fig_02_doublet_scores.png", "label": "双细胞得分图"},
     {"file": "fig_03_umap_clusters.png", "label": "UMAP 聚类图"},
     {"file": "fig_04_umap_condition.png", "label": "UMAP 分组图"},

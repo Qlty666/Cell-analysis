@@ -29,6 +29,7 @@ DATASETS = [
 REQUIRED_FIGURES = [
     "fig_01_qc_raw_violin.png",
     "fig_01_qc_filtered_violin.png",
+    "fig_48_qc_pvalue_comparison.png",
     "fig_02_doublet_scores.png",
     "fig_03_umap_clusters.png",
     "fig_04_umap_condition.png",
