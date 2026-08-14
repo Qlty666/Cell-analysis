@@ -15,7 +15,7 @@ import uuid
 import webbrowser
 from http.server import BaseHTTPRequestHandler, ThreadingHTTPServer
 from pathlib import Path
-from urllib.parse import parse_qs, urlparse
+from urllib.parse import parse_qs, urlencode, urlparse
 
 WEB_DIR = Path(__file__).resolve().parent
 APP_ROOT = WEB_DIR.parent
@@ -995,6 +995,10 @@ def dataset_search_request(data: dict) -> dict:
 
     DATASET_SEARCH_DIR.mkdir(parents=True, exist_ok=True)
     csv_path, json_path = sd.write_outputs(rows, DATASET_SEARCH_DIR)
+    result_rows = [
+        dict(row, full_pipeline_url=dataset_full_pipeline_url(row))
+        for row in rows
+    ]
     return {
         "query": query_text,
         "disease": disease,
@@ -1002,7 +1006,7 @@ def dataset_search_request(data: dict) -> dict:
         "model_applied": model_applied,
         "model_path": model_path,
         "count": len(rows),
-        "results": rows,
+        "results": result_rows,
         "output_dir": str(DATASET_SEARCH_DIR),
         "csv_url": f"/datasets/file?name={csv_path.name}",
         "json_url": f"/datasets/file?name={json_path.name}",
@@ -1121,6 +1125,16 @@ def dataset_file_path(name: str) -> Path | None:
     if target.parent != DATASET_SEARCH_DIR.resolve() or not target.is_file():
         return None
     return target
+
+
+def dataset_full_pipeline_url(row: dict) -> str:
+    """Build the full-pipeline page URL prefilled with a searched dataset."""
+    accession = validate_accession(str(row.get("accession") or ""))
+    params = {"accession": accession}
+    title = str(row.get("title") or "").strip()
+    if title:
+        params["dataset_title"] = title
+    return "/full?" + urlencode(params)
 
 
 def _single_report_path(info: dict | None = None, output: str = "") -> Path | None:
