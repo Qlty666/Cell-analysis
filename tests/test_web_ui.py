@@ -519,5 +519,50 @@ class TestResultDirectoryQueries(unittest.TestCase):
             )
 
 
+class TestTemplatePolish(unittest.TestCase):
+    def _read(self, name: str) -> str:
+        path = APP_ROOT / "web" / "templates" / name
+        return path.read_text(encoding="utf-8", errors="replace")
+
+    def test_shared_css_exists(self):
+        css = (APP_ROOT / "web" / "static" / "app.css").read_text(
+            encoding="utf-8"
+        )
+        self.assertIn(".form-section", css)
+        self.assertIn(".stat-card", css)
+
+    def test_full_page_has_layout_and_form_helpers(self):
+        html = self._read("full_page_template.html")
+        for token in [
+            "page-head",
+            "form-section",
+            "saveFormState",
+            "restoreFormState",
+            "resultStats",
+            "skip_differential_abundance",
+        ]:
+            self.assertIn(token, html)
+
+    def test_single_cell_page_has_collapsible_sections(self):
+        html = self._read("web_page_template.html")
+        for token in ["form-section", "SINGLE_FORM_KEY", "saveFormState"]:
+            self.assertIn(token, html)
+
+    def test_dataset_page_groups_search_options(self):
+        html = self._read("datasets_template.html")
+        self.assertIn("form-section", html)
+        self.assertIn("过滤与下载选项", html)
+
+    def test_tasks_page_has_stat_cards(self):
+        html = self._read("tasks_template.html")
+        for token in ["statTotal", "statRunning", "statQueued", "statPaused"]:
+            self.assertIn(token, html)
+
+    def test_results_page_has_filter_toolbar(self):
+        html = self._read("results_manifest_optimized.html")
+        self.assertIn("resultFilter", html)
+        self.assertIn("filterResults", html)
+
+
 if __name__ == "__main__":
     unittest.main()

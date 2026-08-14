@@ -3,6 +3,7 @@
 <head>
 <meta charset="utf-8">
 <meta name="viewport" content="width=device-width, initial-scale=1">
+<link rel="stylesheet" href="/static/app.css">
 <title>全自动流水线结果清单</title>
 <style>
 body {
@@ -134,8 +135,21 @@ footer { color: #64748b; font-size: 12px; margin: 30px 0 8px; }
   <a href="/tasks" class="nav-right">任务进度</a>
 </div>
 <div class="wrap">
-<h1>全自动流水线结果清单</h1>
-<p class="sub">仅列出各阶段可交付的结果图和结果数据；路径以默认参数 <code>--workdir dock</code>、<code>--output ../liver_cancer</code> 为例，<code>&lt;gene&gt;</code> 表示实际参与对接的基因名。报告、清单、断点、日志、配置、原始证据等过程文件不列入。</p>
+<div class="page-head">
+  <div class="page-title">
+    <h1>全自动流水线结果清单</h1>
+    <p class="page-sub">仅列出各阶段可交付的结果图和结果数据；路径以默认参数 <code>--workdir dock</code>、<code>--output ../liver_cancer</code> 为例，<code>&lt;gene&gt;</code> 表示实际参与对接的基因名。报告、清单、断点、日志、配置、原始证据等过程文件不列入。</p>
+  </div>
+  <div class="page-actions">
+    <a class="link-button" href="/full">返回全自动流水线</a>
+    <a class="link-button" href="/tasks">任务进度</a>
+  </div>
+</div>
+
+<div class="toolbar">
+  <input type="search" id="resultFilter" placeholder="按文件名、内容或用途筛选..." oninput="filterResults(this.value)">
+  <button type="button" class="secondary" onclick="clearResultFilter()">清空筛选</button>
+</div>
 
 <div class="card">
   <h2>输出目录结构</h2>
@@ -385,6 +399,17 @@ try {
     sessionStorage.removeItem('liver_ui_full_job');
   }
 } catch (e) {}
+function filterResults(query) {
+  query = (query || '').toLowerCase().trim();
+  document.querySelectorAll('.card table tbody tr').forEach((tr) => {
+    tr.style.display = tr.textContent.toLowerCase().includes(query) ? '' : 'none';
+  });
+}
+function clearResultFilter() {
+  const input = document.getElementById('resultFilter');
+  if (input) input.value = '';
+  filterResults('');
+}
 </script>
 </body>
 </html>
