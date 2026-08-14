@@ -189,6 +189,17 @@ a { color: #1665c0; text-decoration: none; }
 
 <div class="card">
   <h2>搜索结果</h2>
+  <div class="grid" style="margin-bottom: 8px;">
+    <label>数据类型过滤
+      <select id="dataTypeFilter" onchange="applyDataTypeFilter(this.value)">
+        <option value="all">全部</option>
+        <option value="single-cell">single-cell（支持全自动流水线）</option>
+        <option value="bulk">bulk（仅可下载）</option>
+        <option value="other">other</option>
+      </select>
+    </label>
+  </div>
+  <p class="muted">全自动流水线仅支持 single-cell 数据集；bulk 数据集可直接下载，但无法直接运行全自动流水线。</p>
   <div id="resultMeta" class="muted"></div>
   <div class="tablebox">
     <table>
@@ -214,6 +225,8 @@ function esc(value) {
   return String(value == null ? '' : value).replace(/[&<>"']/g, c => ({'&':'&amp;','<':'&lt;','>':'&gt;','"':'&quot;',"'":'&#39;'}[c]));
 }
 let lastResults = [];
+let lastData = null;
+let dataTypeFilter = 'all';
 let downloadTimer = null;
 
 async function searchDatasets() {
@@ -229,9 +242,10 @@ async function searchDatasets() {
     const result = await resp.json();
     if (!resp.ok) throw new Error(result.error || '搜索失败');
     lastResults = result.results || [];
-    renderResults(result);
+    lastData = result;
+    renderResults();
     msg.className = 'ok';
-    msg.textContent = '匹配数据集：' + result.count;
+    msg.textContent = '匹配数据集：' + result.count + '（当前显示：' + filteredResults().length + '）';
     document.getElementById('downloadTopBtn').disabled = lastResults.length === 0;
   } catch (e) {
     msg.className = 'error';
@@ -243,7 +257,22 @@ async function searchDatasets() {
   }
 }
 
-function renderResults(data) {
+function filteredResults() {
+  if (dataTypeFilter === 'all') return lastResults;
+  return lastResults.filter(row => (row.data_type || 'other') === dataTypeFilter);
+}
+
+function applyDataTypeFilter(value) {
+  dataTypeFilter = value;
+  if (!lastData) return;
+  renderResults();
+  const msg = document.getElementById('message');
+  msg.className = 'ok';
+  msg.textContent = '匹配数据集：' + lastData.count + '（当前显示：' + filteredResults().length + '）';
+}
+
+function renderResults() {
+  const data = lastData || {};
   const meta = document.getElementById('resultMeta');
   const parts = ['查询：' + esc(data.query)];
   if (data.model_applied) parts.push('ML/DL 重排序：' + esc(data.model_path));
@@ -251,11 +280,12 @@ function renderResults(data) {
   parts.push('JSON：<a class="file-link" href="' + esc(data.json_url) + '">下载</a>');
   meta.innerHTML = parts.join(' | ');
   const body = document.getElementById('resultBody');
-  if (!data.results || !data.results.length) {
+  const rows = filteredResults();
+  if (!rows.length) {
     body.innerHTML = '<tr><td colspan="12" class="muted">未找到匹配数据集</td></tr>';
     return;
   }
-  body.innerHTML = data.results.map((row, index) => {
+  body.innerHTML = rows.map((row, index) => {
     const score = row.relevance_score == null ? '' : Number(row.relevance_score).toFixed(3);
     const type = row.data_type || 'other';
     const badge = '<span class="badge ' + esc(type) + '">' + esc(type) + '</span>';
@@ -285,7 +315,7 @@ async function startDownload(accession) {
 
 async function downloadTop() {
   const n = Math.max(1, parseInt(document.getElementById('topN').value || '1', 10));
-  const rows = lastResults.slice(0, n);
+  const rows = filteredResults().slice(0, n);
   if (!rows.length) return;
   const form = new URLSearchParams();
   rows.forEach(row => form.append('accessions', row.accession));
