@@ -22,6 +22,30 @@ BULK_COUNT_TABLE_RE = re.compile(
     re.IGNORECASE,
 )
 
+SINGLE_CELL_MATRIX_RE = re.compile(
+    r"(?:^|[/_. -])filtered[-_. ]?feature[-_. ]?bc[-_. ]?matrix"
+    r"|(?:^|[/_. -])raw[-_. ]?feature[-_. ]?bc[-_. ]?matrix"
+    r"|(?:^|[/_. -])single[-_. ]?cell|singlecell"
+    r"|scrna|scrnaseq|cellranger|10xgenomics|seurat|singlecellexperiment",
+    re.IGNORECASE,
+)
+
+
+def _files_look_bulk(files: dict) -> bool:
+    matrices = files.get("matrix") or []
+    barcodes = files.get("barcodes") or []
+    genes = files.get("genes") or []
+    if any(BULK_COUNT_TABLE_RE.search(name) for name in matrices):
+        return True
+    if any(
+        name.lower().endswith((".rds", ".h5", ".h5ad", ".loom"))
+        for name in matrices
+    ):
+        return False
+    return bool(matrices) and not barcodes and not genes and not any(
+        SINGLE_CELL_MATRIX_RE.search(name) for name in matrices
+    )
+
 
 def _curl() -> str:
     found = shutil.which("curl.exe") or shutil.which("curl")
@@ -138,8 +162,17 @@ def _select_files(names: list[str]) -> dict:
         "barcodes": barcodes,
         "genes": genes,
         "metadata": metadata,
-        "bulk": bool(matrices) and not barcodes and not genes,
+        "bulk": _files_look_bulk(
+            {"matrix": matrices, "barcodes": barcodes, "genes": genes}
+        ),
     }
+
+
+def _refresh_manifest_mode(manifest: dict) -> dict:
+    files = manifest.get("files")
+    if isinstance(files, dict):
+        manifest["mode"] = "bulk" if _files_look_bulk(files) else "generic"
+    return manifest
 
 
 def _download_files(urls: dict, raw_dir: Path, log) -> dict:
@@ -217,7 +250,9 @@ def ensure_geo_dataset(accession: str, root: Path, log) -> dict:
         not manifest_path.exists()
         and cache_manifest.exists()
     ):
-        cached = json.loads(cache_manifest.read_text(encoding="utf-8"))
+        cached = _refresh_manifest_mode(
+            json.loads(cache_manifest.read_text(encoding="utf-8"))
+        )
         all_files = []
         for group in ["matrix", "barcodes", "genes", "metadata", "series_matrices"]:
             all_files.extend(cached.get("files", {}).get(group, []))
@@ -233,11 +268,17 @@ def ensure_geo_dataset(accession: str, root: Path, log) -> dict:
                 json.dumps(cached, indent=2, ensure_ascii=False),
                 encoding="utf-8",
             )
+            cache_manifest.write_text(
+                json.dumps(cached, indent=2, ensure_ascii=False),
+                encoding="utf-8",
+            )
             log(f"using cached download for {acc}")
             return cached
 
     if manifest_path.exists():
-        manifest = json.loads(manifest_path.read_text(encoding="utf-8"))
+        manifest = _refresh_manifest_mode(
+            json.loads(manifest_path.read_text(encoding="utf-8"))
+        )
         all_files = []
         for group in ["matrix", "barcodes", "genes", "metadata", "series_matrices"]:
             all_files.extend(manifest.get("files", {}).get(group, []))
@@ -246,6 +287,10 @@ def ensure_geo_dataset(accession: str, root: Path, log) -> dict:
             for rel in all_files
         ):
             log(f"{acc} already downloaded; skipping download")
+            manifest_path.write_text(
+                json.dumps(manifest, indent=2, ensure_ascii=False),
+                encoding="utf-8",
+            )
             return manifest
 
     html = _fetch(base)
@@ -337,7 +382,7 @@ def ensure_geo_dataset(accession: str, root: Path, log) -> dict:
 
     manifest = {
         "accession": acc,
-        "mode": "bulk" if downloaded.get("bulk") else "generic",
+        "mode": "generic",
         "organism": organism,
         "files": {
             "matrix": downloaded["matrix"],
@@ -347,6 +392,7 @@ def ensure_geo_dataset(accession: str, root: Path, log) -> dict:
             "series_matrices": series_paths,
         },
     }
+    manifest = _refresh_manifest_mode(manifest)
     manifest_path.write_text(
         json.dumps(manifest, indent=2, ensure_ascii=False),
         encoding="utf-8",
@@ -369,7 +415,7 @@ def ensure_geo_dataset(accession: str, root: Path, log) -> dict:
         encoding="utf-8",
     )
     log(f"manifest written: {manifest_path}")
-    if downloaded.get("bulk"):
+    if manifest["mode"] == "bulk":
         raise RuntimeError(
             f"{acc} is a bulk RNA-seq dataset, not single-cell; "
             "the current full pipeline only supports single-cell datasets. "
