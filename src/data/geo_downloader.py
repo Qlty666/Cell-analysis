@@ -17,6 +17,11 @@ except ImportError:
 
 CACHE_ROOT = Path(__file__).resolve().parents[2] / "data_cache"
 
+BULK_COUNT_TABLE_RE = re.compile(
+    r"(?:^|/)GSM\d+_[^/]+\.(?:txt|tsv|csv)(?:\.gz)?$",
+    re.IGNORECASE,
+)
+
 
 def _curl() -> str:
     found = shutil.which("curl.exe") or shutil.which("curl")
@@ -125,7 +130,7 @@ def _select_files(names: list[str]) -> dict:
             r"matrix|\.mtx|counts?|read_counts|umi_counts|"
             r"rna[-_ ]?seq|rnaseq|expression|\.rds$",
             low,
-        ):
+        ) or BULK_COUNT_TABLE_RE.search(name):
             matrices.append(name)
 
     return {
@@ -133,6 +138,7 @@ def _select_files(names: list[str]) -> dict:
         "barcodes": barcodes,
         "genes": genes,
         "metadata": metadata,
+        "bulk": bool(matrices) and not barcodes and not genes,
     }
 
 
@@ -271,6 +277,7 @@ def ensure_geo_dataset(accession: str, root: Path, log) -> dict:
     }
     downloaded = _download_files(all_urls, raw_dir, log)
     downloaded = _convert_downloaded(downloaded, raw_dir)
+    downloaded["bulk"] = bool(selected["bulk"])
 
     if not downloaded["matrix"]:
         archive_names = [
@@ -300,6 +307,7 @@ def ensure_geo_dataset(accession: str, root: Path, log) -> dict:
         downloaded["metadata"] = [
             "_extracted/" + name for name in inner["metadata"]
         ]
+        downloaded["bulk"] = bool(inner["bulk"])
         downloaded = _convert_downloaded(downloaded, raw_dir)
         log(f"found {len(downloaded['matrix'])} matrix files inside archive")
 
@@ -329,7 +337,7 @@ def ensure_geo_dataset(accession: str, root: Path, log) -> dict:
 
     manifest = {
         "accession": acc,
-        "mode": "generic",
+        "mode": "bulk" if downloaded.get("bulk") else "generic",
         "organism": organism,
         "files": {
             "matrix": downloaded["matrix"],
@@ -361,4 +369,11 @@ def ensure_geo_dataset(accession: str, root: Path, log) -> dict:
         encoding="utf-8",
     )
     log(f"manifest written: {manifest_path}")
+    if downloaded.get("bulk"):
+        raise RuntimeError(
+            f"{acc} is a bulk RNA-seq dataset, not single-cell; "
+            "the current full pipeline only supports single-cell datasets. "
+            "The raw per-sample count files and manifest are still cached "
+            f"under {raw_dir} / {cache_dir} for manual bulk analysis."
+        )
     return manifest

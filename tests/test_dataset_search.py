@@ -41,6 +41,7 @@ class TestDatasetSearch(unittest.TestCase):
         self.assertEqual(row["research_direction"], "single cell")
         self.assertEqual(row["organism"], "Homo sapiens")
         self.assertEqual(row["samples"], "8")
+        self.assertEqual(row["data_type"], "single-cell")
         self.assertIn("GSE125449", row["url"])
 
     def test_to_row_supports_lowercase_esummary_fields(self):
@@ -58,6 +59,28 @@ class TestDatasetSearch(unittest.TestCase):
         self.assertEqual(row["title"], "HCC ChIP-Seq")
         self.assertEqual(row["type"], "Genome binding/occupancy profiling")
         self.assertEqual(row["samples"], "12")
+
+    def test_to_row_classifies_bulk_rna_seq(self):
+        row = search_datasets.to_row(
+            {
+                "Accession": "GSE299321",
+                "Title": "TEAD4 in Gastric Cancer [RNA-Seq]",
+                "Summary": "RNA-seq of gastric cancer cells",
+                "taxon": "Homo sapiens",
+            }
+        )
+        self.assertEqual(row["data_type"], "bulk")
+
+    def test_to_row_defaults_to_other(self):
+        row = search_datasets.to_row(
+            {
+                "Accession": "GSE999999",
+                "Title": "Methylation profiling",
+                "Summary": "array-based",
+                "taxon": "Homo sapiens",
+            }
+        )
+        self.assertEqual(row["data_type"], "other")
 
     def test_doc_summary_counts_samples(self):
         xml = (

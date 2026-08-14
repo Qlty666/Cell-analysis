@@ -375,10 +375,20 @@ def run_pipeline(
         manifest_path = OUTPUT_ROOT / "data" / f"{accession.upper()}_manifest.json"
         if manifest_path.exists():
             try:
-                species = json.loads(
+                manifest = json.loads(
                     manifest_path.read_text(encoding="utf-8")
-                ).get("organism", "hs")
-            except Exception:
+                )
+            except (OSError, ValueError):
+                manifest = {}
+            species = manifest.get("organism", "hs")
+            if manifest.get("mode") == "bulk":
+                raise RuntimeError(
+                    f"{accession} is a bulk RNA-seq dataset, not "
+                    "single-cell; the single-cell pipeline and the full "
+                    "pipeline only support single-cell datasets. Use a "
+                    "single-cell GSE accession instead."
+                )
+            if species not in ("hs", "mm"):
                 species = "hs"
         else:
             species = "hs"

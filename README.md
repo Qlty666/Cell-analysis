@@ -1,6 +1,6 @@
 # Liver Cancer Bioinformatics Workflow
 
-> 当前版本：0.4.0
+> 当前版本：0.4.1
 
 面向肝癌研究的本地生信自动化工作流，整合三条可实际运行的流水线：
 
@@ -368,7 +368,7 @@ python scripts\search_datasets.py \
   --organism "Homo sapiens"
 ```
 
-搜索结束后会在 `data_cache/dataset_search/` 写出 `dataset_search_results.csv` 和 `dataset_search_results.json`。需要下载时追加下载参数：
+搜索结束后会在 `data_cache/dataset_search/` 写出 `dataset_search_results.csv` 和 `dataset_search_results.json`，每行包含 `data_type` 字段（`single-cell` / `bulk` / `other`），网页端也会显示数据类型徽标。需要下载时追加下载参数：
 
 ```bash
 python scripts\search_datasets.py \
@@ -380,7 +380,9 @@ python scripts\search_datasets.py \
 
 也可以用 `--download-top N` 下载搜索结果的前 N 个数据集；下载状态写入 `data_cache/dataset_search/download_results.json`。
 
-网页端搜索结果每行提供“全自动流水线”入口，点击后自动带入 GSE 编号；全自动流水线页也可直接搜索并选择数据集，填入后启动即可复用流水线的自动下载流程。
+网页端搜索结果每行提供“全自动流水线”入口，点击后自动带入 GSE 编号；全自动流水线页也可直接搜索并选择数据集，填入后启动即可复用流水线的自动下载流程。注意：全自动流水线只支持单细胞数据，`bulk` 类型数据集会被识别并明确提示，不会再用“No count matrix files found”这类误导性错误中断。
+
+GEO 下载器会把 RAW tar 中的逐样本 bulk 计数表（如 `GSMxxxx_GCxxxx.txt.gz`）识别为 bulk 数据集：数据文件与 manifest 仍会缓存到 `data_cache/<GSE>` 供手工批量分析，但单细胞与全自动流水线会拒绝继续运行，提示改用单细胞 GSE 编号。
 
 批量随机验证搜索是否命中“疾病+研究方向”数据集：
 
@@ -589,6 +591,13 @@ GSE165816 和 TCGA PanCancer Atlas 仅用于真实数据验证。
 MIT License. See `LICENSE` for details.
 
 ## 9. 更新日志
+
+### v0.4.1
+
+- 修复 bulk RNA-seq 数据集（如 GSE299321）下载时报 `No count matrix files found` 的误导性错误：下载器现可识别 RAW tar 中的逐样本计数表并标记为 bulk 数据集。
+- 单细胞与全自动流水线新增 bulk 数据集检测：遇到 bulk 数据集时明确提示当前流水线仅支持单细胞数据，原始计数文件和 manifest 仍保留在缓存中。
+- GEO 数据集搜索结果新增 `data_type` 字段（`single-cell` / `bulk` / `other`），网页端显示数据类型徽标，bulk 数据集不再提供“全自动流水线”入口。
+- 补充 bulk 检测、manifest 拒绝和搜索分类单元测试。
 
 ### v0.4.0
 
