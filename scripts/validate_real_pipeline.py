@@ -49,6 +49,8 @@ REQUIRED_FIGURES = [
     "fig_21_gsea_kegg.png",
     "fig_22_go_network.png",
     "fig_23_kegg_network.png",
+    "fig_46_go_top5.png",
+    "fig_47_kegg_top5.png",
     "fig_24_ml_feature_importance.png",
     "fig_25_ml_shap.png",
 ]

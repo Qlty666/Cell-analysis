@@ -52,7 +52,7 @@ figure_stage <- function(name) {
   if (num %in% c(3, 4, 14, 15)) return("03_cluster")
   if (num %in% c(5, 6, 7, 16, 17, 18, 19)) return("04_annotation")
   if (num %in% c(8, 9)) return("05_deg")
-  if (num %in% c(10, 11, 12, 13, 20, 21, 22, 23)) return("06_enrichment")
+  if (num %in% c(10, 11, 12, 13, 20, 21, 22, 23, 46, 47)) return("06_enrichment")
   if (num %in% c(24, 25, 43, 44, 45)) return("07_ml")
   if (num >= 26 && num <= 39) return("08_publication")
   if (num >= 40 && num <= 42) return("09_cellchat")
@@ -2162,24 +2162,63 @@ if (stage_allowed("07")) run_stage("07_enrichment", {
   plot_gsea(gsea_go, file.path(fig_dir, "fig_20_gsea_go.png"), "GSEA GO BP")
   plot_gsea(gsea_kegg, file.path(fig_dir, "fig_21_gsea_kegg.png"), "GSEA KEGG")
 
-  plot_cnet <- function(res, file, title) {
+  top_enrichment <- function(res, n = 5, padj_cutoff = 0.05) {
     if (is.null(res) || nrow(as.data.frame(res)) == 0) {
+      return(res)
+    }
+    df <- as.data.frame(res)
+    sig_idx <- which(!is.na(df$p.adjust) & df$p.adjust <= padj_cutoff)
+    filtered <- clusterProfiler::slice(res, sig_idx)
+    df <- as.data.frame(filtered)
+    if (nrow(df) == 0) {
+      return(filtered)
+    }
+    clusterProfiler::slice(filtered, seq_len(min(n, nrow(df))))
+  }
+
+  plot_cnet <- function(res, file, title) {
+    filtered <- top_enrichment(res)
+    if (is.null(filtered) || nrow(as.data.frame(filtered)) == 0) {
       p <- ggplot(data.frame(x = 0, y = 0), aes(x, y)) +
         geom_text(label = "No significant pathway network") +
         theme_void()
     } else {
       style <- fig_style(basename(file))
       if (style == "emapplot") {
-        p <- emapplot(res, showCategory = 10) + ggtitle(title)
+        p <- emapplot(filtered, showCategory = 10) + ggtitle(title)
       } else {
-        p <- cnetplot(res, showCategory = 5) +
+        p <- cnetplot(filtered, showCategory = 5) +
           ggtitle(title)
       }
     }
     save_fig(file, p, width = 10, height = 8)
   }
-  plot_cnet(up_res$go, file.path(fig_dir, "fig_22_go_network.png"), "GO BP network")
-  plot_cnet(up_res$kegg, file.path(fig_dir, "fig_23_kegg_network.png"), "KEGG network")
+
+  plot_top5 <- function(res, file, title) {
+    filtered <- top_enrichment(res)
+    if (is.null(filtered) || nrow(as.data.frame(filtered)) == 0) {
+      p <- ggplot(data.frame(x = 0, y = 0), aes(x, y)) +
+        geom_text(label = "No significant pathway after filtering") +
+        theme_void()
+    } else {
+      style <- fig_style(basename(file))
+      if (style == "barplot") {
+        p <- barplot(filtered, showCategory = 5, font.size = 8) + ggtitle(title)
+      } else if (style == "cnetplot") {
+        p <- cnetplot(filtered, showCategory = 5) + ggtitle(title)
+      } else if (style == "emapplot") {
+        p <- emapplot(filtered, showCategory = 5) + ggtitle(title)
+      } else {
+        p <- dotplot(filtered, showCategory = 5, font.size = 8) + ggtitle(title)
+      }
+    }
+    save_fig(file, p, width = 10, height = 8)
+  }
+
+  plot_cnet(up_res$go, file.path(fig_dir, "fig_22_go_network.png"), "GO BP network (filtered top 5)")
+  plot_cnet(up_res$kegg, file.path(fig_dir, "fig_23_kegg_network.png"), "KEGG network (filtered top 5)")
+  plot_top5(up_res$go, file.path(fig_dir, "fig_46_go_top5.png"), "GO BP filtered top 5")
+  plot_top5(up_res$kegg, file.path(fig_dir, "fig_47_kegg_top5.png"), "KEGG filtered top 5")
 
   log_msg("enrichment tables and plots generated")
 })
