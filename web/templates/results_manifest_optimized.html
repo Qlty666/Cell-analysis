@@ -395,14 +395,6 @@ footer { color: #64748b; font-size: 12px; margin: 30px 0 8px; }
 <footer>由 Codex 根据项目流水线代码生成 | 结果清单页</footer>
 </div>
 <script>
-try {
-  const nav = performance.getEntriesByType('navigation')[0];
-  if (nav && nav.type === 'reload') {
-    sessionStorage.removeItem('liver_ui_single_job');
-    sessionStorage.removeItem('liver_ui_dock_job');
-    sessionStorage.removeItem('liver_ui_full_job');
-  }
-} catch (e) {}
 function filterResults(query) {
   query = (query || '').toLowerCase().trim();
   document.querySelectorAll('.card table tbody tr').forEach((tr) => {
