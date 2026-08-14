@@ -906,6 +906,14 @@ if (stage_allowed("01")) run_stage("01_load_data", {
     }
   } else {
     manifest <- load_manifest()
+    if (identical(manifest$mode, "bulk")) {
+      stop(
+        accession,
+        " is a bulk RNA-seq dataset, not single-cell; ",
+        "the single-cell pipeline only supports single-cell datasets. ",
+        "Use a single-cell GSE accession instead."
+      )
+    }
     generic <- read_generic_dataset(manifest)
     counts <- generic$counts
     meta <- generic$meta

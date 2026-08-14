@@ -2116,6 +2116,23 @@ def _stage_single_cell(args, workdir: Path, ctx: dict) -> None:
             )
         log.info("using existing single-cell outputs: %s", root)
     else:
+        accession = str(getattr(args, "accession", "") or "").strip().upper()
+        if accession:
+            manifest_path = (
+                root / "data" / f"{accession}_manifest.json"
+            )
+            try:
+                manifest = json.loads(
+                    manifest_path.read_text(encoding="utf-8")
+                )
+            except (OSError, ValueError):
+                manifest = {}
+            if manifest.get("mode") == "bulk":
+                raise IntegrationError(
+                    f"{accession} is a bulk RNA-seq dataset, not "
+                    "single-cell; the full pipeline only supports "
+                    "single-cell datasets."
+                )
         code = orchestrator.run_pipeline(
             args.force,
             args.skip_download,

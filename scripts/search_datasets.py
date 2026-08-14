@@ -27,6 +27,7 @@ CSV_COLUMNS = [
     "research_direction",
     "title",
     "summary",
+    "data_type",
     "organism",
     "samples",
     "platform",
@@ -233,12 +234,34 @@ def to_row(
     accession = str(raw.get("Accession", ""))
     match = re.search(r"(GSE\d+)", accession)
     gse = match.group(1) if match else accession
+    title = str(raw.get("Title") or raw.get("title") or "")
+    summary = str(raw.get("Summary") or raw.get("summary") or "")
+    haystack = f"{title}\n{summary}".lower()
+    single_cell_terms = (
+        "single cell",
+        "single-cell",
+        "scrna",
+        "scrna-seq",
+        "10x genomics",
+        "cell ranger",
+        "smart-seq",
+    )
+    if any(token in haystack for token in single_cell_terms):
+        data_type = "single-cell"
+    elif any(
+        token in haystack
+        for token in ("bulk rna", "bulk-rna", "rna-seq", "rnaseq", "bulk")
+    ):
+        data_type = "bulk"
+    else:
+        data_type = "other"
     return {
         "accession": gse,
         "disease": disease,
         "research_direction": research_direction,
-        "title": str(raw.get("Title") or raw.get("title") or ""),
-        "summary": str(raw.get("Summary") or raw.get("summary") or ""),
+        "title": title,
+        "summary": summary,
+        "data_type": data_type,
         "organism": str(raw.get("taxon", "")),
         "samples": str(
             raw.get("n_samples")
