@@ -2822,6 +2822,7 @@ class Handler(BaseHTTPRequestHandler):
                 ".png": "image/png",
                 ".jpg": "image/jpeg",
                 ".svg": "image/svg+xml",
+                ".css": "text/css; charset=utf-8",
             }.get(target.suffix.lower(), "application/octet-stream")
             self._send(200, target.read_bytes(), content_type)
             return
