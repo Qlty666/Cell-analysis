@@ -71,6 +71,23 @@ class TestPortCleanup(unittest.TestCase):
             stop.assert_called_once_with("127.0.0.1", 8000)
 
 
+class TestSingleCellFigureList(unittest.TestCase):
+    def test_top5_enrichment_figures_wired_into_web_ui(self):
+        for name in ("fig_46_go_top5.png", "fig_47_kegg_top5.png"):
+            self.assertIn(name, web_ui_module.FIGURE_NAMES)
+        page = web_ui_module.render_page()
+        self.assertIn("fig_46_go_top5.png", page)
+        self.assertIn("GO BP 筛选后 Top5", page)
+        self.assertIn("fig_47_kegg_top5.png", page)
+        self.assertIn("KEGG 筛选后 Top5", page)
+
+    def test_top5_enrichment_figures_expose_expected_styles(self):
+        by_name = {item["file"]: item for item in web_ui_module.FIGURES}
+        for name in ("fig_46_go_top5.png", "fig_47_kegg_top5.png"):
+            self.assertIn("dotplot", by_name[name]["styles"])
+            self.assertIn("barplot", by_name[name]["styles"])
+
+
 class TestHeartbeatAutoShutdown(unittest.TestCase):
     def setUp(self) -> None:
         with HEARTBEAT_LOCK:
