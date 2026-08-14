@@ -1320,14 +1320,18 @@ if (stage_allowed("05")) run_stage("05_annotation", {
     ggtitle("Seurat clusters (marker-based names)")
   p_clusters <- tryCatch(
     {
+      cluster_legend_labels <- paste0(cluster_ids, " - ", cluster_labels)
       p_clusters$data$seurat_clusters <- factor(
-        as.character(p_clusters$data$seurat_clusters),
-        levels = unique(c(cluster_ids, cluster_labels))
+        cluster_legend_labels[match(
+          as.character(p_clusters$data$seurat_clusters),
+          cluster_ids
+        )],
+        levels = unique(c(cluster_legend_labels, cluster_labels))
       )
       LabelClusters(
         p_clusters,
         id = "seurat_clusters",
-        clusters = cluster_ids,
+        clusters = cluster_legend_labels,
         labels = cluster_labels,
         size = 4
       )
