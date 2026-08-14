@@ -141,6 +141,30 @@ a.file-link { color: #1665c0; text-decoration: none; margin-right: 12px; }
 <p class="muted">单细胞分析 → 关键基因/蛋白筛选 → 证据富集 → 虚拟敲除 → 虚拟筛选 → 细胞反馈 → 集成报告。</p>
 
 <div class="card">
+  <h2>数据集搜索</h2>
+  <form id="pipelineSearchForm">
+    <div class="grid">
+      <label>疾病名称 <input name="disease" placeholder="liver cancer"></label>
+      <label>研究方向 <input name="research_direction" placeholder="single cell RNA-seq"></label>
+      <label>原始查询 <input name="query" placeholder="可选"></label>
+      <label>最大结果数 <input type="number" name="max_results" value="10" min="1" max="100"></label>
+    </div>
+    <div class="actions">
+      <button type="button" onclick="searchPipelineDatasets()">搜索数据集</button>
+    </div>
+  </form>
+  <div id="pipelineSearchMessage"></div>
+  <div class="tablebox">
+    <table>
+      <thead>
+        <tr><th>#</th><th>编号</th><th>标题</th><th>物种</th><th>操作</th></tr>
+      </thead>
+      <tbody id="pipelineSearchBody"><tr><td colspan="5" class="muted">暂无结果</td></tr></tbody>
+    </table>
+  </div>
+</div>
+
+<div class="card">
   <form id="form">
     <div class="grid wide">
       <label>GEO 数据集编号
@@ -211,6 +235,7 @@ a.file-link { color: #1665c0; text-decoration: none; margin-right: 12px; }
       <label class="toggle"><input type="checkbox" name="keep_all_genes" value="1"> 保留全部基因</label>
       <label class="toggle"><input type="checkbox" name="force" value="1"> 强制重跑</label>
     </div>
+    <div id="datasetPrefillNote" class="ok"></div>
     <div class="actions">
       <button id="startBtn" type="button" onclick="startRun()">开始全自动流水线</button>
       <button id="pauseBtn" class="secondary" type="button" onclick="pauseFullJob()" disabled>暂停</button>
@@ -257,6 +282,75 @@ let currentJob = null;
 let pollTimer = null;
 let jobAlerted = false;
 const FULL_JOB_KEY = 'liver_ui_full_job';
+let pipelineSearchResults = [];
+
+function applyDatasetPrefill() {
+  try {
+    const params = new URLSearchParams(window.location.search);
+    const accession = params.get('accession');
+    const input = document.querySelector('input[name="accession"]');
+    if (!accession || !input) return;
+    input.value = accession.toUpperCase();
+    const title = params.get('dataset_title');
+    const note = document.getElementById('datasetPrefillNote');
+    if (note) {
+      note.textContent = title
+        ? '已带入数据集：' + accession.toUpperCase() + ' · ' + title
+        : '已带入数据集：' + accession.toUpperCase();
+    }
+    const url = new URL(window.location.href);
+    url.searchParams.delete('accession');
+    url.searchParams.delete('dataset_title');
+    window.history.replaceState(null, '', url.toString());
+  } catch (e) {}
+}
+
+async function searchPipelineDatasets() {
+  const form = document.getElementById('pipelineSearchForm');
+  const data = new URLSearchParams(new FormData(form));
+  const msg = document.getElementById('pipelineSearchMessage');
+  msg.className = '';
+  msg.textContent = '正在搜索...';
+  try {
+    const resp = await fetch('/datasets/search', {method: 'POST', body: data});
+    const result = await resp.json();
+    if (!resp.ok) throw new Error(result.error || '搜索失败');
+    pipelineSearchResults = result.results || [];
+    renderPipelineSearchResults();
+    msg.className = 'ok';
+    msg.textContent = '匹配数据集：' + result.count;
+  } catch (e) {
+    msg.className = 'error';
+    msg.textContent = String(e.message || e);
+    document.getElementById('pipelineSearchBody').innerHTML =
+      '<tr><td colspan="5" class="muted">暂无结果</td></tr>';
+  }
+}
+
+function renderPipelineSearchResults() {
+  const body = document.getElementById('pipelineSearchBody');
+  if (!pipelineSearchResults.length) {
+    body.innerHTML = '<tr><td colspan="5" class="muted">未找到匹配数据集</td></tr>';
+    return;
+  }
+  body.innerHTML = pipelineSearchResults.map((row, index) => {
+    return '<tr><td>' + (index + 1) + '</td>' +
+      '<td><a href="' + esc(row.url) + '" target="_blank" rel="noopener">' + esc(row.accession) + '</a></td>' +
+      '<td>' + esc(row.title) + '</td>' +
+      '<td>' + esc(row.organism) + '</td>' +
+      '<td><button class="secondary" type="button" onclick="choosePipelineDataset(' + index + ')">选择</button></td></tr>';
+  }).join('');
+}
+
+function choosePipelineDataset(index) {
+  const row = pipelineSearchResults[index];
+  if (!row) return;
+  const input = document.querySelector('input[name="accession"]');
+  if (input) input.value = row.accession;
+  const note = document.getElementById('datasetPrefillNote');
+  if (note) note.textContent = '已带入数据集：' + row.accession + ' · ' + row.title;
+  msg('已填入数据集 ' + row.accession + '，启动全自动流水线时将自动下载。', 'ok');
+}
 
 function saveJobRecord() {
   try { sessionStorage.setItem(FULL_JOB_KEY, currentJob); } catch (e) {}
@@ -530,6 +624,7 @@ async function resumeFullJob() {
 }
 
 clearJobRecordsOnReload();
+applyDatasetPrefill();
 restoreJobRecord();
 </script>
 <div id="jobToast" class="job-toast" hidden>

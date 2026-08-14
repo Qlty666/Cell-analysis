@@ -73,6 +73,18 @@ button {
 }
 button.secondary { background: #475569; }
 button:disabled { background: #9aa5b1; cursor: not-allowed; }
+.link-button {
+  display: inline-block;
+  padding: 8px 10px;
+  border-radius: 6px;
+  background: #1665c0;
+  color: #ffffff;
+  font-size: 12px;
+  font-weight: 600;
+  text-decoration: none;
+  margin-top: 4px;
+}
+.link-button:hover { background: #0f4f96; }
 #topN { width: 72px; display: inline-block; margin: 0 6px; padding: 6px; }
 table { width: 100%; border-collapse: collapse; background: #fff; font-size: 12px; }
 th, td {
@@ -227,7 +239,8 @@ function renderResults(data) {
       '<td>' + esc(row.date) + '</td>' +
       '<td>' + esc(row.type) + '</td>' +
       '<td>' + score + '</td>' +
-      '<td><button class="secondary" type="button" onclick="startDownload(\'' + esc(row.accession) + '\')">下载</button></td></tr>';
+      '<td><button class="secondary" type="button" onclick="startDownload(\'' + esc(row.accession) + '\')">下载</button>' +
+      '<a class="link-button" href="' + esc(row.full_pipeline_url || ('/full?accession=' + encodeURIComponent(row.accession))) + '">全自动流水线</a></td></tr>';
   }).join('');
 }
 
