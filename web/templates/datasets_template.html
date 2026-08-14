@@ -3,6 +3,7 @@
 <head>
 <meta charset="utf-8">
 <meta name="viewport" content="width=device-width, initial-scale=1">
+<link rel="stylesheet" href="/static/app.css">
 <title>GEO 数据集搜索</title>
 <style>
 body {
@@ -135,20 +136,37 @@ a { color: #1665c0; text-decoration: none; }
   <a href="/tasks" class="nav-right">任务进度</a>
 </div>
 <div class="wrap">
-<h1>GEO 数据集搜索</h1>
+<div class="page-head">
+  <div class="page-title">
+    <h1>GEO 数据集搜索</h1>
+    <p class="page-sub">按疾病、研究方向或原始查询搜索 GEO 数据集，可批量下载并直接带入全自动流水线。</p>
+  </div>
+  <div class="page-actions">
+    <a class="link-button" href="/full">全自动流水线</a>
+    <a class="link-button" href="/results">结果清单</a>
+  </div>
+</div>
 
 <div class="card">
   <form id="searchForm">
-    <div class="grid">
-      <label>疾病名称 <input name="disease" placeholder="liver cancer"></label>
-      <label>研究方向 <input name="research_direction" placeholder="single cell RNA-seq"></label>
-      <label>原始查询 <input name="query" placeholder="可选"></label>
-      <label>最大结果数 <input type="number" name="max_results" value="20" min="1" max="100"></label>
-      <label>物种过滤 <input name="organism" placeholder="Homo sapiens"></label>
-      <label>关键词过滤 <input name="keyword" placeholder="可选"></label>
-      <label>ML/DL 模型路径 <input name="model" placeholder="data_cache\dataset_search\relevance_model.joblib"></label>
-      <label>下载根目录 <input name="download_root" placeholder="默认 ../liver_cancer"></label>
-    </div>
+    <details class="form-section" open>
+      <summary>搜索条件</summary>
+      <div class="grid">
+        <label>疾病名称 <input name="disease" placeholder="liver cancer"></label>
+        <label>研究方向 <input name="research_direction" placeholder="single cell RNA-seq"></label>
+        <label>原始查询 <input name="query" placeholder="可选"></label>
+        <label>最大结果数 <input type="number" name="max_results" value="20" min="1" max="100"></label>
+      </div>
+    </details>
+    <details class="form-section">
+      <summary>过滤与下载选项</summary>
+      <div class="grid">
+        <label>物种过滤 <input name="organism" placeholder="Homo sapiens"></label>
+        <label>关键词过滤 <input name="keyword" placeholder="可选"></label>
+        <label>ML/DL 模型路径 <input name="model" placeholder="data_cache\dataset_search\relevance_model.joblib"></label>
+        <label>下载根目录 <input name="download_root" placeholder="默认 ../liver_cancer"></label>
+      </div>
+    </details>
     <div class="actions">
       <button id="searchBtn" type="button" onclick="searchDatasets()">搜索数据集</button>
       <button id="downloadTopBtn" class="secondary" type="button" onclick="downloadTop()" disabled>

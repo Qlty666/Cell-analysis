@@ -1,0 +1,294 @@
+/* Shared layout and interaction polish for the web UI. */
+
+* {
+  box-sizing: border-box;
+}
+
+html {
+  scroll-behavior: smooth;
+}
+
+body {
+  min-height: 100vh;
+}
+
+.topnav a {
+  transition: background 0.15s ease, transform 0.15s ease;
+}
+
+.topnav a:hover {
+  transform: translateY(-1px);
+}
+
+.wrap {
+  position: relative;
+}
+
+.page-head {
+  display: flex;
+  align-items: flex-start;
+  justify-content: space-between;
+  gap: 16px;
+  flex-wrap: wrap;
+  margin-bottom: 18px;
+}
+
+.page-title {
+  flex: 1 1 320px;
+}
+
+.page-title h1 {
+  margin: 0 0 6px;
+}
+
+.page-sub {
+  color: #52606d;
+  font-size: 14px;
+  margin: 0;
+  line-height: 1.55;
+}
+
+.page-actions {
+  display: flex;
+  gap: 10px;
+  flex-wrap: wrap;
+  align-items: center;
+}
+
+.card {
+  transition: box-shadow 0.18s ease;
+}
+
+.card:hover {
+  box-shadow: 0 4px 14px rgba(15, 23, 42, 0.10);
+}
+
+label {
+  letter-spacing: 0;
+}
+
+input,
+select,
+textarea {
+  transition: border-color 0.15s ease, box-shadow 0.15s ease;
+}
+
+input:focus,
+select:focus,
+textarea:focus {
+  outline: none;
+  border-color: #1665c0;
+  box-shadow: 0 0 0 3px rgba(22, 101, 192, 0.14);
+}
+
+button {
+  transition: background 0.15s ease, transform 0.12s ease;
+}
+
+button:hover:not(:disabled) {
+  transform: translateY(-1px);
+}
+
+button:active:not(:disabled) {
+  transform: translateY(0);
+}
+
+button.secondary {
+  background: #475569;
+}
+
+.link-button {
+  display: inline-block;
+  padding: 9px 16px;
+  border-radius: 6px;
+  background: #1665c0;
+  color: #ffffff;
+  font-size: 14px;
+  font-weight: 600;
+  text-decoration: none;
+}
+
+.link-button:hover {
+  background: #0f4f96;
+  color: #ffffff;
+}
+
+.field-hint {
+  display: block;
+  color: #64748b;
+  font-size: 12px;
+  font-weight: 400;
+  margin-top: 4px;
+  line-height: 1.45;
+}
+
+.form-section {
+  border: 1px solid #e2e8f0;
+  border-radius: 8px;
+  padding: 12px 14px;
+  margin: 14px 0;
+  background: #fbfcfe;
+}
+
+.form-section summary {
+  cursor: pointer;
+  font-weight: 700;
+  font-size: 14px;
+  color: #0f172a;
+  padding: 4px 2px;
+  list-style: none;
+}
+
+.form-section summary::before {
+  content: "▸ ";
+  color: #1665c0;
+}
+
+.form-section[open] summary::before {
+  content: "▾ ";
+}
+
+.form-grid {
+  display: grid;
+  grid-template-columns: repeat(auto-fit, minmax(240px, 1fr));
+  gap: 12px;
+}
+
+.form-grid label {
+  margin: 0;
+}
+
+.stat-grid {
+  display: grid;
+  grid-template-columns: repeat(auto-fit, minmax(150px, 1fr));
+  gap: 12px;
+  margin: 12px 0;
+}
+
+.stat-card {
+  background: #fff;
+  border: 1px solid #e5e7eb;
+  border-left: 4px solid #1665c0;
+  border-radius: 8px;
+  padding: 12px 14px;
+}
+
+.stat-card .stat-label {
+  color: #64748b;
+  font-size: 12px;
+  margin-bottom: 4px;
+}
+
+.stat-card .stat-value {
+  color: #0f172a;
+  font-size: 20px;
+  font-weight: 700;
+  word-break: break-all;
+}
+
+.stat-card.ok {
+  border-left-color: #047857;
+}
+
+.stat-card.warn {
+  border-left-color: #b45309;
+}
+
+.stat-card.fail {
+  border-left-color: #b91c1c;
+}
+
+.chip {
+  display: inline-block;
+  padding: 2px 8px;
+  border-radius: 999px;
+  background: #eef2f7;
+  color: #334155;
+  font-size: 12px;
+  font-weight: 600;
+}
+
+.badge.pass,
+.badge.ok {
+  background: #dcfce7;
+  color: #166534;
+}
+
+.badge.warn {
+  background: #fef3c7;
+  color: #92400e;
+}
+
+.badge.fail {
+  background: #fee2e2;
+  color: #991b1b;
+}
+
+.tablebox {
+  scrollbar-width: thin;
+}
+
+.tablebox::-webkit-scrollbar {
+  width: 8px;
+  height: 8px;
+}
+
+.tablebox::-webkit-scrollbar-thumb {
+  background: #cbd5e1;
+  border-radius: 4px;
+}
+
+.tablebox thead th {
+  position: sticky;
+  top: 0;
+  z-index: 1;
+}
+
+.empty-state {
+  padding: 28px 16px;
+  text-align: center;
+  color: #64748b;
+  font-size: 14px;
+  border: 1px dashed #cbd2d9;
+  border-radius: 8px;
+  background: #fff;
+}
+
+.toolbar {
+  display: flex;
+  gap: 10px;
+  flex-wrap: wrap;
+  align-items: center;
+  margin-bottom: 12px;
+}
+
+.toolbar input[type="search"] {
+  max-width: 320px;
+}
+
+@media (max-width: 720px) {
+  .wrap {
+    padding: 14px;
+  }
+
+  .topnav {
+    padding: 10px 14px;
+    gap: 8px;
+  }
+
+  .page-head {
+    flex-direction: column;
+  }
+
+  .stat-grid {
+    grid-template-columns: repeat(auto-fit, minmax(120px, 1fr));
+  }
+
+  .form-section {
+    padding: 10px;
+  }
+
+  .toolbar input[type="search"] {
+    max-width: 100%;
+  }
+}

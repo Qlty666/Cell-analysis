@@ -1368,8 +1368,11 @@ def start_full_job(data: dict) -> dict:
         "skip_knockout",
         "skip_docking",
         "skip_cell_feedback",
+        "skip_qc_gate",
+        "skip_differential_abundance",
         "keep_all_genes",
         "force",
+        "dry_run",
     ]:
         if _first(data, flag, "") in ("1", "true", "on", "yes"):
             cmd.append("--" + flag.replace("_", "-"))
@@ -1966,6 +1969,8 @@ def full_results(workdir: Path) -> dict:
         "exists": out.exists(),
         "files": [],
         "summary": {},
+        "qc_metrics": {},
+        "differential_abundance": [],
         "key_genes": [],
         "knockout": [],
         "docking": [],
@@ -1975,6 +1980,7 @@ def full_results(workdir: Path) -> dict:
     if not out.exists():
         return result
     result["summary"] = _read_json(out / "integration_summary.json")
+    result["qc_metrics"] = _read_json(out / "qc_metrics.json")
     result["files"] = _full_result_files(workdir)
     try:
         result["key_genes"] = json.loads(
@@ -2016,6 +2022,14 @@ def full_results(workdir: Path) -> dict:
         )
     except Exception:
         result["evidence"] = []
+    try:
+        result["differential_abundance"] = json.loads(
+            pd_read_csv(out / "differential_abundance.csv").to_json(
+                orient="records"
+            )
+        )
+    except Exception:
+        result["differential_abundance"] = []
     return result
 
 
@@ -2625,6 +2639,7 @@ class Handler(BaseHTTPRequestHandler):
                 ".csv": "text/csv; charset=utf-8",
                 ".json": "application/json",
                 ".html": "text/html; charset=utf-8",
+                ".css": "text/css; charset=utf-8",
                 ".md": "text/markdown; charset=utf-8",
                 ".xlsx": "application/vnd.openxmlformats-officedocument.spreadsheetml.sheet",
             }.get(target.suffix.lower(), "application/octet-stream")
@@ -2807,6 +2822,7 @@ class Handler(BaseHTTPRequestHandler):
                 ".png": "image/png",
                 ".jpg": "image/jpeg",
                 ".svg": "image/svg+xml",
+                ".css": "text/css; charset=utf-8",
             }.get(target.suffix.lower(), "application/octet-stream")
             self._send(200, target.read_bytes(), content_type)
             return

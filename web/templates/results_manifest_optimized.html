@@ -3,6 +3,7 @@
 <head>
 <meta charset="utf-8">
 <meta name="viewport" content="width=device-width, initial-scale=1">
+<link rel="stylesheet" href="/static/app.css">
 <title>全自动流水线结果清单</title>
 <style>
 body {
@@ -134,8 +135,21 @@ footer { color: #64748b; font-size: 12px; margin: 30px 0 8px; }
   <a href="/tasks" class="nav-right">任务进度</a>
 </div>
 <div class="wrap">
-<h1>全自动流水线结果清单</h1>
-<p class="sub">仅列出各阶段可交付的结果图和结果数据；路径以默认参数 <code>--workdir dock</code>、<code>--output ../liver_cancer</code> 为例，<code>&lt;gene&gt;</code> 表示实际参与对接的基因名。报告、清单、断点、日志、配置、原始证据等过程文件不列入。</p>
+<div class="page-head">
+  <div class="page-title">
+    <h1>全自动流水线结果清单</h1>
+    <p class="page-sub">仅列出各阶段可交付的结果图和结果数据；路径以默认参数 <code>--workdir dock</code>、<code>--output ../liver_cancer</code> 为例，<code>&lt;gene&gt;</code> 表示实际参与对接的基因名。报告、清单、断点、日志、配置、原始证据等过程文件不列入。</p>
+  </div>
+  <div class="page-actions">
+    <a class="link-button" href="/full">返回全自动流水线</a>
+    <a class="link-button" href="/tasks">任务进度</a>
+  </div>
+</div>
+
+<div class="toolbar">
+  <input type="search" id="resultFilter" placeholder="按文件名、内容或用途筛选..." oninput="filterResults(this.value)">
+  <button type="button" class="secondary" onclick="clearResultFilter()">清空筛选</button>
+</div>
 
 <div class="card">
   <h2>输出目录结构</h2>
@@ -147,7 +161,7 @@ footer { color: #64748b; font-size: 12px; margin: 30px 0 8px; }
 &lt;workdir&gt;/                       # 全自动流水线工作目录
 ├─ data/knockout/               # 04 阶段敲除输入（不列入结果清单）
 ├─ outputs/
-│  ├─ integration/              # 02/03/06/07/08 阶段结果数据与汇总
+│  ├─ integration/              # 02/03/06/07/08 阶段结果数据、QC 门控与差异丰度
 │  └─ run_001/results/
 │     ├─ 01_analysis/           # 单靶点对接分析：figures + data
 │     ├─ 02_redock/             # 精修重对接：figures + data
@@ -256,6 +270,18 @@ footer { color: #64748b; font-size: 12px; margin: 30px 0 8px; }
       <tr><td><code>data/09_cellchat/fig_40_cellchat_communication_weight.csv</code></td><td>CellChat 通讯权重</td><td><span class="badge data">结果数据</span></td><td>通讯强度 <span class="badge opt">条件</span></td></tr>
       <tr><td><code>data/09_cellchat/fig_42_cellchat_pathways.csv</code></td><td>CellChat 通路结果</td><td><span class="badge data">结果数据</span></td><td>通路通讯结果 <span class="badge opt">条件</span></td></tr>
       <tr><td><code>data/09_cellchat/cellchat_object.rds</code></td><td>CellChat 对象</td><td><span class="badge data">结果数据</span></td><td>完整通讯分析对象 <span class="badge opt">条件</span></td></tr>
+    </tbody>
+  </table>
+</div>
+
+<div class="card">
+  <h2>QC 门控与细胞类型差异丰度</h2>
+  <p class="muted">位置：<span class="path">&lt;workdir&gt;/outputs/integration/</span></p>
+  <table>
+    <thead><tr><th>文件</th><th>内容</th><th>类型</th><th>用途</th></tr></thead>
+    <tbody>
+      <tr><td><code>differential_abundance.csv</code></td><td>条件间细胞类型组成差异检验（2×2 卡方 + BH FDR）</td><td><span class="badge data">结果数据</span></td><td>检查细胞比例偏移</td></tr>
+      <tr><td><code>qc_metrics.json</code></td><td>QC 汇总与门控结果（pass/warn/fail）</td><td><span class="badge data">结果数据</span></td><td>数据质量门控</td></tr>
     </tbody>
   </table>
 </div>
@@ -373,6 +399,17 @@ try {
     sessionStorage.removeItem('liver_ui_full_job');
   }
 } catch (e) {}
+function filterResults(query) {
+  query = (query || '').toLowerCase().trim();
+  document.querySelectorAll('.card table tbody tr').forEach((tr) => {
+    tr.style.display = tr.textContent.toLowerCase().includes(query) ? '' : 'none';
+  });
+}
+function clearResultFilter() {
+  const input = document.getElementById('resultFilter');
+  if (input) input.value = '';
+  filterResults('');
+}
 </script>
 </body>
 </html>

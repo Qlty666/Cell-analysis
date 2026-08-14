@@ -3,6 +3,7 @@
 <head>
 <meta charset="utf-8">
 <meta name="viewport" content="width=device-width, initial-scale=1">
+<link rel="stylesheet" href="/static/app.css">
 <title>全自动流水线</title>
 <style>
 body {
@@ -137,8 +138,16 @@ a.file-link { color: #1665c0; text-decoration: none; margin-right: 12px; }
   <a href="/tasks" class="nav-right">任务进度</a>
 </div>
 <div class="wrap">
-<h1>全自动流水线</h1>
-<p class="muted">单细胞分析 → 关键基因/蛋白筛选 → 证据富集 → 虚拟敲除 → 虚拟筛选 → 细胞反馈 → 集成报告。</p>
+<div class="page-head">
+  <div class="page-title">
+    <h1>全自动流水线</h1>
+    <p class="page-sub">单细胞分析 → 关键基因/蛋白筛选 → 证据富集 → 虚拟敲除 → 虚拟筛选 → 细胞反馈 → 集成报告。支持断点续跑、参数指纹失效、QC 门控与 dry-run 预演。</p>
+  </div>
+  <div class="page-actions">
+    <a class="link-button" href="/results">结果清单</a>
+    <a class="link-button" href="/tasks">任务进度</a>
+  </div>
+</div>
 
 <div class="card">
   <h2>数据集搜索</h2>
@@ -166,75 +175,100 @@ a.file-link { color: #1665c0; text-decoration: none; margin-right: 12px; }
 
 <div class="card">
   <form id="form">
-    <div class="grid wide">
-      <label>GEO 数据集编号
-        <input name="accession" value="" placeholder="请输入数据集编号">
-      </label>
-      <label>单细胞结果目录
-        <input name="output" placeholder="请输入结果保存地址" required>
-      </label>
-      <label>工作目录
-        <input name="workdir" placeholder="请输入工作目录" required>
-      </label>
-      <label>配体库（可选）
-        <input name="ligand_library" placeholder="data/ligands/library.smi">
-      </label>
+    <div class="page-actions" style="margin-bottom: 12px;">
+      <button type="button" class="secondary" onclick="saveFormState()">保存设置</button>
+      <button type="button" class="secondary" onclick="restoreFormState()">恢复设置</button>
+      <button type="button" class="secondary" onclick="resetForm()">恢复默认</button>
     </div>
-    <div class="grid wide">
-      <label>物种
-        <select name="species">
-          <option value="auto">auto</option>
-          <option value="hs">hs - Human</option>
-          <option value="mm">mm - Mouse</option>
-        </select>
-      </label>
-      <label>关键基因数
-        <input name="top_genes" type="number" min="1" value="50">
-      </label>
-      <label>对接靶点数
-        <input name="docking_targets" type="number" min="0" value="3">
-      </label>
-      <label>敲除报告 Top N
-        <input name="ko_top_n" type="number" min="1" value="50">
-      </label>
-      <label>反馈基因数
-        <input name="feedback_top_n" type="number" min="1" value="12">
-      </label>
-      <label>反馈展示基因数
-        <input name="feedback_max_features" type="number" min="1" value="8">
-      </label>
-      <label>病例标签（可选）
-        <input name="case_label" placeholder="Tumor / iCCA">
-      </label>
-      <label>正常标签（可选）
-        <input name="normal_label" placeholder="Normal / HCC">
-      </label>
-      <label>起始阶段
-        <select name="start_stage">
-          <option value="">自动（断点续跑）</option>
-          <option value="01">01 单细胞分析</option>
-          <option value="02">02 关键基因</option>
-          <option value="03">03 证据富集</option>
-          <option value="04">04 敲除输入</option>
-          <option value="05">05 虚拟敲除</option>
-          <option value="06">06 虚拟筛选</option>
-          <option value="07">07 细胞反馈</option>
-          <option value="08">08 集成报告</option>
-        </select>
-      </label>
-    </div>
-    <div class="toggles">
-      <label class="toggle"><input type="checkbox" name="skip_scrna" value="1"> 跳过单细胞分析</label>
-      <label class="toggle"><input type="checkbox" name="skip_download" value="1"> 跳过数据下载</label>
-      <label class="toggle"><input type="checkbox" name="skip_deps" value="1"> 跳过依赖检查</label>
-      <label class="toggle"><input type="checkbox" name="skip_evidence_fetch" value="1"> 跳过联网证据</label>
-      <label class="toggle"><input type="checkbox" name="skip_pseudobulk" value="1"> 跳过伪 bulk 导出</label>
-      <label class="toggle"><input type="checkbox" name="skip_knockout" value="1"> 跳过虚拟敲除</label>
-      <label class="toggle"><input type="checkbox" name="skip_docking" value="1"> 跳过虚拟筛选</label>
-      <label class="toggle"><input type="checkbox" name="skip_cell_feedback" value="1"> 跳过细胞反馈</label>
-      <label class="toggle"><input type="checkbox" name="keep_all_genes" value="1"> 保留全部基因</label>
-      <label class="toggle"><input type="checkbox" name="force" value="1"> 强制重跑</label>
-    </div>
+    <details class="form-section" open>
+      <summary>基础设置</summary>
+      <div class="grid wide">
+        <label>GEO 数据集编号
+          <input name="accession" value="" placeholder="请输入数据集编号">
+          <span class="field-hint">格式如 GSE125449，可留空后从数据集搜索选择。</span>
+        </label>
+        <label>单细胞结果目录
+          <input name="output" placeholder="请输入结果保存地址" required>
+        </label>
+        <label>工作目录
+          <input name="workdir" placeholder="请输入工作目录" required>
+          <span class="field-hint">填到包含 outputs 的上一层目录。</span>
+        </label>
+        <label>配体库（可选）
+          <input name="ligand_library" placeholder="data/ligands/library.smi">
+        </label>
+      </div>
+    </details>
+    <details class="form-section" open>
+      <summary>分析参数</summary>
+      <div class="grid wide">
+        <label>物种
+          <select name="species">
+            <option value="auto">auto</option>
+            <option value="hs">hs - Human</option>
+            <option value="mm">mm - Mouse</option>
+          </select>
+        </label>
+        <label>关键基因数
+          <input name="top_genes" type="number" min="1" value="50">
+        </label>
+        <label>对接靶点数
+          <input name="docking_targets" type="number" min="0" value="3">
+        </label>
+        <label>敲除报告 Top N
+          <input name="ko_top_n" type="number" min="1" value="50">
+        </label>
+        <label>病例标签（可选）
+          <input name="case_label" placeholder="Tumor / iCCA">
+        </label>
+        <label>正常标签（可选）
+          <input name="normal_label" placeholder="Normal / HCC">
+        </label>
+      </div>
+    </details>
+    <details class="form-section">
+      <summary>反馈与起始阶段</summary>
+      <div class="grid wide">
+        <label>反馈基因数
+          <input name="feedback_top_n" type="number" min="1" value="12">
+        </label>
+        <label>反馈展示基因数
+          <input name="feedback_max_features" type="number" min="1" value="8">
+        </label>
+        <label>起始阶段
+          <select name="start_stage">
+            <option value="">自动（断点续跑）</option>
+            <option value="01">01 单细胞分析</option>
+            <option value="02">02 关键基因</option>
+            <option value="03">03 证据富集</option>
+            <option value="04">04 敲除输入</option>
+            <option value="05">05 虚拟敲除</option>
+            <option value="06">06 虚拟筛选</option>
+            <option value="07">07 细胞反馈</option>
+            <option value="08">08 集成报告</option>
+          </select>
+        </label>
+      </div>
+    </details>
+    <details class="form-section">
+      <summary>运行开关</summary>
+      <p class="muted field-hint">勾选后对应参数会追加到命令行；dry-run 只预演不执行。</p>
+      <div class="toggles">
+        <label class="toggle"><input type="checkbox" name="skip_scrna" value="1"> 跳过单细胞分析</label>
+        <label class="toggle"><input type="checkbox" name="skip_download" value="1"> 跳过数据下载</label>
+        <label class="toggle"><input type="checkbox" name="skip_deps" value="1"> 跳过依赖检查</label>
+        <label class="toggle"><input type="checkbox" name="skip_evidence_fetch" value="1"> 跳过联网证据</label>
+        <label class="toggle"><input type="checkbox" name="skip_pseudobulk" value="1"> 跳过伪 bulk 导出</label>
+        <label class="toggle"><input type="checkbox" name="skip_knockout" value="1"> 跳过虚拟敲除</label>
+        <label class="toggle"><input type="checkbox" name="skip_docking" value="1"> 跳过虚拟筛选</label>
+        <label class="toggle"><input type="checkbox" name="skip_cell_feedback" value="1"> 跳过细胞反馈</label>
+        <label class="toggle"><input type="checkbox" name="skip_qc_gate" value="1"> 跳过 QC 门控</label>
+        <label class="toggle"><input type="checkbox" name="skip_differential_abundance" value="1"> 跳过差异丰度检验</label>
+        <label class="toggle"><input type="checkbox" name="keep_all_genes" value="1"> 保留全部基因</label>
+        <label class="toggle"><input type="checkbox" name="force" value="1"> 强制重跑</label>
+        <label class="toggle"><input type="checkbox" name="dry_run" value="1"> 仅预演（dry run）</label>
+      </div>
+    </details>
     <div id="datasetPrefillNote" class="ok"></div>
     <div class="actions">
       <button id="startBtn" type="button" onclick="startRun()">开始全自动流水线</button>
@@ -265,8 +299,11 @@ a.file-link { color: #1665c0; text-decoration: none; margin-right: 12px; }
 
 <div class="card">
   <h2>流程结果</h2>
+  <div id="resultStats" class="stat-grid"></div>
   <div id="summaryRow"></div>
   <div id="fileLinks"></div>
+  <div class="tablebox"><table id="qcGateTable"><caption>QC 门控</caption></table></div>
+  <div class="tablebox"><table id="diffAbundanceTable"><caption>细胞类型差异丰度</caption></table></div>
   <div class="tablebox"><table id="keyTable"><caption>关键基因</caption></table></div>
   <div class="tablebox"><table id="koTable"><caption>虚拟敲除 Top</caption></table></div>
   <div class="tablebox"><table id="dockTable"><caption>虚拟筛选</caption></table></div>
@@ -282,6 +319,7 @@ let currentJob = null;
 let pollTimer = null;
 let jobAlerted = false;
 const FULL_JOB_KEY = 'liver_ui_full_job';
+const FULL_FORM_KEY = 'liver_ui_full_form';
 let pipelineSearchResults = [];
 
 function applyDatasetPrefill() {
@@ -407,6 +445,55 @@ function showJobToast(kind, title, body) {
 function closeJobToast() {
   const toast = document.getElementById('jobToast');
   if (toast) toast.hidden = true;
+}
+
+function collectFormState() {
+  const form = document.getElementById('form');
+  const state = {};
+  new FormData(form).forEach((value, key) => {
+    state[key] = value;
+  });
+  form.querySelectorAll('input[type="checkbox"]').forEach((box) => {
+    if (!box.checked) state[box.name] = '0';
+  });
+  return state;
+}
+
+function saveFormState() {
+  try {
+    sessionStorage.setItem(FULL_FORM_KEY, JSON.stringify(collectFormState()));
+    msg('设置已保存到当前浏览器标签页。', 'ok');
+  } catch (e) {
+    msg('保存设置失败：' + String(e.message || e), 'error');
+  }
+}
+
+function restoreFormState() {
+  let saved = null;
+  try {
+    saved = JSON.parse(sessionStorage.getItem(FULL_FORM_KEY) || 'null');
+  } catch (e) {
+    return;
+  }
+  if (!saved) return;
+  const form = document.getElementById('form');
+  Object.entries(saved).forEach(([name, value]) => {
+    const el = form.querySelector('[name="' + name + '"]');
+    if (!el) return;
+    if (el.type === 'checkbox') {
+      el.checked = String(value) === '1';
+    } else {
+      el.value = value;
+    }
+  });
+}
+
+function resetForm() {
+  try {
+    sessionStorage.removeItem(FULL_FORM_KEY);
+  } catch (e) {}
+  document.getElementById('form').reset();
+  msg('已恢复默认设置。', 'ok');
 }
 
 function msg(text, cls) {
@@ -564,18 +651,58 @@ async function loadByWorkdir() {
   }
 }
 
-function renderResults(data) {
+function renderStats(data) {
   const summary = data.summary || {};
   const ko = summary.knockout || {};
   const dock = summary.docking || {};
   const fb = summary.cell_feedback || {};
+  const qc = (data.qc_metrics || {}).qc_gate || summary.qc_gate || {};
+  const cards = [
+    {
+      label: '关键基因',
+      value: summary.key_genes !== undefined ? summary.key_genes : (data.key_genes || []).length,
+    },
+    {
+      label: '敲除评分基因',
+      value: ko.genes_scored !== undefined ? ko.genes_scored : 0,
+    },
+    {
+      label: '对接成功 / 失败',
+      value: (dock.ok || 0) + ' / ' + (dock.failed || 0),
+    },
+    {
+      label: '细胞反馈匹配',
+      value: fb.genes_matched !== undefined ? fb.genes_matched : 0,
+    },
+    {
+      label: 'QC 门控',
+      value: qc.status || 'skipped',
+      cls: qc.status === 'pass' ? 'ok' : (qc.status === 'fail' ? 'fail' : 'warn'),
+    },
+  ];
+  document.getElementById('resultStats').innerHTML = cards.map((card) => {
+    return '<div class="stat-card ' + (card.cls || '') + '">' +
+      '<div class="stat-label">' + esc(card.label) + '</div>' +
+      '<div class="stat-value">' + esc(card.value) + '</div></div>';
+  }).join('');
+}
+
+function renderResults(data) {
+  const summary = data.summary || {};
+  renderStats(data);
+  const ko = summary.knockout || {};
+  const dock = summary.docking || {};
+  const fb = summary.cell_feedback || {};
+  const qc = data.qc_metrics || {};
+  const qcGate = qc.qc_gate || summary.qc_gate || {};
   document.getElementById('summaryRow').innerHTML =
     '<p class="muted">单细胞：' + esc(summary.single_cell ? summary.single_cell.dataset || '' : '') +
     '；关键基因：' + esc(summary.key_genes !== undefined ? summary.key_genes : data.key_genes.length) +
     '；敲除评分基因数：' + esc(ko.genes_scored !== undefined ? ko.genes_scored : 0) +
     '；对接成功：' + esc(dock.ok !== undefined ? dock.ok : 0) +
     '；失败：' + esc(dock.failed !== undefined ? dock.failed : 0) +
-    '；细胞反馈匹配基因：' + esc(fb.genes_matched !== undefined ? fb.genes_matched : 0) + '</p>';
+    '；细胞反馈匹配基因：' + esc(fb.genes_matched !== undefined ? fb.genes_matched : 0) +
+    '；QC 门控：' + esc(qcGate.status || 'skipped') + '</p>';
   const links = document.getElementById('fileLinks');
   links.innerHTML = '';
   (data.files || []).forEach((name) => {
@@ -585,6 +712,24 @@ function renderResults(data) {
     a.textContent = name.split('/').pop();
     links.appendChild(a);
   });
+  const qcChecks = (qcGate.checks || []).map((c) => ({
+    name: c.name,
+    level: c.level,
+    ok: c.ok ? '通过' : '未通过',
+    message: c.message,
+  }));
+  const qcRows = qcChecks.length
+    ? qcChecks
+    : [{
+        name: 'QC 门控',
+        level: qcGate.status || 'skipped',
+        ok: qcGate.status === 'pass' ? '通过' : qcGate.status,
+        message: qcGate.summary || '',
+      }];
+  renderTable('qcGateTable', qcRows, ['name', 'level', 'ok', 'message']);
+  renderTable('diffAbundanceTable', data.differential_abundance, [
+    'celltype', 'n_cells', 'chi2', 'p_value', 'p_adjust', 'significant', 'direction'
+  ]);
   renderTable('keyTable', data.key_genes, ['rank', 'gene', 'direction', 'avg_log2fc', 'p_val_adj']);
   renderTable('koTable', data.knockout, ['rank', 'gene', 'target_class', 'target_score', 'knockout_score']);
   renderTable('dockTable', data.docking, ['gene', 'status', 'pdb_id', 'ligand_count', 'hits', 'best_affinity']);
@@ -626,6 +771,7 @@ async function resumeFullJob() {
 clearJobRecordsOnReload();
 applyDatasetPrefill();
 restoreJobRecord();
+restoreFormState();
 </script>
 <div id="jobToast" class="job-toast" hidden>
   <div class="job-toast-title" id="jobToastTitle"></div>

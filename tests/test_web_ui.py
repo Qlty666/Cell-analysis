@@ -183,6 +183,30 @@ class TestFullStatus(unittest.TestCase):
             finally:
                 FULL_JOBS.pop(job_id, None)
 
+    def test_start_full_job_passes_new_optimization_flags(self):
+        with tempfile.TemporaryDirectory() as tmp:
+            base = Path(tmp)
+            output = base / "out"
+            workdir = base / "work"
+            with mock.patch("web_ui._drain_full_queue"):
+                result = start_full_job(
+                    {
+                        "output": [str(output)],
+                        "workdir": [str(workdir)],
+                        "skip_qc_gate": ["1"],
+                        "skip_differential_abundance": ["1"],
+                        "dry_run": ["1"],
+                    }
+                )
+            job_id = result["job"]
+            try:
+                cmd = FULL_JOBS[job_id]["cmd"]
+                self.assertIn("--skip-qc-gate", cmd)
+                self.assertIn("--skip-differential-abundance", cmd)
+                self.assertIn("--dry-run", cmd)
+            finally:
+                FULL_JOBS.pop(job_id, None)
+
     def test_completed_full_pipeline_uses_full_flow_label(self):
         with tempfile.TemporaryDirectory() as tmp:
             status = _full_status(_make_info(Path(tmp), 0))
@@ -216,6 +240,15 @@ class TestResultDirectoryQueries(unittest.TestCase):
         )
         (integration / "integration_report.html").write_text(
             "<html></html>", encoding="utf-8"
+        )
+        (integration / "qc_metrics.json").write_text(
+            '{"qc_gate": {"status": "fail", "checks": []}}',
+            encoding="utf-8",
+        )
+        (integration / "differential_abundance.csv").write_text(
+            "celltype,n_cells,chi2,p_value,p_adjust,significant,direction\n"
+            "T_cell,50,9.0,0.002,0.002,true,enriched_in_Tumor\n",
+            encoding="utf-8",
         )
         feedback_data = integration / "cell_feedback" / "data"
         feedback_data.mkdir(parents=True)
@@ -402,6 +435,23 @@ class TestResultDirectoryQueries(unittest.TestCase):
                 )
             )
 
+    def test_full_results_includes_qc_and_differential_abundance(self):
+        with tempfile.TemporaryDirectory() as tmp:
+            workdir = self._make_full_workdir(Path(tmp))
+            data = full_results(workdir)
+            self.assertEqual(
+                data["qc_metrics"]["qc_gate"]["status"],
+                "fail",
+            )
+            self.assertEqual(
+                data["differential_abundance"][0]["celltype"],
+                "T_cell",
+            )
+            self.assertIn(
+                "differential_abundance.csv",
+                data["files"],
+            )
+
     def test_dock_results_only_returns_result_figures_and_data(self):
         with tempfile.TemporaryDirectory() as tmp:
             out = Path(tmp) / "out"
@@ -467,6 +517,51 @@ class TestResultDirectoryQueries(unittest.TestCase):
             self.assertIsNone(
                 _dock_file_path(info, "03_ml/data/ml_model.joblib")
             )
+
+
+class TestTemplatePolish(unittest.TestCase):
+    def _read(self, name: str) -> str:
+        path = APP_ROOT / "web" / "templates" / name
+        return path.read_text(encoding="utf-8", errors="replace")
+
+    def test_shared_css_exists(self):
+        css = (APP_ROOT / "web" / "static" / "app.css").read_text(
+            encoding="utf-8"
+        )
+        self.assertIn(".form-section", css)
+        self.assertIn(".stat-card", css)
+
+    def test_full_page_has_layout_and_form_helpers(self):
+        html = self._read("full_page_template.html")
+        for token in [
+            "page-head",
+            "form-section",
+            "saveFormState",
+            "restoreFormState",
+            "resultStats",
+            "skip_differential_abundance",
+        ]:
+            self.assertIn(token, html)
+
+    def test_single_cell_page_has_collapsible_sections(self):
+        html = self._read("web_page_template.html")
+        for token in ["form-section", "SINGLE_FORM_KEY", "saveFormState"]:
+            self.assertIn(token, html)
+
+    def test_dataset_page_groups_search_options(self):
+        html = self._read("datasets_template.html")
+        self.assertIn("form-section", html)
+        self.assertIn("过滤与下载选项", html)
+
+    def test_tasks_page_has_stat_cards(self):
+        html = self._read("tasks_template.html")
+        for token in ["statTotal", "statRunning", "statQueued", "statPaused"]:
+            self.assertIn(token, html)
+
+    def test_results_page_has_filter_toolbar(self):
+        html = self._read("results_manifest_optimized.html")
+        self.assertIn("resultFilter", html)
+        self.assertIn("filterResults", html)
 
 
 if __name__ == "__main__":
