@@ -670,17 +670,6 @@ function clearJobRecord() {
   try { sessionStorage.removeItem(SINGLE_JOB_KEY); } catch (e) {}
 }
 
-function clearJobRecordsOnReload() {
-  try {
-    const nav = performance.getEntriesByType('navigation')[0];
-    if (nav && nav.type === 'reload') {
-      sessionStorage.removeItem('liver_ui_single_job');
-      sessionStorage.removeItem('liver_ui_dock_job');
-      sessionStorage.removeItem('liver_ui_full_job');
-    }
-  } catch (e) {}
-}
-
 function restoreJobRecord() {
   let saved = null;
   let target = null;
@@ -814,7 +803,6 @@ async function loadResults(job) {
   }
 }
 
-clearJobRecordsOnReload();
 restoreJobRecord();
 </script>
 <div id="jobToast" class="job-toast" hidden>
