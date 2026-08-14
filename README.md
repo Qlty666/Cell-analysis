@@ -1,6 +1,6 @@
 # Liver Cancer Bioinformatics Workflow
 
-> 当前版本：0.4.1
+> 当前版本：0.4.2
 
 面向肝癌研究的本地生信自动化工作流，整合三条可实际运行的流水线：
 
@@ -384,6 +384,8 @@ python scripts\search_datasets.py \
 
 GEO 下载器会把 RAW tar 中的逐样本 bulk 计数表（如 `GSMxxxx_GCxxxx.txt.gz`）识别为 bulk 数据集：数据文件与 manifest 仍会缓存到 `data_cache/<GSE>` 供手工批量分析，但单细胞与全自动流水线会拒绝继续运行，提示改用单细胞 GSE 编号。
 
+网页版已同步该限制：数据集搜索页提供数据类型过滤（`single-cell` / `bulk` / `other`）并显示数据类型徽标，bulk 数据集只保留下载按钮；全自动流水线页的内嵌搜索、直接带入和启动前校验都会拦截 bulk 数据集并给出明确提示；单细胞分析页也标注仅支持单细胞数据集。
+
 批量随机验证搜索是否命中“疾病+研究方向”数据集：
 
 ```bash
@@ -591,6 +593,13 @@ GSE165816 和 TCGA PanCancer Atlas 仅用于真实数据验证。
 MIT License. See `LICENSE` for details.
 
 ## 9. 更新日志
+
+### v0.4.2
+
+- 网页版同步 bulk 数据集检测：数据集搜索页新增数据类型过滤与说明，bulk 数据集只可下载、不能直接运行全自动流水线。
+- 全自动流水线页内嵌搜索新增数据类型列，bulk 数据集不可选择；带入链接携带 `data_type` 参数，启动前校验可拦截 bulk 数据集。
+- 单细胞分析页标注仅支持单细胞数据集。
+- 补充网页端 bulk 链接与搜索数据类型的单元测试。
 
 ### v0.4.1
 

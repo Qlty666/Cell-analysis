@@ -40,6 +40,7 @@ def _fake_search_module():
                 "research_direction": research_direction,
                 "title": "title",
                 "summary": "summary",
+                "data_type": "single-cell",
                 "organism": organism or "Homo sapiens",
                 "samples": "3",
                 "platform": "GPL1",
@@ -88,7 +89,11 @@ class TestDatasetSearchRequest(unittest.TestCase):
             self.assertTrue(result["csv_url"].startswith("/datasets/file?name="))
             self.assertEqual(
                 result["results"][0]["full_pipeline_url"],
-                "/full?accession=GSE1&dataset_title=title",
+                "/full?accession=GSE1&dataset_title=title&data_type=single-cell",
+            )
+            self.assertEqual(
+                result["results"][0]["data_type"],
+                "single-cell",
             )
             self.assertTrue(
                 (base / "search" / "dataset_search_results.csv").exists()
@@ -232,6 +237,19 @@ class TestDatasetFileAndReport(unittest.TestCase):
             {"accession": "GSE1", "title": ""}
         )
         self.assertEqual(url, "/full?accession=GSE1")
+
+    def test_dataset_full_pipeline_url_includes_bulk_data_type(self):
+        url = web_ui.dataset_full_pipeline_url(
+            {
+                "accession": "GSE299321",
+                "title": "Bulk RNA-seq",
+                "data_type": "bulk",
+            }
+        )
+        self.assertEqual(
+            url,
+            "/full?accession=GSE299321&dataset_title=Bulk+RNA-seq&data_type=bulk",
+        )
 
     def test_dataset_file_path_prevents_traversal(self):
         with tempfile.TemporaryDirectory() as tmp:

@@ -1134,6 +1134,9 @@ def dataset_full_pipeline_url(row: dict) -> str:
     title = str(row.get("title") or "").strip()
     if title:
         params["dataset_title"] = title
+    data_type = str(row.get("data_type") or "").strip().lower()
+    if data_type in ("single-cell", "bulk", "other"):
+        params["data_type"] = data_type
     return "/full?" + urlencode(params)
 
 
