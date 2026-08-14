@@ -86,6 +86,10 @@ class TestDatasetSearchRequest(unittest.TestCase):
             self.assertEqual(result["count"], 1)
             self.assertFalse(result["model_applied"])
             self.assertTrue(result["csv_url"].startswith("/datasets/file?name="))
+            self.assertEqual(
+                result["results"][0]["full_pipeline_url"],
+                "/full?accession=GSE1&dataset_title=title",
+            )
             self.assertTrue(
                 (base / "search" / "dataset_search_results.csv").exists()
             )
@@ -211,6 +215,24 @@ class TestDatasetDownload(unittest.TestCase):
 
 
 class TestDatasetFileAndReport(unittest.TestCase):
+    def test_dataset_full_pipeline_url_prefills_accession_and_title(self):
+        url = web_ui.dataset_full_pipeline_url(
+            {
+                "accession": "gse125449",
+                "title": "Liver cancer & single-cell",
+            }
+        )
+        self.assertEqual(
+            url,
+            "/full?accession=GSE125449&dataset_title=Liver+cancer+%26+single-cell",
+        )
+
+    def test_dataset_full_pipeline_url_omits_empty_title(self):
+        url = web_ui.dataset_full_pipeline_url(
+            {"accession": "GSE1", "title": ""}
+        )
+        self.assertEqual(url, "/full?accession=GSE1")
+
     def test_dataset_file_path_prevents_traversal(self):
         with tempfile.TemporaryDirectory() as tmp:
             base = Path(tmp)
