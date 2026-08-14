@@ -3,6 +3,7 @@
 <head>
 <meta charset="utf-8">
 <meta name="viewport" content="width=device-width, initial-scale=1">
+<link rel="stylesheet" href="/static/app.css">
 <title>任务进度</title>
 <style>
 body {
@@ -210,8 +211,23 @@ button.danger:hover { background: #991b1b; }
   <a href="/tasks" class="nav-right active">任务进度</a>
 </div>
 <div class="wrap">
-<h1>任务进度</h1>
-<p class="sub">集中显示三个页面启动的排队、运行和暂停任务；任务完成后自动从列表移除，跳转不会中断后台进程。</p>
+<div class="page-head">
+  <div class="page-title">
+    <h1>任务进度</h1>
+    <p class="page-sub">集中显示三个页面启动的排队、运行和暂停任务；任务完成后自动从列表移除，跳转不会中断后台进程。</p>
+  </div>
+  <div class="page-actions">
+    <a class="link-button" href="/full">全自动流水线</a>
+    <a class="link-button" href="/results">结果清单</a>
+  </div>
+</div>
+
+<div class="stat-grid">
+  <div class="stat-card"><div class="stat-label">运行中</div><div class="stat-value" id="statRunning">0</div></div>
+  <div class="stat-card"><div class="stat-label">排队中</div><div class="stat-value" id="statQueued">0</div></div>
+  <div class="stat-card"><div class="stat-label">已暂停</div><div class="stat-value" id="statPaused">0</div></div>
+  <div class="stat-card"><div class="stat-label">进行中合计</div><div class="stat-value" id="statTotal">0</div></div>
+</div>
 
 <div class="card">
   <div id="statusline" class="statusline muted">正在刷新任务列表...</div>
@@ -337,6 +353,10 @@ async function refresh() {
     if (!resp.ok) throw new Error('加载失败');
     const data = await resp.json();
     const tasks = data.tasks || [];
+    document.getElementById('statTotal').textContent = tasks.length;
+    document.getElementById('statRunning').textContent = tasks.filter(t => t.status === 'running').length;
+    document.getElementById('statQueued').textContent = tasks.filter(t => t.status === 'queued').length;
+    document.getElementById('statPaused').textContent = tasks.filter(t => t.status === 'paused').length;
     statusEl.textContent = '共 ' + tasks.length + ' 个进行中的任务 · 每 2 秒自动刷新';
     listEl.innerHTML = '';
     if (!tasks.length) {

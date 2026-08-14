@@ -3,6 +3,7 @@
 <head>
 <meta charset="utf-8">
 <meta name="viewport" content="width=device-width, initial-scale=1">
+<link rel="stylesheet" href="/static/app.css">
 <title>单细胞数据集分析</title>
 <style>
 body {
@@ -122,44 +123,60 @@ a { color: #1665c0; text-decoration: none; }
 </head>
 <body>
 <div class="wrap">
-<h1>单细胞数据集分析</h1>
-<p class="muted">输入 GEO 数据集编号和输出路径，自动完成下载、质控、双细胞、聚类、注释、差异表达与富集分析。</p>
+<div class="page-head">
+  <div class="page-title">
+    <h1>单细胞数据集分析</h1>
+    <p class="page-sub">输入 GEO 数据集编号和输出路径，自动完成下载、质控、双细胞、聚类、注释、差异表达与富集分析。</p>
+  </div>
+  <div class="page-actions">
+    <a class="link-button" href="/full">全自动流水线</a>
+    <a class="link-button" href="/results">结果清单</a>
+  </div>
+</div>
 
 <div class="card">
   <form id="form">
-    <label for="acc">GSE 数据集编号</label>
-    <input id="acc" name="accession" placeholder="请输入数据集编号" required>
-
-    <label for="out">结果保存路径</label>
-    <input id="out" name="output" placeholder="请输入结果保存地址" required>
-
-    <label for="sp">物种</label>
-    <select id="sp" name="species">
-      <option value="auto" selected>auto - 自动识别</option>
-      <option value="hs">hs - Human</option>
-      <option value="mm">mm - Mouse</option>
-    </select>
-
-    <div class="params">
-      <h2>分析参数</h2>
-      <label>QC 最小基因数 <input type="number" name="LIVER_QC_MIN_FEATURES" placeholder="自动"></label>
-      <label>QC 最大基因数 <input type="number" name="LIVER_QC_MAX_FEATURES" placeholder="自动"></label>
-      <label>QC 最小 UMI <input type="number" name="LIVER_QC_MIN_COUNTS" placeholder="自动"></label>
-      <label>QC 最大 UMI <input type="number" name="LIVER_QC_MAX_COUNTS" placeholder="自动"></label>
-      <label>QC 最大线粒体比例 <input type="number" name="LIVER_QC_MAX_MT" placeholder="自动"></label>
-      <label>聚类分辨率 <input type="number" step="0.1" name="LIVER_CLUSTER_RESOLUTION" placeholder="0.6"></label>
-      <label>聚类算法 1-Louvain 4-Leiden <input type="number" name="LIVER_CLUSTER_ALGORITHM" placeholder="1"></label>
-      <label>差异表达 log2FC 阈值 <input type="number" step="0.05" name="LIVER_DE_LOGFc" placeholder="0.25"></label>
-      <label>差异表达 Padj 阈值 <input type="number" step="0.01" name="LIVER_DE_PADJ" placeholder="0.05"></label>
-      <label>Top DEG 小提琴基因数 <input type="number" name="LIVER_DE_VIOLIN_TOP_N" placeholder="12"></label>
-      <label>Top DEG 小提琴每条件细胞数 <input type="number" name="LIVER_DE_VIOLIN_MAX_CELLS" placeholder="1000"></label>
+    <div class="page-actions" style="margin-bottom: 12px;">
+      <button type="button" class="secondary" onclick="saveFormState()">保存设置</button>
+      <button type="button" class="secondary" onclick="restoreFormState()">恢复设置</button>
+      <button type="button" class="secondary" onclick="resetForm()">恢复默认</button>
     </div>
-
-    <div id="figureToggles" style="margin-top: 16px;">
-      <h2>结果图开关</h2>
-      <p class="muted">默认 yes；选择 no 则跳过该图。开始分析后不可修改。</p>
+    <details class="form-section" open>
+      <summary>基础设置</summary>
+      <label for="acc">GSE 数据集编号</label>
+      <input id="acc" name="accession" placeholder="请输入数据集编号" required>
+      <label for="out">结果保存路径</label>
+      <input id="out" name="output" placeholder="请输入结果保存地址" required>
+      <label for="sp">物种</label>
+      <select id="sp" name="species">
+        <option value="auto" selected>auto - 自动识别</option>
+        <option value="hs">hs - Human</option>
+        <option value="mm">mm - Mouse</option>
+      </select>
+    </details>
+    <details class="form-section" open>
+      <summary>分析参数</summary>
+      <div class="params">
+        <label>QC 最小基因数 <input type="number" name="LIVER_QC_MIN_FEATURES" placeholder="自动"></label>
+        <label>QC 最大基因数 <input type="number" name="LIVER_QC_MAX_FEATURES" placeholder="自动"></label>
+        <label>QC 最小 UMI <input type="number" name="LIVER_QC_MIN_COUNTS" placeholder="自动"></label>
+        <label>QC 最大 UMI <input type="number" name="LIVER_QC_MAX_COUNTS" placeholder="自动"></label>
+        <label>QC 最大线粒体比例 <input type="number" name="LIVER_QC_MAX_MT" placeholder="自动"></label>
+        <label>聚类分辨率 <input type="number" step="0.1" name="LIVER_CLUSTER_RESOLUTION" placeholder="0.6"></label>
+        <label>聚类算法 1-Louvain 4-Leiden <input type="number" name="LIVER_CLUSTER_ALGORITHM" placeholder="1"></label>
+        <label>差异表达 log2FC 阈值 <input type="number" step="0.05" name="LIVER_DE_LOGFc" placeholder="0.25"></label>
+        <label>差异表达 Padj 阈值 <input type="number" step="0.01" name="LIVER_DE_PADJ" placeholder="0.05"></label>
+        <label>Top DEG 小提琴基因数 <input type="number" name="LIVER_DE_VIOLIN_TOP_N" placeholder="12"></label>
+        <label>Top DEG 小提琴每条件细胞数 <input type="number" name="LIVER_DE_VIOLIN_MAX_CELLS" placeholder="1000"></label>
+      </div>
+    </details>
+    <details class="form-section">
+      <summary>结果图开关</summary>
+      <p class="muted field-hint">默认 yes；选择 no 则跳过该图。开始分析后不可修改。</p>
+      <div id="figureToggles" style="margin-top: 10px;">
 <!--FIGURE_TOGGLES-->
-    </div>
+      </div>
+    </details>
 
     <button id="startBtn" type="button" onclick="startRun()">开始分析</button>
     <button id="pauseBtn" type="button" onclick="pauseRun()" disabled>暂停分析</button>
@@ -208,6 +225,7 @@ let figTimer = null;
 let paused = false;
 let jobAlerted = false;
 const SINGLE_JOB_KEY = 'liver_ui_single_job';
+const SINGLE_FORM_KEY = 'liver_ui_single_form';
 
 function saveJobRecord() {
   try { sessionStorage.setItem(SINGLE_JOB_KEY, currentJob); } catch (e) {}
@@ -270,6 +288,53 @@ function showJobToast(kind, title, body) {
 function closeJobToast() {
   const toast = document.getElementById('jobToast');
   if (toast) toast.hidden = true;
+}
+
+function collectFormState() {
+  const form = document.getElementById('form');
+  const state = {};
+  new FormData(form).forEach((value, key) => {
+    state[key] = value;
+  });
+  return state;
+}
+
+function saveFormState() {
+  try {
+    sessionStorage.setItem(SINGLE_FORM_KEY, JSON.stringify(collectFormState()));
+    const box = document.getElementById('message');
+    box.className = 'ok';
+    box.textContent = '设置已保存到当前浏览器标签页。';
+  } catch (e) {
+    const box = document.getElementById('message');
+    box.className = 'error';
+    box.textContent = '保存设置失败：' + String(e.message || e);
+  }
+}
+
+function restoreFormState() {
+  let saved = null;
+  try {
+    saved = JSON.parse(sessionStorage.getItem(SINGLE_FORM_KEY) || 'null');
+  } catch (e) {
+    return;
+  }
+  if (!saved) return;
+  const form = document.getElementById('form');
+  Object.entries(saved).forEach(([name, value]) => {
+    const el = form.querySelector('[name="' + name + '"]');
+    if (el) el.value = value;
+  });
+}
+
+function resetForm() {
+  try {
+    sessionStorage.removeItem(SINGLE_FORM_KEY);
+  } catch (e) {}
+  document.getElementById('form').reset();
+  const box = document.getElementById('message');
+  box.className = 'ok';
+  box.textContent = '已恢复默认设置。';
 }
 
 function setupFigureSlots() {
@@ -578,6 +643,7 @@ loadHistory();
 loadVersions();
 clearJobRecordsOnReload();
 restoreJobRecord();
+restoreFormState();
 </script>
 <div id="jobToast" class="job-toast" hidden>
   <div class="job-toast-title" id="jobToastTitle"></div>
