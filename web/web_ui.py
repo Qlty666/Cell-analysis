@@ -2639,6 +2639,7 @@ class Handler(BaseHTTPRequestHandler):
                 ".csv": "text/csv; charset=utf-8",
                 ".json": "application/json",
                 ".html": "text/html; charset=utf-8",
+                ".css": "text/css; charset=utf-8",
                 ".md": "text/markdown; charset=utf-8",
                 ".xlsx": "application/vnd.openxmlformats-officedocument.spreadsheetml.sheet",
             }.get(target.suffix.lower(), "application/octet-stream")

@@ -3,6 +3,7 @@
 <head>
 <meta charset="utf-8">
 <meta name="viewport" content="width=device-width, initial-scale=1">
+<link rel="stylesheet" href="/static/app.css">
 <title>虚拟筛选流水线</title>
 <style>
 body {
@@ -145,8 +146,16 @@ a.file-link { color: #1665c0; text-decoration: none; margin-right: 12px; }
   <a href="/tasks" class="nav-right">任务进度</a>
 </div>
 <div class="wrap">
-<h1>虚拟筛选流水线</h1>
-<p class="muted">AutoDock Vina 对接：受体准备、配体库准备、并行对接、命中排序与多样性筛选。</p>
+<div class="page-head">
+  <div class="page-title">
+    <h1>虚拟筛选流水线</h1>
+    <p class="page-sub">AutoDock Vina 对接：受体准备、配体库准备、并行对接、命中排序与多样性筛选。</p>
+  </div>
+  <div class="page-actions">
+    <a class="link-button" href="/full">全自动流水线</a>
+    <a class="link-button" href="/results">结果清单</a>
+  </div>
+</div>
 
 <div class="card">
   <form id="form">
