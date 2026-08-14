@@ -47,7 +47,7 @@ fig_style <- function(name) {
 figure_stage <- function(name) {
   num <- as.integer(sub("^fig_([0-9]+)_.*$", "\\1", name))
   if (is.na(num)) return("00_other")
-  if (num <= 1) return("01_qc")
+  if (num <= 1 || num == 48) return("01_qc")
   if (num == 2) return("02_doublets")
   if (num %in% c(3, 4, 14, 15)) return("03_cluster")
   if (num %in% c(5, 6, 7, 16, 17, 18, 19)) return("04_annotation")
@@ -970,8 +970,79 @@ if (stage_allowed("02")) run_stage("02_qc_filter", {
 
   qc_data <- FetchData(
     seurat_raw,
-    vars = c("nFeature_RNA", "nCount_RNA", "percent.mt")
+    vars = c("nFeature_RNA", "nCount_RNA", "percent.mt", "percent.ribo")
   )
+  qc_data$sample <- seurat_raw$sample
+  qc_data$condition <- seurat_raw$condition
+
+  qc_pvalue_table <- function(qc_frame, stage) {
+    group_col <- as.character(qc_frame$condition)
+    metrics <- c("nFeature_RNA", "nCount_RNA", "percent.mt", "percent.ribo")
+    groups <- sort(unique(group_col[!is.na(group_col) & nzchar(group_col)]))
+    if (length(groups) < 2) {
+      return(data.frame(
+        stage = character(),
+        metric = character(),
+        group1 = character(),
+        group2 = character(),
+        n1 = integer(),
+        n2 = integer(),
+        median1 = numeric(),
+        median2 = numeric(),
+        median_diff = numeric(),
+        statistic = numeric(),
+        pvalue = numeric(),
+        padj = numeric(),
+        neg_log10_pvalue = numeric(),
+        direction = character(),
+        stringsAsFactors = FALSE
+      ))
+    }
+    pairs <- combn(groups, 2, simplify = FALSE)
+    rows <- lapply(pairs, function(pair) {
+      lapply(metrics, function(metric) {
+        x <- as.numeric(qc_frame[[metric]][group_col == pair[1]])
+        y <- as.numeric(qc_frame[[metric]][group_col == pair[2]])
+        x <- x[is.finite(x)]
+        y <- y[is.finite(y)]
+        med1 <- median(x)
+        med2 <- median(y)
+        test <- tryCatch(
+          suppressWarnings(wilcox.test(x, y, exact = FALSE)),
+          error = function(e) NULL
+        )
+        data.frame(
+          stage = stage,
+          metric = metric,
+          group1 = pair[1],
+          group2 = pair[2],
+          n1 = length(x),
+          n2 = length(y),
+          median1 = med1,
+          median2 = med2,
+          median_diff = med2 - med1,
+          statistic = if (is.null(test)) NA_real_ else unname(test$statistic),
+          pvalue = if (is.null(test)) NA_real_ else test$p.value,
+          direction = ifelse(
+            is.na(med1) || is.na(med2) || med2 == med1,
+            "no difference",
+            ifelse(med2 > med1, paste0(pair[2], " higher"), paste0(pair[1], " higher"))
+          ),
+          stringsAsFactors = FALSE
+        )
+      })
+    })
+    out <- do.call(rbind, unlist(rows, recursive = FALSE))
+    out$padj <- p.adjust(out$pvalue, method = "BH")
+    out$neg_log10_pvalue <- ifelse(
+      is.na(out$pvalue),
+      NA_real_,
+      -log10(pmax(out$pvalue, .Machine$double.xmin))
+    )
+    out
+  }
+
+  qc_diff_raw <- qc_pvalue_table(qc_data, "raw")
 
   lo_feature <- if (!is.na(qc_min_features)) {
     qc_min_features
@@ -1034,6 +1105,51 @@ if (stage_allowed("02")) run_stage("02_qc_filter", {
   qc_metrics$sample <- seurat_qc$sample
   qc_metrics$condition <- seurat_qc$condition
   write.csv(qc_metrics, stage_data_file("fig_01_qc_metrics.csv"))
+
+  qc_diff_filtered <- qc_pvalue_table(qc_metrics, "filtered")
+  qc_diff <- rbind(qc_diff_raw, qc_diff_filtered)
+  write.csv(qc_diff, stage_data_file("fig_48_qc_pvalue_comparison.csv"), row.names = FALSE)
+
+  if (nrow(qc_diff) > 0) {
+    qc_diff$comparison <- paste(qc_diff$group1, qc_diff$group2, sep = " vs ")
+    qc_diff$stage <- factor(qc_diff$stage, levels = c("raw", "filtered"))
+    p_qc_diff <- ggplot(qc_diff, aes(x = metric, y = neg_log10_pvalue, fill = comparison)) +
+      geom_col(position = position_dodge2(preserve = "single"), width = 0.7) +
+      geom_hline(yintercept = -log10(0.05), linetype = "dashed", color = "#666666") +
+      geom_text(
+        aes(label = ifelse(
+          is.na(pvalue),
+          "NA",
+          paste0("P=", formatC(pvalue, digits = 2, format = "g"))
+        )),
+        position = position_dodge2(width = 0.7),
+        vjust = -0.4,
+        size = 3
+      ) +
+      facet_wrap(~ stage, ncol = 1, scales = "free_y") +
+      labs(
+        x = "QC metric",
+        y = "-log10(P value)",
+        title = "QC metric difference by condition",
+        subtitle = "Wilcoxon rank-sum test; dashed line indicates P = 0.05"
+      ) +
+      theme_minimal() +
+      theme(
+        axis.text.x = element_text(angle = 30, hjust = 1),
+        legend.position = "bottom"
+      )
+  } else {
+    p_qc_diff <- ggplot(data.frame(x = 0, y = 0), aes(x, y)) +
+      geom_text(label = "At least two conditions are required") +
+      theme_void()
+  }
+  save_fig(
+    file.path(fig_dir, "fig_48_qc_pvalue_comparison.png"),
+    p_qc_diff,
+    width = 10,
+    height = 8,
+    dpi = 150
+  )
 
   p_qc <- VlnPlot(
     seurat_qc,
