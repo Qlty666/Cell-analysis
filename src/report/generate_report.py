@@ -43,6 +43,7 @@ STAGE_LABELS = {
 FIGURE_GUIDE = {
     "fig_01_qc_raw_violin.png": ("QC 小提琴图（原始）", "过滤前 nFeature、nCount、percent.mt 的分布，用于识别低质量细胞和数据批次差异。"),
     "fig_01_qc_filtered_violin.png": ("QC 小提琴图（过滤后）", "过滤后的 QC 指标分布，确认阈值是否合理、主要细胞群是否保留。"),
+    "fig_48_qc_pvalue_comparison.png": ("QC 质控差异度 P 值图", "以 Wilcoxon 秩和检验 P 值衡量原始/过滤后 QC 指标在不同条件间的差异程度。"),
     "fig_02_doublet_scores.png": ("双细胞得分图", "scDblFinder 双细胞得分的分布，用于判断双细胞分类边界。"),
     "fig_03_umap_clusters.png": ("UMAP 聚类图", "Seurat 聚类在 UMAP 上的结构，检查分群是否清晰、是否存在过度分割。"),
     "fig_04_umap_condition.png": ("UMAP 分组图", "不同条件下细胞在 UMAP 上的分布，检查分组偏移和批次效应。"),
@@ -235,7 +236,7 @@ def stage_label(rel: str) -> str:
     match = re.match(r"^fig_(\d+)", Path(rel).name)
     if match:
         num = int(match.group(1))
-        if num <= 1:
+        if num <= 1 or num == 48:
             return STAGE_LABELS["01_qc"]
         if num == 2:
             return STAGE_LABELS["02_doublets"]
@@ -654,6 +655,7 @@ def main() -> int:
         data_link("fig_09_deg_significant.csv", "显著差异表达基因"),
         data_link("fig_09_deg_horizontal_violin.csv", "Top DEG 横向小提琴图数据"),
         data_link("fig_01_qc_metrics.csv", "QC 指标"),
+        data_link("fig_48_qc_pvalue_comparison.csv", "QC 质控差异度 P 值"),
         data_link("fig_02_doublet_results.csv", "双细胞结果"),
         data_link("fig_05_16_17_cell_annotations.csv", "细胞注释"),
         data_link("fig_07_annotation_confusion.csv", "注释混淆矩阵"),
@@ -758,6 +760,7 @@ summary {{ cursor: pointer; color: #1665c0; font-size: 13px; }}
 <h2>1. 质控</h2>
 {image_card('fig_01_qc_raw_violin.png', '原始 QC 指标')}
 {image_card('fig_01_qc_filtered_violin.png', '过滤后 QC 指标')}
+{image_card('fig_48_qc_pvalue_comparison.png', 'QC 质控差异度 P 值')}
 
 <h2>2. 双细胞检测</h2>
 {image_card('fig_02_doublet_scores.png', '双细胞得分')}
