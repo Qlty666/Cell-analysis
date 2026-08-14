@@ -540,6 +540,8 @@ class TestTemplatePolish(unittest.TestCase):
             "restoreFormState",
             "resultStats",
             "skip_differential_abundance",
+            "prefillDataType",
+            "bulk",
         ]:
             self.assertIn(token, html)
 
@@ -552,6 +554,9 @@ class TestTemplatePolish(unittest.TestCase):
         html = self._read("datasets_template.html")
         self.assertIn("form-section", html)
         self.assertIn("过滤与下载选项", html)
+        self.assertIn("dataTypeFilter", html)
+        self.assertIn("applyDataTypeFilter", html)
+        self.assertIn("仅支持 single-cell", html)
 
     def test_tasks_page_has_stat_cards(self):
         html = self._read("tasks_template.html")

@@ -74,6 +74,16 @@ button:disabled { background: #9aa5b1; cursor: not-allowed; }
 .toggles { display: grid; grid-template-columns: repeat(auto-fit, minmax(230px, 1fr)); gap: 8px; margin-top: 14px; }
 .toggle { display: flex; align-items: center; gap: 8px; font-weight: 600; margin: 0; }
 .toggle input { width: auto; }
+.badge {
+  display: inline-block;
+  padding: 2px 8px;
+  border-radius: 999px;
+  font-size: 11px;
+  font-weight: 700;
+}
+.badge.single-cell { background: #dcfce7; color: #166534; }
+.badge.bulk { background: #fef3c7; color: #92400e; }
+.badge.other { background: #e5e7eb; color: #374151; }
 pre {
   background: #0f172a;
   color: #dbeafe;
@@ -166,11 +176,12 @@ a.file-link { color: #1665c0; text-decoration: none; margin-right: 12px; }
   <div class="tablebox">
     <table>
       <thead>
-        <tr><th>#</th><th>编号</th><th>标题</th><th>物种</th><th>操作</th></tr>
+        <tr><th>#</th><th>编号</th><th>标题</th><th>物种</th><th>数据类型</th><th>操作</th></tr>
       </thead>
-      <tbody id="pipelineSearchBody"><tr><td colspan="5" class="muted">暂无结果</td></tr></tbody>
+      <tbody id="pipelineSearchBody"><tr><td colspan="6" class="muted">暂无结果</td></tr></tbody>
     </table>
   </div>
+  <p class="muted" style="margin-top: 6px;">全自动流水线仅支持 single-cell 数据集；bulk 数据集只能下载，不能选择运行。</p>
 </div>
 
 <div class="card">
@@ -185,7 +196,7 @@ a.file-link { color: #1665c0; text-decoration: none; margin-right: 12px; }
       <div class="grid wide">
         <label>GEO 数据集编号
           <input name="accession" value="" placeholder="请输入数据集编号">
-          <span class="field-hint">格式如 GSE125449，可留空后从数据集搜索选择。</span>
+          <span class="field-hint">格式如 GSE125449；仅支持单细胞数据集，bulk 数据集会被明确拒绝。</span>
         </label>
         <label>单细胞结果目录
           <input name="output" placeholder="请输入结果保存地址" required>
@@ -321,6 +332,7 @@ let jobAlerted = false;
 const FULL_JOB_KEY = 'liver_ui_full_job';
 const FULL_FORM_KEY = 'liver_ui_full_form';
 let pipelineSearchResults = [];
+let prefillDataType = '';
 
 function applyDatasetPrefill() {
   try {
@@ -330,15 +342,22 @@ function applyDatasetPrefill() {
     if (!accession || !input) return;
     input.value = accession.toUpperCase();
     const title = params.get('dataset_title');
+    prefillDataType = (params.get('data_type') || '').toLowerCase();
     const note = document.getElementById('datasetPrefillNote');
     if (note) {
-      note.textContent = title
-        ? '已带入数据集：' + accession.toUpperCase() + ' · ' + title
-        : '已带入数据集：' + accession.toUpperCase();
+      const label = prefillDataType ? '（' + prefillDataType + '）' : '';
+      if (prefillDataType === 'bulk') {
+        note.className = 'error';
+        note.textContent = '已带入数据集：' + accession.toUpperCase() + label + ' · ' + (title || '') + '。该数据集为 bulk RNA-seq，无法运行全自动流水线，请改用单细胞数据集。';
+      } else {
+        note.className = 'ok';
+        note.textContent = '已带入数据集：' + accession.toUpperCase() + label + (title ? ' · ' + title : '');
+      }
     }
     const url = new URL(window.location.href);
     url.searchParams.delete('accession');
     url.searchParams.delete('dataset_title');
+    url.searchParams.delete('data_type');
     window.history.replaceState(null, '', url.toString());
   } catch (e) {}
 }
@@ -361,32 +380,46 @@ async function searchPipelineDatasets() {
     msg.className = 'error';
     msg.textContent = String(e.message || e);
     document.getElementById('pipelineSearchBody').innerHTML =
-      '<tr><td colspan="5" class="muted">暂无结果</td></tr>';
+      '<tr><td colspan="6" class="muted">暂无结果</td></tr>';
   }
 }
 
 function renderPipelineSearchResults() {
   const body = document.getElementById('pipelineSearchBody');
   if (!pipelineSearchResults.length) {
-    body.innerHTML = '<tr><td colspan="5" class="muted">未找到匹配数据集</td></tr>';
+    body.innerHTML = '<tr><td colspan="6" class="muted">未找到匹配数据集</td></tr>';
     return;
   }
   body.innerHTML = pipelineSearchResults.map((row, index) => {
+    const type = row.data_type || 'other';
+    const badge = '<span class="badge ' + esc(type) + '">' + esc(type) + '</span>';
+    const action = type === 'bulk'
+      ? '<span class="badge bulk">仅支持单细胞</span>'
+      : '<button class="secondary" type="button" onclick="choosePipelineDataset(' + index + ')">选择</button>';
     return '<tr><td>' + (index + 1) + '</td>' +
       '<td><a href="' + esc(row.url) + '" target="_blank" rel="noopener">' + esc(row.accession) + '</a></td>' +
       '<td>' + esc(row.title) + '</td>' +
       '<td>' + esc(row.organism) + '</td>' +
-      '<td><button class="secondary" type="button" onclick="choosePipelineDataset(' + index + ')">选择</button></td></tr>';
+      '<td>' + badge + '</td>' +
+      '<td>' + action + '</td></tr>';
   }).join('');
 }
 
 function choosePipelineDataset(index) {
   const row = pipelineSearchResults[index];
   if (!row) return;
+  prefillDataType = (row.data_type || 'other').toLowerCase();
+  if (prefillDataType === 'bulk') {
+    msg(row.accession + ' 是 bulk RNA-seq 数据集，无法运行全自动流水线，请选择 single-cell 数据集。', 'error');
+    return;
+  }
   const input = document.querySelector('input[name="accession"]');
   if (input) input.value = row.accession;
   const note = document.getElementById('datasetPrefillNote');
-  if (note) note.textContent = '已带入数据集：' + row.accession + ' · ' + row.title;
+  if (note) {
+    note.className = 'ok';
+    note.textContent = '已带入数据集：' + row.accession + '（' + prefillDataType + '） · ' + row.title;
+  }
   msg('已填入数据集 ' + row.accession + '，启动全自动流水线时将自动下载。', 'ok');
 }
 
@@ -535,6 +568,15 @@ function renderTable(id, rows, columns) {
 async function startRun() {
   const form = document.getElementById('form');
   const data = new URLSearchParams(new FormData(form));
+  const accession = (data.get('accession') || '').trim().toUpperCase();
+  const knownBulk = pipelineSearchResults.some(row =>
+    String(row.accession || '').toUpperCase() === accession &&
+    String(row.data_type || '').toLowerCase() === 'bulk'
+  );
+  if (prefillDataType === 'bulk' || knownBulk) {
+    msg('该数据集为 bulk RNA-seq，无法运行全自动流水线；请改用 single-cell 数据集。', 'error');
+    return;
+  }
     const btn = document.getElementById('startBtn');
     btn.disabled = true;
     jobAlerted = false;
