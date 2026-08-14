@@ -494,6 +494,12 @@ infer_group_from_filename <- function(mat_file) {
   if (grepl("etoh|alcohol", low) && grepl("control", low)) {
     return(ifelse(grepl("etoh", low), "EtOH", "Control"))
   }
+  if (grepl("dmso", low)) {
+    return("DMSO")
+  }
+  if (grepl("jte[-_ ]?607", low)) {
+    return("JTE607")
+  }
   if (grepl("fibrosis", low) && grepl("control", low)) {
     return(ifelse(grepl("fibrosis", low), "Fibrosis", "Control"))
   }
