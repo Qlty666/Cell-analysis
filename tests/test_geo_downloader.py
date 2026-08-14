@@ -13,6 +13,7 @@ if str(APP_ROOT / "src") not in sys.path:
 
 from data.geo_downloader import (  # noqa: E402
     BULK_COUNT_TABLE_RE,
+    _refresh_manifest_mode,
     _select_files,
 )
 
@@ -59,6 +60,22 @@ class TestSelectFiles(unittest.TestCase):
         self.assertEqual(selected["matrix"], ["GSE125449_Set1_matrix.mtx.gz"])
         self.assertFalse(selected["bulk"])
 
+    def test_filtered_feature_bc_matrix_rds_not_bulk(self):
+        names = [
+            "_extracted/GSM9947997_Organoid_pool_DMSO_filtered_feature_bc_matrix.rds",
+            "_extracted/GSM9947998_Organoid_pool_JTE607_filtered_feature_bc_matrix.rds",
+            "_extracted/GSM9947999_LACO1_FPKM_quan.tab.gz",
+        ]
+        selected = _select_files(names)
+        self.assertEqual(selected["matrix"], names[:2])
+        self.assertFalse(selected["bulk"])
+
+    def test_rds_count_matrix_not_bulk(self):
+        names = ["GSM9037276_counts.rds"]
+        selected = _select_files(names)
+        self.assertEqual(selected["matrix"], names)
+        self.assertFalse(selected["bulk"])
+
     def test_bulk_count_table_regex(self):
         self.assertTrue(BULK_COUNT_TABLE_RE.search("GSM9037276_GC119559.txt.gz"))
         self.assertTrue(
@@ -66,6 +83,44 @@ class TestSelectFiles(unittest.TestCase):
         )
         self.assertFalse(BULK_COUNT_TABLE_RE.search("GSE125449_Set1_matrix.mtx.gz"))
         self.assertFalse(BULK_COUNT_TABLE_RE.search("GSE299321_RAW.tar"))
+
+
+class TestRefreshManifestMode(unittest.TestCase):
+    def test_reclassifies_seurat_rds_from_old_bulk_manifest(self):
+        manifest = {
+            "accession": "GSE343226",
+            "mode": "bulk",
+            "organism": "hs",
+            "files": {
+                "matrix": [
+                    "_extracted/GSM9947997_Organoid_pool_DMSO_filtered_feature_bc_matrix.rds",
+                    "_extracted/GSM9947998_Organoid_pool_JTE607_filtered_feature_bc_matrix.rds",
+                ],
+                "barcodes": [],
+                "genes": [],
+                "metadata": [],
+                "series_matrices": ["GSE343226_series_matrix.txt.gz"],
+            },
+        }
+        updated = _refresh_manifest_mode(manifest)
+        self.assertEqual(updated["mode"], "generic")
+
+    def test_keeps_per_sample_count_tables_bulk(self):
+        manifest = {
+            "accession": "GSE299321",
+            "mode": "bulk",
+            "organism": "hs",
+            "files": {
+                "matrix": ["GSM9037276_GC119559.txt.gz"],
+                "barcodes": [],
+                "genes": [],
+                "metadata": [],
+                "series_matrices": ["GSE299321_series_matrix.txt.gz"],
+            },
+        }
+        updated = _refresh_manifest_mode(manifest)
+        self.assertEqual(updated["mode"], "bulk")
+
 
 if __name__ == "__main__":
     unittest.main()
