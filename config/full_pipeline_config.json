@@ -22,6 +22,20 @@
     "max_workers": 6,
     "timeout": 90
   },
+  "qc_gate": {
+    "enabled": true,
+    "min_cells_after_qc": 0,
+    "min_genes": 0,
+    "max_doublet_rate": null,
+    "min_deg_genes": 0,
+    "require_pseudobulk": false,
+    "fail_on_missing_metrics": false
+  },
+  "differential_abundance": {
+    "enabled": true,
+    "min_cells": 5,
+    "fdr": 0.05
+  },
   "gene_blacklist": [
     "^RPL",
     "^RPS",

@@ -18,8 +18,10 @@ from __future__ import annotations
 
 import argparse
 import concurrent.futures
+import hashlib
 import json
 import logging
+import math
 import os
 import re
 import shutil
@@ -59,6 +61,52 @@ STAGES = [
     ("07", "cell_feedback", "re-score single-cell targets from knockout/docking results"),
     ("08", "report", "integrated HTML report and provenance manifest"),
 ]
+
+# Required outputs per stage. Paths are relative to the full-pipeline workdir.
+STAGE_OUTPUTS = {
+    "01": ("results/pipeline_complete.json",),
+    "02": (
+        "outputs/integration/key_genes.csv",
+        "outputs/integration/key_genes_summary.json",
+    ),
+    "03": ("outputs/integration/gene_evidence.csv",),
+    "04": (
+        "data/knockout/expression.csv",
+        "data/knockout/metadata.csv",
+        "data/knockout/inputs_summary.json",
+    ),
+    "05": (
+        "outputs/integration/knockout_summary.json",
+        "outputs/run_001/results/04_knockout/data/fig_52_53_ranked_knockout.csv",
+        "outputs/run_001/results/05_validation/data/validation_plan.md",
+    ),
+    "06": (
+        "outputs/integration/docking_summary.json",
+        "outputs/integration/docking_targets.csv",
+    ),
+    "07": ("outputs/integration/cell_feedback/cell_feedback_summary.json",),
+    "08": (
+        "outputs/integration/integration_report.html",
+        "outputs/integration/integration_summary.json",
+        "outputs/integration/run_manifest.json",
+    ),
+}
+
+DEFAULT_QC_GATE = {
+    "enabled": True,
+    "min_cells_after_qc": 0,
+    "min_genes": 0,
+    "max_doublet_rate": None,
+    "min_deg_genes": 0,
+    "require_pseudobulk": False,
+    "fail_on_missing_metrics": False,
+}
+
+DEFAULT_DIFFERENTIAL_ABUNDANCE = {
+    "enabled": True,
+    "min_cells": 5,
+    "fdr": 0.05,
+}
 
 DEFAULT_GENE_BLACKLIST = [
     r"^RPL",
@@ -115,6 +163,181 @@ def _stage_dir(workdir: Path) -> Path:
 
 def _marker(workdir: Path, code: str, name: str) -> Path:
     return _stage_dir(workdir) / f"{code}_{name}.done"
+
+
+def _sha256_file(path: Path) -> str:
+    try:
+        digest = hashlib.sha256()
+        with path.open("rb") as fh:
+            for block in iter(lambda: fh.read(1 << 20), b""):
+                digest.update(block)
+        return digest.hexdigest()
+    except OSError:
+        return "missing"
+
+
+def _json_sorted(value) -> str:
+    try:
+        return json.dumps(
+            value,
+            sort_keys=True,
+            ensure_ascii=False,
+            default=str,
+        )
+    except Exception:
+        return str(value)
+
+
+def _read_stage_marker(workdir: Path, code: str, name: str) -> dict | None:
+    marker = _marker(workdir, code, name)
+    if not marker.exists():
+        return None
+    try:
+        data = json.loads(marker.read_text(encoding="utf-8"))
+        if isinstance(data, dict) and data.get("signature"):
+            return data
+    except Exception:
+        pass
+    return None
+
+
+def _write_stage_marker(
+    workdir: Path,
+    code: str,
+    name: str,
+    signature: str,
+    note: str = "",
+) -> None:
+    marker = _marker(workdir, code, name)
+    marker.parent.mkdir(parents=True, exist_ok=True)
+    marker.write_text(
+        json.dumps(
+            {
+                "timestamp": datetime.now().isoformat(timespec="seconds"),
+                "stage": f"{code}_{name}",
+                "signature": signature,
+                "note": note,
+            },
+            ensure_ascii=False,
+            indent=2,
+        ),
+        encoding="utf-8",
+    )
+
+
+def _stage_signature(code: str, args, workdir: Path, ctx: dict) -> str:
+    """Fingerprint the parameters and inputs that can invalidate a stage."""
+    integration = _integration_dir(workdir)
+    config_path = Path(str(getattr(args, "config", "") or "")).resolve()
+    docking_config = Path(
+        str(ctx.get("docking_config") or getattr(args, "docking_config", "") or "")
+    ).resolve()
+    payload: dict = {"stage": code}
+
+    if code == "01":
+        payload.update(
+            {
+                "single_cell_root": str(ctx.get("single_cell_root") or ""),
+                "accession": getattr(args, "accession", None),
+                "species": getattr(args, "species", None),
+                "skip_scrna": bool(getattr(args, "skip_scrna", False)),
+                "skip_download": bool(getattr(args, "skip_download", False)),
+                "skip_deps": bool(getattr(args, "skip_deps", False)),
+                "qc_gate": _json_sorted(getattr(args, "qc_gate", {})),
+                "differential_abundance": _json_sorted(
+                    getattr(args, "differential_abundance", {})
+                ),
+            }
+        )
+    elif code == "02":
+        payload.update(
+            {
+                "single_cell_root": str(ctx.get("single_cell_root") or ""),
+                "top_genes": int(getattr(args, "top_genes", 50) or 50),
+                "keep_all_genes": bool(getattr(args, "keep_all_genes", False)),
+                "gene_blacklist": sorted(
+                    getattr(args, "gene_blacklist", DEFAULT_GENE_BLACKLIST) or []
+                ),
+            }
+        )
+    elif code == "03":
+        key_genes = ctx.get("key_genes_path") or integration / "key_genes.csv"
+        payload.update(
+            {
+                "key_genes_csv": str(key_genes),
+                "key_genes_sha256": _sha256_file(Path(str(key_genes))),
+                "fetch": bool(not getattr(args, "skip_evidence_fetch", False)),
+                "max_workers": int(getattr(args, "evidence_workers", 6) or 6),
+                "timeout": int(getattr(args, "evidence_timeout", 90) or 90),
+            }
+        )
+    elif code == "04":
+        payload.update(
+            {
+                "single_cell_root": str(ctx.get("single_cell_root") or ""),
+                "skip_pseudobulk": bool(getattr(args, "skip_pseudobulk", False)),
+            }
+        )
+    elif code == "05":
+        payload.update(
+            {
+                "docking_config": str(docking_config),
+                "docking_config_sha256": _sha256_file(docking_config),
+                "case_label": getattr(args, "case_label", None),
+                "normal_label": getattr(args, "normal_label", None),
+                "ko_top_n": getattr(args, "ko_top_n", None),
+                "depmap_csv": getattr(args, "depmap_csv", None),
+                "skip_knockout": bool(getattr(args, "skip_knockout", False)),
+            }
+        )
+    elif code == "06":
+        key_genes = ctx.get("key_genes_path") or integration / "key_genes.csv"
+        evidence = ctx.get("evidence_path") or integration / "gene_evidence.csv"
+        payload.update(
+            {
+                "docking_config": str(docking_config),
+                "docking_config_sha256": _sha256_file(docking_config),
+                "key_genes_csv": str(key_genes),
+                "key_genes_sha256": _sha256_file(Path(str(key_genes))),
+                "evidence_csv": str(evidence),
+                "evidence_sha256": _sha256_file(Path(str(evidence))),
+                "max_targets": int(getattr(args, "docking_targets", 3) or 3),
+                "ligand_library": getattr(args, "ligand_library", None),
+                "skip_docking": bool(getattr(args, "skip_docking", False)),
+            }
+        )
+    elif code == "07":
+        payload.update(
+            {
+                "workdir": str(workdir),
+                "single_cell_root": str(ctx.get("single_cell_root") or ""),
+                "top_n": int(getattr(args, "feedback_top_n", 12) or 12),
+                "max_features": int(getattr(args, "feedback_max_features", 8) or 8),
+                "timeout": int(getattr(args, "feedback_timeout", 3600) or 3600),
+                "skip_cell_feedback": bool(
+                    getattr(args, "skip_cell_feedback", False)
+                ),
+            }
+        )
+    elif code == "08":
+        payload.update(
+            {
+                "workdir": str(workdir),
+                "single_cell_root": str(ctx.get("single_cell_root") or ""),
+                "docking_config": str(docking_config),
+                "docking_config_sha256": _sha256_file(docking_config),
+            }
+        )
+
+    payload["config_sha256"] = _sha256_file(config_path)
+    return hashlib.sha256(
+        json.dumps(
+            payload,
+            sort_keys=True,
+            ensure_ascii=False,
+            default=str,
+        ).encode("utf-8")
+    ).hexdigest()
 
 
 def _read_json(path: Path, default=None) -> dict:
@@ -179,13 +402,13 @@ def _invalidate_markers_for_changed_root(
     return True
 
 
-def _clear_downstream_markers(workdir: Path) -> None:
-    for code, name, _description in STAGES[1:]:
+def _clear_downstream_markers(workdir: Path, from_index: int = 1) -> None:
+    for code, name, _description in STAGES[from_index:]:
         marker = _marker(workdir, code, name)
         if marker.exists():
             marker.unlink()
             log.warning(
-                "stage 01 rerun invalidates stage %s %s marker",
+                "stage rerun invalidates stage %s %s marker",
                 code,
                 name,
             )
@@ -214,11 +437,403 @@ def _single_cell_outputs_ready(root: Path) -> bool:
     )
 
 
+def _stage_output_paths(
+    code: str,
+    workdir: Path,
+    ctx: dict,
+    args,
+) -> list[Path]:
+    if code == "01":
+        root = ctx.get("single_cell_root")
+        if root:
+            return [Path(str(root)) / "results" / "pipeline_complete.json"]
+        return [workdir / "results" / "pipeline_complete.json"]
+    rels = list(STAGE_OUTPUTS.get(code, ()))
+    if code == "05" and getattr(args, "skip_knockout", False):
+        rels = ("outputs/integration/knockout_summary.json",)
+    elif code == "06" and getattr(args, "skip_docking", False):
+        rels = ("outputs/integration/docking_summary.json",)
+    elif code == "07" and getattr(args, "skip_cell_feedback", False):
+        rels = ("outputs/integration/cell_feedback/cell_feedback_summary.json",)
+    return [workdir / rel for rel in rels]
+
+
+def _stage_outputs_ready(code: str, workdir: Path, ctx: dict, args) -> bool:
+    if code == "01":
+        return _single_cell_outputs_ready(ctx.get("single_cell_root"))
+    try:
+        return all(
+            path.exists() and path.stat().st_size > 0
+            for path in _stage_output_paths(code, workdir, ctx, args)
+        )
+    except OSError:
+        return False
+
+
+def _verify_stage_outputs(code: str, workdir: Path, ctx: dict, args) -> None:
+    missing = [
+        path
+        for path in _stage_output_paths(code, workdir, ctx, args)
+        if not path.exists() or path.stat().st_size == 0
+    ]
+    if missing:
+        raise IntegrationError(
+            f"stage {code} completed but required outputs are missing: "
+            + ", ".join(str(p) for p in missing)
+        )
+
+
 def _resolve_path(value, base: Path) -> Path:
     path = Path(str(value)).expanduser()
     if not path.is_absolute():
         path = base / path
     return path.resolve()
+
+
+def _as_float(value) -> float | None:
+    try:
+        number = float(value)
+        return number if math.isfinite(number) else None
+    except (TypeError, ValueError):
+        return None
+
+
+def collect_qc_metrics(single_cell_root: Path, workdir: Path) -> dict:
+    """Aggregate single-cell and downstream metrics for the QC gate."""
+    data_dir = single_cell_root / "results" / "data"
+    metrics: dict = {
+        "single_cell": _read_json(single_cell_root / "results" / "summary.json"),
+        "doublet_rate": None,
+        "doublet_rate_by_sample": [],
+        "pseudobulk_used": None,
+        "pseudobulk_warning": "",
+        "knockout": {},
+        "docking": {},
+    }
+
+    doublet_csv = data_dir / "08_publication" / "fig_29_doublet_rate_by_sample.csv"
+    if not doublet_csv.exists():
+        doublet_csv = data_dir / "08_publication" / "fig_29_doublet_rate_sample.csv"
+    if doublet_csv.exists():
+        try:
+            frame = pd.read_csv(doublet_csv)
+            rates = pd.to_numeric(frame.get("doublet_rate"), errors="coerce")
+            metrics["doublet_rate_by_sample"] = frame.to_dict(orient="records")
+            if rates.notna().any():
+                metrics["doublet_rate"] = float(rates.mean())
+        except Exception:
+            pass
+    else:
+        doublet_tbl = data_dir / "02_doublets" / "fig_02_doublet_results.csv"
+        if doublet_tbl.exists():
+            try:
+                frame = pd.read_csv(doublet_tbl)
+                if "doublet_call" in frame.columns and "sample" in frame.columns:
+                    grouped = (
+                        frame.groupby("sample")["doublet_call"]
+                        .agg(
+                            n_cells="count",
+                            n_doublets=lambda s: int(
+                                (s.astype(str).str.lower() == "doublet").sum()
+                            ),
+                        )
+                        .reset_index()
+                    )
+                    grouped["doublet_rate"] = (
+                        grouped["n_doublets"] / grouped["n_cells"]
+                    )
+                    metrics["doublet_rate_by_sample"] = grouped.to_dict(
+                        orient="records"
+                    )
+                    rates = pd.to_numeric(
+                        grouped["doublet_rate"], errors="coerce"
+                    )
+                    if rates.notna().any():
+                        metrics["doublet_rate"] = float(rates.mean())
+            except Exception:
+                pass
+
+    warn_path = data_dir / "pseudobulk_warning.txt"
+    if warn_path.exists():
+        try:
+            metrics["pseudobulk_warning"] = (
+                warn_path.read_text(encoding="utf-8", errors="replace").strip()
+            )
+            metrics["pseudobulk_used"] = False
+        except OSError:
+            pass
+
+    integration = _integration_dir(workdir)
+    ko_summary = _read_json(integration / "knockout_summary.json")
+    metrics["knockout"] = ko_summary.get("knockout") or {}
+    metrics["docking"] = _read_json(integration / "docking_summary.json")
+    return metrics
+
+
+def evaluate_qc_gate(metrics: dict, config: dict) -> dict:
+    """Turn collected metrics into an explicit pass/warn/fail gate."""
+    if not config.get("enabled", True):
+        return {
+            "status": "skipped",
+            "checks": [],
+            "summary": "QC gate disabled by configuration",
+        }
+
+    sc = metrics.get("single_cell") or {}
+    checks: list[dict] = []
+    fail_on_missing = bool(config.get("fail_on_missing_metrics", False))
+
+    def check(
+        name: str,
+        value,
+        threshold,
+        message: str,
+        missing_message: str,
+        below_is_bad: bool = True,
+    ) -> None:
+        number = _as_float(threshold)
+        if number is None or number == 0:
+            return
+        current = _as_float(value)
+        if current is None:
+            checks.append(
+                {
+                    "name": name,
+                    "level": "fail" if fail_on_missing else "warn",
+                    "ok": False,
+                    "message": missing_message,
+                }
+            )
+            return
+        ok = current >= number if below_is_bad else current <= number
+        checks.append(
+            {
+                "name": name,
+                "level": "fail" if not ok else "pass",
+                "ok": ok,
+                "message": message.format(value=current, threshold=number),
+            }
+        )
+
+    check(
+        "min_cells_after_qc",
+        sc.get("n_cells_after_qc"),
+        config.get("min_cells_after_qc"),
+        "cells after QC = {value:.0f} (min {threshold:.0f})",
+        "n_cells_after_qc metric is missing",
+    )
+    check(
+        "min_genes",
+        sc.get("n_genes"),
+        config.get("min_genes"),
+        "genes = {value:.0f} (min {threshold:.0f})",
+        "n_genes metric is missing",
+    )
+    check(
+        "min_deg_genes",
+        sc.get("deg_total"),
+        config.get("min_deg_genes"),
+        "DEGs = {value:.0f} (min {threshold:.0f})",
+        "deg_total metric is missing",
+    )
+    check(
+        "max_doublet_rate",
+        metrics.get("doublet_rate"),
+        config.get("max_doublet_rate"),
+        "doublet rate = {value:.3f} (max {threshold:.3f})",
+        "doublet rate metric is missing",
+        below_is_bad=False,
+    )
+
+    if config.get("require_pseudobulk") and metrics.get("pseudobulk_used") is False:
+        checks.append(
+            {
+                "name": "require_pseudobulk",
+                "level": "fail",
+                "ok": False,
+                "message": metrics.get("pseudobulk_warning")
+                or "DE fell back to cells-as-replicates",
+            }
+        )
+
+    failed = [c for c in checks if c["level"] == "fail" and not c["ok"]]
+    warned = [c for c in checks if c["level"] == "warn" and not c["ok"]]
+    status = "fail" if failed else ("warn" if warned else "pass")
+    return {
+        "status": status,
+        "checks": checks,
+        "summary": (
+            f"{len(failed)} failed, {len(warned)} warned"
+            if checks
+            else "no QC thresholds configured"
+        ),
+    }
+
+
+def write_qc_metrics(
+    workdir: Path,
+    single_cell_root: Path,
+    qc_config: dict,
+) -> dict:
+    """Collect and evaluate QC metrics, writing qc_metrics.json."""
+    metrics = collect_qc_metrics(single_cell_root, workdir)
+    metrics["qc_gate"] = evaluate_qc_gate(metrics, qc_config)
+    out_dir = _integration_dir(workdir)
+    out_dir.mkdir(parents=True, exist_ok=True)
+    write_json(out_dir / "qc_metrics.json", metrics)
+    return metrics
+
+
+def _chi2_contingency(table) -> tuple[float, float]:
+    """Pearson chi-square (Yates-corrected 2x2) with p from the erfc formula."""
+    matrix = np.asarray(table, dtype=float)
+    if matrix.shape != (2, 2):
+        return float("nan"), float("nan")
+    total = float(matrix.sum())
+    if total == 0 or np.any(matrix < 0):
+        return float("nan"), float("nan")
+    row_totals = matrix.sum(axis=1)
+    col_totals = matrix.sum(axis=0)
+    expected = np.outer(row_totals, col_totals) / total
+    with np.errstate(divide="ignore", invalid="ignore"):
+        corrected = float(
+            np.nansum((np.abs(matrix - expected) - 0.5) ** 2 / expected)
+        )
+    chi2 = max(0.0, corrected)
+    if chi2 == 0:
+        return 0.0, 1.0
+    p_value = math.erfc(math.sqrt(chi2 / 2.0))
+    return chi2, min(max(p_value, 0.0), 1.0)
+
+
+def _bh_adjust(p_values) -> list[float]:
+    """Benjamini-Hochberg FDR adjustment without extra dependencies."""
+    values = np.asarray(p_values, dtype=float)
+    n = len(values)
+    if n == 0:
+        return []
+    order = np.argsort(values, kind="mergesort")
+    ranked = values[order]
+    adjusted = ranked * n / np.arange(1, n + 1)
+    adjusted = np.minimum.accumulate(adjusted[::-1])[::-1]
+    adjusted = np.minimum(adjusted, 1.0)
+    out = np.empty_like(adjusted)
+    out[order] = adjusted
+    return [float(v) for v in out]
+
+
+def run_differential_abundance(
+    single_cell_root: Path,
+    out_dir: Path,
+    config: dict | None = None,
+) -> dict:
+    """Pair DE with a cell-type composition shift test (skill-guided)."""
+    cfg = config or {}
+    out_dir.mkdir(parents=True, exist_ok=True)
+    ann_path = (
+        single_cell_root
+        / "results"
+        / "data"
+        / "04_annotation"
+        / "fig_05_16_17_cell_annotations.csv"
+    )
+    if not ann_path.exists():
+        return {
+            "status": "skipped",
+            "reason": "cell annotation CSV not found",
+            "output_csv": "",
+        }
+    try:
+        ann = pd.read_csv(ann_path)
+    except Exception:
+        return {
+            "status": "skipped",
+            "reason": "cell annotation CSV unreadable",
+            "output_csv": "",
+        }
+    if not {"celltype_annot", "condition"}.issubset(ann.columns):
+        return {
+            "status": "skipped",
+            "reason": "annotation CSV lacks celltype_annot/condition columns",
+            "output_csv": "",
+        }
+    conditions = [str(x) for x in ann["condition"].dropna().unique()]
+    if len(conditions) < 2:
+        return {
+            "status": "skipped",
+            "reason": "fewer than two conditions for composition test",
+            "output_csv": "",
+        }
+    cond0, cond1 = conditions[0], conditions[1]
+    counts = pd.crosstab(ann["celltype_annot"], ann["condition"])
+    if cond0 not in counts.columns or cond1 not in counts.columns:
+        return {
+            "status": "skipped",
+            "reason": "condition columns missing from crosstab",
+            "output_csv": "",
+        }
+
+    total0 = int(counts[cond0].sum())
+    total1 = int(counts[cond1].sum())
+    min_cells = int(cfg.get("min_cells", 5))
+    rows: list[dict] = []
+    for celltype, row in counts.iterrows():
+        a = int(row[cond0])
+        b = int(row[cond1])
+        if a + b < min_cells or (total0 + total1) == 0:
+            continue
+        table = np.array(
+            [[a, total0 - a], [b, total1 - b]],
+            dtype=float,
+        )
+        chi2, p_value = _chi2_contingency(table)
+        fraction0 = a / total0 if total0 else 0.0
+        fraction1 = b / total1 if total1 else 0.0
+        rows.append(
+            {
+                "celltype": str(celltype),
+                f"{cond0}_cells": a,
+                f"{cond1}_cells": b,
+                f"{cond0}_fraction": round(fraction0, 6),
+                f"{cond1}_fraction": round(fraction1, 6),
+                "n_cells": a + b,
+                "chi2": None if math.isnan(chi2) else round(chi2, 6),
+                "p_value": None if math.isnan(p_value) else p_value,
+                "direction": (
+                    "enriched_in_" + cond0
+                    if fraction0 > fraction1
+                    else "enriched_in_" + cond1
+                ),
+            }
+        )
+
+    frame = pd.DataFrame(rows)
+    if not frame.empty:
+        frame["p_adjust"] = _bh_adjust(frame["p_value"].fillna(1.0))
+        frame["significant"] = frame["p_adjust"] < float(cfg.get("fdr", 0.05))
+        frame = frame.sort_values(
+            ["p_adjust", "p_value"],
+            na_position="last",
+        ).reset_index(drop=True)
+
+    csv_path = out_dir / "differential_abundance.csv"
+    frame.to_csv(csv_path, index=False)
+    summary = {
+        "status": "completed",
+        "conditions": [cond0, cond1],
+        "celltypes_tested": int(len(frame)),
+        "significant_celltypes": int(
+            frame["significant"].sum() if not frame.empty else 0
+        ),
+        "output_csv": str(csv_path),
+    }
+    write_json(out_dir / "differential_abundance_summary.json", summary)
+    log.info(
+        "differential abundance: %s cell types tested, %s significant",
+        summary["celltypes_tested"],
+        summary["significant_celltypes"],
+    )
+    return summary
 
 
 def extract_key_genes(
@@ -347,7 +962,10 @@ def find_rscript() -> str:
 
 def export_pseudobulk(single_cell_root: Path, out_dir: Path) -> dict:
     """Aggregate single-cell counts by sample with the bundled R helper."""
-    rscript = find_rscript()
+    try:
+        rscript = find_rscript()
+    except RuntimeError as exc:
+        raise IntegrationError(str(exc)) from exc
     out_dir.mkdir(parents=True, exist_ok=True)
     script = APP_ROOT / "src" / "pipeline" / "export_pseudobulk.R"
     if not script.exists():
@@ -779,22 +1397,40 @@ def _download_pdb(pdb_id: str, target_dir: Path, timeout: int = 90) -> Path | No
     if out.exists() and out.stat().st_size > 0:
         return out
     url = f"https://files.rcsb.org/download/{pdb_id}.pdb"
+    last_error: Exception | None = None
+    for attempt in range(3):
+        try:
+            req = urllib.request.Request(
+                url,
+                headers={"User-Agent": "Mozilla/5.0"},
+            )
+            with urllib.request.urlopen(req, timeout=timeout) as resp:
+                text = resp.read().decode("utf-8", errors="replace")
+            if "\nATOM" not in text and not text.startswith("ATOM"):
+                log.warning("PDB %s has no ATOM records", pdb_id)
+                return None
+            out.parent.mkdir(parents=True, exist_ok=True)
+            out.write_text(text, encoding="utf-8")
+            return out
+        except Exception as exc:  # noqa: BLE001
+            last_error = exc
+            if attempt < 2:
+                time.sleep(1.5 * (attempt + 1))
+    log.warning("PDB download failed for %s: %s", pdb_id, last_error)
+    return None
+
+
+def _valid_docking_box(center, size) -> bool:
     try:
-        req = urllib.request.Request(
-            url,
-            headers={"User-Agent": "Mozilla/5.0"},
+        return (
+            len(center) == 3
+            and len(size) == 3
+            and all(np.isfinite(center))
+            and all(np.isfinite(size))
+            and all(float(value) > 0 for value in size)
         )
-        with urllib.request.urlopen(req, timeout=timeout) as resp:
-            text = resp.read().decode("utf-8", errors="replace")
-        if "\nATOM" not in text and not text.startswith("ATOM"):
-            log.warning("PDB %s has no ATOM records", pdb_id)
-            return None
-        out.parent.mkdir(parents=True, exist_ok=True)
-        out.write_text(text, encoding="utf-8")
-        return out
-    except Exception as exc:  # noqa: BLE001
-        log.warning("PDB download failed for %s: %s", pdb_id, exc)
-        return None
+    except (TypeError, ValueError):
+        return False
 
 
 def _prepare_ligand_library(
@@ -953,6 +1589,7 @@ def run_target_docking(
         "status": "skipped",
         "pdb_id": "",
         "uniprot": "",
+        "box_mode": "",
         "ligand_count": 0,
         "hits": 0,
         "best_affinity": "",
@@ -1013,7 +1650,22 @@ def run_target_docking(
         base["error"] = "no ligand library available"
         return base
 
-    center, size, mode = box.detect_box_data(pdb_path)
+    try:
+        center, size, mode = box.detect_box_data(pdb_path)
+    except Exception as exc:  # noqa: BLE001
+        base["status"] = "failed"
+        base["error"] = f"docking box detection failed: {exc}"
+        base["pdb_id"] = pdb_path.stem
+        return base
+    base["box_mode"] = mode
+    if not _valid_docking_box(center, size):
+        base["status"] = "skipped"
+        base["error"] = (
+            f"invalid docking box (mode={mode}, center={center}, size={size})"
+        )
+        base["pdb_id"] = pdb_path.stem
+        base["uniprot"] = uniprot
+        return base
     cfg.data["receptor"]["input"] = str(pdb_path)
     cfg.data["receptor"]["output"] = str(
         target_dir / "data" / "receptors" / f"{pdb_path.stem}.pdbqt"
@@ -1064,6 +1716,7 @@ def run_target_docking(
         "status": "ok",
         "pdb_id": pdb_path.stem,
         "uniprot": uniprot,
+        "box_mode": mode,
         "ligand_count": int(summary.get("total_docked", 0)),
         "hits": hits,
         "best_affinity": best,
@@ -1127,6 +1780,7 @@ def run_docking_stage(
                     "status": "failed",
                     "pdb_id": "",
                     "uniprot": "",
+                    "box_mode": "",
                     "ligand_count": 0,
                     "hits": 0,
                     "best_affinity": "",
@@ -1230,6 +1884,20 @@ def generate_integrated_report(
         if (out_dir / "cell_feedback" / "data" / "celltype_enrichment.csv").exists()
         else pd.DataFrame()
     )
+    qc_metrics = _read_json(out_dir / "qc_metrics.json")
+    differential_abundance = (
+        pd.read_csv(out_dir / "differential_abundance.csv")
+        if (out_dir / "differential_abundance.csv").exists()
+        else pd.DataFrame()
+    )
+    differential_abundance_summary = _read_json(
+        out_dir / "differential_abundance_summary.json"
+    )
+    qc_gate = qc_metrics.get("qc_gate") or {}
+    qc_gate_frame = pd.DataFrame(
+        qc_gate.get("checks") or [],
+        columns=["name", "level", "ok", "message"],
+    )
 
     sc_html = _render_table(
         pd.DataFrame(
@@ -1301,6 +1969,19 @@ def generate_integrated_report(
         for c in ["celltype", "n_cells", "module_mean", "module_diff", "p_adjust"]
         if c in feedback_enrichment.columns
     ]
+    differential_abundance_cols = [
+        c
+        for c in [
+            "celltype",
+            "n_cells",
+            "chi2",
+            "p_value",
+            "p_adjust",
+            "significant",
+            "direction",
+        ]
+        if c in differential_abundance.columns
+    ]
 
     def rel(path):
         try:
@@ -1337,6 +2018,16 @@ a {{ color: #1d4ed8; }}
   {sc_html}
 </div>
 <div class="card">
+  <h2>QC gate ({_esc(qc_gate.get("status", "skipped"))})</h2>
+  <p class="muted">{_esc(qc_gate.get("summary", ""))}</p>
+  {_render_table(qc_gate_frame, ["name", "level", "ok", "message"])}
+</div>
+<div class="card">
+  <h2>Differential abundance (cell type composition)</h2>
+  <p class="muted">{_esc(differential_abundance_summary.get("reason", ""))}</p>
+  {_render_table(differential_abundance, differential_abundance_cols)}
+</div>
+<div class="card">
   <h2>Key genes (top 20)</h2>
   {_render_table(key_genes, ["rank", "gene", "direction", "avg_log2fc", "p_val_adj"])}
 </div>
@@ -1364,6 +2055,8 @@ a {{ color: #1d4ed8; }}
   <h2>Outputs</h2>
   <ul>
     <li><a href="{rel(out_dir / 'key_genes.csv')}">key_genes.csv</a></li>
+    <li><a href="{rel(out_dir / 'differential_abundance.csv') if (out_dir / 'differential_abundance.csv').exists() else '#'}">differential_abundance.csv</a></li>
+    <li><a href="{rel(out_dir / 'qc_metrics.json')}">qc_metrics.json</a></li>
     <li><a href="{rel(ko_ranked) if ko_ranked.exists() else '#'}">fig_52_53_ranked_knockout.csv</a></li>
     <li><a href="{rel(out_dir / 'docking_targets.csv') if (out_dir / 'docking_targets.csv').exists() else '#'}">docking_targets.csv</a></li>
     <li><a href="{rel(out_dir / 'cell_feedback' / 'data' / 'feedback_targets.csv') if (out_dir / 'cell_feedback' / 'data' / 'feedback_targets.csv').exists() else '#'}">cell_feedback_targets.csv</a></li>
@@ -1378,6 +2071,8 @@ a {{ color: #1d4ed8; }}
 
     summary = {
         "single_cell": sc_summary,
+        "qc_gate": qc_gate,
+        "differential_abundance": differential_abundance_summary,
         "key_genes": len(key_genes),
         "knockout": {
             "genes_scored": (ko_summary.get("knockout") or {}).get("genes_scored", 0),
@@ -1420,19 +2115,46 @@ def _stage_single_cell(args, workdir: Path, ctx: dict) -> None:
                 f"single-cell outputs not found under {root}; remove --skip-scrna"
             )
         log.info("using existing single-cell outputs: %s", root)
-        return
-    code = orchestrator.run_pipeline(
-        args.force,
-        args.skip_download,
-        args.skip_deps,
-        args.accession,
-        str(root),
-        args.species,
-    )
-    if code == 98:
-        raise PauseRequested("single-cell pipeline paused; run again to resume")
-    if code != 0:
-        raise IntegrationError(f"single-cell pipeline exited with code {code}")
+    else:
+        code = orchestrator.run_pipeline(
+            args.force,
+            args.skip_download,
+            args.skip_deps,
+            args.accession,
+            str(root),
+            args.species,
+        )
+        if code == 98:
+            raise PauseRequested("single-cell pipeline paused; run again to resume")
+        if code != 0:
+            raise IntegrationError(f"single-cell pipeline exited with code {code}")
+
+    metrics = write_qc_metrics(workdir, root, getattr(args, "qc_gate", {}))
+    gate = metrics["qc_gate"]
+    if gate["status"] == "fail":
+        raise IntegrationError("QC gate failed: " + str(gate.get("summary", "")))
+    if gate["status"] == "warn":
+        log.warning("QC gate warning: %s", gate.get("summary", ""))
+    ctx["qc_metrics"] = metrics
+
+    da_config = getattr(args, "differential_abundance", {}) or {}
+    if da_config.get("enabled", True):
+        ctx["differential_abundance"] = run_differential_abundance(
+            root,
+            _integration_dir(workdir),
+            da_config,
+        )
+    else:
+        summary = {
+            "status": "skipped",
+            "reason": "differential abundance disabled by configuration",
+            "output_csv": "",
+        }
+        write_json(
+            _integration_dir(workdir) / "differential_abundance_summary.json",
+            summary,
+        )
+        ctx["differential_abundance"] = summary
 
 
 def _stage_key_targets(args, workdir: Path, ctx: dict) -> None:
@@ -1551,8 +2273,48 @@ def _stage_report(args, workdir: Path, ctx: dict) -> None:
     )
 
 
+def _dry_run_stages(args, workdir: Path, ctx: dict) -> int:
+    """Show what the pipeline would run without executing anything."""
+    print(f"full pipeline dry run (workdir: {workdir})")
+    for code, name, description in STAGES:
+        if args.start_stage and code < args.start_stage:
+            print(f"{code} {name:<20} SKIP  {description} (before --start-stage)")
+            continue
+        signature = _stage_signature(code, args, workdir, ctx)
+        outputs_ready = _stage_outputs_ready(code, workdir, ctx, args)
+        outdated, reason = _stage_outdated(
+            workdir,
+            code,
+            name,
+            signature,
+            outputs_ready,
+        )
+        if args.force or outdated:
+            print(f"{code} {name:<20} RUN   {description} ({reason})")
+        else:
+            print(f"{code} {name:<20} DONE  {description} (marker up to date)")
+    return 0
+
+
+def _stage_outdated(
+    workdir: Path,
+    code: str,
+    name: str,
+    signature: str,
+    outputs_ready: bool,
+) -> tuple[bool, str]:
+    marker = _read_stage_marker(workdir, code, name)
+    if marker is None:
+        return True, "no marker"
+    if not outputs_ready:
+        return True, "required outputs missing"
+    if marker.get("signature") != signature:
+        return True, "inputs or parameters changed"
+    return False, ""
+
+
 def run_full_pipeline(args) -> int:
-    """Run the integrated pipeline with per-stage resume markers."""
+    """Run the integrated pipeline with provenance-aware resume markers."""
     workdir = Path(args.workdir).resolve()
     workdir.mkdir(parents=True, exist_ok=True)
     cfg_path = Path(args.docking_config).resolve()
@@ -1563,66 +2325,68 @@ def run_full_pipeline(args) -> int:
     }
     if not args.force:
         _invalidate_markers_for_changed_root(workdir, ctx["single_cell_root"])
-    reran_stage01 = False
+    if args.dry_run:
+        return _dry_run_stages(args, workdir, ctx)
 
-    for code, name, _description in STAGES:
+    stage_fns = {
+        "01": _stage_single_cell,
+        "02": _stage_key_targets,
+        "03": _stage_evidence,
+        "04": _stage_knockout_inputs,
+        "05": _stage_knockout,
+        "06": _stage_docking,
+        "07": _stage_cell_feedback,
+        "08": _stage_report,
+    }
+
+    for index, (code, name, _description) in enumerate(STAGES):
+        signature = _stage_signature(code, args, workdir, ctx)
         marker = _marker(workdir, code, name)
         if args.start_stage and code < args.start_stage:
-            marker.parent.mkdir(parents=True, exist_ok=True)
-            marker.write_text("skipped by start-stage", encoding="utf-8")
+            _write_stage_marker(
+                workdir,
+                code,
+                name,
+                signature,
+                note="skipped by start-stage",
+            )
             log.info("stage %s %s skipped by --start-stage", code, name)
             continue
-        if code == "01" and not _single_cell_outputs_ready(
-            ctx["single_cell_root"]
-        ):
-            reran_stage01 = True
-        if not args.force and marker.exists():
-            if code == "01" and not _single_cell_outputs_ready(
-                ctx["single_cell_root"]
-            ):
-                log.warning(
-                    "stage 01 marker exists but single-cell outputs are missing "
-                    "under %s; rerunning",
-                    ctx["single_cell_root"],
-                )
-                marker.unlink(missing_ok=True)
-            elif code == "04" and not _knockout_inputs_ready(
-                workdir / "data" / "knockout" / "expression.csv",
-                workdir / "data" / "knockout" / "metadata.csv",
-            ):
-                log.warning(
-                    "stage 04 marker exists but knockout inputs are missing or "
-                    "malformed; rebuilding pseudobulk"
-                )
-                marker.unlink(missing_ok=True)
-            else:
+
+        outputs_ready = _stage_outputs_ready(code, workdir, ctx, args)
+        if not args.force:
+            outdated, reason = _stage_outdated(
+                workdir,
+                code,
+                name,
+                signature,
+                outputs_ready,
+            )
+            if not outdated:
                 log.info("skip stage %s %s (already done)", code, name)
                 continue
+            if reason == "no marker":
+                log.info("stage %s %s not run yet; executing", code, name)
+            else:
+                log.warning(
+                    "stage %s %s outdated: %s; rerunning",
+                    code,
+                    name,
+                    reason,
+                )
+            marker.unlink(missing_ok=True)
+
         log.info("=== stage %s %s ===", code, name)
-        fn = {
-            "01": _stage_single_cell,
-            "02": _stage_key_targets,
-            "03": _stage_evidence,
-            "04": _stage_knockout_inputs,
-            "05": _stage_knockout,
-            "06": _stage_docking,
-            "07": _stage_cell_feedback,
-            "08": _stage_report,
-        }[code]
         try:
-            fn(args, workdir, ctx)
+            stage_fns[code](args, workdir, ctx)
         except PauseRequested as exc:
             log.info(str(exc))
             return 98
-        marker.parent.mkdir(parents=True, exist_ok=True)
-        marker.write_text(
-            datetime.now().isoformat(timespec="seconds"),
-            encoding="utf-8",
-        )
+        _verify_stage_outputs(code, workdir, ctx, args)
+        _write_stage_marker(workdir, code, name, signature)
+        _clear_downstream_markers(workdir, from_index=index + 1)
         if code == "01":
             _write_run_context(workdir, ctx["single_cell_root"])
-            if reran_stage01:
-                _clear_downstream_markers(workdir)
         log.info("stage %s %s complete", code, name)
     _write_run_context(workdir, ctx["single_cell_root"])
     log.info("full pipeline complete: %s", _integration_dir(workdir))
@@ -1650,6 +2414,8 @@ def load_full_config(path: Path) -> dict:
             "timeout_seconds": 3600,
         },
         "evidence": {"fetch": True, "max_workers": 6, "timeout": 90},
+        "qc_gate": DEFAULT_QC_GATE,
+        "differential_abundance": DEFAULT_DIFFERENTIAL_ABUNDANCE,
         "gene_blacklist": DEFAULT_GENE_BLACKLIST,
     }
     raw = {}
@@ -1661,6 +2427,14 @@ def load_full_config(path: Path) -> dict:
     config["cell_feedback"].update((raw.get("cell_feedback") or {}))
     config["evidence"] = dict(defaults["evidence"])
     config["evidence"].update((raw.get("evidence") or {}))
+    config["qc_gate"] = dict(defaults["qc_gate"])
+    config["qc_gate"].update((raw.get("qc_gate") or {}))
+    config["differential_abundance"] = dict(
+        defaults["differential_abundance"]
+    )
+    config["differential_abundance"].update(
+        (raw.get("differential_abundance") or {})
+    )
     config["gene_blacklist"] = (
         raw.get("gene_blacklist") or defaults["gene_blacklist"]
     )
@@ -1716,6 +2490,16 @@ def _apply_defaults(args, config: dict) -> None:
         args.evidence_workers = int(config.get("evidence", {}).get("max_workers", 6))
     if args.evidence_timeout is None:
         args.evidence_timeout = int(config.get("evidence", {}).get("timeout", 90))
+    qc_gate = dict(DEFAULT_QC_GATE)
+    qc_gate.update(config.get("qc_gate") or {})
+    if getattr(args, "skip_qc_gate", False):
+        qc_gate["enabled"] = False
+    args.qc_gate = qc_gate
+    differential_abundance = dict(DEFAULT_DIFFERENTIAL_ABUNDANCE)
+    differential_abundance.update(config.get("differential_abundance") or {})
+    if getattr(args, "skip_differential_abundance", False):
+        differential_abundance["enabled"] = False
+    args.differential_abundance = differential_abundance
     if not str(args.output or "").strip():
         raise IntegrationError(
             "single-cell output is required; provide --output or set "
@@ -1774,12 +2558,23 @@ def build_parser() -> argparse.ArgumentParser:
     parser.add_argument("--skip-knockout", action="store_true")
     parser.add_argument("--skip-docking", action="store_true")
     parser.add_argument("--skip-cell-feedback", action="store_true", default=None)
+    parser.add_argument("--skip-qc-gate", action="store_true", default=None)
+    parser.add_argument(
+        "--skip-differential-abundance",
+        action="store_true",
+        default=None,
+    )
     parser.add_argument("--feedback-top-n", type=int, default=None)
     parser.add_argument("--feedback-max-features", type=int, default=None)
     parser.add_argument("--feedback-timeout", type=int, default=None)
     parser.add_argument("--keep-all-genes", action="store_true", default=None)
     parser.add_argument("--force", action="store_true", help="rerun stages from scratch")
     parser.add_argument("--start-stage", default=None, help="stage code to start from")
+    parser.add_argument(
+        "--dry-run",
+        action="store_true",
+        help="show which stages would run without executing them",
+    )
     parser.add_argument("--list-stages", action="store_true")
     parser.add_argument("--verbose", action="store_true")
     return parser
