@@ -65,8 +65,10 @@ FIGURE_GUIDE = {
     "fig_19_condition_proportion.png": ("分组构成比例图", "不同分组中细胞类型的比例对比。"),
     "fig_20_gsea_go.png": ("GSEA GO BP 富集图", "GO 生物过程的 GSEA 富集曲线，查看通路的整体上调/下调方向。"),
     "fig_21_gsea_kegg.png": ("GSEA KEGG 富集图", "KEGG 通路的 GSEA 富集曲线。"),
-    "fig_22_go_network.png": ("GO BP 通路网络图", "GO 通路之间的重叠和关系网络。"),
-    "fig_23_kegg_network.png": ("KEGG 通路网络图", "KEGG 通路之间的关系网络。"),
+    "fig_22_go_network.png": ("GO BP 通路网络图（筛选后 Top5）", "上调基因 GO 富集结果经 p.adjust 筛选后取前 5 个通路的基因-通路关系网络。"),
+    "fig_23_kegg_network.png": ("KEGG 通路网络图（筛选后 Top5）", "上调基因 KEGG 富集结果经 p.adjust 筛选后取前 5 个通路的基因-通路关系网络。"),
+    "fig_46_go_top5.png": ("GO BP 筛选后 Top5 富集图", "上调基因 GO 富集结果按 p.adjust 排序的前 5 条通路气泡图。"),
+    "fig_47_kegg_top5.png": ("KEGG 筛选后 Top5 富集图", "上调基因 KEGG 富集结果按 p.adjust 排序的前 5 条通路气泡图。"),
     "fig_24_ml_feature_importance.png": ("ML 特征重要性图", "分类模型中的重要基因/特征，用于筛选关键变量。"),
     "fig_25_ml_shap.png": ("SHAP 可解释性图", "特征对模型预测的方向和贡献，解释分类结果。"),
     "fig_26_cellcycle_umap.png": ("细胞周期 UMAP", "细胞周期阶段在 UMAP 上的分布，检查细胞周期对聚类的干扰。"),
@@ -246,7 +248,7 @@ def stage_label(rel: str) -> str:
             return STAGE_LABELS["04_annotation"]
         if num in (8, 9):
             return STAGE_LABELS["05_deg"]
-        if num in (10, 11, 12, 13, 20, 21, 22, 23):
+        if num in (10, 11, 12, 13, 20, 21, 22, 23, 46, 47):
             return STAGE_LABELS["06_enrichment"]
         if num in (24, 25, 43, 44, 45):
             return STAGE_LABELS["07_ml"]
@@ -794,8 +796,10 @@ summary {{ cursor: pointer; color: #1665c0; font-size: 13px; }}
 {image_card('fig_13_kegg_down.png', '下调基因 KEGG')}
 {image_card('fig_20_gsea_go.png', 'GSEA GO BP')}
 {image_card('fig_21_gsea_kegg.png', 'GSEA KEGG')}
-{image_card('fig_22_go_network.png', 'GO BP 通路网络')}
-{image_card('fig_23_kegg_network.png', 'KEGG 通路网络')}
+{image_card('fig_22_go_network.png', 'GO BP 通路网络（筛选后 Top5）')}
+{image_card('fig_23_kegg_network.png', 'KEGG 通路网络（筛选后 Top5）')}
+{image_card('fig_46_go_top5.png', 'GO BP 筛选后 Top5')}
+{image_card('fig_47_kegg_top5.png', 'KEGG 筛选后 Top5')}
 
 <h2>7. 机器学习分析</h2>
 {image_card('fig_24_ml_feature_importance.png', 'ML 特征重要性')}
