@@ -1524,8 +1524,8 @@ def _full_status(info: dict) -> dict:
             _notify_finished(
                 info,
                 "full",
-                "鍏ㄨ嚜鍔ㄦ祦姘寸嚎",
-                f"{info.get('accession') or '鍏ㄨ嚜鍔ㄦ祦姘寸嚎'} 鍏ㄨ嚜鍔ㄦ祦姘寸嚎",
+                "全自动流水线",
+                f"{info.get('accession') or '全自动流水线'} 全自动流水线",
                 "paused",
                 stage,
                 error,
@@ -1584,7 +1584,7 @@ def _single_status(info: dict) -> dict:
     if not running:
         ok = info["proc"].returncode == 0
         paused = info["proc"].returncode == 98
-        if not info.get("recorded"):
+        if not info.get("recorded") and not paused:
             record_job(info, ok)
             info["recorded"] = True
         _drain_queue()
