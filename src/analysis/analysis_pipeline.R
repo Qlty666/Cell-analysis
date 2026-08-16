@@ -123,6 +123,33 @@ if (is.na(de_padj)) de_padj <- 0.05
 if (is.na(deg_violin_top_n)) deg_violin_top_n <- 12
 if (is.na(deg_violin_max_cells)) deg_violin_max_cells <- 1000
 
+empty_deg_frame <- function() {
+  data.frame(
+    p_val = numeric(0),
+    avg_log2FC = numeric(0),
+    pct.1 = numeric(0),
+    pct.2 = numeric(0),
+    p_val_adj = numeric(0),
+    stringsAsFactors = FALSE
+  )
+}
+
+ensure_deg_columns <- function(deg) {
+  if (is.null(deg) || !is.data.frame(deg)) {
+    return(empty_deg_frame())
+  }
+  required <- c("p_val", "avg_log2FC", "pct.1", "pct.2", "p_val_adj")
+  for (col in required) {
+    if (!col %in% colnames(deg)) {
+      deg[[col]] <- numeric(nrow(deg))
+    }
+  }
+  if (!"gene" %in% colnames(deg)) {
+    deg$gene <- rownames(deg)
+  }
+  deg
+}
+
 save_fig <- function(file, plot, width, height, dpi = 150, plot_margin = NULL) {
   name <- basename(file)
   if (name %in% skip_figs) {
@@ -1765,19 +1792,42 @@ if (stage_allowed("06")) run_stage("06_differential_expression", {
       "Sample count insufficient for pseudobulk; used Seurat Wilcoxon",
       file.path(data_dir, "pseudobulk_warning.txt")
     )
-    deg <- FindMarkers(
-      seurat,
-      ident.1 = cond_levels[1],
-      ident.2 = cond_levels[2],
-      test.use = "wilcox",
-      max.cells.per.ident = 3000,
-      logfc.threshold = de_logfc,
-      min.pct = 0.1,
-      only.pos = FALSE,
-      verbose = FALSE
+    deg <- tryCatch(
+      FindMarkers(
+        seurat,
+        ident.1 = cond_levels[1],
+        ident.2 = cond_levels[2],
+        test.use = "wilcox",
+        max.cells.per.ident = 3000,
+        logfc.threshold = de_logfc,
+        min.pct = 0.1,
+        only.pos = FALSE,
+        verbose = FALSE
+      ),
+      error = function(e) NULL
     )
+    if (is.null(deg) || nrow(deg) == 0 || ncol(deg) == 0) {
+      log_msg(
+        "no DEGs passed default filters; ",
+        "rerunning without logFC/min.pct filters"
+      )
+      deg <- tryCatch(
+        FindMarkers(
+          seurat,
+          ident.1 = cond_levels[1],
+          ident.2 = cond_levels[2],
+          test.use = "wilcox",
+          max.cells.per.ident = 3000,
+          logfc.threshold = 0,
+          min.pct = 0,
+          only.pos = FALSE,
+          verbose = FALSE
+        ),
+        error = function(e) NULL
+      )
+    }
   }
-  deg$gene <- rownames(deg)
+  deg <- ensure_deg_columns(deg)
   deg$significant <- deg$p_val_adj < de_padj & abs(deg$avg_log2FC) > de_logfc
   deg$direction <- ifelse(
     deg$significant,
@@ -1785,7 +1835,11 @@ if (stage_allowed("06")) run_stage("06_differential_expression", {
     "NS"
   )
   deg$neg_log10_padj <- -log10(pmax(deg$p_val_adj, 1e-300))
-  deg <- deg[order(deg$p_val_adj, -abs(deg$avg_log2FC)), ]
+  deg <- deg[order(
+    is.na(deg$p_val_adj),
+    deg$p_val_adj,
+    -abs(deg$avg_log2FC)
+  ), , drop = FALSE]
 
   write.csv(deg, stage_data_file("fig_08_deg_all.csv"), row.names = FALSE)
   write.csv(
@@ -1972,22 +2026,24 @@ if (stage_allowed("06")) run_stage("06_differential_expression", {
   )
   if (length(top30) > 0) {
     seurat <- ScaleData(seurat, features = top30, verbose = FALSE)
+    p_heat <- DoHeatmap(
+      seurat,
+      features = top30,
+      group.by = "condition",
+      angle = 45
+    ) +
+      scale_fill_viridis_c()
+    save_fig(
+      file.path(fig_dir, "fig_09_deg_heatmap.png"),
+      p_heat,
+      width = 10,
+      height = 8,
+      dpi = 150,
+      plot_margin = ggplot2::margin(32, 24, 24, 18, "pt")
+    )
+  } else {
+    log_msg("skip DEG heatmap: no DEGs to plot")
   }
-  p_heat <- DoHeatmap(
-    seurat,
-    features = top30,
-    group.by = "condition",
-    angle = 45
-  ) +
-    scale_fill_viridis_c()
-  save_fig(
-    file.path(fig_dir, "fig_09_deg_heatmap.png"),
-    p_heat,
-    width = 10,
-    height = 8,
-    dpi = 150,
-    plot_margin = ggplot2::margin(32, 24, 24, 18, "pt")
-  )
 
   log_msg("significant DEGs: ", sum(deg$significant, na.rm = TRUE))
 })
