@@ -10,11 +10,6 @@ import tarfile
 import urllib.request
 import shutil
 
-try:
-    from .h5_converter import convert_h5ad, convert_loom
-except ImportError:
-    from h5_converter import convert_h5ad, convert_loom
-
 CACHE_ROOT = Path(__file__).resolve().parents[2] / "data_cache"
 
 BULK_COUNT_TABLE_RE = re.compile(
@@ -188,17 +183,32 @@ def _download_files(urls: dict, raw_dir: Path, log) -> dict:
 
 
 def _convert_downloaded(downloaded: dict, raw_dir: Path) -> dict:
+    try:
+        from .h5_converter import convert_h5ad, convert_loom
+    except ImportError:
+        convert_h5ad = None
+        convert_loom = None
     matrix = []
     barcodes = []
     genes = []
     for name in downloaded["matrix"]:
         path = raw_dir / name
         if name.lower().endswith(".h5ad"):
+            if convert_h5ad is None:
+                raise RuntimeError(
+                    "h5py/scipy are required to convert .h5ad inputs; "
+                    "run: python -m pip install h5py scipy"
+                )
             result = convert_h5ad(path)
             matrix.append(result["matrix"])
             barcodes.append(result["barcodes"])
             genes.append(result["genes"])
         elif name.lower().endswith(".loom"):
+            if convert_loom is None:
+                raise RuntimeError(
+                    "h5py/scipy are required to convert .loom inputs; "
+                    "run: python -m pip install h5py scipy"
+                )
             result = convert_loom(path)
             matrix.append(result["matrix"])
             barcodes.append(result["barcodes"])

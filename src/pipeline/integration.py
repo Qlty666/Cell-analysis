@@ -845,13 +845,21 @@ def extract_key_genes(
 ) -> pd.DataFrame:
     """Rank significant DEGs into a compact key-gene table."""
     data_dir = single_cell_root / "results" / "data"
-    deg_path = data_dir / "05_deg" / "fig_09_deg_significant.csv"
-    if not deg_path.exists():
-        deg_path = data_dir / "05_deg" / "fig_08_deg_all.csv"
+    significant_path = data_dir / "05_deg" / "fig_09_deg_significant.csv"
+    all_path = data_dir / "05_deg" / "fig_08_deg_all.csv"
+    deg_path = significant_path if significant_path.exists() else all_path
     if not deg_path.exists():
         raise IntegrationError(f"DEG table not found under {data_dir}")
 
     frame = pd.read_csv(deg_path)
+    if frame.empty and deg_path == significant_path and all_path.exists():
+        log.warning(
+            "significant DEG table is empty (%s); "
+            "falling back to the full DEG table",
+            significant_path,
+        )
+        deg_path = all_path
+        frame = pd.read_csv(all_path)
     if frame.empty:
         raise IntegrationError(f"DEG table is empty: {deg_path}")
 

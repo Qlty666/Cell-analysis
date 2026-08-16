@@ -1,2 +1,10 @@
 # Python dependencies beyond the standard library.
 fpdf2
+numpy
+pandas
+matplotlib
+pyyaml
+openpyxl
+h5py
+scipy
+scikit-learn
