@@ -5,11 +5,24 @@ import shutil
 import subprocess
 import sys
 import urllib.request
+import importlib
 from pathlib import Path
 
 ROOT = Path(__file__).resolve().parent.parent
 REQUIRED_PYTHON = (3, 10)
 REQUIRED_R = (4, 5, 0)
+
+PYTHON_PACKAGES = [
+    "numpy",
+    "pandas",
+    "matplotlib",
+    "yaml",
+    "openpyxl",
+    "h5py",
+    "scipy",
+    "sklearn",
+    "fpdf",
+]
 
 R_PACKAGES = [
     "Seurat",
@@ -77,6 +90,19 @@ def main() -> int:
         py >= REQUIRED_PYTHON,
         f"{py.major}.{py.minor}.{py.micro} (required >= "
         f"{REQUIRED_PYTHON[0]}.{REQUIRED_PYTHON[1]})",
+    )
+
+    missing_packages = []
+    for module in PYTHON_PACKAGES:
+        try:
+            importlib.import_module(module)
+        except Exception:
+            missing_packages.append(module)
+    report(
+        "Python packages",
+        not missing_packages,
+        "all installed" if not missing_packages else
+        "missing: " + ", ".join(missing_packages),
     )
 
     rscript = find_rscript()

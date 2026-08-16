@@ -197,6 +197,45 @@ class TestExtractKeyGenes(unittest.TestCase):
             self.assertEqual(result.iloc[0]["gene"], "GENE1")
             self.assertAlmostEqual(float(result.iloc[0]["avg_log2fc"]), 3.0)
 
+    def test_empty_significant_table_falls_back_to_all_deg_table(self):
+        with tempfile.TemporaryDirectory() as tmp:
+            root = Path(tmp) / "single_cell"
+            data_dir = root / "results" / "data"
+            (data_dir / "05_deg").mkdir(parents=True)
+            pd.DataFrame(
+                columns=[
+                    "gene",
+                    "p_val_adj",
+                    "avg_log2FC",
+                    "direction",
+                    "pct.1",
+                    "pct.2",
+                    "significant",
+                ]
+            ).to_csv(
+                data_dir / "05_deg" / "fig_09_deg_significant.csv",
+                index=False,
+            )
+            all_frame = pd.DataFrame(
+                {
+                    "gene": ["GENE1", "GENE2"],
+                    "p_val_adj": [0.01, 0.02],
+                    "avg_log2FC": [2.0, -1.5],
+                    "direction": ["Up", "Down"],
+                    "pct.1": [0.5, 0.6],
+                    "pct.2": [0.2, 0.3],
+                    "significant": [True, True],
+                }
+            )
+            all_frame.to_csv(
+                data_dir / "05_deg" / "fig_08_deg_all.csv",
+                index=False,
+            )
+            out = root / "integration_out"
+            result = extract_key_genes(root, out, top_n=10)
+            self.assertEqual(result.iloc[0]["gene"], "GENE1")
+            self.assertGreater(len(result), 0)
+
 
 class TestCocrystalLigandFallback(unittest.TestCase):
     def test_extract_hetatm_ligand(self):

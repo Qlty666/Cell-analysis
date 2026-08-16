@@ -18,12 +18,15 @@ if str(APP_ROOT / "web") not in sys.path:
 import web_ui as web_ui_module  # noqa: E402
 
 from web_ui import (  # noqa: E402
+    FINISHED_NOTIFICATIONS,
     FULL_JOBS,
     HEARTBEAT_CLIENTS,
     HEARTBEAT_LOCK,
+    NOTIFY_LOCK,
     _dock_file_path,
     _full_file_path,
     _full_status,
+    _single_status,
     _cleanup_stale_web_ui,
     _heartbeat_client_ids,
     _inject_heartbeat_script,
@@ -258,6 +261,48 @@ class TestFullStatus(unittest.TestCase):
             status = _full_status(_make_info(Path(tmp), 98))
             self.assertFalse(status["ok"])
             self.assertTrue(status["paused"])
+
+    def test_paused_notification_uses_readable_chinese_label(self):
+        with tempfile.TemporaryDirectory() as tmp:
+            info = _make_info(Path(tmp), 98)
+            info["notified"] = False
+            with NOTIFY_LOCK:
+                FINISHED_NOTIFICATIONS.clear()
+            with mock.patch("web_ui._append_task_history"):
+                status = _full_status(info)
+            self.assertTrue(status["paused"])
+            with NOTIFY_LOCK:
+                items = list(FINISHED_NOTIFICATIONS)
+                FINISHED_NOTIFICATIONS.clear()
+            self.assertTrue(items)
+            item = items[-1]
+            self.assertEqual(item["page_label"], "全自动流水线")
+            self.assertNotIn("鍏", item["title"])
+
+
+class TestSingleCellStatus(unittest.TestCase):
+    def test_paused_single_job_is_not_recorded_as_failure(self):
+        with tempfile.TemporaryDirectory() as tmp:
+            out = Path(tmp)
+            log_path = out / "logs" / "web_test.log"
+            log_path.parent.mkdir(parents=True)
+            log_path.write_text("", encoding="utf-8")
+            info = {
+                "job_id": "single-test",
+                "proc": _FakeProc(98),
+                "out": out,
+                "log": log_path,
+                "accession": "GSE123456",
+                "species": "hs",
+                "started": time.time(),
+                "recorded": False,
+                "notified": True,
+            }
+            with mock.patch("web_ui.record_job") as record:
+                status = _single_status(info)
+            self.assertTrue(status["paused"])
+            self.assertFalse(status["ok"])
+            record.assert_not_called()
 
 
 class TestResultDirectoryQueries(unittest.TestCase):
