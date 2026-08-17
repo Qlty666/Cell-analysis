@@ -6,9 +6,9 @@ import gzip
 import re
 import shutil
 import subprocess
+import time
 import tarfile
 import urllib.request
-import shutil
 
 CACHE_ROOT = Path(__file__).resolve().parents[2] / "data_cache"
 
@@ -79,25 +79,36 @@ def _fetch(url: str) -> str:
 
 
 def _download(url: str, out: Path, log) -> None:
-    log(f"downloading {out.name}")
-    subprocess.run(
-        [
-            _curl(),
-            "-L",
-            "--ssl-no-revoke",
-            "-A", "Mozilla/5.0",
-            "-C", "-",
-            "--retry", "5",
-            "--retry-delay", "3",
-            "--fail",
-            "--silent",
-            "--show-error",
-            "--max-time", "5400",
-            "-o", str(out),
-            url,
-        ],
-        check=True,
-    )
+    for attempt in range(1, 4):
+        log(f"downloading {out.name} (attempt {attempt}/3)")
+        try:
+            subprocess.run(
+                [
+                    _curl(),
+                    "-L",
+                    "--ssl-no-revoke",
+                    "-A", "Mozilla/5.0",
+                    "-C", "-",
+                    "--retry", "5",
+                    "--retry-delay", "3",
+                    "--fail",
+                    "--silent",
+                    "--show-error",
+                    "--max-time", "5400",
+                    "-o", str(out),
+                    url,
+                ],
+                check=True,
+            )
+            if not out.exists() or out.stat().st_size == 0:
+                raise RuntimeError("downloaded file is empty")
+            return
+        except (subprocess.CalledProcessError, OSError, RuntimeError) as exc:
+            if attempt == 3:
+                raise
+            delay = 3 * attempt
+            log(f"download attempt {attempt} failed ({exc}); retrying in {delay}s")
+            time.sleep(delay)
 
 
 def series_prefix(accession: str) -> str:

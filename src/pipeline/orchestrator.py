@@ -30,6 +30,15 @@ CONFIG_PATH = ROOT / "config" / "project_config.json"
 STALL_SECONDS = int(os.environ.get("LIVER_STALL_SECONDS", "1800"))
 POLL_INTERVAL = 30
 MAX_ATTEMPTS = 4
+STALL_LOG_INTERVAL = 600
+
+DETERMINISTIC_FAILURE_MARKERS = (
+    "Error: unexpected symbol",
+    "Error: unexpected ')'",
+    "Error: unexpected input",
+    "Error: unexpected string constant",
+    "argument 1 is not a vector",
+)
 
 SINGLE_CELL_STAGES = [
     "01_load_data",
@@ -105,6 +114,27 @@ def _snapshot_r_script(log_dir: Path) -> Path:
     shutil.copy2(source, snapshot)
     log(f"R script snapshot: {snapshot}")
     return snapshot
+
+
+def _check_r_script_syntax(script: Path) -> None:
+    proc = subprocess.run(
+        [
+            find_rscript(),
+            "-e",
+            "invisible(parse(file=commandArgs(TRUE)[1]))",
+            str(script),
+        ],
+        capture_output=True,
+        text=True,
+        encoding="utf-8",
+        errors="replace",
+        timeout=120,
+    )
+    if proc.returncode != 0:
+        raise RuntimeError(
+            "R script syntax check failed:\n"
+            + (proc.stderr or proc.stdout)[-2000:]
+        )
 
 
 def _cpu_seconds(pid: int) -> float:
@@ -185,6 +215,7 @@ def run_r_pipeline(
     log_path = log_dir / "pipeline_r.log"
 
     script = _snapshot_r_script(log_dir)
+    _check_r_script_syntax(script)
     cmd = [find_rscript(), str(script)]
     if force:
         cmd.append("--force")
@@ -213,6 +244,7 @@ def run_r_pipeline(
         paused = {"flag": False}
 
         def watch_stall() -> None:
+            last_stall_log = float("-inf")
             while proc.poll() is None:
                 if pause_path.exists():
                     log("pause requested; stopping current run")
@@ -226,10 +258,12 @@ def run_r_pipeline(
                     continue
                 if age > STALL_SECONDS:
                     if _process_using_cpu(proc.pid):
-                        log(
-                            f"no log output for {int(age)}s but R is still "
-                            "computing; extending stall grace"
-                        )
+                        if age - last_stall_log >= STALL_LOG_INTERVAL:
+                            log(
+                                f"no log output for {int(age)}s but R is still "
+                                "computing; extending stall grace"
+                            )
+                            last_stall_log = age
                     else:
                         log(
                             f"progress stalled for {int(age)}s; "
@@ -252,6 +286,10 @@ def run_r_pipeline(
 
 
 def diagnose_failure(log_text: str) -> str | None:
+    for marker in DETERMINISTIC_FAILURE_MARKERS:
+        if marker in log_text:
+            return f"deterministic R error: {marker}"
+
     missing = re.search(
         r"there is no package called ['\"]([^'\"]+)", log_text
     ) or re.search(
@@ -427,7 +465,13 @@ def run_pipeline(
         tail = read_tail(log_path)
         issue = diagnose_failure(tail)
         if issue:
-            log(f"issue detected: {issue}; fixing and retrying")
+            log(f"issue detected: {issue}")
+            if issue.startswith("deterministic"):
+                print(tail[-2000:])
+                raise RuntimeError(
+                    "Pipeline failed with a deterministic error; "
+                    "retrying cannot fix it"
+                )
             if "package" in issue:
                 install_deps()
         else:
