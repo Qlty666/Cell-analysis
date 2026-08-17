@@ -1489,8 +1489,9 @@ def _full_status(info: dict) -> dict:
         stage, error = _finished_info(
             marker_dir,
             FULL_STAGE_LABELS,
-            [info["log"]],
+            _full_log_paths(info),
             True,
+            SINGLE_STAGE_LABELS,
         )
         _notify_finished(
             info,
@@ -1518,8 +1519,9 @@ def _full_status(info: dict) -> dict:
             stage, error = _finished_info(
                 marker_dir,
                 FULL_STAGE_LABELS,
-                [info["log"]],
+                _full_log_paths(info),
                 True,
+                SINGLE_STAGE_LABELS,
             )
             _notify_finished(
                 info,
@@ -1550,8 +1552,9 @@ def _full_status(info: dict) -> dict:
             stage, error = _finished_info(
                 marker_dir,
                 FULL_STAGE_LABELS,
-                [info["log"]],
+                _full_log_paths(info),
                 False,
+                SINGLE_STAGE_LABELS,
             )
         _notify_finished(
             info,
@@ -1695,6 +1698,55 @@ def _stage_from_log(log_text: str, labels: dict) -> str:
     return labels.get(matches[-1].group(1), "")
 
 
+def _full_stage_from_log(
+    log_text: str,
+    full_labels: dict,
+    single_labels: dict,
+) -> str:
+    full_matches = re.findall(
+        r"=== stage (\d+) [A-Za-z0-9_-]+ ===",
+        log_text,
+    )
+    if full_matches:
+        return full_labels.get(full_matches[-1], "")
+    single_matches = re.findall(
+        r"start stage:\s*(\d+)[_\s-][A-Za-z0-9_-]+",
+        log_text,
+    )
+    if single_matches:
+        single_label = single_labels.get(single_matches[-1], "")
+        return "单细胞分析" if single_label else "单细胞分析"
+    return ""
+
+
+def _full_log_paths(info: dict) -> list[Path]:
+    paths = [Path(info["log"])]
+    roots: list[Path] = []
+    output = info.get("output")
+    if output:
+        roots.append(Path(output).expanduser().resolve())
+    context_root = _single_cell_root_from_workdir(Path(info["workdir"]))
+    if context_root is not None:
+        roots.append(context_root)
+    for root in roots:
+        paths.append(root / "logs" / "pipeline_r.log")
+    return paths
+
+
+def _full_stage_label(info: dict, marker_dir: Path) -> str:
+    log_text = "\n".join(
+        _log_tail(path, 20000) for path in _full_log_paths(info)
+    ).strip()
+    stage = _full_stage_from_log(
+        log_text,
+        FULL_STAGE_LABELS,
+        SINGLE_STAGE_LABELS,
+    )
+    if stage:
+        return stage
+    return _current_stage(marker_dir, FULL_STAGE_LABELS) or ""
+
+
 def _extract_error(log_text: str, limit: int = 700) -> str:
     lines = [line.strip() for line in log_text.splitlines() if line.strip()]
     if not lines:
@@ -1713,13 +1765,19 @@ def _finished_info(
     labels: dict,
     log_paths: list[Path],
     paused: bool,
+    single_cell_labels: dict | None = None,
 ) -> tuple[str, str]:
-    log_text = "\n".join(_log_tail(path, 4000) for path in log_paths).strip()
-    stage = (
-        _stage_from_log(log_text, labels)
-        or _current_stage(marker_dir, labels)
-        or "未知"
-    )
+    log_text = "\n".join(_log_tail(path, 20000) for path in log_paths).strip()
+    stage = ""
+    if single_cell_labels is not None:
+        stage = _full_stage_from_log(log_text, labels, single_cell_labels)
+        if not stage:
+            stage = _stage_from_log(log_text, single_cell_labels)
+            if stage:
+                stage = "单细胞分析"
+    else:
+        stage = _stage_from_log(log_text, labels)
+    stage = stage or _current_stage(marker_dir, labels) or "未知"
     if paused:
         error = "任务已暂停"
     else:
@@ -1899,7 +1957,7 @@ def running_tasks_data() -> dict:
         stage_label = (
             "排队中" if state == "queued"
             else "已暂停" if state == "paused"
-            else _current_stage(marker_dir, FULL_STAGE_LABELS) or "准备中"
+            else _full_stage_label(info, marker_dir) or "准备中"
         )
         started = float(info.get("started") or now)
         output = info.get("output") or "-"
@@ -1919,7 +1977,9 @@ def running_tasks_data() -> dict:
                 "elapsed": int(now - started),
                 "progress": progress,
                 "stage_label": stage_label,
-                "log_tail": _log_tail(info["log"]),
+                "log_tail": "\n".join(
+                    _log_tail(path, 4000) for path in _full_log_paths(info)
+                ).strip(),
             }
         )
 

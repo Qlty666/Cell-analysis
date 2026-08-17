@@ -49,6 +49,8 @@
 | `LIVER_RUN_TRAJECTORY` | `no` | slingshot 拟时序轨迹（需安装 `slingshot`） |
 | `LIVER_DE_VIOLIN_TOP_N` | `12` | Top DEG 横向小提琴图展示的基因数 |
 | `LIVER_DE_VIOLIN_MAX_CELLS` | `1000` | 每个条件下用于该图的抽样细胞数 |
+| `LIVER_SKIP_GSEA` | `no` | 设为 `yes` 时跳过 GSEA GO/KEGG，避免大数据集富集阶段长时间运行 |
+| `LIVER_GSEA_MAX_GENES` | `0`（不限） | 限制参与 GSEA 的基因数，例如 `20000` 可显著缩短运行时间 |
 
 ### 2.2 虚拟筛选（CADD）流水线
 

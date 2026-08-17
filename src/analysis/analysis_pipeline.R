@@ -143,6 +143,18 @@ ensure_deg_columns <- function(deg) {
     if (!col %in% colnames(deg)) {
       deg[[col]] <- numeric(nrow(deg))
     }
+    if (is.list(deg[[col]])) {
+      deg[[col]] <- vapply(
+        deg[[col]],
+        function(x) {
+          if (length(x) != 1L) return(NA_real_)
+          suppressWarnings(as.numeric(x))
+        },
+        numeric(1)
+      )
+    } else {
+      deg[[col]] <- suppressWarnings(as.numeric(deg[[col]]))
+    }
   }
   if (!"gene" %in% colnames(deg)) {
     deg$gene <- rownames(deg)
@@ -183,6 +195,14 @@ run_cnv <- flag_on("LIVER_RUN_CNV", "yes")
 run_singler <- flag_on("LIVER_RUN_SINGLER", "yes")
 run_trajectory <- flag_on("LIVER_RUN_TRAJECTORY", "no")
 regress_cellcycle <- flag_on("LIVER_REGRESS_CELLCYCLE", "no")
+skip_gsea <- flag_on("LIVER_SKIP_GSEA", "no")
+gsea_max_genes_raw <- Sys.getenv("LIVER_GSEA_MAX_GENES", unset = "")
+gsea_max_genes <- if (nzchar(gsea_max_genes_raw)) {
+  val <- suppressWarnings(as.integer(gsea_max_genes_raw))
+  if (is.na(val) || val < 0) 0L else val
+} else {
+  0L
+}
 
 save_pheatmap <- function(file, fn, width, height, res = 150) {
   name <- basename(file)
@@ -2195,7 +2215,11 @@ if (stage_allowed("07")) run_stage("07_enrichment", {
     ),
     error = function(e) data.frame()
   )
-  if (nrow(eg_all) == 0) {
+  if (skip_gsea) {
+    log_msg("GSEA skipped by LIVER_SKIP_GSEA")
+    gsea_go <- NULL
+    gsea_kegg <- NULL
+  } else if (nrow(eg_all) == 0) {
     log_msg("no Entrez mapping for GSEA; skipping")
     gsea_go <- NULL
     gsea_kegg <- NULL
@@ -2203,7 +2227,18 @@ if (stage_allowed("07")) run_stage("07_enrichment", {
     ranked <- rank_vec[eg_all[[mapped_col]]]
     names(ranked) <- eg_all$ENTREZID
     ranked <- sort(ranked, decreasing = TRUE)
+    if (gsea_max_genes > 0 && length(ranked) > gsea_max_genes) {
+      ranked <- ranked[seq_len(gsea_max_genes)]
+      log_msg(
+        "GSEA gene list capped to ",
+        length(ranked),
+        " genes (LIVER_GSEA_MAX_GENES=",
+        gsea_max_genes,
+        ")"
+      )
+    }
 
+    log_msg("starting GSEA GO with ", length(ranked), " genes")
     gsea_go <- tryCatch(
       gseGO(
         geneList = ranked,
@@ -2217,8 +2252,11 @@ if (stage_allowed("07")) run_stage("07_enrichment", {
       ),
       error = function(e) NULL
     )
+    log_msg("GSEA GO finished")
+    log_msg("starting GSEA KEGG with ", length(ranked), " genes")
     gsea_kegg <- tryCatch({
       options(timeout = 60)
+      httr::set_config(httr::timeout(60))
       R.utils::withTimeout(
         gseKEGG(
           geneList = ranked,
@@ -2235,6 +2273,7 @@ if (stage_allowed("07")) run_stage("07_enrichment", {
       log_msg("GSEA KEGG unavailable: ", conditionMessage(e))
       NULL
     })
+    log_msg("GSEA KEGG finished")
   }
 
   plot_gsea <- function(res, file, title) {
