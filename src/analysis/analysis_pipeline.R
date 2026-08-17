@@ -485,13 +485,19 @@ read_generic_counts <- function(manifest) {
       if (length(bc) >= ncol(m)) bc else colnames(m)
     )
     filename_sample <- "Sample1"
-    g_match <- regmatches(mat_file, regexpr("G[0-9]+[A-Z]?", mat_file))
-    if (length(g_match) > 0) {
-      filename_sample <- g_match
+    path_parts <- strsplit(mat_file, "/", fixed = TRUE)[[1]]
+    feature_dir <- which(tolower(path_parts) == "raw_feature_bc_matrix")
+    if (length(feature_dir) > 0 && feature_dir[1] > 1) {
+      filename_sample <- path_parts[feature_dir[1] - 1]
     } else {
-      gsm_match <- regmatches(mat_file, regexpr("GSM[0-9]+", mat_file))
-      if (length(gsm_match) > 0) {
-        filename_sample <- gsm_match
+      g_match <- regmatches(mat_file, regexpr("G[0-9]+[A-Z]?", mat_file))
+      if (length(g_match) > 0) {
+        filename_sample <- g_match
+      } else {
+        gsm_match <- regmatches(mat_file, regexpr("GSM[0-9]+", mat_file))
+        if (length(gsm_match) > 0) {
+          filename_sample <- gsm_match
+        }
       }
     }
     if (all(barcode_labels == "Sample1")) {
@@ -610,7 +616,7 @@ infer_group_from_filename <- function(mat_file) {
   ""
 }
 
-read_generic_metadata <- function(manifest, cells) {
+read_generic_metadata <- function(manifest, cells, cell_sample = NULL) {
   meta <- data.frame(row.names = cells)
   files <- as.character(manifest$files$metadata)
   if (length(files) == 0) {
@@ -650,8 +656,46 @@ read_generic_metadata <- function(manifest, cells) {
     }
 
     bc_vals <- as.character(tab[[bc_col]])
+    strip_sample_affixes <- function(x) {
+      x <- as.character(x)
+      without_suffix <- sub("_[^_]+$", "", x)
+      ifelse(without_suffix != x, without_suffix, sub("^[^_]+_", "", x))
+    }
     match_barcodes <- function(cells, vals) {
       idx <- match(cells, vals)
+      if (sum(!is.na(idx)) < 10 && !is.null(cell_sample)) {
+        samples <- as.character(cell_sample)
+        candidate <- mapply(
+          function(c, s) {
+            if (is.na(s)) return(NA_character_)
+            if (startsWith(c, s)) {
+              return(paste0(
+                s,
+                "_",
+                sub(paste0(s, "_"), "", c, fixed = TRUE)
+              ))
+            }
+            if (endsWith(c, s)) {
+              return(paste0(
+                s,
+                "_",
+                sub(paste0("_", s), "", c, fixed = TRUE)
+              ))
+            }
+            paste0(s, "_", c)
+          },
+          cells,
+          samples,
+          USE.NAMES = FALSE
+        )
+        idx <- match(candidate, vals)
+      }
+      if (sum(!is.na(idx)) < 10) {
+        idx <- match(
+          strip_sample_affixes(cells),
+          strip_sample_affixes(vals)
+        )
+      }
       if (sum(!is.na(idx)) < 10) {
         idx <- match(sub("_[^_]+$", "", cells), vals)
       }
@@ -775,9 +819,9 @@ parse_series_generic <- function(manifest) {
 
 infer_condition <- function(meta, sample_ann) {
   candidates <- c(
-    "condition", "group", "disease", "histology", "cancer_type",
-    "cancer.type", "tissue", "site", "tissue_sub", "sample_type", "status",
-    "treatment"
+    "condition", "group", "disease", "disease_status", "health_status",
+    "histology", "cancer_type", "cancer.type", "tissue", "site",
+    "tissue_sub", "sample_type", "status", "treatment"
   )
   candidate_cols <- colnames(meta)[
     tolower(colnames(meta)) %in% candidates
@@ -864,7 +908,11 @@ normalize_condition <- function(meta) {
 read_generic_dataset <- function(manifest) {
   loaded <- read_generic_counts(manifest)
   counts <- loaded$counts
-  meta <- read_generic_metadata(manifest, colnames(counts))
+  meta <- read_generic_metadata(
+    manifest,
+    colnames(counts),
+    loaded$cell_sample
+  )
   ann <- parse_series_generic(manifest)
 
   if (!is.null(ann) && "sample" %in% colnames(ann)) {
