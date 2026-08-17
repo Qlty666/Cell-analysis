@@ -17,6 +17,16 @@ BULK_COUNT_TABLE_RE = re.compile(
     re.IGNORECASE,
 )
 
+ARCHIVE_SUFFIXES = (
+    ".tar",
+    ".tar.gz",
+    ".tgz",
+    ".tar.bz2",
+    ".tbz2",
+    ".tar.xz",
+    ".txz",
+)
+
 SINGLE_CELL_MATRIX_RE = re.compile(
     r"(?:^|[/_. -])filtered[-_. ]?feature[-_. ]?bc[-_. ]?matrix"
     r"|(?:^|[/_. -])raw[-_. ]?feature[-_. ]?bc[-_. ]?matrix"
@@ -40,6 +50,10 @@ def _files_look_bulk(files: dict) -> bool:
     return bool(matrices) and not barcodes and not genes and not any(
         SINGLE_CELL_MATRIX_RE.search(name) for name in matrices
     )
+
+
+def _is_archive(name: str) -> bool:
+    return name.lower().endswith(ARCHIVE_SUFFIXES)
 
 
 def _curl() -> str:
@@ -134,6 +148,8 @@ def _select_files(names: list[str]) -> dict:
 
     for name in names:
         low = name.lower()
+        if _is_archive(name):
+            continue
         if any(
             token in low
             for token in (
@@ -172,6 +188,48 @@ def _select_files(names: list[str]) -> dict:
             {"matrix": matrices, "barcodes": barcodes, "genes": genes}
         ),
     }
+
+
+def _expand_archive_files(files: dict, base_dir: Path, log) -> dict:
+    """Replace archive entries in a manifest with files extracted from them."""
+    expanded = {
+        "matrix": list(files.get("matrix", [])),
+        "barcodes": list(files.get("barcodes", [])),
+        "genes": list(files.get("genes", [])),
+        "metadata": list(files.get("metadata", [])),
+        "series_matrices": list(files.get("series_matrices", [])),
+    }
+    archives = []
+    for group in ("matrix", "barcodes", "genes", "metadata", "series_matrices"):
+        for name in files.get(group, []):
+            if _is_archive(name) and name not in archives:
+                archives.append(name)
+    if not archives:
+        return files
+
+    extract_dir = base_dir / "_extracted"
+    for name in archives:
+        archive_path = base_dir / name
+        if not archive_path.exists() or archive_path.stat().st_size == 0:
+            continue
+        log(f"expanding archive {name}")
+        extract_dir.mkdir(parents=True, exist_ok=True)
+        _extract_archive(archive_path, extract_dir)
+        inner = _select_files(_walk_relative(extract_dir))
+        for group in ("matrix", "barcodes", "genes", "metadata"):
+            expanded[group] = [
+                item for item in expanded[group] if item != name
+            ] + [f"_extracted/{item}" for item in inner[group]]
+
+    for group, values in expanded.items():
+        seen = set()
+        unique = []
+        for value in values:
+            if value not in seen:
+                seen.add(value)
+                unique.append(value)
+        expanded[group] = unique
+    return expanded
 
 
 def _refresh_manifest_mode(manifest: dict) -> dict:
@@ -271,9 +329,13 @@ def ensure_geo_dataset(accession: str, root: Path, log) -> dict:
         not manifest_path.exists()
         and cache_manifest.exists()
     ):
-        cached = _refresh_manifest_mode(
-            json.loads(cache_manifest.read_text(encoding="utf-8"))
+        cached = json.loads(cache_manifest.read_text(encoding="utf-8"))
+        cached["files"] = _expand_archive_files(
+            cached.get("files", {}),
+            cache_dir,
+            log,
         )
+        cached = _refresh_manifest_mode(cached)
         all_files = []
         for group in ["matrix", "barcodes", "genes", "metadata", "series_matrices"]:
             all_files.extend(cached.get("files", {}).get(group, []))
@@ -297,9 +359,13 @@ def ensure_geo_dataset(accession: str, root: Path, log) -> dict:
             return cached
 
     if manifest_path.exists():
-        manifest = _refresh_manifest_mode(
-            json.loads(manifest_path.read_text(encoding="utf-8"))
+        manifest = json.loads(manifest_path.read_text(encoding="utf-8"))
+        manifest["files"] = _expand_archive_files(
+            manifest.get("files", {}),
+            raw_dir,
+            log,
         )
+        manifest = _refresh_manifest_mode(manifest)
         all_files = []
         for group in ["matrix", "barcodes", "genes", "metadata", "series_matrices"]:
             all_files.extend(manifest.get("files", {}).get(group, []))
@@ -343,6 +409,7 @@ def ensure_geo_dataset(accession: str, root: Path, log) -> dict:
     }
     downloaded = _download_files(all_urls, raw_dir, log)
     downloaded = _convert_downloaded(downloaded, raw_dir)
+    downloaded = _expand_archive_files(downloaded, raw_dir, log)
     downloaded["bulk"] = bool(selected["bulk"])
 
     if not downloaded["matrix"]:
