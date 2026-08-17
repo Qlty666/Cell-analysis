@@ -3,8 +3,10 @@
 
 from __future__ import annotations
 
+import io
 import subprocess
 import sys
+import tarfile
 import tempfile
 import unittest
 from pathlib import Path
@@ -17,6 +19,7 @@ if str(APP_ROOT / "src") not in sys.path:
 from data.geo_downloader import (  # noqa: E402
     BULK_COUNT_TABLE_RE,
     _download,
+    _expand_archive_files,
     _refresh_manifest_mode,
     _select_files,
 )
@@ -62,6 +65,17 @@ class TestSelectFiles(unittest.TestCase):
         ]
         selected = _select_files(names)
         self.assertEqual(selected["matrix"], ["GSE125449_Set1_matrix.mtx.gz"])
+        self.assertFalse(selected["bulk"])
+
+    def test_archive_names_are_not_selected_as_matrix(self):
+        names = [
+            "GSE254513_CG_raw_feature_bc_matrix.tar.gz",
+            "GSE254513_CG_Seurat_metadata.csv.gz",
+            "GSE254513_series_matrix.txt.gz",
+        ]
+        selected = _select_files(names)
+        self.assertEqual(selected["matrix"], [])
+        self.assertEqual(selected["metadata"], ["GSE254513_CG_Seurat_metadata.csv.gz"])
         self.assertFalse(selected["bulk"])
 
     def test_filtered_feature_bc_matrix_rds_not_bulk(self):
@@ -124,6 +138,53 @@ class TestRefreshManifestMode(unittest.TestCase):
         }
         updated = _refresh_manifest_mode(manifest)
         self.assertEqual(updated["mode"], "bulk")
+
+
+class TestExpandArchiveFiles(unittest.TestCase):
+    def test_extracts_feature_bc_matrix_archive_into_manifest(self):
+        with tempfile.TemporaryDirectory() as tmp:
+            base = Path(tmp)
+            archive = base / "GSE254513_CG_raw_feature_bc_matrix.tar.gz"
+            members = {
+                "matrices/S1/raw_feature_bc_matrix/barcodes.tsv": "AAAC-1\n",
+                "matrices/S1/raw_feature_bc_matrix/features.tsv": "GENE1\n",
+                "matrices/S1/raw_feature_bc_matrix/matrix.mtx": (
+                    "%%MatrixMarket matrix coordinate integer general\n"
+                    "1 1 1\n"
+                    "1 1 1\n"
+                ),
+            }
+            with tarfile.open(archive, "w:gz") as tf:
+                for rel, data in members.items():
+                    info = tarfile.TarInfo(rel)
+                    info.size = len(data)
+                    tf.addfile(info, io.BytesIO(data.encode("utf-8")))
+
+            files = {
+                "matrix": [archive.name],
+                "barcodes": [],
+                "genes": [],
+                "metadata": [],
+                "series_matrices": [],
+            }
+            logs = []
+            expanded = _expand_archive_files(files, base, logs.append)
+
+            prefix = "_extracted/matrices/S1/raw_feature_bc_matrix"
+            self.assertEqual(
+                expanded["matrix"],
+                [f"{prefix}/matrix.mtx"],
+            )
+            self.assertEqual(
+                expanded["barcodes"],
+                [f"{prefix}/barcodes.tsv"],
+            )
+            self.assertEqual(
+                expanded["genes"],
+                [f"{prefix}/features.tsv"],
+            )
+            self.assertTrue((base / prefix / "matrix.mtx").exists())
+            self.assertEqual(logs, ["expanding archive " + archive.name])
 
 
 class TestDownloadRetry(unittest.TestCase):
