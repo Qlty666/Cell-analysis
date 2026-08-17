@@ -3,9 +3,12 @@
 
 from __future__ import annotations
 
+import subprocess
 import sys
+import tempfile
 import unittest
 from pathlib import Path
+from unittest import mock
 
 APP_ROOT = Path(__file__).resolve().parent.parent
 if str(APP_ROOT / "src") not in sys.path:
@@ -13,6 +16,7 @@ if str(APP_ROOT / "src") not in sys.path:
 
 from data.geo_downloader import (  # noqa: E402
     BULK_COUNT_TABLE_RE,
+    _download,
     _refresh_manifest_mode,
     _select_files,
 )
@@ -120,6 +124,39 @@ class TestRefreshManifestMode(unittest.TestCase):
         }
         updated = _refresh_manifest_mode(manifest)
         self.assertEqual(updated["mode"], "bulk")
+
+
+class TestDownloadRetry(unittest.TestCase):
+    def test_retries_transient_curl_failures(self):
+        with tempfile.TemporaryDirectory() as tmp:
+            out = Path(tmp) / "GSE123456_RAW.tar"
+            calls = {"count": 0}
+
+            def fake_run(cmd, **kwargs):
+                calls["count"] += 1
+                if calls["count"] < 3:
+                    raise subprocess.CalledProcessError(56, cmd)
+                out.write_bytes(b"downloaded")
+                return subprocess.CompletedProcess(cmd, 0)
+
+            log_lines = []
+            with (
+                mock.patch("data.geo_downloader._curl", return_value="curl"),
+                mock.patch(
+                    "data.geo_downloader.subprocess.run",
+                    side_effect=fake_run,
+                ),
+                mock.patch("data.geo_downloader.time.sleep"),
+            ):
+                _download(
+                    "https://example.test/GSE123456_RAW.tar",
+                    out,
+                    log_lines.append,
+                )
+
+            self.assertEqual(calls["count"], 3)
+            self.assertEqual(out.read_bytes(), b"downloaded")
+            self.assertEqual(len(log_lines), 5)
 
 
 if __name__ == "__main__":

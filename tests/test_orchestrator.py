@@ -9,6 +9,7 @@ import sys
 import tempfile
 import unittest
 from pathlib import Path
+from unittest import mock
 
 APP_ROOT = Path(__file__).resolve().parent.parent
 if str(APP_ROOT / "src") not in sys.path:
@@ -32,6 +33,46 @@ class TestOrchestratorHelpers(unittest.TestCase):
 
     def test_cpu_seconds_returns_zero_for_missing_process(self):
         self.assertEqual(orchestrator._cpu_seconds(999_999_999), 0.0)
+
+    def test_diagnose_failure_recognizes_r_parse_error(self):
+        issue = orchestrator.diagnose_failure(
+            "Error: unexpected symbol in:\n[pipeline] pipeline failed"
+        )
+        self.assertIn("deterministic", issue or "")
+
+    def test_diagnose_failure_recognizes_order_vector_error(self):
+        issue = orchestrator.diagnose_failure(
+            "Error in order(...) : argument 1 is not a vector"
+        )
+        self.assertIn("deterministic", issue or "")
+
+    def test_diagnose_failure_still_detects_missing_package(self):
+        issue = orchestrator.diagnose_failure(
+            "there is no package called 'Seurat'"
+        )
+        self.assertEqual(issue, "missing R package: Seurat")
+
+    def test_check_r_script_syntax_invokes_rscript_parse(self):
+        with tempfile.TemporaryDirectory() as tmp:
+            script = Path(tmp) / "pipeline_analysis.R"
+            script.write_text("if (", encoding="utf-8")
+            with (
+                mock.patch(
+                    "pipeline.orchestrator.find_rscript",
+                    return_value="Rscript",
+                ),
+                mock.patch("pipeline.orchestrator.subprocess.run") as run,
+            ):
+                run.return_value = subprocess.CompletedProcess(
+                    [],
+                    0,
+                    stdout="",
+                    stderr="",
+                )
+                orchestrator._check_r_script_syntax(script)
+            cmd = run.call_args.args[0]
+            self.assertIn("-e", cmd)
+            self.assertEqual(cmd[-1], str(script))
 
     def test_terminate_process_tree_kills_children(self):
         if orchestrator.psutil is None:

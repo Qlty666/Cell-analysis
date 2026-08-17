@@ -186,6 +186,7 @@ def _make_info(tmp: Path, returncode: int) -> dict:
         "proc": _FakeProc(returncode),
         "workdir": workdir,
         "log": log_path,
+        "output": str(tmp / "single_cell"),
         "accession": "GSE999999",
         "notified": True,
         "paused": False,
@@ -278,6 +279,51 @@ class TestFullStatus(unittest.TestCase):
             item = items[-1]
             self.assertEqual(item["page_label"], "全自动流水线")
             self.assertNotIn("鍏", item["title"])
+
+    def test_paused_full_job_reports_single_cell_stage_from_r_log(self):
+        with tempfile.TemporaryDirectory() as tmp:
+            base = Path(tmp)
+            info = _make_info(base, 98)
+            sc = base / "single_cell"
+            log_dir = sc / "logs"
+            log_dir.mkdir(parents=True, exist_ok=True)
+            (log_dir / "pipeline_r.log").write_text(
+                "[2026-08-17 16:52:47] start stage: 07_enrichment\n",
+                encoding="utf-8",
+            )
+            marker_dir = (
+                info["workdir"] / "outputs" / "integration" / ".stages"
+            )
+            for marker in marker_dir.glob("*.done"):
+                marker.unlink()
+            with (
+                mock.patch("web_ui._append_task_history"),
+                mock.patch("web_ui._drain_full_queue"),
+            ):
+                status = _full_status(info)
+            self.assertTrue(status["paused"])
+            self.assertEqual(status["stage"], "单细胞分析")
+
+    def test_failed_full_job_reports_in_progress_stage_not_last_done(self):
+        with tempfile.TemporaryDirectory() as tmp:
+            info = _make_info(Path(tmp), 1)
+            marker_dir = (
+                info["workdir"] / "outputs" / "integration" / ".stages"
+            )
+            for code in ("07", "08"):
+                for marker in marker_dir.glob(f"{code}_*.done"):
+                    marker.unlink()
+            info["log"].write_text(
+                "[INFO] === stage 06 docking ===\n"
+                "[INFO] === stage 07 cell_feedback ===\n"
+                "RuntimeError: cell feedback R analysis failed\n"
+                "Error in order(...) : argument 1 is not a vector\n",
+                encoding="utf-8",
+            )
+            with mock.patch("web_ui._drain_full_queue"):
+                status = _full_status(info)
+            self.assertFalse(status["ok"])
+            self.assertEqual(status["stage"], "细胞反馈")
 
 
 class TestSingleCellStatus(unittest.TestCase):
