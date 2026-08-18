@@ -21,6 +21,7 @@ import numpy as np
 import pandas as pd
 
 from .config import ResolvedConfig
+from .network_toxicology import ppi_hub_scores
 from .provenance import write_run_manifest
 from .utils import DockingError, write_json
 
@@ -122,6 +123,7 @@ DEFAULT_TARGET_WEIGHTS = {
     "specificity": 0.10,
     "prognosis": 0.10,
     "druggability": 0.10,
+    "ppi_hub": 0.10,
 }
 
 _CELL_TYPE_COLS = {
@@ -181,6 +183,7 @@ def run_knockout(cfg: ResolvedConfig, log) -> dict:
     expression_score = _percentile_rank(expression)
     prolif_corr, prolif_score = _proliferation_scores(mat)
     hub_degree, hub_score = _network_hub_scores(mat, ko, log)
+    ppi_hub_frame, ppi_hub_score = _ppi_hub_scores(cfg, mat.index, ko, log)
     depmap_effect, depmap_score, depmap_lines = _depmap_scores(
         cfg, mat.index, ko, log
     )
@@ -224,6 +227,7 @@ def run_knockout(cfg: ResolvedConfig, log) -> dict:
         "specificity": specificity_score,
         "prognosis": prognosis_score,
         "druggability": druggability_score,
+        "ppi_hub": ppi_hub_score,
     }
     target_weights = _normalize_target_weights(
         ko.get("target_weights"), target_sources
@@ -251,6 +255,15 @@ def run_knockout(cfg: ResolvedConfig, log) -> dict:
     frame["proliferation_score"] = prolif_score
     frame["hub_degree"] = hub_degree
     frame["hub_score"] = hub_score
+    if ppi_hub_frame is not None:
+        frame["ppi_degree"] = _as_series(ppi_hub_frame.get("ppi_degree"))
+        frame["ppi_betweenness"] = _as_series(
+            ppi_hub_frame.get("ppi_betweenness")
+        )
+        frame["ppi_clustering"] = _as_series(
+            ppi_hub_frame.get("ppi_clustering")
+        )
+        frame["ppi_hub_score"] = _as_series(ppi_hub_score)
     frame["depmap_effect"] = depmap_effect
     frame["depmap_score"] = depmap_score
     frame["knockout_score"] = knockout_score
@@ -304,9 +317,11 @@ def run_knockout(cfg: ResolvedConfig, log) -> dict:
         "specificity_score",
         "prognosis_score",
         "druggability_score",
+        "ppi_hub_score",
         "off_target_paralogs",
         "safety_concern",
     ]
+    candidate_cols = [c for c in candidate_cols if c in frame.columns]
     candidates = frame[candidate_cols].head(top_n)
     candidates_path = data_dir / "fig_52_target_candidates.csv"
     candidates.to_csv(candidates_path, index=False)
@@ -326,6 +341,7 @@ def run_knockout(cfg: ResolvedConfig, log) -> dict:
         "normal_group": group_names["normal"],
         "depmap_lines": depmap_lines,
         "depmap_included": depmap_score is not None,
+        "ppi_hub_included": ppi_hub_score is not None,
         "top_n": min(top_n, len(frame)),
         "weights": weights,
         "top_genes": frame["gene"].astype(str).head(top_n).tolist(),
@@ -358,6 +374,7 @@ def run_knockout(cfg: ResolvedConfig, log) -> dict:
             "prognosis_csv": _resolve_path(cfg, ko.get("prognosis_csv")),
             "druggability_csv": _resolve_path(cfg, ko.get("druggability_csv")),
             "off_target_csv": _resolve_path(cfg, ko.get("off_target_csv")),
+            "ppi_network_csv": _resolve_path(cfg, ko.get("ppi_network_csv")),
         },
         {
             "weights": weights,
@@ -896,6 +913,40 @@ def _network_hub_scores(
     full_degree = pd.Series(0.0, index=mat.index)
     full_degree.loc[degree.index] = degree
     return full_degree, _percentile_rank(full_degree)
+
+
+def _ppi_hub_scores(
+    cfg: ResolvedConfig,
+    genes: pd.Index,
+    ko: dict,
+    log,
+) -> tuple[pd.DataFrame | None, pd.Series | None]:
+    """Score PPI hubness from an optional STRING-style edge table."""
+    path = _resolve_path(cfg, ko.get("ppi_network_csv"))
+    if path is None or not path.exists():
+        return None, None
+    try:
+        hub = ppi_hub_scores(path, genes=genes)
+    except Exception as exc:
+        log.warning("PPI hub scoring skipped: %s", exc)
+        return None, None
+    lookup = {str(g).upper(): str(g) for g in genes}
+    hub["gene"] = hub["gene"].map(lookup).fillna(hub["gene"])
+    hub = (
+        hub.set_index("gene")
+        .reindex([str(g) for g in genes])
+        .reset_index()
+    )
+    if "index" in hub.columns and "gene" not in hub.columns:
+        hub = hub.rename(columns={"index": "gene"})
+    hub = hub.set_index("gene")
+    score = hub["ppi_hub_score"]
+    log.info(
+        "PPI hub scoring included: %s/%s genes matched",
+        int(score.notna().sum()),
+        len(genes),
+    )
+    return hub, score
 
 
 def _depmap_scores(

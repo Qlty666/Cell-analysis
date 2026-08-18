@@ -48,6 +48,7 @@
     "enabled": true,
     "expression_csv": "data/knockout/expression.csv",
     "metadata_csv": null,
+    "ppi_network_csv": null,
     "depmap_csv": null,
     "prognosis_csv": null,
     "druggability_csv": null,
@@ -78,8 +79,28 @@
       "pathway": 0.15,
       "specificity": 0.10,
       "prognosis": 0.10,
-      "druggability": 0.10
+      "druggability": 0.10,
+      "ppi_hub": 0.10
     }
+  },
+  "network_toxicology": {
+    "compound_name": null,
+    "disease_name": null,
+    "compound_targets_csv": null,
+    "target_sources": null,
+    "disease_genes_csv": null,
+    "disease_gene_column": null,
+    "ppi_network_csv": null,
+    "output_dir": "outputs/run_001/network_toxicology",
+    "venn": true
+  },
+  "faers": {
+    "input_csv": null,
+    "drug_column": "drug",
+    "event_column": "event",
+    "count_column": null,
+    "min_count": 3,
+    "output_dir": "outputs/run_001/faers"
   },
   "validation": {
     "top_n": 10,

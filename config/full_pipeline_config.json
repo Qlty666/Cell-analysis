@@ -11,6 +11,7 @@
   "ligand_library": null,
   "ko_top_n": 50,
   "depmap_csv": null,
+  "ppi_network_csv": null,
   "cell_feedback": {
     "enabled": true,
     "top_n": 12,

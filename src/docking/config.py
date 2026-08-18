@@ -100,6 +100,7 @@ DEFAULTS = {
         "enabled": True,
         "expression_csv": "data/knockout/expression.csv",
         "metadata_csv": None,
+        "ppi_network_csv": None,
         "depmap_csv": None,
         "prognosis_csv": None,
         "druggability_csv": None,
@@ -131,7 +132,27 @@ DEFAULTS = {
             "specificity": 0.10,
             "prognosis": 0.10,
             "druggability": 0.10,
+            "ppi_hub": 0.10,
         },
+    },
+    "network_toxicology": {
+        "compound_name": None,
+        "disease_name": None,
+        "compound_targets_csv": None,
+        "target_sources": None,
+        "disease_genes_csv": None,
+        "disease_gene_column": None,
+        "ppi_network_csv": None,
+        "output_dir": "outputs/run_001/network_toxicology",
+        "venn": True,
+    },
+    "faers": {
+        "input_csv": None,
+        "drug_column": "drug",
+        "event_column": "event",
+        "count_column": None,
+        "min_count": 3,
+        "output_dir": "outputs/run_001/faers",
     },
     "validation": {
         "top_n": 10,
@@ -338,10 +359,28 @@ def apply_overrides(cfg: ResolvedConfig, overrides: dict) -> ResolvedConfig:
         "normal_label": ("knockout", "normal_label"),
         "ko_top_n": ("knockout", "top_n"),
         "validation_top_n": ("validation", "top_n"),
+        "compound_name": ("network_toxicology", "compound_name"),
+        "disease_name": ("network_toxicology", "disease_name"),
+        "compound_targets_csv": ("network_toxicology", "compound_targets_csv"),
+        "disease_genes_csv": ("network_toxicology", "disease_genes_csv"),
+        "disease_gene_column": ("network_toxicology", "disease_gene_column"),
+        "network_output_dir": ("network_toxicology", "output_dir"),
+        "faers_input": ("faers", "input_csv"),
+        "faers_drug_column": ("faers", "drug_column"),
+        "faers_event_column": ("faers", "event_column"),
+        "faers_count_column": ("faers", "count_column"),
+        "faers_min_count": ("faers", "min_count"),
     }
     for key, (section, field) in section_map.items():
         if overrides.get(key) is not None:
             data.setdefault(section, {})[field] = overrides[key]
+    if overrides.get("ppi_network_csv") is not None:
+        data.setdefault("knockout", {})["ppi_network_csv"] = overrides[
+            "ppi_network_csv"
+        ]
+        data.setdefault("network_toxicology", {})["ppi_network_csv"] = overrides[
+            "ppi_network_csv"
+        ]
     return ResolvedConfig(data, cfg.config_path)
 
 
@@ -443,6 +482,7 @@ def save_config(cfg: ResolvedConfig, path: Path) -> None:
                 "knockout", "expression_csv", "data/knockout/expression.csv"
             ),
             "metadata_csv": cfg.get("knockout", "metadata_csv"),
+            "ppi_network_csv": cfg.get("knockout", "ppi_network_csv"),
             "depmap_csv": cfg.get("knockout", "depmap_csv"),
             "prognosis_csv": cfg.get("knockout", "prognosis_csv"),
             "druggability_csv": cfg.get("knockout", "druggability_csv"),
@@ -481,7 +521,39 @@ def save_config(cfg: ResolvedConfig, path: Path) -> None:
                     "specificity": 0.10,
                     "prognosis": 0.10,
                     "druggability": 0.10,
+                    "ppi_hub": 0.10,
                 },
+            ),
+        },
+        "network_toxicology": {
+            "compound_name": cfg.get("network_toxicology", "compound_name"),
+            "disease_name": cfg.get("network_toxicology", "disease_name"),
+            "compound_targets_csv": cfg.get(
+                "network_toxicology", "compound_targets_csv"
+            ),
+            "target_sources": cfg.get("network_toxicology", "target_sources"),
+            "disease_genes_csv": cfg.get(
+                "network_toxicology", "disease_genes_csv"
+            ),
+            "disease_gene_column": cfg.get(
+                "network_toxicology", "disease_gene_column"
+            ),
+            "ppi_network_csv": cfg.get("network_toxicology", "ppi_network_csv"),
+            "output_dir": cfg.get(
+                "network_toxicology",
+                "output_dir",
+                "outputs/run_001/network_toxicology",
+            ),
+            "venn": cfg.get("network_toxicology", "venn", True),
+        },
+        "faers": {
+            "input_csv": cfg.get("faers", "input_csv"),
+            "drug_column": cfg.get("faers", "drug_column", "drug"),
+            "event_column": cfg.get("faers", "event_column", "event"),
+            "count_column": cfg.get("faers", "count_column"),
+            "min_count": cfg.get("faers", "min_count", 3),
+            "output_dir": cfg.get(
+                "faers", "output_dir", "outputs/run_001/faers"
             ),
         },
         "validation": {

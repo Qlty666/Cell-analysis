@@ -1353,6 +1353,7 @@ def run_knockout_stage(
     normal_label: str | None = None,
     ko_top_n: int | None = None,
     depmap_csv: str | None = None,
+    ppi_network_csv: str | None = None,
 ) -> dict:
     overrides = {
         "workdir": str(workdir),
@@ -1370,6 +1371,8 @@ def run_knockout_stage(
         overrides["ko_top_n"] = int(ko_top_n)
     if depmap_csv:
         overrides["depmap_csv"] = depmap_csv
+    if ppi_network_csv:
+        overrides["ppi_network_csv"] = ppi_network_csv
 
     metadata = pd.read_csv(inputs["metadata_csv"])
     if "cell_type" in metadata.columns:
@@ -2228,6 +2231,7 @@ def _stage_knockout(args, workdir: Path, ctx: dict) -> None:
         normal_label=args.normal_label,
         ko_top_n=args.ko_top_n,
         depmap_csv=args.depmap_csv,
+        ppi_network_csv=args.ppi_network_csv,
     )
 
 
@@ -2432,6 +2436,7 @@ def load_full_config(path: Path) -> dict:
         "ligand_library": None,
         "ko_top_n": None,
         "depmap_csv": None,
+        "ppi_network_csv": None,
         "cell_feedback": {
             "enabled": True,
             "top_n": 12,
@@ -2489,6 +2494,8 @@ def _apply_defaults(args, config: dict) -> None:
         args.ko_top_n = config.get("ko_top_n")
     if args.depmap_csv is None:
         args.depmap_csv = config.get("depmap_csv")
+    if args.ppi_network_csv is None:
+        args.ppi_network_csv = config.get("ppi_network_csv")
     if args.skip_cell_feedback is None:
         args.skip_cell_feedback = not bool(
             config.get("cell_feedback", {}).get("enabled", True)
@@ -2545,6 +2552,10 @@ def _apply_defaults(args, config: dict) -> None:
         args.ligand_library = str(_resolve_path(args.ligand_library, Path.cwd()))
     if args.depmap_csv:
         args.depmap_csv = str(_resolve_path(args.depmap_csv, Path.cwd()))
+    if args.ppi_network_csv:
+        args.ppi_network_csv = str(
+            _resolve_path(args.ppi_network_csv, Path.cwd())
+        )
 
 
 def build_parser() -> argparse.ArgumentParser:
@@ -2573,6 +2584,10 @@ def build_parser() -> argparse.ArgumentParser:
     parser.add_argument("--normal-label", help="normal group label for knockout")
     parser.add_argument("--ko-top-n", type=int, help="top N knockout report genes")
     parser.add_argument("--depmap-csv", help="DepMap gene effect CSV")
+    parser.add_argument(
+        "--ppi-network-csv",
+        help="STRING-style PPI edge table for knockout PPI hub scoring",
+    )
     parser.add_argument("--evidence-workers", type=int, default=None)
     parser.add_argument("--evidence-timeout", type=int, default=None)
     parser.add_argument("--skip-scrna", action="store_true")
