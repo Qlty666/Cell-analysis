@@ -30,6 +30,13 @@ def _fake_search_module():
         max_results=20,
         organism=None,
         keyword=None,
+        data_type=None,
+        min_samples=None,
+        max_samples=None,
+        start_date=None,
+        end_date=None,
+        platform=None,
+        dataset_type=None,
         disease="",
         research_direction="",
     ):
@@ -98,6 +105,53 @@ class TestDatasetSearchRequest(unittest.TestCase):
             self.assertTrue(
                 (base / "search" / "dataset_search_results.csv").exists()
             )
+
+    def test_search_passes_extra_filters(self):
+        with tempfile.TemporaryDirectory() as tmp:
+            base = Path(tmp)
+            fake = _fake_search_module()
+            row = {
+                "accession": "GSE1",
+                "title": "title",
+                "data_type": "single-cell",
+                "organism": "Homo sapiens",
+                "samples": "8",
+                "platform": "GPL24676",
+                "date": "2025/01/01",
+                "type": "Expression profiling by high throughput sequencing",
+            }
+            with mock.patch.dict(
+                sys.modules,
+                {"search_datasets": fake},
+            ), mock.patch.object(
+                web_ui,
+                "DATASET_SEARCH_DIR",
+                base / "search",
+            ), mock.patch.object(
+                fake,
+                "search_datasets",
+                return_value=[row],
+            ) as search:
+                web_ui.dataset_search_request(
+                    {
+                        "disease": ["liver cancer"],
+                        "data_type": ["single-cell"],
+                        "min_samples": ["5"],
+                        "max_samples": ["20"],
+                        "start_date": ["2024-01-01"],
+                        "end_date": ["2025-12-31"],
+                        "platform": ["GPL24676"],
+                        "dataset_type": ["high throughput"],
+                    }
+                )
+            kwargs = search.call_args.kwargs
+            self.assertEqual(kwargs["data_type"], "single-cell")
+            self.assertEqual(kwargs["min_samples"], 5)
+            self.assertEqual(kwargs["max_samples"], 20)
+            self.assertEqual(kwargs["start_date"], "2024-01-01")
+            self.assertEqual(kwargs["end_date"], "2025-12-31")
+            self.assertEqual(kwargs["platform"], "GPL24676")
+            self.assertEqual(kwargs["dataset_type"], "high throughput")
 
     def test_model_rerank_applied_when_model_exists(self):
         with tempfile.TemporaryDirectory() as tmp:
@@ -288,6 +342,29 @@ class TestDatasetFileAndReport(unittest.TestCase):
             info2 = {"out": Path(tmp) / "other"}
             self.assertIsNone(web_ui._single_report_path(info2))
             self.assertIsNone(web_ui._single_report_path(None, str(Path(tmp) / "other")))
+
+
+class TestDatasetTemplateFilters(unittest.TestCase):
+    def test_template_exposes_extra_filters(self):
+        html = (APP_ROOT / "web" / "templates" / "datasets_template.html").read_text(
+            encoding="utf-8"
+        )
+        for name in [
+            'name="data_type"',
+            'name="min_samples"',
+            'name="max_samples"',
+            'name="start_date"',
+            'name="end_date"',
+            'name="platform"',
+            'name="dataset_type"',
+            'id="filterMinSamples"',
+            'id="filterMaxSamples"',
+            'id="filterStartDate"',
+            'id="filterEndDate"',
+            'id="filterPlatform"',
+            'id="filterType"',
+        ]:
+            self.assertIn(name, html)
 
 
 if __name__ == "__main__":
