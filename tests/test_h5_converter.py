@@ -28,6 +28,7 @@ def _write_sparse_h5ad(
     path: Path,
     with_names: bool = True,
     with_counts_layer: bool = False,
+    with_attrs_index: bool = False,
 ) -> None:
     with h5py.File(path, "w") as f:
         x = f.create_group("X")
@@ -46,7 +47,18 @@ def _write_sparse_h5ad(
             counts.attrs["shape"] = np.array([2, 2], dtype=np.int64)
         obs = f.create_group("obs")
         var = f.create_group("var")
-        if with_names:
+        if with_attrs_index:
+            obs.create_dataset(
+                "sample_id",
+                data=np.array([b"AAAC-1", b"TTTG-1"], dtype="S6"),
+            )
+            obs.attrs["_index"] = "sample_id"
+            var.create_dataset(
+                "gene_id",
+                data=np.array([b"TP53", b"EGFR"], dtype="S4"),
+            )
+            var.attrs["_index"] = "gene_id"
+        elif with_names:
             obs.create_dataset(
                 "_index",
                 data=np.array([b"AAAC-1", b"TTTG-1"], dtype="S6"),
@@ -90,6 +102,16 @@ class TestH5adConversion(unittest.TestCase):
             matrix_text = _read_gzip(path.with_name(result["matrix"]))
             self.assertIn(" 5", matrix_text)
             self.assertIn(" 6", matrix_text)
+
+    def test_uses_obs_var_attrs_index_when_underscore_index_missing(self):
+        with tempfile.TemporaryDirectory() as tmp:
+            path = Path(tmp) / "sample.h5ad"
+            _write_sparse_h5ad(path, with_attrs_index=True)
+            result = convert_h5ad(path)
+            barcodes = _read_gzip(path.with_name(result["barcodes"]))
+            genes = _read_gzip(path.with_name(result["genes"]))
+            self.assertEqual(barcodes.splitlines(), ["AAAC-1", "TTTG-1"])
+            self.assertEqual(genes.splitlines(), ["TP53", "EGFR"])
 
 
 class TestLoomConversion(unittest.TestCase):
