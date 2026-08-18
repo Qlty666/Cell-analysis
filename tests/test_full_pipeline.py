@@ -628,6 +628,14 @@ class TestFullPipeline(unittest.TestCase):
             self.assertTrue((out / "integration_report.html").exists())
             self.assertTrue((out / "integration_summary.json").exists())
             self.assertTrue((out / ".stages" / "08_report.done").exists())
+            evidence = pd.read_csv(out / "gene_evidence.csv")
+            for column in [
+                "string_partners",
+                "reactome_pathways",
+                "kegg_pathways",
+                "database_sources",
+            ]:
+                self.assertIn(column, evidence.columns)
 
     def test_stale_stage01_marker_reruns_when_outputs_missing(self):
         with tempfile.TemporaryDirectory() as tmp:
