@@ -13,7 +13,7 @@
 单细胞分析和虚拟筛选通常依赖多个分散工具和手工流程，结果难以复现，也难以从“细胞图谱”推进到“可干预靶点”。本项目把以下环节串成一条可检查、可断点续跑、可交付的本地链路：
 
 - GEO 单细胞数据从下载、QC、注释到差异表达与富集分析的完整分析链。
-- 从显著差异基因中自动筛选关键基因/蛋白，并补充 UniProt、PDB、ChEMBL、BindingDB、PubChem、ChEBI 证据。
+- 从显著差异基因中自动筛选关键基因/蛋白，并补充 UniProt、PDB、ChEMBL、BindingDB、PubChem、ChEBI、STRING、Reactome、Open Targets、PharmGKB、AlphaFold、KEGG 证据。
 - 对有 PDB 结构的靶点自动准备受体、收集已知配体并运行 AutoDock Vina 对接、命中排序和精细重对接。
 - 通过虚拟敲除对候选靶点做多维评分：表达差异、增殖共表达、共表达网络 hub、DepMap 依赖、疾病逆转、通路控制、细胞类型特异性、预后、成药性和脱靶风险。
 - 将排序后的候选靶点导出为分阶段湿实验验证方案（细胞系、类器官、药物剂量反应、动物模型、PDX）。
@@ -83,7 +83,7 @@
 ```text
 01 single_cell           GEO 单细胞分析（下载、QC、注释、差异表达、富集）
 02 key_targets           从显著 DEG 中筛选并排序关键基因/蛋白
-03 evidence              UniProt / PDB / ChEMBL 证据富集（带本地缓存）
+03 evidence              UniProt / PDB / ChEMBL / STRING / Reactome / Open Targets / KEGG 证据富集（带本地缓存）
 04 knockout_inputs       导出样本级伪 bulk 表达矩阵并生成敲除输入
 05 knockout              虚拟敲除 + 多维靶点评分 + 湿实验验证方案
 06 docking               对有 PDB 结构的靶点自动收集已知配体并跑 Vina 对接
@@ -146,7 +146,7 @@
 - Python 3.10+（推荐 3.11）。
 - R 4.5+（仅单细胞分析和伪 bulk 导出需要）。
 - AutoDock Vina（虚拟筛选需要，可放在 `dock/tools/vina.exe` 或加入 PATH）。
-- 可选 Codex skills（仅证据收集需要）：`uniprot-skill`、`rcsb-pdb-skill`、`chembl-skill`、`bindingdb-skill`、`pubchem-pug-skill`、`chebi-skill`。
+- 可选 Codex skills（仅证据收集需要）：`uniprot-skill`、`rcsb-pdb-skill`、`chembl-skill`、`bindingdb-skill`、`pubchem-pug-skill`、`chebi-skill`、`string-skill`、`reactome-skill`、`pharmgkb-skill`、`alphafold-skill`、`opentargets-skill`。
 
 ### 安装步骤
 
@@ -547,7 +547,7 @@ python scripts\validate_dataset_search.py \
 输出（`<workdir>/outputs/integration/`）：
 
 - `key_genes.csv`：关键基因排序表。
-- `gene_evidence.csv`：每个基因的 UniProt、PDB、ChEMBL 证据。
+- `gene_evidence.csv`：每个基因的 UniProt、PDB、ChEMBL、STRING、Reactome、PharmGKB、AlphaFold、Open Targets、KEGG 证据与来源覆盖。
 - `knockout_summary.json`：虚拟敲除与验证方案汇总。
 - `docking_targets.csv`：每个靶点的对接状态、命中数和最佳亲和力。
 - `cell_feedback/`：细胞反馈阶段输出，包括 `data/cell_scores.csv`、`data/feedback_targets.csv`、`data/celltype_summary.csv`、`data/celltype_enrichment.csv`、`data/condition_summary.csv`，以及 `fig_54` 至 `fig_58` 的结果图。
@@ -653,6 +653,7 @@ MIT License. See `LICENSE` for details.
 
 - 扩大证据数据库覆盖范围：虚拟筛选证据收集新增 STRING 互作网络、Open Targets 靶点关联、Reactome 通路、PharmGKB 药物基因组、AlphaFold 结构和 KEGG 通路来源。
 - 证据报告升级为数据库覆盖表，逐项展示每个数据库的状态与记录数；`check-cadd` 自动检查新增 skill 脚本。
+- 全自动流水线 stage 03 同步接入扩展数据库：`gene_evidence.csv` 新增 STRING/Reactome/PharmGKB/AlphaFold/Open Targets/KEGG 的计数、ID 和 `database_sources`，集成报告与结果清单同步展示。
 - 更新 `VIRTUAL_SCREENING_REQUIREMENTS.md` 环境清单和网页端证据收集文案。
 
 ### v0.6.1

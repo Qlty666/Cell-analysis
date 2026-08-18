@@ -5,7 +5,7 @@ The module wires the existing pieces together:
 
 1. run the GEO single-cell pipeline and export a sample-level pseudobulk matrix;
 2. rank significant DEGs into a compact key-gene table;
-3. enrich genes with UniProt/PDB/ChEMBL evidence (network optional, cached);
+3. enrich genes with UniProt/PDB/ChEMBL/STRING/Reactome/Open Targets/KEGG evidence (network optional, cached);
 4. build the virtual-knockout inputs and run multidimensional target scoring;
 5. for genes with a PDB structure, collect known ligands and run the full
    AutoDock Vina pipeline in an isolated per-target workdir;
@@ -54,7 +54,7 @@ log = logging.getLogger("full_pipeline")
 STAGES = [
     ("01", "single_cell", "GEO single-cell analysis (download, QC, annotation, DEG)"),
     ("02", "key_targets", "extract and rank key genes/proteins from DEGs"),
-    ("03", "evidence", "enrich genes with UniProt/PDB/ChEMBL evidence"),
+    ("03", "evidence", "enrich genes with UniProt/PDB/ChEMBL/STRING/Reactome/Open Targets/KEGG evidence"),
     ("04", "knockout_inputs", "build pseudobulk expression and knockout inputs"),
     ("05", "knockout", "virtual knockout and multidimensional target scoring"),
     ("06", "docking", "per-target virtual screening with AutoDock Vina"),
@@ -142,6 +142,19 @@ EVIDENCE_COLUMNS = [
     "pdb_ids",
     "off_target_paralogs",
     "safety_concern",
+    "string_partners",
+    "string_partner_ids",
+    "reactome_pathways",
+    "reactome_pathway_ids",
+    "pharmgkb_annotations",
+    "pharmgkb_ids",
+    "alphafold_structures",
+    "alphafold_ids",
+    "opentargets_hits",
+    "opentargets_target_ids",
+    "kegg_pathways",
+    "kegg_pathway_ids",
+    "database_sources",
 ]
 
 
@@ -1143,20 +1156,41 @@ def _empty_evidence(gene: str) -> dict:
         "pdb_ids": "",
         "off_target_paralogs": 0,
         "safety_concern": 0,
+        "string_partners": 0,
+        "string_partner_ids": "",
+        "reactome_pathways": 0,
+        "reactome_pathway_ids": "",
+        "pharmgkb_annotations": 0,
+        "pharmgkb_ids": "",
+        "alphafold_structures": 0,
+        "alphafold_ids": "",
+        "opentargets_hits": 0,
+        "opentargets_target_ids": "",
+        "kegg_pathways": 0,
+        "kegg_pathway_ids": "",
+        "database_sources": "",
     }
 
 
 def _evidence_for_gene(gene: str, timeout: int = 90) -> dict:
     info = _mygene_info(gene, timeout)
     uniprot = info.get("uniprot") or ""
+    ensembl = info.get("ensembl") or ""
     chembl_id, bioactivities = _chembl_evidence(uniprot, timeout)
     pdb_count, pdb_ids = _rcsb_evidence(uniprot, timeout)
+    database = evidence_mod.collect_gene_database_evidence(
+        gene,
+        max_items=10,
+        timeout=timeout,
+        uniprot=uniprot,
+        ensembl=ensembl,
+    )
     row = _empty_evidence(gene)
     row.update(
         {
             "entrez": info.get("entrez") or "",
             "uniprot": uniprot,
-            "ensembl": info.get("ensembl") or "",
+            "ensembl": ensembl,
             "chembl_target_id": chembl_id,
             "known_ligands": bioactivities,
             "chembl_bioactivities": bioactivities,
@@ -1164,13 +1198,19 @@ def _evidence_for_gene(gene: str, timeout: int = 90) -> dict:
             "pdb_ids": ",".join(pdb_ids),
         }
     )
+    row.update(database)
     log.info(
-        "evidence %s: ligands=%s chembl=%s pdb=%s %s",
+        "evidence %s: ligands=%s chembl=%s pdb=%s string=%s reactome=%s "
+        "opentargets=%s kegg=%s sources=%s",
         gene,
         bioactivities,
         chembl_id,
         pdb_count,
-        pdb_ids,
+        database.get("string_partners", 0),
+        database.get("reactome_pathways", 0),
+        database.get("opentargets_hits", 0),
+        database.get("kegg_pathways", 0),
+        database.get("database_sources", ""),
     )
     return row
 
@@ -1956,6 +1996,13 @@ def generate_integrated_report(
             "known_ligands",
             "pdb_structures",
             "pdb_ids",
+            "string_partners",
+            "reactome_pathways",
+            "pharmgkb_annotations",
+            "alphafold_structures",
+            "opentargets_hits",
+            "kegg_pathways",
+            "database_sources",
         ]
         if c in evidence.columns
     ]
@@ -2098,6 +2145,20 @@ a {{ color: #1d4ed8; }}
             "figures": feedback_summary.get("figures", []),
         },
         "evidence_genes": len(evidence),
+        "evidence_database_sources": (
+            ",".join(
+                sorted(
+                    {
+                        source
+                        for value in evidence.get("database_sources", [])
+                        for source in str(value).split(",")
+                        if source
+                    }
+                )
+            )
+            if "database_sources" in evidence.columns
+            else ""
+        ),
         "report_html": str(report_path),
         "finished_at": datetime.now().isoformat(timespec="seconds"),
     }

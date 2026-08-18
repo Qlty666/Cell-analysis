@@ -275,6 +275,8 @@
   run_manifest.json
 ```
 
+`gene_evidence.csv` 现在除 UniProt/PDB/ChEMBL 外，还包含 STRING 互作伙伴、Reactome 通路、PharmGKB 注释、AlphaFold 结构、Open Targets 靶点关联、KEGG 通路及 `database_sources` 来源覆盖列。
+
 集成流水线中的单细胞图仍位于单细胞输出根目录；独立对接结果图位于每个靶点的工作目录 `<workdir>/work/<gene>/outputs/run_001/results/`。集成报告直接链接 `fig_54`，其余图需到各自结果目录查看。
 
 先检查 `cell_feedback_summary.json`：
