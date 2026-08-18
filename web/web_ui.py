@@ -297,6 +297,7 @@ FIGURES = [
     {"file": "fig_43_ml_confusion_matrix.png", "label": "ML 混淆矩阵"},
     {"file": "fig_44_ml_roc_pr.png", "label": "ML ROC 与 PR 曲线"},
     {"file": "fig_45_ml_cv_scores.png", "label": "ML 交叉验证得分图"},
+    {"file": "fig_45_ml_calibration_curve.png", "label": "ML 校准曲线"},
 ]
 FIGURE_NAMES = [item["file"] for item in FIGURES]
 
@@ -1252,6 +1253,9 @@ def start_dock_job(data: dict) -> dict:
         "max_workers": _int_field(data, "max_workers"),
         "cutoff": _float_field(data, "cutoff"),
         "top_n": _int_field(data, "top_n"),
+        "model": _first(data, "model", "") or None,
+        "training_csv": _first(data, "training_csv", "") or None,
+        "label_column": _first(data, "label_column", "") or None,
     }
     cfg = load_config(APP_ROOT / "config" / "docking_config.json", overrides)
     save_config(cfg, cfg_path)
@@ -1411,6 +1415,9 @@ def start_full_job(data: dict) -> dict:
     species = _first(data, "species", "").strip()
     if species:
         cmd += ["--species", species]
+    ml_model = _first(data, "ml_model", "").strip()
+    if ml_model:
+        cmd += ["--ml-model", ml_model]
     top_genes = _int_field(data, "top_genes")
     if top_genes:
         cmd += ["--top-genes", str(top_genes)]
@@ -1429,6 +1436,12 @@ def start_full_job(data: dict) -> dict:
     ligand_library = _first(data, "ligand_library", "").strip()
     if ligand_library:
         cmd += ["--ligand-library", ligand_library]
+    depmap_csv = _first(data, "depmap_csv", "").strip()
+    if depmap_csv:
+        cmd += ["--depmap-csv", depmap_csv]
+    ppi_network_csv = _first(data, "ppi_network_csv", "").strip()
+    if ppi_network_csv:
+        cmd += ["--ppi-network-csv", ppi_network_csv]
     case_label = _first(data, "case_label", "").strip()
     if case_label:
         cmd += ["--case-label", case_label]
@@ -2398,6 +2411,7 @@ def run_knockout_request(data: dict) -> dict:
         "expression_csv": _first(data, "ko_expression", "") or None,
         "metadata_csv": _first(data, "ko_metadata", "") or None,
         "depmap_csv": _first(data, "ko_depmap", "") or None,
+        "ppi_network_csv": _first(data, "ko_ppi", "") or None,
         "case_label": _first(data, "ko_case", "") or None,
         "normal_label": _first(data, "ko_normal", "") or None,
         "ko_top_n": _int_field(data, "ko_top_n"),
@@ -3592,6 +3606,7 @@ class Handler(BaseHTTPRequestHandler):
             "LIVER_DE_PADJ",
             "LIVER_DE_VIOLIN_TOP_N",
             "LIVER_DE_VIOLIN_MAX_CELLS",
+            "LIVER_ML_MODEL",
         ]:
             if data.get(key):
                 params[key] = data[key][0]

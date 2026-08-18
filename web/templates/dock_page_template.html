@@ -187,6 +187,22 @@ a.file-link { color: #1665c0; text-decoration: none; margin-right: 12px; }
           <option value="report">生成 HTML 报告</option>
         </select>
       </label>
+      <label>ML 模型（ml-train 使用）
+        <select name="model">
+          <option value="">默认</option>
+          <option value="rf">rf - Random Forest</option>
+          <option value="gbm">gbm - GBM</option>
+          <option value="mlp">mlp - MLP</option>
+          <option value="lasso_svm">lasso_svm - LASSO+SVM-RFE</option>
+          <option value="torch">torch - PyTorch MLP</option>
+        </select>
+      </label>
+      <label>训练 CSV（相对工作目录）
+        <input name="training_csv" placeholder="data/ml/training.csv">
+      </label>
+      <label>标签列
+        <input name="label_column" placeholder="active">
+      </label>
       <div>
         <label>对接盒中心 (X Y Z)</label>
         <div class="inline3">
@@ -251,6 +267,9 @@ a.file-link { color: #1665c0; text-decoration: none; margin-right: 12px; }
       </label>
       <label>DepMap 依赖 CSV（可选）
         <input name="ko_depmap" placeholder="data/knockout/depmap_gene_effect.csv">
+      </label>
+      <label>PPI 网络边表 CSV/TSV（可选）
+        <input name="ko_ppi" placeholder="data/network/string_edges.tsv">
       </label>
       <label>肿瘤/病例标签（可选）
         <input name="ko_case" placeholder="Tumor">
@@ -861,13 +880,13 @@ function renderKnockout(data) {
   ).join('');
 
   const headers = ['排名', '基因', '靶点评分', '分类', '敲除分', '逆转分', '通路分',
-    '特异性分', '预后分', '成药性分', '安全标记', '优先级'];
+    '特异性分', '预后分', '成药性分', 'PPI hub', '安全标记', '优先级'];
   const keys = ['rank', 'gene', 'target_score', 'target_class', 'knockout_score',
     'reversal_score', 'pathway_score', 'specificity_score', 'prognosis_score',
-    'druggability_score', 'safety_concern', 'target_priority'];
+    'druggability_score', 'ppi_hub_score', 'safety_concern', 'target_priority'];
   const scoreKeys = ['target_score', 'knockout_score', 'reversal_score',
     'pathway_score', 'specificity_score', 'prognosis_score', 'druggability_score',
-    'safety_concern'];
+    'ppi_hub_score', 'safety_concern'];
   const table = document.getElementById('koTable');
   if (data.rows && data.rows.length) {
     table.innerHTML = '<thead><tr>' + headers.map(h =>
