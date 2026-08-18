@@ -59,6 +59,7 @@ DOCK_HISTORY_PATH = WEB_DIR / "dock_history.json"
 FULL_TEMPLATE_PATH = TEMPLATE_DIR / "full_page_template.html"
 RESULTS_TEMPLATE_PATH = TEMPLATE_DIR / "results_manifest_optimized.html"
 RESULT_GUIDE_PATH = APP_ROOT / "docs" / "result_figure_guide.md"
+RESULT_DETAILS_PATH = STATIC_DIR / "result_details.json"
 TASKS_TEMPLATE_PATH = TEMPLATE_DIR / "tasks_template.html"
 DATASET_TEMPLATE_PATH = TEMPLATE_DIR / "datasets_template.html"
 DATASET_SEARCH_DIR = APP_ROOT / "data_cache" / "dataset_search"
@@ -947,6 +948,18 @@ def result_guide_data() -> dict:
             )
         ),
     }
+
+
+def result_details_data() -> dict:
+    """Return detailed content, type and use descriptions for result files."""
+    if not RESULT_DETAILS_PATH.exists():
+        return {"available": False, "entries": []}
+    try:
+        data = json.loads(RESULT_DETAILS_PATH.read_text(encoding="utf-8"))
+        data["available"] = True
+        return data
+    except (OSError, ValueError):
+        return {"available": False, "entries": []}
 
 
 def render_tasks_page() -> str:
@@ -2871,6 +2884,13 @@ class Handler(BaseHTTPRequestHandler):
                 "application/json; charset=utf-8",
             )
             return
+        if parsed.path == "/result-details":
+            self._send(
+                200,
+                json.dumps(result_details_data(), ensure_ascii=False).encode("utf-8"),
+                "application/json; charset=utf-8",
+            )
+            return
         if parsed.path == "/tasks":
             self._send(
                 200,
@@ -3182,6 +3202,7 @@ class Handler(BaseHTTPRequestHandler):
                 ".jpg": "image/jpeg",
                 ".svg": "image/svg+xml",
                 ".css": "text/css; charset=utf-8",
+                ".json": "application/json; charset=utf-8",
             }.get(target.suffix.lower(), "application/octet-stream")
             self._send(200, target.read_bytes(), content_type)
             return

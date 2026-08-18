@@ -38,6 +38,7 @@ from web_ui import (  # noqa: E402
     dock_results,
     full_results,
     register_heartbeat,
+    result_details_data,
     run_faers_request,
     run_network_request,
     start_dock_job,
@@ -212,6 +213,33 @@ class TestNetworkAndFaersWeb(unittest.TestCase):
         self.assertIn("FAERS 不相称性信号检测", dock)
         self.assertIn("网络毒理学与 FAERS 信号", results)
         self.assertIn("### 6.3 网络毒理学与 FAERS 信号", guide)
+
+
+class TestResultDetails(unittest.TestCase):
+    def test_result_details_cover_manifest_rows(self):
+        template = (
+            APP_ROOT / "web" / "templates" / "results_manifest_optimized.html"
+        ).read_text(encoding="utf-8")
+        data = web_ui_module.result_details_data()
+        self.assertTrue(data["available"])
+        self.assertGreaterEqual(len(data["entries"]), 100)
+        for entry in data["entries"]:
+            for field in ("name", "kind", "content", "type", "use"):
+                self.assertTrue(
+                    str(entry.get(field, "")).strip(),
+                    f"{entry.get('name')} missing {field}",
+                )
+        names = {entry["name"] for entry in data["entries"]}
+        for name in (
+            "fig_01_qc_raw_violin.png",
+            "fig_45_ml_calibration_curve.png",
+            "compound_disease_venn.png",
+            "liver_cancer_seurat.rds",
+        ):
+            self.assertIn(name, names)
+        self.assertIn("result-toggle", template)
+        self.assertIn("result-detail-row", template)
+        self.assertIn("/result-details", template)
 
 
 class TestRecentWebIntegration(unittest.TestCase):
