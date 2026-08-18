@@ -1026,7 +1026,18 @@ def dataset_search_request(data: dict) -> dict:
         )
     except ValueError:
         pass
-    organism = _first(data, "organism", "").strip() or None
+    raw_organism = _first(data, "organism", "").strip()
+    organism_aliases = {
+        "hs": "Homo sapiens",
+        "human": "Homo sapiens",
+        "homo sapiens": "Homo sapiens",
+        "mm": "Mus musculus",
+        "mouse": "Mus musculus",
+        "mus musculus": "Mus musculus",
+        "auto": "",
+        "all": "",
+    }
+    organism = organism_aliases.get(raw_organism.lower(), raw_organism) or None
     keyword = _first(data, "keyword", "").strip() or None
     data_type = _first(data, "data_type", "").strip() or None
     min_samples = _int_field(data, "min_samples")
@@ -1227,6 +1238,14 @@ def dataset_full_pipeline_url(row: dict) -> str:
     data_type = str(row.get("data_type") or "").strip().lower()
     if data_type in ("single-cell", "bulk", "other"):
         params["data_type"] = data_type
+    organism = str(row.get("organism") or "").lower()
+    species = "auto"
+    if "homo sapiens" in organism or "human" in organism:
+        species = "hs"
+    elif "mus musculus" in organism or "mouse" in organism:
+        species = "mm"
+    if species != "auto":
+        params["species"] = species
     return "/full?" + urlencode(params)
 
 

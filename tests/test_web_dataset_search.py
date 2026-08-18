@@ -96,7 +96,7 @@ class TestDatasetSearchRequest(unittest.TestCase):
             self.assertTrue(result["csv_url"].startswith("/datasets/file?name="))
             self.assertEqual(
                 result["results"][0]["full_pipeline_url"],
-                "/full?accession=GSE1&dataset_title=title&data_type=single-cell",
+                "/full?accession=GSE1&dataset_title=title&data_type=single-cell&species=hs",
             )
             self.assertEqual(
                 result["results"][0]["data_type"],
@@ -152,6 +152,40 @@ class TestDatasetSearchRequest(unittest.TestCase):
             self.assertEqual(kwargs["end_date"], "2025-12-31")
             self.assertEqual(kwargs["platform"], "GPL24676")
             self.assertEqual(kwargs["dataset_type"], "high throughput")
+
+    def test_search_maps_species_aliases_to_organism(self):
+        with tempfile.TemporaryDirectory() as tmp:
+            base = Path(tmp)
+            fake = _fake_search_module()
+            row = {
+                "accession": "GSE1",
+                "title": "title",
+                "data_type": "single-cell",
+                "organism": "Mus musculus",
+                "samples": "8",
+                "platform": "GPL1",
+                "date": "2025/01/01",
+                "type": "GSE",
+            }
+            with mock.patch.dict(
+                sys.modules,
+                {"search_datasets": fake},
+            ), mock.patch.object(
+                web_ui,
+                "DATASET_SEARCH_DIR",
+                base / "search",
+            ), mock.patch.object(
+                fake,
+                "search_datasets",
+                return_value=[row],
+            ) as search:
+                web_ui.dataset_search_request(
+                    {
+                        "disease": ["liver cancer"],
+                        "organism": ["mm"],
+                    }
+                )
+            self.assertEqual(search.call_args.kwargs["organism"], "Mus musculus")
 
     def test_model_rerank_applied_when_model_exists(self):
         with tempfile.TemporaryDirectory() as tmp:
@@ -304,6 +338,35 @@ class TestDatasetFileAndReport(unittest.TestCase):
             url,
             "/full?accession=GSE299321&dataset_title=Bulk+RNA-seq&data_type=bulk",
         )
+
+    def test_dataset_full_pipeline_url_includes_species(self):
+        human = web_ui.dataset_full_pipeline_url(
+            {
+                "accession": "GSE1",
+                "title": "Human dataset",
+                "data_type": "single-cell",
+                "organism": "Homo sapiens",
+            }
+        )
+        mouse = web_ui.dataset_full_pipeline_url(
+            {
+                "accession": "GSE2",
+                "title": "Mouse dataset",
+                "data_type": "single-cell",
+                "organism": "Mus musculus",
+            }
+        )
+        unknown = web_ui.dataset_full_pipeline_url(
+            {
+                "accession": "GSE3",
+                "title": "Unknown dataset",
+                "data_type": "single-cell",
+                "organism": "Rattus norvegicus",
+            }
+        )
+        self.assertIn("species=hs", human)
+        self.assertIn("species=mm", mouse)
+        self.assertNotIn("species", unknown)
 
     def test_dataset_file_path_prevents_traversal(self):
         with tempfile.TemporaryDirectory() as tmp:
