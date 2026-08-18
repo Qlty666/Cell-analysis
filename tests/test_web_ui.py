@@ -876,6 +876,24 @@ class TestTemplatePolish(unittest.TestCase):
         ]:
             self.assertIn(token, html)
 
+    def test_full_page_dataset_search_has_filters_and_species(self):
+        html = self._read("full_page_template.html")
+        for token in [
+            'name="organism"',
+            'name="keyword"',
+            'name="data_type"',
+            'name="min_samples"',
+            'name="max_samples"',
+            'name="start_date"',
+            'name="end_date"',
+            'name="platform"',
+            'name="dataset_type"',
+            'name="model"',
+            "choosePipelineDataset",
+            "speciesSelect",
+        ]:
+            self.assertIn(token, html)
+
     def test_single_cell_page_has_collapsible_sections(self):
         html = self._read("web_page_template.html")
         for token in ["form-section", "SINGLE_FORM_KEY", "saveFormState"]:

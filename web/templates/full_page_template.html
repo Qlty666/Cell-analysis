@@ -168,6 +168,34 @@ a.file-link { color: #1665c0; text-decoration: none; margin-right: 12px; }
       <label>原始查询 <input name="query" placeholder="可选"></label>
       <label>最大结果数 <input type="number" name="max_results" value="10" min="1" max="100"></label>
     </div>
+    <details class="form-section">
+      <summary>过滤选项</summary>
+      <div class="grid wide">
+        <label>物种过滤
+          <select name="organism">
+            <option value="">全部</option>
+            <option value="hs">Human (hs)</option>
+            <option value="mm">Mouse (mm)</option>
+          </select>
+        </label>
+        <label>关键词过滤 <input name="keyword" placeholder="可选"></label>
+        <label>数据类型过滤
+          <select name="data_type">
+            <option value="">全部</option>
+            <option value="single-cell">single-cell</option>
+            <option value="bulk">bulk</option>
+            <option value="other">other</option>
+          </select>
+        </label>
+        <label>最小样本数 <input type="number" name="min_samples" min="1" placeholder="可选"></label>
+        <label>最大样本数 <input type="number" name="max_samples" min="1" placeholder="可选"></label>
+        <label>起始日期 <input type="date" name="start_date"></label>
+        <label>结束日期 <input type="date" name="end_date"></label>
+        <label>平台过滤 <input name="platform" placeholder="GPL24676 或平台名称"></label>
+        <label>数据集类型过滤 <input name="dataset_type" placeholder="high throughput sequencing"></label>
+        <label>ML/DL 模型路径 <input name="model" placeholder="data_cache\dataset_search\relevance_model.joblib"></label>
+      </div>
+    </details>
     <div class="actions">
       <button type="button" onclick="searchPipelineDatasets()">搜索数据集</button>
     </div>
@@ -357,7 +385,12 @@ function applyDatasetPrefill() {
     if (!accession || !input) return;
     input.value = accession.toUpperCase();
     const title = params.get('dataset_title');
+    const species = params.get('species');
     prefillDataType = (params.get('data_type') || '').toLowerCase();
+    const speciesSelect = document.querySelector('select[name="species"]');
+    if (speciesSelect && ['auto', 'hs', 'mm'].includes(species)) {
+      speciesSelect.value = species;
+    }
     const note = document.getElementById('datasetPrefillNote');
     if (note) {
       const label = prefillDataType ? '（' + prefillDataType + '）' : '';
@@ -373,6 +406,7 @@ function applyDatasetPrefill() {
     url.searchParams.delete('accession');
     url.searchParams.delete('dataset_title');
     url.searchParams.delete('data_type');
+    url.searchParams.delete('species');
     window.history.replaceState(null, '', url.toString());
   } catch (e) {}
 }
@@ -430,10 +464,21 @@ function choosePipelineDataset(index) {
   }
   const input = document.querySelector('input[name="accession"]');
   if (input) input.value = row.accession;
+  const speciesSelect = document.querySelector('select[name="species"]');
+  const organism = String(row.organism || '').toLowerCase();
+  if (speciesSelect) {
+    if (organism.includes('homo sapiens') || organism.includes('human')) {
+      speciesSelect.value = 'hs';
+    } else if (organism.includes('mus musculus') || organism.includes('mouse')) {
+      speciesSelect.value = 'mm';
+    } else {
+      speciesSelect.value = 'auto';
+    }
+  }
   const note = document.getElementById('datasetPrefillNote');
   if (note) {
     note.className = 'ok';
-    note.textContent = '已带入数据集：' + row.accession + '（' + prefillDataType + '） · ' + row.title;
+    note.textContent = '已带入数据集：' + row.accession + '（' + prefillDataType + ' · ' + (row.organism || '物种未知') + '） · ' + row.title;
   }
   msg('已填入数据集 ' + row.accession + '，启动全自动流水线时将自动下载。', 'ok');
 }
