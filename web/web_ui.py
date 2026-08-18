@@ -1014,6 +1014,13 @@ def dataset_search_request(data: dict) -> dict:
         pass
     organism = _first(data, "organism", "").strip() or None
     keyword = _first(data, "keyword", "").strip() or None
+    data_type = _first(data, "data_type", "").strip() or None
+    min_samples = _int_field(data, "min_samples")
+    max_samples = _int_field(data, "max_samples")
+    start_date = _first(data, "start_date", "").strip() or None
+    end_date = _first(data, "end_date", "").strip() or None
+    platform = _first(data, "platform", "").strip() or None
+    dataset_type = _first(data, "dataset_type", "").strip() or None
     model_value = _first(data, "model", "").strip()
 
     import search_datasets as sd
@@ -1024,6 +1031,13 @@ def dataset_search_request(data: dict) -> dict:
         max_results=max_results,
         organism=organism,
         keyword=keyword,
+        data_type=data_type,
+        min_samples=min_samples,
+        max_samples=max_samples,
+        start_date=start_date,
+        end_date=end_date,
+        platform=platform,
+        dataset_type=dataset_type,
         disease=disease,
         research_direction=research_direction,
     )
@@ -1056,6 +1070,17 @@ def dataset_search_request(data: dict) -> dict:
         "research_direction": research_direction,
         "model_applied": model_applied,
         "model_path": model_path,
+        "filters": {
+            "organism": organism or "",
+            "keyword": keyword or "",
+            "data_type": data_type or "",
+            "min_samples": min_samples,
+            "max_samples": max_samples,
+            "start_date": start_date or "",
+            "end_date": end_date or "",
+            "platform": platform or "",
+            "dataset_type": dataset_type or "",
+        },
         "count": len(rows),
         "results": result_rows,
         "output_dir": str(DATASET_SEARCH_DIR),

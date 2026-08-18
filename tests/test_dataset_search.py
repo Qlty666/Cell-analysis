@@ -127,6 +127,103 @@ class TestDatasetSearch(unittest.TestCase):
         filtered = search_datasets.filter_rows(rows, keyword="mouse")
         self.assertEqual([r["accession"] for r in filtered], ["GSE100002"])
 
+    def test_filter_rows_extra_filters(self):
+        rows = [
+            {
+                "accession": "GSE100001",
+                "title": "HCC single-cell",
+                "summary": "scRNA-seq",
+                "data_type": "single-cell",
+                "organism": "Homo sapiens",
+                "samples": "8",
+                "platform": "GPL24676",
+                "date": "2024/01/01",
+                "type": "Expression profiling by high throughput sequencing",
+            },
+            {
+                "accession": "GSE100002",
+                "title": "Methylation",
+                "summary": "array",
+                "data_type": "bulk",
+                "organism": "Homo sapiens",
+                "samples": "2",
+                "platform": "GPL1",
+                "date": "2020/05/05",
+                "type": "Methylation profiling by array",
+            },
+            {
+                "accession": "GSE100003",
+                "title": "Liver single-cell",
+                "summary": "10x",
+                "data_type": "single-cell",
+                "organism": "Homo sapiens",
+                "samples": "20",
+                "platform": "GPL24676",
+                "date": "2025/06/01",
+                "type": "Expression profiling by high throughput sequencing",
+            },
+        ]
+        self.assertEqual(
+            [
+                r["accession"]
+                for r in search_datasets.filter_rows(rows, data_type="single-cell")
+            ],
+            ["GSE100001", "GSE100003"],
+        )
+        self.assertEqual(
+            [
+                r["accession"]
+                for r in search_datasets.filter_rows(
+                    rows,
+                    min_samples=5,
+                    max_samples=10,
+                )
+            ],
+            ["GSE100001"],
+        )
+        self.assertEqual(
+            [
+                r["accession"]
+                for r in search_datasets.filter_rows(
+                    rows,
+                    start_date="2024-01-01",
+                    end_date="2024-12-31",
+                )
+            ],
+            ["GSE100001"],
+        )
+        self.assertEqual(
+            [
+                r["accession"]
+                for r in search_datasets.filter_rows(
+                    rows,
+                    platform="GPL24676",
+                )
+            ],
+            ["GSE100001", "GSE100003"],
+        )
+        self.assertEqual(
+            [
+                r["accession"]
+                for r in search_datasets.filter_rows(
+                    rows,
+                    dataset_type="methylation",
+                )
+            ],
+            ["GSE100002"],
+        )
+
+    def test_parse_date_handles_year_only(self):
+        self.assertEqual(
+            search_datasets._parse_date("2026"),
+            (2026, 1, 1),
+        )
+        self.assertEqual(
+            search_datasets._parse_date("2026/08/01"),
+            (2026, 8, 1),
+        )
+        self.assertIsNone(search_datasets._parse_date("unknown"))
+
     def test_build_query(self):
         self.assertEqual(
             search_datasets.build_query(
