@@ -93,6 +93,9 @@ def _fetch(url: str) -> str:
 
 
 def _download(url: str, out: Path, log) -> None:
+    if out.exists() and out.stat().st_size > 0:
+        log(f"{out.name} already exists; skipping download")
+        return
     for attempt in range(1, 4):
         log(f"downloading {out.name} (attempt {attempt}/3)")
         try:
@@ -174,7 +177,8 @@ def _select_files(names: list[str]) -> dict:
             genes.append(name)
         elif re.search(
             r"matrix|\.mtx|counts?|read_counts|umi_counts|"
-            r"rna[-_ ]?seq|rnaseq|expression|\.rds$",
+            r"rna[-_ ]?seq|rnaseq|expression|\.rds$|"
+            r"\.h5ad$|\.h5$|\.loom$",
             low,
         ) or BULK_COUNT_TABLE_RE.search(name):
             matrices.append(name)
@@ -262,6 +266,9 @@ def _convert_downloaded(downloaded: dict, raw_dir: Path) -> dict:
     genes = []
     for name in downloaded["matrix"]:
         path = raw_dir / name
+        prefix = Path(name).parent.as_posix()
+        if prefix == ".":
+            prefix = ""
         if name.lower().endswith(".h5ad"):
             if convert_h5ad is None:
                 raise RuntimeError(
@@ -269,9 +276,13 @@ def _convert_downloaded(downloaded: dict, raw_dir: Path) -> dict:
                     "run: python -m pip install h5py scipy"
                 )
             result = convert_h5ad(path)
-            matrix.append(result["matrix"])
-            barcodes.append(result["barcodes"])
-            genes.append(result["genes"])
+            matrix.append(f"{prefix}/{result['matrix']}" if prefix else result["matrix"])
+            barcodes.append(
+                f"{prefix}/{result['barcodes']}" if prefix else result["barcodes"]
+            )
+            genes.append(
+                f"{prefix}/{result['genes']}" if prefix else result["genes"]
+            )
         elif name.lower().endswith(".loom"):
             if convert_loom is None:
                 raise RuntimeError(
@@ -279,9 +290,13 @@ def _convert_downloaded(downloaded: dict, raw_dir: Path) -> dict:
                     "run: python -m pip install h5py scipy"
                 )
             result = convert_loom(path)
-            matrix.append(result["matrix"])
-            barcodes.append(result["barcodes"])
-            genes.append(result["genes"])
+            matrix.append(f"{prefix}/{result['matrix']}" if prefix else result["matrix"])
+            barcodes.append(
+                f"{prefix}/{result['barcodes']}" if prefix else result["barcodes"]
+            )
+            genes.append(
+                f"{prefix}/{result['genes']}" if prefix else result["genes"]
+            )
         else:
             matrix.append(name)
     downloaded["matrix"] = matrix
@@ -426,7 +441,10 @@ def ensure_geo_dataset(accession: str, root: Path, log) -> dict:
         _download(base + archive_names[0], archive_path, log)
         extract_dir = raw_dir / "_extracted"
         extract_dir.mkdir(parents=True, exist_ok=True)
-        _extract_archive(archive_path, extract_dir)
+        if any(extract_dir.iterdir()):
+            log("archive already extracted; skipping extraction")
+        else:
+            _extract_archive(archive_path, extract_dir)
         inner = _select_files(_walk_relative(extract_dir))
         downloaded["matrix"] = [
             "_extracted/" + name for name in inner["matrix"]
