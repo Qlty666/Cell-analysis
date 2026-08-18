@@ -415,15 +415,25 @@ read_generic_counts <- function(manifest) {
       if (length(barcodes) < i || length(genes) < i) {
         stop("Missing barcode or gene files for ", mat_file)
       }
-      bc <- as.character(
-        fread(file.path(raw_dir, barcodes[i]), header = FALSE)$V1
+      bc <- tryCatch(
+        as.character(
+          fread(file.path(raw_dir, barcodes[i]), header = FALSE)$V1
+        ),
+        error = function(e) character()
       )
-      gn <- fread(file.path(raw_dir, genes[i]), header = FALSE)
-      gene_vals <- if (ncol(gn) >= 2) {
+      bc <- bc[nzchar(trimws(bc))]
+      gn <- tryCatch(
+        fread(file.path(raw_dir, genes[i]), header = FALSE),
+        error = function(e) NULL
+      )
+      gene_vals <- if (is.null(gn) || ncol(gn) == 0) {
+        character()
+      } else if (ncol(gn) >= 2) {
         as.character(gn[[2]])
       } else {
         as.character(gn[[1]])
       }
+      gene_vals <- gene_vals[nzchar(trimws(gene_vals))]
       m <- tryCatch(
         {
           con <- gzfile(mat_path, "rt")
@@ -438,10 +448,15 @@ read_generic_counts <- function(manifest) {
         gene_vals <- gene_vals[seq_len(nrow(m))]
       }
       rownames(m) <- make.unique(gene_vals)
+      if (length(gene_vals) < nrow(m)) {
+        rownames(m) <- make.unique(
+          c(gene_vals, paste0("Gene", seq.int(length(gene_vals) + 1, nrow(m))))
+        )
+      }
       if (length(bc) >= ncol(m)) {
         colnames(m) <- bc[seq_len(ncol(m))]
       } else {
-        colnames(m) <- bc
+        colnames(m) <- c(bc, paste0("Cell", seq.int(length(bc) + 1, ncol(m))))
       }
     } else {
       con <- gzfile(mat_path, "rt")
