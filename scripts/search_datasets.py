@@ -147,6 +147,24 @@ def _mapping_values(mapping: dict, key: str) -> list[str]:
     return []
 
 
+def _to_int(value) -> int | None:
+    try:
+        return int(float(str(value)))
+    except (TypeError, ValueError):
+        return None
+
+
+def _parse_date(value) -> tuple[int, int, int] | None:
+    text = str(value or "")
+    match = re.search(r"(\d{4})[-/](\d{1,2})[-/](\d{1,2})", text)
+    if match:
+        return tuple(int(part) for part in match.groups())
+    match = re.search(r"(\d{4})", text)
+    if match:
+        return (int(match.group(1)), 1, 1)
+    return None
+
+
 def _http_get(url: str, timeout: int = 90, retries: int = 3) -> str:
     last_error: Exception | None = None
     for attempt in range(retries):
@@ -284,6 +302,13 @@ def filter_rows(
     rows: list[dict],
     organism: str | None = None,
     keyword: str | None = None,
+    data_type: str | None = None,
+    min_samples: int | None = None,
+    max_samples: int | None = None,
+    start_date: str | None = None,
+    end_date: str | None = None,
+    platform: str | None = None,
+    dataset_type: str | None = None,
 ) -> list[dict]:
     def matches(row: dict) -> bool:
         if organism and organism.lower() not in row["organism"].lower():
@@ -294,6 +319,37 @@ def filter_rows(
             ).lower()
             if keyword.lower() not in haystack:
                 return False
+        if data_type and row.get("data_type", "") != data_type:
+            return False
+        sample_count = _to_int(row.get("samples"))
+        if min_samples is not None and (
+            sample_count is None or sample_count < min_samples
+        ):
+            return False
+        if max_samples is not None and (
+            sample_count is None or sample_count > max_samples
+        ):
+            return False
+        row_date = _parse_date(row.get("date"))
+        start = _parse_date(start_date) if start_date else None
+        end = _parse_date(end_date) if end_date else None
+        if row_date is not None:
+            if start is not None and row_date < start:
+                return False
+            if end is not None and row_date > end:
+                return False
+        elif start_date or end_date:
+            return False
+        if (
+            platform
+            and platform.lower() not in str(row.get("platform", "")).lower()
+        ):
+            return False
+        if (
+            dataset_type
+            and dataset_type.lower() not in str(row.get("type", "")).lower()
+        ):
+            return False
         return True
 
     return [row for row in rows if matches(row)]
@@ -304,6 +360,13 @@ def search_datasets(
     max_results: int = 20,
     organism: str | None = None,
     keyword: str | None = None,
+    data_type: str | None = None,
+    min_samples: int | None = None,
+    max_samples: int | None = None,
+    start_date: str | None = None,
+    end_date: str | None = None,
+    platform: str | None = None,
+    dataset_type: str | None = None,
     disease: str = "",
     research_direction: str = "",
 ) -> list[dict]:
@@ -323,7 +386,18 @@ def search_datasets(
             )
         )
     time.sleep(0.34)
-    return filter_rows(rows, organism, keyword)
+    return filter_rows(
+        rows,
+        organism=organism,
+        keyword=keyword,
+        data_type=data_type,
+        min_samples=min_samples,
+        max_samples=max_samples,
+        start_date=start_date,
+        end_date=end_date,
+        platform=platform,
+        dataset_type=dataset_type,
+    )
 
 
 def build_query(
@@ -405,6 +479,37 @@ def main() -> int:
         help="filter by extra keyword in accession/title/summary",
     )
     parser.add_argument(
+        "--data-type",
+        choices=["single-cell", "bulk", "other"],
+        help="filter by inferred data type",
+    )
+    parser.add_argument(
+        "--min-samples",
+        type=int,
+        help="minimum number of samples",
+    )
+    parser.add_argument(
+        "--max-samples",
+        type=int,
+        help="maximum number of samples",
+    )
+    parser.add_argument(
+        "--start-date",
+        help="earliest publication/update date, e.g. 2024-01-01",
+    )
+    parser.add_argument(
+        "--end-date",
+        help="latest publication/update date, e.g. 2025-12-31",
+    )
+    parser.add_argument(
+        "--platform",
+        help="filter by platform GPL id or platform name substring",
+    )
+    parser.add_argument(
+        "--dataset-type",
+        help="filter by GEO dataset type substring, e.g. 'high throughput sequencing'",
+    )
+    parser.add_argument(
         "--output",
         default=str(APP_ROOT / "data_cache" / "dataset_search"),
         help="directory for search result CSV/JSON",
@@ -443,6 +548,13 @@ def main() -> int:
         max_results=args.max_results,
         organism=args.organism,
         keyword=args.keyword,
+        data_type=args.data_type,
+        min_samples=args.min_samples,
+        max_samples=args.max_samples,
+        start_date=args.start_date,
+        end_date=args.end_date,
+        platform=args.platform,
+        dataset_type=args.dataset_type,
         disease=args.disease or "",
         research_direction=args.research_direction or "",
     )
