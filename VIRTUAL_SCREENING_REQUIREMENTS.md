@@ -61,6 +61,13 @@ python -m pip install scikit-learn joblib torch
 - bindingdb-skill
 - pubchem-pug-skill
 - chebi-skill
+- string-skill
+- reactome-skill
+- pharmgkb-skill
+- alphafold-skill
+- opentargets-skill
+
+`kegg` 使用公开 REST API（`rest.kegg.jp`），不需要额外 skill。
 
 ## 单细胞分析（原有系统）
 
