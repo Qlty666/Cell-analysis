@@ -782,8 +782,14 @@ class TestTemplatePolish(unittest.TestCase):
         html = self._read("datasets_template.html")
         self.assertIn("form-section", html)
         self.assertIn("过滤与下载选项", html)
-        self.assertIn("dataTypeFilter", html)
-        self.assertIn("applyDataTypeFilter", html)
+        self.assertIn("filterDataType", html)
+        self.assertIn("applyFilters", html)
+        self.assertIn("filterMinSamples", html)
+        self.assertIn("filterMaxSamples", html)
+        self.assertIn("filterStartDate", html)
+        self.assertIn("filterEndDate", html)
+        self.assertIn("filterPlatform", html)
+        self.assertIn("filterType", html)
         self.assertIn("仅支持 single-cell", html)
 
     def test_tasks_page_has_stat_cards(self):

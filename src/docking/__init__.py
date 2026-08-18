@@ -1,3 +1,3 @@
 """Virtual screening (molecular docking) pipeline for liver cancer targets."""
 
-__version__ = "0.5.1"
+__version__ = "0.6.0"

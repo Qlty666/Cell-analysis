@@ -173,6 +173,20 @@ a { color: #1665c0; text-decoration: none; }
       <div class="grid">
         <label>物种过滤 <input name="organism" placeholder="Homo sapiens"></label>
         <label>关键词过滤 <input name="keyword" placeholder="可选"></label>
+        <label>数据类型过滤
+          <select name="data_type">
+            <option value="">全部</option>
+            <option value="single-cell">single-cell</option>
+            <option value="bulk">bulk</option>
+            <option value="other">other</option>
+          </select>
+        </label>
+        <label>最小样本数 <input type="number" name="min_samples" min="1" placeholder="可选"></label>
+        <label>最大样本数 <input type="number" name="max_samples" min="1" placeholder="可选"></label>
+        <label>起始日期 <input type="date" name="start_date"></label>
+        <label>结束日期 <input type="date" name="end_date"></label>
+        <label>平台过滤 <input name="platform" placeholder="GPL24676 或平台名称"></label>
+        <label>数据集类型过滤 <input name="dataset_type" placeholder="high throughput sequencing"></label>
         <label>ML/DL 模型路径 <input name="model" placeholder="data_cache\dataset_search\relevance_model.joblib"></label>
         <label>下载根目录 <input name="download_root" placeholder="默认 ../liver_cancer"></label>
       </div>
@@ -191,12 +205,30 @@ a { color: #1665c0; text-decoration: none; }
   <h2>搜索结果</h2>
   <div class="grid" style="margin-bottom: 8px;">
     <label>数据类型过滤
-      <select id="dataTypeFilter" onchange="applyDataTypeFilter(this.value)">
+      <select id="filterDataType" onchange="applyFilters()">
         <option value="all">全部</option>
         <option value="single-cell">single-cell（支持全自动流水线）</option>
         <option value="bulk">bulk（仅可下载）</option>
         <option value="other">other</option>
       </select>
+    </label>
+    <label>最小样本数
+      <input type="number" id="filterMinSamples" min="1" oninput="applyFilters()" placeholder="可选">
+    </label>
+    <label>最大样本数
+      <input type="number" id="filterMaxSamples" min="1" oninput="applyFilters()" placeholder="可选">
+    </label>
+    <label>起始日期
+      <input type="date" id="filterStartDate" onchange="applyFilters()">
+    </label>
+    <label>结束日期
+      <input type="date" id="filterEndDate" onchange="applyFilters()">
+    </label>
+    <label>平台过滤
+      <input id="filterPlatform" placeholder="GPL24676 或平台名称" oninput="applyFilters()">
+    </label>
+    <label>数据集类型过滤
+      <input id="filterType" placeholder="high throughput sequencing" oninput="applyFilters()">
     </label>
   </div>
   <p class="muted">全自动流水线仅支持 single-cell 数据集；bulk 数据集可直接下载，但无法直接运行全自动流水线。</p>
@@ -226,7 +258,6 @@ function esc(value) {
 }
 let lastResults = [];
 let lastData = null;
-let dataTypeFilter = 'all';
 let downloadTimer = null;
 
 async function searchDatasets() {
@@ -257,13 +288,60 @@ async function searchDatasets() {
   }
 }
 
-function filteredResults() {
-  if (dataTypeFilter === 'all') return lastResults;
-  return lastResults.filter(row => (row.data_type || 'other') === dataTypeFilter);
+function filterInput(name) {
+  const el = document.getElementById(name);
+  return el ? String(el.value || '').trim() : '';
 }
 
-function applyDataTypeFilter(value) {
-  dataTypeFilter = value;
+function parseDateText(value) {
+  if (!value) return null;
+  const parts = String(value).split('-');
+  if (parts.length < 3) return null;
+  const year = parseInt(parts[0], 10);
+  const month = parseInt(parts[1], 10);
+  const day = parseInt(parts[2], 10);
+  if (!year || !month || !day) return null;
+  return {year: year, month: month, day: day};
+}
+
+function parseRowDate(value) {
+  if (!value) return null;
+  const match = String(value).match(/(\d{4})[-/](\d{1,2})[-/](\d{1,2})/);
+  if (match) return {year: parseInt(match[1], 10), month: parseInt(match[2], 10), day: parseInt(match[3], 10)};
+  const yearMatch = String(value).match(/(\d{4})/);
+  return yearMatch ? {year: parseInt(yearMatch[1], 10), month: 1, day: 1} : null;
+}
+
+function dateLessEqual(a, b) {
+  if (!a || !b) return true;
+  if (a.year !== b.year) return a.year < b.year;
+  if (a.month !== b.month) return a.month < b.month;
+  return a.day <= b.day;
+}
+
+function filteredResults() {
+  const type = filterInput('filterDataType');
+  const minSamples = parseInt(filterInput('filterMinSamples'), 10);
+  const maxSamples = parseInt(filterInput('filterMaxSamples'), 10);
+  const startDate = parseDateText(filterInput('filterStartDate'));
+  const endDate = parseDateText(filterInput('filterEndDate'));
+  const platform = filterInput('filterPlatform').toLowerCase();
+  const datasetType = filterInput('filterType').toLowerCase();
+  return lastResults.filter(row => {
+    if (type !== 'all' && type !== '' && (row.data_type || 'other') !== type) return false;
+    const samples = parseInt(row.samples, 10);
+    if (!isNaN(minSamples) && (isNaN(samples) || samples < minSamples)) return false;
+    if (!isNaN(maxSamples) && (isNaN(samples) || samples > maxSamples)) return false;
+    const rowDate = parseRowDate(row.date);
+    if (startDate && (!rowDate || !dateLessEqual(startDate, rowDate))) return false;
+    if (endDate && (!rowDate || !dateLessEqual(rowDate, endDate))) return false;
+    if (platform && !String(row.platform || '').toLowerCase().includes(platform)) return false;
+    if (datasetType && !String(row.type || '').toLowerCase().includes(datasetType)) return false;
+    return true;
+  });
+}
+
+function applyFilters() {
   if (!lastData) return;
   renderResults();
   const msg = document.getElementById('message');

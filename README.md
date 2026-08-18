@@ -1,6 +1,6 @@
 # Liver Cancer Bioinformatics Workflow
 
-> 当前版本：0.5.1
+> 当前版本：0.6.0
 
 面向肝癌研究的本地生信自动化工作流，整合三条可实际运行的流水线：
 
@@ -403,6 +403,21 @@ python scripts\search_datasets.py \
   --organism "Homo sapiens"
 ```
 
+搜索支持更多筛选条件：`--data-type`（`single-cell` / `bulk` / `other`）、`--min-samples`、`--max-samples`、`--start-date`、`--end-date`、`--platform` 和 `--dataset-type`。例如：
+
+```bash
+python scripts\search_datasets.py \
+  --disease "liver cancer" \
+  --research-direction "single cell RNA-seq" \
+  --data-type single-cell \
+  --min-samples 3 \
+  --max-samples 200 \
+  --start-date 2024-01-01 \
+  --end-date 2025-12-31 \
+  --platform GPL24676 \
+  --dataset-type "high throughput sequencing"
+```
+
 搜索结束后会在 `data_cache/dataset_search/` 写出 `dataset_search_results.csv` 和 `dataset_search_results.json`，每行包含 `data_type` 字段（`single-cell` / `bulk` / `other`），网页端也会显示数据类型徽标。需要下载时追加下载参数：
 
 ```bash
@@ -419,7 +434,7 @@ python scripts\search_datasets.py \
 
 GEO 下载器会把 RAW tar 中的逐样本 bulk 计数表（如 `GSMxxxx_GCxxxx.txt.gz`）识别为 bulk 数据集：数据文件与 manifest 仍会缓存到 `data_cache/<GSE>` 供手工批量分析，但单细胞与全自动流水线会拒绝继续运行，提示改用单细胞 GSE 编号。
 
-网页版已同步该限制：数据集搜索页提供数据类型过滤（`single-cell` / `bulk` / `other`）并显示数据类型徽标，bulk 数据集只保留下载按钮；全自动流水线页的内嵌搜索、直接带入和启动前校验都会拦截 bulk 数据集并给出明确提示；单细胞分析页也标注仅支持单细胞数据集。
+网页版已同步该限制：数据集搜索页提供数据类型过滤（`single-cell` / `bulk` / `other`）并显示数据类型徽标，同时支持物种、关键词、样本数范围、日期范围、平台和数据集类型过滤；bulk 数据集只保留下载按钮；全自动流水线页的内嵌搜索、直接带入和启动前校验都会拦截 bulk 数据集并给出明确提示；单细胞分析页也标注仅支持单细胞数据集。
 
 批量随机验证搜索是否命中“疾病+研究方向”数据集：
 
@@ -630,6 +645,14 @@ GSE165816 和 TCGA PanCancer Atlas 仅用于真实数据验证。
 MIT License. See `LICENSE` for details.
 
 ## 9. 更新日志
+
+### v0.6.0
+
+- 数据集搜索新增更多筛选条件：数据类型、最小/最大样本数、起始/结束日期、平台 GPL/名称、数据集类型。
+- 命令行 `scripts/search_datasets.py` 同步支持 `--data-type`、`--min-samples`、`--max-samples`、`--start-date`、`--end-date`、`--platform`、`--dataset-type`。
+- 网页数据集搜索页的“过滤与下载选项”和搜索结果过滤栏同步新增对应条件，可在已加载结果中即时筛选。
+- 搜索结果接口返回 `filters` 字段，便于网页端展示当前筛选状态。
+- 补充筛选函数、日期解析、网页参数传递和模板字段测试。
 
 ### v0.5.1
 
