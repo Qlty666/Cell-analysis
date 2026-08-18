@@ -1,18 +1,18 @@
 # Liver Cancer Bioinformatics Workflow
 
-> 当前版本：0.7.2
+> 当前版本：0.8.0
 
 面向肝癌研究的本地生信自动化工作流，整合三条可实际运行的流水线：
 
-- 单细胞转录组分析：GEO 数据下载、QC、双细胞检测、聚类注释、差异表达、富集分析和 ML 可解释性分析。
+- 表达谱分析（单细胞 / bulk RNA-seq / microarray 等）：GEO 数据下载、QC、差异表达、富集分析和 ML 可解释性分析；单细胞数据额外执行双细胞检测、聚类注释。
 - 虚拟筛选（CADD）：靶点证据收集、受体/配体准备、AutoDock Vina 并行对接、命中排序、精细重对接、ML/DL 重打分和 MD/外部工具交接。
-- 全自动集成流水线：从单细胞分析直接筛选关键基因/蛋白，再自动完成证据富集、虚拟敲除和虚拟筛选，最终输出集成报告和湿实验验证方案。
+- 全自动集成流水线：从表达分析直接筛选关键基因/蛋白，再自动完成证据富集、虚拟敲除和虚拟筛选，最终输出集成报告和湿实验验证方案。
 
 ## 1. 项目解决什么问题
 
-单细胞分析和虚拟筛选通常依赖多个分散工具和手工流程，结果难以复现，也难以从“细胞图谱”推进到“可干预靶点”。本项目把以下环节串成一条可检查、可断点续跑、可交付的本地链路：
+表达谱分析和虚拟筛选通常依赖多个分散工具和手工流程，结果难以复现，也难以从“细胞图谱/样本表达谱”推进到“可干预靶点”。本项目把以下环节串成一条可检查、可断点续跑、可交付的本地链路：
 
-- GEO 单细胞数据从下载、QC、注释到差异表达与富集分析的完整分析链。
+- GEO 表达数据从下载、QC、注释到差异表达与富集分析的完整分析链，支持单细胞、bulk RNA-seq、microarray 等表达数据。
 - 从显著差异基因中自动筛选关键基因/蛋白，并补充 UniProt、PDB、ChEMBL、BindingDB、PubChem、ChEBI、STRING、Reactome、Open Targets、PharmGKB、AlphaFold、KEGG 证据。
 - 对有 PDB 结构的靶点自动准备受体、收集已知配体并运行 AutoDock Vina 对接、命中排序和精细重对接。
 - 通过虚拟敲除对候选靶点做多维评分：表达差异、增殖共表达、共表达网络 hub、DepMap 依赖、疾病逆转、通路控制、细胞类型特异性、预后、成药性和脱靶风险。
@@ -21,11 +21,11 @@
 
 ## 2. 主要功能
 
-### 2.1 单细胞分析流水线
+### 2.1 表达分析流水线（单细胞 / bulk RNA-seq / microarray 等）
 
-- 输入 GSE 编号，自动下载 GEO 数据并识别常见格式（10x MTX、CSV、h5ad、loom、Series Matrix）。
+- 输入 GSE 编号，自动下载 GEO 数据并识别常见格式（10x MTX、CSV、h5ad、loom、Series Matrix、逐样本 bulk 计数表）。
 - 内置 GSE125449 适配；支持 `--species hs/mm/auto`。
-- QC、双细胞检测（`scDblFinder`）、PCA/UMAP 聚类和细胞注释。
+- 单细胞数据执行 QC、双细胞检测（`scDblFinder`）、PCA/UMAP 聚类和细胞注释；bulk RNA-seq、microarray 等非单细胞数据按样本级表达矩阵运行，跳过双细胞与细胞级反馈。
 - 差异表达（DESeq2 pseudobulk 或 Seurat Wilcoxon 回退）与 GO/KEGG/GSEA 富集分析。
 - 按校正后 P 值排序输出差异最显著基因的横向小提琴图，并在图中标注 P 值。
 - QC 阶段对原始/过滤后 `nFeature_RNA`、`nCount_RNA`、`percent.mt`、`percent.ribo` 按条件做 Wilcoxon 秩和检验并输出 P 值图，用于量化过滤对条件间质量差异的影响。
@@ -51,7 +51,7 @@
 | `LIVER_DE_VIOLIN_MAX_CELLS` | `1000` | 每个条件下用于该图的抽样细胞数 |
 | `LIVER_SKIP_GSEA` | `no` | 设为 `yes` 时跳过 GSEA GO/KEGG，避免大数据集富集阶段长时间运行 |
 | `LIVER_GSEA_MAX_GENES` | `0`（不限） | 限制参与 GSEA 的基因数，例如 `20000` 可显著缩短运行时间 |
-| `LIVER_ML_MODEL` | `xgb` | 单细胞 ML 模型：`xgb` / `rf` / `gbm` / `mlp` / `lasso_svm` |
+| `LIVER_ML_MODEL` | `xgb` | 表达分析 ML 模型：`xgb` / `rf` / `gbm` / `mlp` / `lasso_svm` |
 
 ### 2.2 虚拟筛选（CADD）流水线
 
@@ -78,10 +78,10 @@
 
 ### 2.3 全自动集成流水线
 
-`scripts/run_full_pipeline.py` 把单细胞分析、关键基因筛选、证据富集、虚拟敲除和虚拟筛选串成一条流水线：
+`scripts/run_full_pipeline.py` 把表达分析、关键基因筛选、证据富集、虚拟敲除和虚拟筛选串成一条流水线：
 
 ```text
-01 single_cell           GEO 单细胞分析（下载、QC、注释、差异表达、富集）
+01 single_cell           GEO 表达分析（下载、QC、注释、差异表达、富集；bulk/microarray 等按样本级运行）
 02 key_targets           从显著 DEG 中筛选并排序关键基因/蛋白
 03 evidence              UniProt / PDB / ChEMBL / STRING / Reactome / Open Targets / KEGG 证据富集（带本地缓存）
 04 knockout_inputs       导出样本级伪 bulk 表达矩阵并生成敲除输入
@@ -95,11 +95,11 @@
 
 新增 `--dry-run`，不执行任何阶段，只打印每个阶段会 `RUN` 还是 `DONE` 及原因；新增 `--skip-qc-gate` 和 `--skip-differential-abundance` 可分别关闭 QC 门控和细胞组成差异检验。
 
-单细胞阶段完成后会汇总 `qc_metrics.json`，包括细胞数、基因数、双细胞率、伪 bulk 使用情况和下游阶段统计，并按 `config/full_pipeline_config.json` 中的 `qc_gate` 阈值给出 `pass/warn/fail` 门控结果；默认阈值不强制拦截，需要拦截时在配置中填写阈值即可。差异表达阶段同时补做细胞类型组成差异检验（2×2 卡方 + Benjamini-Hochberg FDR），输出 `differential_abundance.csv` 并写入集成报告，避免“表达没变但比例变了”的组成偏移被漏掉。
+表达分析阶段完成后会汇总 `qc_metrics.json`，包括样本/细胞数、基因数、双细胞率（仅单细胞）、伪 bulk 使用情况和下游阶段统计，并按 `config/full_pipeline_config.json` 中的 `qc_gate` 阈值给出 `pass/warn/fail` 门控结果；默认阈值不强制拦截，需要拦截时在配置中填写阈值即可。单细胞数据的差异表达阶段同时补做细胞类型组成差异检验（2×2 卡方 + Benjamini-Hochberg FDR），输出 `differential_abundance.csv` 并写入集成报告；非单细胞样本级数据集自动跳过该检验，避免把样本当细胞做比例检验。
 
 虚拟筛选阶段增加对接盒有效性校验：中心/尺寸非有限值或尺寸非正数时跳过该靶点并写明原因；PDB 下载失败会自动重试 3 次，避免单次网络抖动直接丢弃有结构靶点。
 
-细胞反馈阶段会把虚拟敲除评分和虚拟筛选命中合并成反馈清单，重新读取单细胞 Seurat 对象，为每个候选基因写入细胞级表达、计算筛选靶点模块评分，并输出细胞类型表达汇总、模块富集检验、条件×细胞类型汇总和 UMAP/DotPlot/热图等结果；同时生成 `feedback_targets.csv`，把筛选优先级与细胞表达特异性合并为 `cell_support_score`，用于下一轮靶点收敛。
+细胞反馈阶段会把虚拟敲除评分和虚拟筛选命中合并成反馈清单，重新读取单细胞 Seurat 对象，为每个候选基因写入细胞级表达、计算筛选靶点模块评分，并输出细胞类型表达汇总、模块富集检验、条件×细胞类型汇总和 UMAP/DotPlot/热图等结果；同时生成 `feedback_targets.csv`，把筛选优先级与细胞表达特异性合并为 `cell_support_score`，用于下一轮靶点收敛。bulk RNA-seq、microarray 等样本级数据集没有细胞级对象，此阶段自动跳过并在 `cell_feedback_summary.json` 中注明原因。
 
 ### 2.4 虚拟敲除与多维靶点评分
 
@@ -117,21 +117,21 @@
 
 ### 2.5 网页版统一界面
 
-`web/web_ui.py` 提供本地网页端，顶部导航默认顺序为全自动流水线、单细胞分析、数据集搜索、虚拟筛选、结果清单，“任务进度”固定在右上角：
+`web/web_ui.py` 提供本地网页端，顶部导航默认顺序为全自动流水线、表达分析、数据集搜索、虚拟筛选、结果清单，“任务进度”固定在右上角：
 
 - 全自动流水线：`/full`
-- 单细胞分析：`/`
+- 表达分析：`/`
 - 数据集搜索：`/datasets`
 - 虚拟筛选：`/dock`
 - 结果清单：`/results`
 - 任务进度：`/tasks`
 
-网页端支持任务启动、实时日志、暂停/继续、结果表和文件下载、环境检查与自动补全。任务完成或中断时会弹窗提醒，中断提示会显示运行到的阶段和原因；“任务进度”页集中显示流水线页面启动的排队、运行和暂停任务，保存已完成任务的历史记录并支持一键清空，同时可直接跳转到对应页面继续查看。切换顶部导航或刷新网页不会清除正在运行的任务记录，返回原页面后会自动恢复日志轮询；未关闭标签页或未修改任务参数时无需清空记录，关闭标签页后由浏览器自动清除会话记录。单细胞页的 GEO 数据集编号需手动输入，不再预填示例；全自动流水线页支持直接填写工作目录加载已有结果，工作目录需填到 `outputs` 的上一层目录，未找到结果时会明确提示。数据集搜索页支持疾病、研究方向或原始查询搜索 GEO 数据集，可选 ML/DL 模型重排序、CSV/JSON 结果下载与批量下载；搜索结果可直接带入全自动流水线页，全自动流水线页也可内嵌搜索并选择数据集自动填入 GSE 编号，启动后自动执行 GEO 数据下载；单细胞分析完成后可在结果报告区直接打开包含逐文件分析的 `result_report.html`。
+网页端支持任务启动、实时日志、暂停/继续、结果表和文件下载、环境检查与自动补全。任务完成或中断时会弹窗提醒，中断提示会显示运行到的阶段和原因；“任务进度”页集中显示流水线页面启动的排队、运行和暂停任务，保存已完成任务的历史记录并支持一键清空，同时可直接跳转到对应页面继续查看。切换顶部导航或刷新网页不会清除正在运行的任务记录，返回原页面后会自动恢复日志轮询；未关闭标签页或未修改任务参数时无需清空记录，关闭标签页后由浏览器自动清除会话记录。表达分析页的 GEO 数据集编号需手动输入，不再预填示例；全自动流水线页支持直接填写工作目录加载已有结果，工作目录需填到 `outputs` 的上一层目录，未找到结果时会明确提示。数据集搜索页支持疾病、研究方向或原始查询搜索 GEO 数据集，可选 ML/DL 模型重排序、CSV/JSON 结果下载与批量下载；搜索结果可直接带入全自动流水线页，全自动流水线页也可内嵌搜索并选择数据集自动填入 GSE 编号，启动后自动执行 GEO 数据下载；表达分析完成后可在结果报告区直接打开包含逐文件分析的 `result_report.html`。
 全自动流水线页新增细胞反馈阶段的基因数、展示基因数和跳过选项，并在流程结果中显示 `feedback_targets.csv` 的细胞支持度排序表。
 全自动流水线页同步新增 QC 门控与差异丰度检验开关、`dry-run` 仅预演选项；流程结果区新增 QC 门控表和细胞类型差异丰度表，结果清单页补充 `qc_metrics.json` 与 `differential_abundance.csv` 的说明。
-网页版整体布局优化：各页面统一页头与快捷入口、表单按“基础/分析/运行”分组折叠、全自动流水线与单细胞表单支持设置保存/恢复/重置、结果区增加统计卡片、任务页增加数量统计、结果清单页支持按文件名/用途筛选。
+网页版整体布局优化：各页面统一页头与快捷入口、表单按“基础/分析/运行”分组折叠、全自动流水线与表达分析表单支持设置保存/恢复/重置、结果区增加统计卡片、任务页增加数量统计、结果清单页支持按文件名/用途筛选。
 虚拟筛选页新增“网络毒理学分析”与“FAERS 不相称性信号检测”卡片：填写工作目录和输入文件后可直接运行，页面展示交集基因表、PPI hub 评分、Venn 图、C-T-P-D 网络文件和 FAERS 信号表，并支持文件下载。结果清单页与结果图指南同步补充这两类输出的路径、用途与判读标准。
-近期功能已全部接入网页端：单细胞分析页支持 `xgb` / `rf` / `gbm` / `mlp` / `lasso_svm` ML 模型选择；全自动流水线页新增 ML 模型、DepMap 依赖表和 PPI 网络边表；虚拟筛选页新增重打分 ML 模型/训练 CSV/标签列，以及虚拟敲除 PPI 边表；结果清单补充 ML 校准曲线与 `lasso_svm` 选定特征表。
+近期功能已全部接入网页端：表达分析页支持 `xgb` / `rf` / `gbm` / `mlp` / `lasso_svm` ML 模型选择；全自动流水线页新增 ML 模型、DepMap 依赖表和 PPI 网络边表；虚拟筛选页新增重打分 ML 模型/训练 CSV/标签列，以及虚拟敲除 PPI 边表；结果清单补充 ML 校准曲线与 `lasso_svm` 选定特征表。
 
 ### 2.6 真实数据验证与可复现性
 
@@ -144,7 +144,7 @@
 ### 环境要求
 
 - Python 3.10+（推荐 3.11）。
-- R 4.5+（仅单细胞分析和伪 bulk 导出需要）。
+- R 4.5+（表达分析和伪 bulk 导出需要）。
 - AutoDock Vina（虚拟筛选需要，可放在 `dock/tools/vina.exe` 或加入 PATH）。
 - 可选 Codex skills（仅证据收集需要）：`uniprot-skill`、`rcsb-pdb-skill`、`chembl-skill`、`bindingdb-skill`、`pubchem-pug-skill`、`chebi-skill`、`string-skill`、`reactome-skill`、`pharmgkb-skill`、`alphafold-skill`、`opentargets-skill`。
 
@@ -174,7 +174,7 @@ conda env create -f environment_dock.yml
 
 ## 4. 使用方法
 
-### 4.1 单细胞分析命令行
+### 4.1 表达分析命令行（单细胞 / bulk RNA-seq / microarray 等）
 
 ```bash
 python scripts\run_pipeline.py GSE125449 --output ../liver_cancer --species auto
@@ -285,7 +285,7 @@ python scripts\run_docking.py virtual-knockout \
 python scripts\run_docking.py export-validation --validation-top-n 10
 ```
 
-把已有虚拟敲除/虚拟筛选结果返回单细胞分析：
+把已有虚拟敲除/虚拟筛选结果返回表达分析：
 
 ```bash
 python scripts\run_docking.py cell-feedback \
@@ -323,7 +323,7 @@ python scripts\run_full_pipeline.py \
 
 常用参数：
 
-- `--skip-scrna`：复用已完成的单细胞结果，直接从关键基因筛选开始。
+- `--skip-scrna`：复用已完成的表达分析结果，直接从关键基因筛选开始。
 - `--skip-docking`：只跑虚拟敲除和验证方案，跳过对接。
 - `--skip-evidence-fetch`：不联网，使用已有证据缓存或置零。
 - `--skip-download` / `--skip-deps` / `--skip-pseudobulk` / `--skip-knockout` / `--skip-cell-feedback`。
@@ -336,7 +336,7 @@ python scripts\run_full_pipeline.py \
 - `--case-label` / `--normal-label`：虚拟敲除的病例/正常分组标签。
 - `--ppi-network-csv`：STRING 风格 PPI 边表，用于虚拟敲除的 PPI hub 维度评分。
 - `--depmap-csv`：DepMap CRISPR 基因效应表，用于虚拟敲除依赖评分。
-- `--ml-model`：单细胞 ML 模型，可选 `xgb` / `rf` / `gbm` / `mlp` / `lasso_svm`。
+- `--ml-model`：表达分析 ML 模型，可选 `xgb` / `rf` / `gbm` / `mlp` / `lasso_svm`。
 - `--start-stage 08`：从指定阶段继续，之前阶段自动标记为跳过。
 - `--dry-run`：不执行任何阶段，只打印每个阶段会运行还是跳过及原因。
 - `--skip-qc-gate` / `--skip-differential-abundance`：分别关闭 QC 门控和细胞组成差异检验。
@@ -362,7 +362,7 @@ launchers\run_web_ui.bat --page results
 launchers\run_web_ui.bat --page tasks
 ```
 
-全自动流水线页的“单细胞结果目录”和“工作目录”均为必填项，须手动填写；工作目录需填到包含 `outputs` 的上一层目录，目录中没有结果时页面会显示错误提示。单细胞页需要手动填写 GEO 数据集编号和结果保存地址。“结果清单”页展示 `scripts/run_full_pipeline.py` 成功且完整运行后应输出的图片、数据、报告、断点和溯源文件清单；“任务进度”页支持查看任务进度并跳转到对应任务页面。
+全自动流水线页的“表达分析结果目录”和“工作目录”均为必填项，须手动填写；工作目录需填到包含 `outputs` 的上一层目录，目录中没有结果时页面会显示错误提示。表达分析页需要手动填写 GEO 数据集编号和结果保存地址。“结果清单”页展示 `scripts/run_full_pipeline.py` 成功且完整运行后应输出的图片、数据、报告、断点和溯源文件清单；“任务进度”页支持查看任务进度并跳转到对应任务页面。
 
 关闭所有网页标签后，本地网页服务会在数秒内自动退出并释放端口；正常退出时启动窗口也会自动关闭。再次启动时，如果检测到旧网页服务仍占用端口，会自动关闭旧实例后再启动；若端口被其他非网页程序占用，窗口会保留错误信息等待确认后关闭。
 
@@ -376,7 +376,7 @@ python -m unittest discover -s tests -p "test_*.py" -v
 
 | 脚本 | 用途 |
 | --- | --- |
-| `scripts/validate_pipeline.py` | 用 10 个合成单细胞数据集跑通完整单细胞流水线 |
+| `scripts/validate_pipeline.py` | 用 10 个合成表达数据集跑通完整表达流水线 |
 | `scripts/validate_dock_pipeline.py` | 用假 Vina 可执行文件验证对接流水线 |
 | `scripts/validate_real_pipeline.py` | 用 10 个真实肝病 GEO 数据集跑通完整流水线 |
 | `scripts/validate_real_evidence.py` | 用 10 个真实 PDB 结构验证证据收集 |
@@ -433,11 +433,11 @@ python scripts\search_datasets.py \
 
 也可以用 `--download-top N` 下载搜索结果的前 N 个数据集；下载状态写入 `data_cache/dataset_search/download_results.json`。
 
-网页端搜索结果每行提供“全自动流水线”入口，点击后自动带入 GSE 编号；全自动流水线页也可直接搜索并选择数据集，填入后启动即可复用流水线的自动下载流程。注意：全自动流水线只支持单细胞数据，`bulk` 类型数据集会被识别并明确提示，不会再用“No count matrix files found”这类误导性错误中断。
+网页端搜索结果每行提供“全自动流水线”入口，点击后自动带入 GSE 编号；全自动流水线页也可直接搜索并选择数据集，填入后启动即可复用流水线的自动下载流程。全自动流水线支持 `single-cell`、`bulk`、`microarray` 和其他表达矩阵数据集：单细胞数据走细胞级分析，非单细胞数据按样本级表达矩阵运行差异表达与下游靶点评分。
 
-GEO 下载器会把 RAW tar 中的逐样本 bulk 计数表（如 `GSMxxxx_GCxxxx.txt.gz`）识别为 bulk 数据集：数据文件与 manifest 仍会缓存到 `data_cache/<GSE>` 供手工批量分析，但单细胞与全自动流水线会拒绝继续运行，提示改用单细胞 GSE 编号。
+GEO 下载器会把 RAW tar 中的逐样本 bulk 计数表（如 `GSMxxxx_GCxxxx.txt.gz`）识别为 bulk 数据集，也会把其他样本级表达矩阵归入通用表达类型：数据文件与 manifest 会缓存到 `data_cache/<GSE>`，这些数据集可直接进入表达分析与全自动流水线，按样本级分析运行。
 
-网页版已同步该限制：数据集搜索页提供数据类型过滤（`single-cell` / `bulk` / `other`）并显示数据类型徽标，同时支持物种、关键词、样本数范围、日期范围、平台和数据集类型过滤；bulk 数据集只保留下载按钮；全自动流水线页的内嵌搜索、直接带入和启动前校验都会拦截 bulk 数据集并给出明确提示；单细胞分析页也标注仅支持单细胞数据集。
+网页版已同步支持：数据集搜索页提供数据类型过滤（`single-cell` / `bulk` / `other`）并显示数据类型徽标，同时支持物种、关键词、样本数范围、日期范围、平台和数据集类型过滤；所有类型的表达数据集都可选择进入全自动流水线；表达分析页说明非单细胞数据按样本级分析运行。
 
 批量随机验证搜索是否命中“疾病+研究方向”数据集：
 
@@ -481,7 +481,7 @@ python scripts\validate_dataset_search.py \
 
 ## 5. 输入输出示例
 
-### 5.1 单细胞分析
+### 5.1 表达分析
 
 输入：
 
@@ -540,7 +540,7 @@ python scripts\validate_dataset_search.py \
 输入：
 
 - GSE 编号（默认 `GSE125449`）。
-- 单细胞输出目录（必填，例如 `y2`）。
+- 表达分析输出目录（必填，例如 `y2`）。
 - 工作目录（必填，例如 `y3`）。
 - 可选配体库、病例/正常标签、DepMap CSV。
 
@@ -560,12 +560,12 @@ python scripts\validate_dataset_search.py \
 
 | 脚本 | 说明 |
 | --- | --- |
-| `scripts/run_pipeline.py` | 单细胞分析 CLI 入口 |
+| `scripts/run_pipeline.py` | 表达分析 CLI 入口 |
 | `scripts/run_docking.py` | 虚拟筛选 CLI 入口 |
 | `scripts/run_full_pipeline.py` | 全自动集成流水线 CLI 入口 |
 | `scripts/search_datasets.py` | GEO 数据集搜索与下载 |
 | `scripts/dataset_search_ml.py` | 数据集搜索 ML/DL 相关性重排序 |
-| `scripts/validate_pipeline.py` | 合成数据单细胞流水线验证 |
+| `scripts/validate_pipeline.py` | 合成数据表达流水线验证 |
 | `scripts/validate_dock_pipeline.py` | 假 Vina 对接流水线验证 |
 | `scripts/validate_real_pipeline.py` | 真实 GEO 数据流水线验证 |
 | `scripts/validate_real_evidence.py` | 真实 PDB 证据收集验证 |
@@ -578,19 +578,19 @@ python scripts\validate_dataset_search.py \
 | `launchers/run_web_ui.bat` | 启动网页端 |
 | `launchers/run_docking.bat` | 虚拟筛选快捷入口 |
 | `launchers/run_full_pipeline.bat` | 全自动流水线快捷入口 |
-| `launchers/run_GSE125449.bat` | GSE125449 单细胞快捷入口 |
-| `launchers/run_pipeline_prompt.bat` | 交互式单细胞入口 |
+| `launchers/run_GSE125449.bat` | GSE125449 表达分析快捷入口 |
+| `launchers/run_pipeline_prompt.bat` | 交互式表达分析入口 |
 | `src/analysis/*` | R/Python 分析实现（QC、聚类、DEG、富集、CellChat、ML） |
 | `src/data/*` | GEO 下载、格式转换、合成数据生成 |
 | `src/docking/*` | 对接、证据、敲除、验证、报告等实现 |
-| `src/pipeline/orchestrator.py` | 单细胞流水线编排 |
+| `src/pipeline/orchestrator.py` | 表达流水线编排 |
 | `src/pipeline/integration.py` | 全自动集成流水线编排 |
-| `src/pipeline/cell_feedback.py` / `cell_feedback.R` | 虚拟敲除/对接结果返回单细胞的闭环分析 |
+| `src/pipeline/cell_feedback.py` / `cell_feedback.R` | 虚拟敲除/对接结果返回单细胞对象的闭环分析 |
 | `src/pipeline/export_pseudobulk.R` | 伪 bulk 表达矩阵导出 |
 | `src/report/*` | HTML/Word 报告生成 |
 | `web/web_ui.py` | 本地网页服务 |
 | `web/templates/*` | 三个页面的 HTML 模板 |
-| `config/*.json` | 单细胞、对接和全流程配置 |
+| `config/*.json` | 表达分析、对接和全流程配置 |
 | `tests/test_*.py` | 单元/集成测试 |
 
 ## 7. 目录结构
@@ -634,7 +634,7 @@ Script/
 │   ├── evidence/
 │   ├── validation_real/
 │   └── tools/
-└── results/             # 单细胞结果（gitignore）
+└── results/             # 表达分析结果（gitignore）
 ```
 
 `dock/tools/`、`dock/outputs/`、`dock/logs/`、`dock/evidence/`、`dock/validation_real/`、`dock/work/`、`data_cache/` 等运行产物和二进制文件默认被 `.gitignore` 排除，不会上传 GitHub。
@@ -648,6 +648,15 @@ GSE165816 和 TCGA PanCancer Atlas 仅用于真实数据验证。
 MIT License. See `LICENSE` for details.
 
 ## 9. 更新日志
+
+### v0.8.0
+
+- 取消“全自动流水线仅支持单细胞”的限制，全面支持 bulk RNA-seq、microarray 和样本级表达矩阵：GEO 下载器不再拒绝非单细胞数据集，这些数据可直接进入表达分析与全自动流水线。
+- 修复逐样本单细胞 CSV（如 GSE165816 的 `GSMxxxx_counts.csv.gz`）被误判为 bulk 的问题：下载器会结合 Series Matrix 标题和矩阵表头中的细胞 barcode 自动识别为单细胞。
+- R 表达流水线新增 `dataset_mode` 模式：单细胞数据保留 QC、双细胞、聚类、注释和细胞级反馈；bulk RNA-seq、microarray 等非单细胞数据按样本级表达矩阵运行，自动跳过双细胞检测、细胞级发表分析和细胞反馈，保留差异表达、富集、虚拟敲除和虚拟筛选链路。
+- 全自动流水线对非单细胞样本级数据集自动跳过细胞类型差异丰度检验和细胞反馈阶段，并在 `differential_abundance_summary.json` / `cell_feedback_summary.json` 中注明原因。
+- 网页数据集搜索与全自动流水线页移除 bulk 选择限制，`single-cell`、`bulk`、`other` 均可带入并运行；网页文案统一改为“表达分析”。
+- 更新 GEO 数据集搜索、manifest 分类、流水线编排和全流程相关测试。
 
 ### v0.7.2
 

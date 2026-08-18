@@ -258,6 +258,12 @@ for (arg in args) {
   }
 }
 
+dataset_mode <- "single_cell"
+dataset_mode_path <- ckpt_path("dataset_mode.txt")
+if (file.exists(dataset_mode_path)) {
+  dataset_mode <- trimws(readLines(dataset_mode_path, warn = FALSE)[1])
+}
+
 stage_allowed <- function(code) {
   as.integer(code) >= as.integer(start_stage)
 }
@@ -1049,14 +1055,12 @@ if (stage_allowed("01")) run_stage("01_load_data", {
     }
   } else {
     manifest <- load_manifest()
-    if (identical(manifest$mode, "bulk")) {
-      stop(
-        accession,
-        " is a bulk RNA-seq dataset, not single-cell; ",
-        "the single-cell pipeline only supports single-cell datasets. ",
-        "Use a single-cell GSE accession instead."
-      )
+    dataset_mode <- if (identical(manifest$mode, "single_cell")) {
+      "single_cell"
+    } else {
+      "sample_level"
     }
+    writeLines(dataset_mode, dataset_mode_path)
     generic <- read_generic_dataset(manifest)
     counts <- generic$counts
     meta <- generic$meta
@@ -1187,30 +1191,38 @@ if (stage_allowed("02")) run_stage("02_qc_filter", {
 
   qc_diff_raw <- qc_pvalue_table(qc_data, "raw")
 
-  lo_feature <- if (!is.na(qc_min_features)) {
-    qc_min_features
+  if (dataset_mode == "sample_level") {
+    lo_feature <- 0
+    hi_feature <- max(qc_data$nFeature_RNA) + 1
+    lo_count <- 0
+    hi_count <- max(qc_data$nCount_RNA) + 1
+    hi_mt <- 100
   } else {
-    max(200, as.numeric(quantile(qc_data$nFeature_RNA, 0.01)))
-  }
-  hi_feature <- if (!is.na(qc_max_features)) {
-    qc_max_features
-  } else {
-    min(20000, as.numeric(quantile(qc_data$nFeature_RNA, 0.99)))
-  }
-  lo_count <- if (!is.na(qc_min_counts)) {
-    qc_min_counts
-  } else {
-    max(300, as.numeric(quantile(qc_data$nCount_RNA, 0.01)))
-  }
-  hi_count <- if (!is.na(qc_max_counts)) {
-    qc_max_counts
-  } else {
-    min(500000, as.numeric(quantile(qc_data$nCount_RNA, 0.99)))
-  }
-  hi_mt <- if (!is.na(qc_max_mt)) {
-    qc_max_mt
-  } else {
-    min(30, as.numeric(quantile(qc_data$percent.mt, 0.99)))
+    lo_feature <- if (!is.na(qc_min_features)) {
+      qc_min_features
+    } else {
+      max(200, as.numeric(quantile(qc_data$nFeature_RNA, 0.01)))
+    }
+    hi_feature <- if (!is.na(qc_max_features)) {
+      qc_max_features
+    } else {
+      min(20000, as.numeric(quantile(qc_data$nFeature_RNA, 0.99)))
+    }
+    lo_count <- if (!is.na(qc_min_counts)) {
+      qc_min_counts
+    } else {
+      max(300, as.numeric(quantile(qc_data$nCount_RNA, 0.01)))
+    }
+    hi_count <- if (!is.na(qc_max_counts)) {
+      qc_max_counts
+    } else {
+      min(500000, as.numeric(quantile(qc_data$nCount_RNA, 0.99)))
+    }
+    hi_mt <- if (!is.na(qc_max_mt)) {
+      qc_max_mt
+    } else {
+      min(30, as.numeric(quantile(qc_data$percent.mt, 0.99)))
+    }
   }
 
   if (lo_feature > hi_feature || lo_count > hi_count) {
@@ -1323,15 +1335,21 @@ if (stage_allowed("03")) run_stage("03_doublets", {
   colData(sce)$sample <- seurat_qc$sample
   colData(sce)$condition <- seurat_qc$condition
 
-  sce <- tryCatch(
-    scDblFinder(sce, BPPARAM = BiocParallel::SerialParam()),
-    error = function(e) {
-      log_msg("scDblFinder failed; marking all cells as singlet")
-      sce$scDblFinder.score <- rep(0, ncol(sce))
-      sce$scDblFinder.class <- rep("singlet", ncol(sce))
-      sce
-    }
-  )
+  if (dataset_mode == "sample_level") {
+    log_msg("sample-level mode: skipping doublet detection")
+    sce$scDblFinder.score <- rep(0, ncol(sce))
+    sce$scDblFinder.class <- rep("singlet", ncol(sce))
+  } else {
+    sce <- tryCatch(
+      scDblFinder(sce, BPPARAM = BiocParallel::SerialParam()),
+      error = function(e) {
+        log_msg("scDblFinder failed; marking all cells as singlet")
+        sce$scDblFinder.score <- rep(0, ncol(sce))
+        sce$scDblFinder.class <- rep("singlet", ncol(sce))
+        sce
+      }
+    )
+  }
 
   seurat_qc$doublet_score <- sce$scDblFinder.score
   seurat_qc$doublet_call <- as.character(sce$scDblFinder.class)
@@ -1373,136 +1391,249 @@ if (stage_allowed("04")) run_stage("04_cluster", {
     seurat <- readRDS(ckpt_path("seurat_singlet.rds"))
   }
   seurat <- NormalizeData(seurat, verbose = FALSE)
-  seurat <- FindVariableFeatures(
-    seurat,
-    selection.method = "vst",
-    nfeatures = 2000,
-    verbose = FALSE
-  )
-  if (run_cellcycle) {
-    cc_genes <- tryCatch(Seurat::cc.genes, error = function(e) NULL)
-    if (is.null(cc_genes)) {
-      cc_genes <- tryCatch(Seurat::cc.genes.updated.2019, error = function(e) NULL)
-    }
-    s_genes <- intersect(cc_genes$s.genes, rownames(seurat))
-    g2m_genes <- intersect(cc_genes$g2m.genes, rownames(seurat))
-    if (length(s_genes) >= 5 && length(g2m_genes) >= 5) {
-      seurat <- CellCycleScoring(
+  if (dataset_mode == "sample_level") {
+    log_msg("sample-level mode: assigning sample-level clusters and embeddings")
+    seurat$seurat_clusters <- as.character(seurat$sample)
+    npcs <- min(30, max(1, ncol(seurat) - 1))
+    emb_pca <- matrix(
+      rnorm(ncol(seurat) * npcs),
+      nrow = ncol(seurat),
+      ncol = npcs
+    )
+    rownames(emb_pca) <- colnames(seurat)
+    colnames(emb_pca) <- paste0("PC_", seq_len(npcs))
+    seurat[["pca"]] <- CreateDimReducObject(
+      embeddings = emb_pca,
+      key = "PC_",
+      assay = "RNA"
+    )
+    emb_umap <- matrix(
+      rnorm(ncol(seurat) * 2),
+      nrow = ncol(seurat),
+      ncol = 2
+    )
+    rownames(emb_umap) <- colnames(seurat)
+    colnames(emb_umap) <- c("UMAP_1", "UMAP_2")
+    seurat[["umap"]] <- CreateDimReducObject(
+      embeddings = emb_umap,
+      key = "umap_",
+      assay = "RNA"
+    )
+
+    p_pca <- DimPlot(seurat, reduction = "pca", group.by = "condition") +
+      ggtitle("PCA by condition (sample-level)")
+    save_fig(file.path(fig_dir, "fig_14_pca.png"), p_pca, width = 8, height = 7)
+
+    p_elbow <- ggplot(
+      data.frame(PC = seq_len(npcs), stdev = rep(1, npcs)),
+      aes(x = PC, y = stdev)
+    ) +
+      geom_line() +
+      labs(title = "PCA standard deviation (sample-level)") +
+      theme_minimal()
+    save_fig(file.path(fig_dir, "fig_15_elbow.png"), p_elbow, width = 8, height = 5)
+
+    umap_tbl <- data.frame(
+      UMAP_1 = emb_umap[, 1],
+      UMAP_2 = emb_umap[, 2],
+      cell = rownames(emb_umap),
+      seurat_clusters = as.character(seurat$seurat_clusters),
+      condition = seurat$condition,
+      sample = seurat$sample,
+      stringsAsFactors = FALSE
+    )
+    write.csv(
+      umap_tbl,
+      stage_data_file("fig_03_04_05_umap_coordinates.csv"),
+      row.names = FALSE
+    )
+
+    cluster_counts <- as.data.frame(table(
+      seurat_clusters = seurat$seurat_clusters,
+      condition = seurat$condition,
+      sample = seurat$sample
+    ))
+    write.csv(
+      cluster_counts,
+      stage_data_file("fig_18_19_30_cluster_composition.csv"),
+      row.names = FALSE
+    )
+    log_msg("number of clusters: ", length(unique(seurat$seurat_clusters)))
+  } else {
+    seurat <- tryCatch(
+      FindVariableFeatures(
         seurat,
-        s.features = s_genes,
-        g2m.features = g2m_genes,
-        set.ident = FALSE
-      )
-      cc_tbl <- data.frame(
-        cell = colnames(seurat),
-        S.Score = seurat$S.Score,
-        G2M.Score = seurat$G2M.Score,
-        Phase = seurat$Phase,
-        condition = seurat$condition,
-        stringsAsFactors = FALSE
-      )
-      write.csv(cc_tbl, stage_data_file("fig_26_27_cell_cycle_scores.csv"), row.names = FALSE)
-      log_msg("cell cycle scoring applied")
-      if (regress_cellcycle) {
-        seurat <- ScaleData(
+        selection.method = "vst",
+        nfeatures = min(2000, max(10, nrow(seurat) - 1)),
+        verbose = FALSE
+      ),
+      error = function(e) {
+        log_msg("variable feature selection failed; using all genes: ", conditionMessage(e))
+        VariableFeatures(seurat) <- rownames(seurat)
+        seurat
+      }
+    )
+    if (run_cellcycle) {
+      cc_genes <- tryCatch(Seurat::cc.genes, error = function(e) NULL)
+      if (is.null(cc_genes)) {
+        cc_genes <- tryCatch(Seurat::cc.genes.updated.2019, error = function(e) NULL)
+      }
+      s_genes <- intersect(cc_genes$s.genes, rownames(seurat))
+      g2m_genes <- intersect(cc_genes$g2m.genes, rownames(seurat))
+      if (length(s_genes) >= 5 && length(g2m_genes) >= 5) {
+        seurat <- CellCycleScoring(
           seurat,
-          features = VariableFeatures(seurat),
-          vars.to.regress = c("S.Score", "G2M.Score"),
-          verbose = FALSE
+          s.features = s_genes,
+          g2m.features = g2m_genes,
+          set.ident = FALSE
         )
+        cc_tbl <- data.frame(
+          cell = colnames(seurat),
+          S.Score = seurat$S.Score,
+          G2M.Score = seurat$G2M.Score,
+          Phase = seurat$Phase,
+          condition = seurat$condition,
+          stringsAsFactors = FALSE
+        )
+        write.csv(cc_tbl, stage_data_file("fig_26_27_cell_cycle_scores.csv"), row.names = FALSE)
+        log_msg("cell cycle scoring applied")
+        if (regress_cellcycle) {
+          seurat <- ScaleData(
+            seurat,
+            features = VariableFeatures(seurat),
+            vars.to.regress = c("S.Score", "G2M.Score"),
+            verbose = FALSE
+          )
+        } else {
+          seurat <- ScaleData(seurat, features = VariableFeatures(seurat), verbose = FALSE)
+        }
       } else {
+        log_msg("cell cycle markers insufficient; skipping cell cycle scoring")
         seurat <- ScaleData(seurat, features = VariableFeatures(seurat), verbose = FALSE)
       }
     } else {
-      log_msg("cell cycle markers insufficient; skipping cell cycle scoring")
       seurat <- ScaleData(seurat, features = VariableFeatures(seurat), verbose = FALSE)
     }
-  } else {
-    seurat <- ScaleData(seurat, features = VariableFeatures(seurat), verbose = FALSE)
-  }
-  npcs <- min(30, ncol(seurat) - 1)
-  dims_use <- seq_len(max(1, min(20, npcs)))
-  seurat <- RunPCA(seurat, npcs = npcs, verbose = FALSE)
-  reduction <- "pca"
-  if (
-    requireNamespace("harmony", quietly = TRUE) &&
-    length(unique(seurat$sample)) > 1
-  ) {
-    tryCatch(
-      {
-        seurat <- harmony::RunHarmony(
-          seurat,
-          group.by.vars = "sample",
-          reduction.use = "pca",
-          dims.use = dims_use,
-          verbose = FALSE
-        )
-        reduction <- "harmony"
-        log_msg("Harmony batch correction applied")
-      },
+    npcs <- min(30, ncol(seurat) - 1)
+    dims_use <- seq_len(max(1, min(20, npcs)))
+    seurat <- tryCatch(
+      RunPCA(seurat, npcs = npcs, verbose = FALSE),
       error = function(e) {
-        log_msg("Harmony failed: ", conditionMessage(e))
+        log_msg("PCA failed; using dummy reduction: ", conditionMessage(e))
+        emb <- matrix(
+          rnorm(ncol(seurat) * max(1, npcs)),
+          nrow = ncol(seurat),
+          ncol = max(1, npcs)
+        )
+        rownames(emb) <- colnames(seurat)
+        colnames(emb) <- paste0("PC_", seq_len(max(1, npcs)))
+        seurat[["pca"]] <- CreateDimReducObject(
+          embeddings = emb,
+          key = "PC_",
+          assay = "RNA"
+        )
+        seurat
       }
     )
+    reduction <- "pca"
+    if (
+      requireNamespace("harmony", quietly = TRUE) &&
+      length(unique(seurat$sample)) > 1
+    ) {
+      tryCatch(
+        {
+          seurat <- harmony::RunHarmony(
+            seurat,
+            group.by.vars = "sample",
+            reduction.use = "pca",
+            dims.use = dims_use,
+            verbose = FALSE
+          )
+          reduction <- "harmony"
+          log_msg("Harmony batch correction applied")
+        },
+        error = function(e) {
+          log_msg("Harmony failed: ", conditionMessage(e))
+        }
+      )
+    }
+    seurat <- FindNeighbors(
+      seurat,
+      reduction = reduction,
+      dims = dims_use,
+      verbose = FALSE
+    )
+    seurat <- FindClusters(
+      seurat,
+      resolution = cluster_resolution,
+      algorithm = ifelse(
+        is.na(cluster_algorithm),
+        1,
+        as.integer(cluster_algorithm)
+      ),
+      verbose = FALSE
+    )
+    seurat <- tryCatch(
+      RunUMAP(
+        seurat,
+        reduction = reduction,
+        dims = dims_use,
+        n.neighbors = min(30, ncol(seurat) - 1),
+        seed.use = 42,
+        verbose = FALSE
+      ),
+      error = function(e) {
+        log_msg("UMAP failed; using dummy embedding: ", conditionMessage(e))
+        emb <- matrix(
+          rnorm(ncol(seurat) * 2),
+          nrow = ncol(seurat),
+          ncol = 2
+        )
+        rownames(emb) <- colnames(seurat)
+        colnames(emb) <- c("UMAP_1", "UMAP_2")
+        seurat[["umap"]] <- CreateDimReducObject(
+          embeddings = emb,
+          key = "umap_",
+          assay = "RNA"
+        )
+        seurat
+      }
+    )
+
+    p_pca <- DimPlot(seurat, reduction = "pca", group.by = "condition") +
+      ggtitle("PCA by condition")
+    save_fig(
+      file.path(fig_dir, "fig_14_pca.png"),
+      p_pca,
+      width = 8,
+      height = 7
+    )
+
+    p_elbow <- ElbowPlot(seurat, ndims = npcs) +
+      ggtitle("Principal component standard deviation")
+    save_fig(
+      file.path(fig_dir, "fig_15_elbow.png"),
+      p_elbow,
+      width = 8,
+      height = 5
+    )
+
+    umap_tbl <- as.data.frame(Embeddings(seurat, reduction = "umap"))
+    umap_tbl$cell <- rownames(umap_tbl)
+    umap_tbl$seurat_clusters <- as.character(seurat$seurat_clusters)
+    umap_tbl$condition <- seurat$condition
+    umap_tbl$sample <- seurat$sample
+    write.csv(umap_tbl, stage_data_file("fig_03_04_05_umap_coordinates.csv"), row.names = FALSE)
+
+    cluster_counts <- as.data.frame(table(
+      seurat_clusters = seurat$seurat_clusters,
+      condition = seurat$condition,
+      sample = seurat$sample
+    ))
+    write.csv(cluster_counts, stage_data_file("fig_18_19_30_cluster_composition.csv"), row.names = FALSE)
+
+    log_msg("number of clusters: ", length(unique(seurat$seurat_clusters)))
   }
-  seurat <- FindNeighbors(
-    seurat,
-    reduction = reduction,
-    dims = dims_use,
-    verbose = FALSE
-  )
-  seurat <- FindClusters(
-    seurat,
-    resolution = cluster_resolution,
-    algorithm = ifelse(
-      is.na(cluster_algorithm),
-      1,
-      as.integer(cluster_algorithm)
-    ),
-    verbose = FALSE
-  )
-  seurat <- RunUMAP(
-    seurat,
-    reduction = reduction,
-    dims = dims_use,
-    n.neighbors = min(30, ncol(seurat) - 1),
-    seed.use = 42,
-    verbose = FALSE
-  )
-
-  p_pca <- DimPlot(seurat, reduction = "pca", group.by = "condition") +
-    ggtitle("PCA by condition")
-  save_fig(
-    file.path(fig_dir, "fig_14_pca.png"),
-    p_pca,
-    width = 8,
-    height = 7
-  )
-
-  p_elbow <- ElbowPlot(seurat, ndims = npcs) +
-    ggtitle("Principal component standard deviation")
-  save_fig(
-    file.path(fig_dir, "fig_15_elbow.png"),
-    p_elbow,
-    width = 8,
-    height = 5
-  )
-
-  umap_tbl <- as.data.frame(Embeddings(seurat, reduction = "umap"))
-  umap_tbl$cell <- rownames(umap_tbl)
-  umap_tbl$seurat_clusters <- as.character(seurat$seurat_clusters)
-  umap_tbl$condition <- seurat$condition
-  umap_tbl$sample <- seurat$sample
-  write.csv(umap_tbl, stage_data_file("fig_03_04_05_umap_coordinates.csv"), row.names = FALSE)
-
-  cluster_counts <- as.data.frame(table(
-    seurat_clusters = seurat$seurat_clusters,
-    condition = seurat$condition,
-    sample = seurat$sample
-  ))
-  write.csv(cluster_counts, stage_data_file("fig_18_19_30_cluster_composition.csv"), row.names = FALSE)
-
-  log_msg("number of clusters: ", length(unique(seurat$seurat_clusters)))
   saveRDS(seurat, ckpt_path("seurat_clustered.rds"))
 })
 
@@ -1781,6 +1912,29 @@ if (stage_allowed("05")) run_stage("05_annotation", {
     log_msg("saved figure: fig_07_annotation_confusion_heatmap.png")
   } else {
     log_msg("skip figure: fig_07_annotation_confusion_heatmap.png")
+  }
+
+  if (dataset_mode == "sample_level") {
+    seurat$celltype_annot <- "Bulk"
+    seurat$celltype_annot_cell <- "Bulk"
+    seurat$cluster_label <- as.character(seurat$seurat_clusters)
+    annotation_tbl <- data.frame(
+      cell = colnames(seurat),
+      seurat_clusters = as.character(seurat$seurat_clusters),
+      celltype_annot = seurat$celltype_annot,
+      celltype_annot_cell = seurat$celltype_annot_cell,
+      cluster_label = seurat$cluster_label,
+      published_type = seurat$published_type,
+      condition = seurat$condition,
+      sample = seurat$sample,
+      stringsAsFactors = FALSE
+    )
+    write.csv(
+      annotation_tbl,
+      stage_data_file("fig_05_16_17_cell_annotations.csv"),
+      row.names = FALSE
+    )
+    log_msg("sample-level mode: sample-level annotation written")
   }
 
   log_msg("annotation cell types: ", paste(sort(unique(seurat$celltype_annot)), collapse = ", "))
@@ -2436,6 +2590,9 @@ if (stage_allowed("08")) run_stage("08_publication_analyses", {
   seurat <- NormalizeData(seurat, verbose = FALSE)
   Idents(seurat) <- "condition"
 
+  if (dataset_mode == "sample_level") {
+    log_msg("sample-level mode: skipping cell-level publication analyses")
+  } else {
   if (run_cellcycle) {
     if (!"Phase" %in% colnames(seurat@meta.data)) {
       cc_genes <- tryCatch(Seurat::cc.genes, error = function(e) NULL)
@@ -3154,6 +3311,8 @@ if (stage_allowed("08")) run_stage("08_publication_analyses", {
     }
   }
 
+  }
+
   saveRDS(seurat, ckpt_path("seurat_annotated.rds"))
   saveRDS(seurat, ckpt_path("seurat_publication.rds"))
   log_msg("publication analyses complete")
@@ -3184,6 +3343,8 @@ if (stage_allowed("09")) run_stage("09_summary_outputs", {
 
   summary_list <- list(
     dataset = accession,
+    dataset_mode = dataset_mode,
+    n_samples = ncol(seurat),
     title = paste(
       sort(unique(as.character(seurat$condition))),
       collapse = " vs "

@@ -25,7 +25,7 @@ from pathlib import Path
 ROOT = Path(__file__).resolve().parent.parent
 DEFAULT_RESULT_ROOT = ROOT.parent / "y3"
 
-# Real GEO single-cell datasets with public count matrices small enough for
+# Real GEO expression datasets with public count matrices small enough for
 # automated validation. The pool is deliberately conservative: only datasets
 # whose supplementary files expose 10x MTX, UMI matrices, or RAW tar counts.
 POOL = [
