@@ -375,8 +375,10 @@ def run_cellchat(species: str) -> None:
     )
 
 
-def run_ml_analysis() -> None:
+def run_ml_analysis(ml_model: str = "xgb") -> None:
     log("running optional ML analysis")
+    env = os.environ.copy()
+    env["LIVER_ML_MODEL"] = ml_model
     subprocess.run(
         [
             sys.executable,
@@ -384,6 +386,7 @@ def run_ml_analysis() -> None:
             str(OUTPUT_ROOT),
         ],
         cwd=ROOT,
+        env=env,
         check=False,
     )
 
@@ -395,6 +398,7 @@ def run_pipeline(
     accession: str = "GSE125449",
     output_root: str | None = None,
     species: str = "hs",
+    ml_model: str = "xgb",
 ) -> int:
     global OUTPUT_ROOT
     accession = accession.strip().upper()
@@ -485,7 +489,7 @@ def run_pipeline(
         raise RuntimeError("Pipeline failed after repeated attempts")
 
     verify_outputs()
-    run_ml_analysis()
+    run_ml_analysis(ml_model)
     if os.environ.get("LIVER_RUN_CELLCHAT", "").lower() == "yes":
         run_cellchat(species)
     generate_report()
@@ -514,6 +518,12 @@ def main() -> int:
     parser.add_argument("--force", action="store_true", help="rerun all R stages")
     parser.add_argument("--skip-download", action="store_true", help="skip data download")
     parser.add_argument("--skip-deps", action="store_true", help="skip R dependency check")
+    parser.add_argument(
+        "--ml-model",
+        default="xgb",
+        choices=["xgb", "rf", "gbm", "mlp", "lasso_svm"],
+        help="ML model for disease classification",
+    )
     args = parser.parse_args()
 
     try:
@@ -524,6 +534,7 @@ def main() -> int:
             args.accession,
             args.output,
             args.species,
+            args.ml_model,
         )
     except Exception as exc:  # noqa: BLE001
         log(f"ERROR: {exc}")

@@ -2,13 +2,22 @@
 """ML disease classification, feature importance, and SHAP explainability."""
 
 import json
+import os
 import sys
 from pathlib import Path
 
 import matplotlib
 matplotlib.use("Agg")
 import matplotlib.pyplot as plt
+import numpy as np
 import pandas as pd
+from sklearn.calibration import calibration_curve
+from sklearn.ensemble import (
+    GradientBoostingClassifier,
+    RandomForestClassifier,
+)
+from sklearn.feature_selection import RFE, SelectFromModel
+from sklearn.linear_model import LogisticRegression
 from sklearn.metrics import (
     auc,
     average_precision_score,
@@ -22,7 +31,89 @@ from sklearn.model_selection import (
     cross_val_predict,
     cross_val_score,
 )
+from sklearn.neural_network import MLPClassifier
 from sklearn.preprocessing import LabelEncoder
+from sklearn.svm import SVC
+
+
+def model_name() -> str:
+    name = os.environ.get("LIVER_ML_MODEL", "xgb").strip().lower()
+    if name not in {"xgb", "rf", "gbm", "mlp", "lasso_svm"}:
+        name = "xgb"
+    return name
+
+
+def build_model(name: str, random_state: int = 42):
+    if name == "rf":
+        return RandomForestClassifier(
+            n_estimators=300,
+            max_depth=8,
+            random_state=random_state,
+            n_jobs=-1,
+        )
+    if name == "gbm":
+        return GradientBoostingClassifier(
+            n_estimators=200,
+            max_depth=3,
+            learning_rate=0.05,
+            random_state=random_state,
+        )
+    if name == "mlp":
+        return MLPClassifier(
+            hidden_layer_sizes=(64, 32),
+            max_iter=500,
+            early_stopping=True,
+            random_state=random_state,
+        )
+    if name == "lasso_svm":
+        return SVC(kernel="linear", probability=True, random_state=random_state)
+    try:
+        from xgboost import XGBClassifier
+
+        return XGBClassifier(
+            n_estimators=200,
+            max_depth=4,
+            use_label_encoder=False,
+            eval_metric="logloss",
+            random_state=random_state,
+            verbosity=0,
+        )
+    except Exception:
+        return RandomForestClassifier(
+            n_estimators=300,
+            max_depth=8,
+            random_state=random_state,
+            n_jobs=-1,
+        )
+
+
+def _importance_values(model, X, y, columns):
+    if hasattr(model, "feature_importances_"):
+        values = np.asarray(model.feature_importances_, dtype=float)
+    elif hasattr(model, "coef_"):
+        coef = np.asarray(model.coef_, dtype=float)
+        values = np.abs(coef).mean(axis=0) if coef.ndim > 1 else np.abs(coef)
+    else:
+        try:
+            from sklearn.inspection import permutation_importance
+
+            result = permutation_importance(
+                model,
+                X,
+                y,
+                n_repeats=3,
+                random_state=42,
+                scoring="accuracy",
+            )
+            values = result.importances_mean
+        except Exception:
+            values = np.zeros(len(columns), dtype=float)
+    series = pd.Series(
+        values,
+        index=columns,
+        name="importance",
+    ).sort_values(ascending=False)
+    return series
 
 
 def main() -> int:
@@ -79,29 +170,39 @@ def main() -> int:
             )
             return 0
 
-        use_xgb = True
-        try:
-            from xgboost import XGBClassifier
-
-            model = XGBClassifier(
-                n_estimators=200,
-                max_depth=4,
-                use_label_encoder=False,
-                eval_metric="logloss",
-                random_state=42,
-                verbosity=0,
+        chosen_model = model_name()
+        fit_X = X
+        selected_columns = list(X.columns)
+        feature_selection = "none"
+        if chosen_model == "lasso_svm":
+            lasso_selector = SelectFromModel(
+                LogisticRegression(
+                    penalty="l1",
+                    solver="liblinear",
+                    C=1.0,
+                    max_iter=1000,
+                    random_state=42,
+                )
             )
-        except Exception:
-            use_xgb = False
-            from sklearn.ensemble import RandomForestClassifier
+            lasso_selector.fit(X, y_enc)
+            fit_X = lasso_selector.transform(X)
+            selected_columns = X.columns[lasso_selector.get_support()].tolist()
+            if fit_X.shape[1] < 1:
+                selected_columns = list(X.columns[:5])
+                fit_X = X[selected_columns].to_numpy()
+            if fit_X.shape[1] >= 2:
+                n_features = max(2, min(15, fit_X.shape[1]))
+                rfe = RFE(
+                    SVC(kernel="linear", probability=True, random_state=42),
+                    n_features_to_select=n_features,
+                )
+                rfe.fit(fit_X, y_enc)
+                keep = rfe.get_support()
+                fit_X = fit_X[:, keep]
+                selected_columns = np.asarray(selected_columns)[keep].tolist()
+            feature_selection = "lasso_svm"
 
-            model = RandomForestClassifier(
-                n_estimators=300,
-                max_depth=8,
-                random_state=42,
-                n_jobs=-1,
-            )
-
+        model = build_model(chosen_model)
         min_class = min(pd.Series(y_enc).value_counts())
         n_splits = max(2, min(5, min_class))
         cv = StratifiedKFold(
@@ -109,18 +210,28 @@ def main() -> int:
             shuffle=True,
             random_state=42,
         )
-        scores = cross_val_score(model, X, y_enc, cv=cv, scoring="accuracy")
-        y_pred = cross_val_predict(model, X, y_enc, cv=cv)
+        scores = cross_val_score(
+            model,
+            fit_X,
+            y_enc,
+            cv=cv,
+            scoring="accuracy",
+        )
+        y_pred = cross_val_predict(model, fit_X, y_enc, cv=cv)
         try:
             y_proba = cross_val_predict(
-                model, X, y_enc, cv=cv, method="predict_proba"
+                model,
+                fit_X,
+                y_enc,
+                cv=cv,
+                method="predict_proba",
             )
         except Exception:
-            model.fit(X, y_enc)
-            y_proba = model.predict_proba(X)
-        model.fit(X, y_enc)
+            model.fit(fit_X, y_enc)
+            y_proba = model.predict_proba(fit_X)
+        model.fit(fit_X, y_enc)
 
-        proba = model.predict_proba(X)
+        proba = model.predict_proba(fit_X)
         sample_ids = (
             features["sample"]
             if "sample" in features.columns
@@ -129,7 +240,7 @@ def main() -> int:
         confidence = pd.DataFrame({
             "sample": sample_ids,
             "condition": features["condition"],
-            "predicted_condition": le.inverse_transform(model.predict(X)),
+            "predicted_condition": le.inverse_transform(model.predict(fit_X)),
             "confidence": proba.max(axis=1),
         })
         confidence.to_csv(
@@ -137,11 +248,16 @@ def main() -> int:
             index=False,
         )
 
-        importance = pd.Series(
-            model.feature_importances_,
-            index=X.columns,
-            name="importance",
-        ).sort_values(ascending=False)
+        pd.DataFrame({"feature": selected_columns}).to_csv(
+            data_dir / "fig_24_ml_selected_features.csv",
+            index=False,
+        )
+        importance = _importance_values(
+            model,
+            fit_X,
+            y_enc,
+            selected_columns,
+        )
         importance.to_csv(data_dir / "fig_24_ml_feature_importance.csv")
 
         fig, ax = plt.subplots(figsize=(8, 6))
@@ -156,13 +272,23 @@ def main() -> int:
         try:
             import shap
 
-            explainer = shap.TreeExplainer(model)
-            shap_values = explainer.shap_values(X)
+            if chosen_model in {"xgb", "rf", "gbm"}:
+                explainer = shap.TreeExplainer(model)
+                shap_values = explainer.shap_values(fit_X)
+            else:
+                background = fit_X[: min(20, fit_X.shape[0])]
+                explainer = shap.KernelExplainer(
+                    model.predict_proba,
+                    background,
+                )
+                shap_values = explainer.shap_values(
+                    fit_X[: min(50, fit_X.shape[0])]
+                )
             if isinstance(shap_values, list):
                 shap_values = shap_values[1]
             shap.summary_plot(
                 shap_values,
-                X,
+                fit_X[: shap_values.shape[0]],
                 show=False,
                 max_display=15,
             )
@@ -272,9 +398,50 @@ def main() -> int:
         fig.savefig(fig_dir / "fig_45_ml_cv_scores.png", dpi=150)
         plt.close(fig)
 
+        if n_classes == 2:
+            try:
+                n_bins = max(3, min(6, int(np.ceil(np.sqrt(len(y_enc))))))
+                prob_true, prob_pred = calibration_curve(
+                    y_enc,
+                    y_proba[:, 1],
+                    n_bins=n_bins,
+                )
+                fig, ax = plt.subplots(figsize=(6, 4.5))
+                ax.plot(
+                    prob_pred,
+                    prob_true,
+                    marker="o",
+                    color="#4C72B0",
+                    label="Calibration",
+                )
+                ax.plot(
+                    [0, 1],
+                    [0, 1],
+                    "--",
+                    color="grey",
+                    label="Perfect",
+                )
+                ax.set_xlabel("Mean predicted probability")
+                ax.set_ylabel("Observed frequency")
+                ax.set_title("Calibration curve")
+                ax.legend(fontsize=8)
+                fig.tight_layout()
+                fig.savefig(
+                    fig_dir / "fig_45_ml_calibration_curve.png",
+                    dpi=150,
+                )
+                plt.close(fig)
+            except Exception:
+                (data_dir / "ml_calibration_status.txt").write_text(
+                    "Calibration curve skipped",
+                    encoding="utf-8",
+                )
+
         status = {
             "status": "completed",
-            "model": "XGBoost" if use_xgb else "RandomForest",
+            "model": chosen_model,
+            "feature_selection": feature_selection,
+            "selected_features": len(selected_columns),
             "accuracy": float(scores.mean()),
             "cv_mean": float(scores.mean()),
             "cv_sd": float(scores.std()),

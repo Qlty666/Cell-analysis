@@ -16,10 +16,12 @@ from . import (
     knockout,
     ligands,
     ml,
+    network_toxicology,
     pipeline,
     receptor,
     redock,
     report,
+    signal_detection,
     validation,
 )
 from .config import load_config, save_config
@@ -51,6 +53,8 @@ def main(argv: list[str] | None = None) -> int:
         ("redock", "re-dock top hits with higher exhaustiveness"),
         ("report", "generate HTML summary report"),
         ("virtual-knockout", "score virtual gene knockouts from expression/DepMap data"),
+        ("network", "compound-disease overlap, PPI hub and C-T-P-D network"),
+        ("faers", "FAERS-style disproportionality signal detection"),
         ("export-validation", "export wet-lab validation plan for top targets"),
         ("cell-feedback", "re-run single-cell analysis from knockout/docking results"),
         ("detect-box", "detect docking box from cocrystal ligand and save config"),
@@ -99,12 +103,24 @@ def main(argv: list[str] | None = None) -> int:
         "prognosis_csv": args.prognosis_csv,
         "druggability_csv": args.druggability_csv,
         "off_target_csv": args.off_target_csv,
+        "ppi_network_csv": args.ppi_network_csv,
         "cell_type_column": args.cell_type_column,
         "group_column": args.group_column,
         "case_label": args.case_label,
         "normal_label": args.normal_label,
         "ko_top_n": args.ko_top_n,
         "validation_top_n": args.validation_top_n,
+        "compound_name": args.compound_name,
+        "disease_name": args.disease_name,
+        "compound_targets_csv": args.compound_targets_csv,
+        "disease_genes_csv": args.disease_genes_csv,
+        "disease_gene_column": args.disease_gene_column,
+        "network_output_dir": args.network_output_dir,
+        "faers_input": args.faers_input,
+        "faers_drug_column": args.faers_drug_column,
+        "faers_event_column": args.faers_event_column,
+        "faers_count_column": args.faers_count_column,
+        "faers_min_count": args.faers_min_count,
     }
     overrides = {key: value for key, value in overrides.items() if value is not None}
     cfg = load_config(args.config, overrides)
@@ -152,6 +168,10 @@ def main(argv: list[str] | None = None) -> int:
         report.generate_report(cfg, log)
     elif args.command == "virtual-knockout":
         knockout.run_knockout(cfg, log)
+    elif args.command == "network":
+        network_toxicology.run_network_toxicology(cfg, log)
+    elif args.command == "faers":
+        signal_detection.run_faers(cfg, log)
     elif args.command == "export-validation":
         validation.export_validation(cfg, log)
     elif args.command == "cell-feedback":
@@ -203,7 +223,7 @@ def _add_common(sub: argparse.ArgumentParser) -> None:
     sub.add_argument("--top-n", type=int)
     sub.add_argument("--executable", help="Vina executable or script path")
     sub.add_argument("--scoring", help="Vina scoring function, e.g. vina/vinardo")
-    sub.add_argument("--model", help="ML model: rf, gbm, mlp or torch")
+    sub.add_argument("--model", help="ML model: rf, gbm, mlp, lasso_svm or torch")
     sub.add_argument("--label-column", help="training label column")
     sub.add_argument("--training-csv", help="training CSV path")
     sub.add_argument("--epochs", type=int, help="MLP/torch training epochs")
@@ -242,10 +262,40 @@ def _add_common(sub: argparse.ArgumentParser) -> None:
     sub.add_argument("--normal-label", help="normal/control group label")
     sub.add_argument("--ko-top-n", type=int, help="top N genes for knockout report")
     sub.add_argument(
+        "--ppi-network-csv",
+        help="STRING-style PPI edge table used by virtual knockout and network",
+    )
+    sub.add_argument(
         "--validation-top-n",
         type=int,
         help="top N genes for the wet-lab validation plan",
     )
+    sub.add_argument("--compound-name", help="compound name for network toxicology")
+    sub.add_argument("--disease-name", help="disease name for network toxicology")
+    sub.add_argument(
+        "--compound-targets-csv",
+        help="compound-target gene table for network toxicology",
+    )
+    sub.add_argument(
+        "--disease-genes-csv",
+        help="disease gene list for network toxicology",
+    )
+    sub.add_argument(
+        "--disease-gene-column",
+        help="gene column in the disease gene list",
+    )
+    sub.add_argument(
+        "--network-output-dir",
+        help="output directory for network toxicology results",
+    )
+    sub.add_argument(
+        "--faers-input",
+        help="FAERS-style event CSV (drug, event, optional count)",
+    )
+    sub.add_argument("--faers-drug-column", help="drug column in FAERS CSV")
+    sub.add_argument("--faers-event-column", help="event column in FAERS CSV")
+    sub.add_argument("--faers-count-column", help="count column in FAERS CSV")
+    sub.add_argument("--faers-min-count", type=int, help="minimum count for signals")
     sub.add_argument(
         "--single-cell-root",
         help="single-cell output root containing results/checkpoints",
