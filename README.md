@@ -1,6 +1,6 @@
 # Liver Cancer Bioinformatics Workflow
 
-> 当前版本：0.4.2
+> 当前版本：0.5.0
 
 面向肝癌研究的本地生信自动化工作流，整合三条可实际运行的流水线：
 
@@ -51,6 +51,7 @@
 | `LIVER_DE_VIOLIN_MAX_CELLS` | `1000` | 每个条件下用于该图的抽样细胞数 |
 | `LIVER_SKIP_GSEA` | `no` | 设为 `yes` 时跳过 GSEA GO/KEGG，避免大数据集富集阶段长时间运行 |
 | `LIVER_GSEA_MAX_GENES` | `0`（不限） | 限制参与 GSEA 的基因数，例如 `20000` 可显著缩短运行时间 |
+| `LIVER_ML_MODEL` | `xgb` | 单细胞 ML 模型：`xgb` / `rf` / `gbm` / `mlp` / `lasso_svm` |
 
 ### 2.2 虚拟筛选（CADD）流水线
 
@@ -63,10 +64,12 @@
 | `dock` | AutoDock Vina 并行对接，按配体写入结果，支持断点续跑 |
 | `analyze` | 按亲和力排序、阈值筛选、Tanimoto 多样性选择 |
 | `redock` | 对 Top 命中用更高 exhaustiveness 精细重对接 |
-| `ml-train` / `ml-predict` | 随机森林、GBDT、MLP 或 PyTorch MLP 重打分 |
+| `ml-train` / `ml-predict` | 随机森林、GBDT、MLP、LASSO+SVM-RFE 或 PyTorch MLP 重打分 |
 | `export-md` / `export-external` | 导出 Amber/GROMACS 和 UniDock-Pro/HDOCK/HADDOCK 模板 |
 | `report` | 生成 HTML 汇总报告 |
-| `virtual-knockout` | 基因敲除优先级和多维靶点评分 |
+| `virtual-knockout` | 基因敲除优先级和多维靶点评分，支持 STRING PPI hub 维度 |
+| `network` | 化合物-疾病靶点交集、PPI hub、Venn 与 C-T-P-D 网络导出 |
+| `faers` | FAERS 风格 ROR/PRR/BCPNN/EBGM 不相称性信号检测 |
 | `export-validation` | 把排序后的靶点导出为湿实验验证方案 |
 | `cell-feedback` | 把虚拟敲除/对接结果返回 Seurat 单细胞对象做细胞级分析 |
 | `detect-box` | 从共晶配体自动检测对接盒并写回配置 |
@@ -108,6 +111,7 @@
 - `prognosis_score`：方向感知的风险比评分。
 - `druggability_score`：已知配体、蛋白结构和生物活性计数。
 - `safety_concern` / `off_target_paralogs`：脱靶和旁系同源标记。
+- `ppi_hub_score`：STRING/PPI 边表的 degree、betweenness 与 clustering 拓扑 hub 评分。
 
 以上维度按 `target_weights` 加权合并为 `target_score`，并把候选基因分为 `core_driver`、`microenvironment_regulator`、`biomarker`、`high_priority`、`low_priority`。
 
@@ -180,6 +184,7 @@ python scripts\run_pipeline.py GSE125449 --output ../liver_cancer --species auto
 python scripts\run_pipeline.py GSE125449 --output ../liver_cancer --species hs --force
 python scripts\run_pipeline.py GSE125449 --output ../liver_cancer --skip-download
 python scripts\run_pipeline.py GSE125449 --output ../liver_cancer --skip-deps
+python scripts\run_pipeline.py GSE125449 --output ../liver_cancer --ml-model lasso_svm
 ```
 
 Windows 下也可以直接使用：
@@ -236,7 +241,31 @@ python scripts\run_docking.py virtual-knockout \
   --expression-csv data/knockout/expression.csv \
   --metadata-csv data/knockout/metadata.csv \
   --depmap-csv data/knockout/depmap_gene_effect.csv \
+  --ppi-network-csv data/network/string_edges.tsv \
   --case-label Tumor --normal-label Normal
+```
+
+网络毒理学（化合物-疾病交集、PPI hub、Venn 与 C-T-P-D 网络）：
+
+```bash
+python scripts\run_docking.py network \
+  --compound-name "Bisphenol A" \
+  --disease-name "Hepatocellular Carcinoma" \
+  --compound-targets-csv data/network/compound_targets.csv \
+  --disease-genes-csv data/network/disease_genes.csv \
+  --ppi-network-csv data/network/string_edges.tsv \
+  --network-output-dir outputs/run_001/network_toxicology
+```
+
+FAERS 不相称性信号检测：
+
+```bash
+python scripts\run_docking.py faers \
+  --faers-input data/faers/events.csv \
+  --faers-drug-column drug \
+  --faers-event-column event \
+  --faers-count-column count \
+  --faers-min-count 3
 ```
 
 多维评分与验证方案导出：
@@ -303,6 +332,7 @@ python scripts\run_full_pipeline.py \
 - `--feedback-timeout`：细胞反馈 R 分析超时秒数，默认 3600。
 - `--ligand-library`：自定义配体库（`.smi` / `.sdf` / `.csv`），也可放到 `dock/data/ligands/`。
 - `--case-label` / `--normal-label`：虚拟敲除的病例/正常分组标签。
+- `--ppi-network-csv`：STRING 风格 PPI 边表，用于虚拟敲除的 PPI hub 维度评分。
 - `--start-stage 08`：从指定阶段继续，之前阶段自动标记为跳过。
 - `--dry-run`：不执行任何阶段，只打印每个阶段会运行还是跳过及原因。
 - `--skip-qc-gate` / `--skip-differential-abundance`：分别关闭 QC 门控和细胞组成差异检验。
@@ -599,6 +629,15 @@ GSE165816 和 TCGA PanCancer Atlas 仅用于真实数据验证。
 MIT License. See `LICENSE` for details.
 
 ## 9. 更新日志
+
+### v0.5.0
+
+- 新增网络毒理学命令 `python scripts\run_docking.py network`：支持化合物-疾病靶点交集、多数据库来源计数、STRING PPI hub 评分、Venn 图和 C-T-P-D 节点/边导出。
+- 新增 FAERS 风格信号检测命令 `python scripts\run_docking.py faers`：支持 ROR、PRR、BCPNN IC、EBGM 四种不相称性指标及组合信号判定。
+- 虚拟敲除新增 PPI hub 维度：`virtual-knockout --ppi-network-csv` 可把 STRING 边表的 degree/betweenness/clustering 合入 `target_score`；全自动流水线同步支持 `--ppi-network-csv` 和 `full_pipeline_config.json` 中的 `ppi_network_csv`。
+- 单细胞 ML 扩展：新增 `--ml-model` / `LIVER_ML_MODEL`，支持 `xgb`、`rf`、`gbm`、`mlp`、`lasso_svm`；`lasso_svm` 使用 LASSO 初筛 + SVM-RFE 特征选择，并输出选定特征表。
+- 单细胞 ML 新增校准曲线图 `fig_45_ml_calibration_curve.png`，与 ROC/PR、SHAP 一起构成更完整的模型诊断。
+- 同步更新 `config/docking_config.json`、`config/full_pipeline_config.json`，并新增网络毒理学与 FAERS 单元测试。
 
 ### v0.4.2
 
