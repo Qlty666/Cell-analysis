@@ -2151,6 +2151,7 @@ def _stage_single_cell(args, workdir: Path, ctx: dict) -> None:
             args.accession,
             str(root),
             args.species,
+            getattr(args, "ml_model", "xgb"),
         )
         if code == 98:
             raise PauseRequested("single-cell pipeline paused; run again to resume")
@@ -2430,6 +2431,7 @@ def load_full_config(path: Path) -> dict:
         "species": "auto",
         "top_genes": 50,
         "docking_targets": 3,
+        "ml_model": "xgb",
         "keep_all_genes": False,
         "case_label": None,
         "normal_label": None,
@@ -2482,6 +2484,8 @@ def _apply_defaults(args, config: dict) -> None:
         args.species = config.get("species", "auto")
     if args.top_genes is None:
         args.top_genes = int(config.get("top_genes", 50))
+    if getattr(args, "ml_model", None) is None:
+        args.ml_model = config.get("ml_model", "xgb")
     if args.docking_targets is None:
         args.docking_targets = int(config.get("docking_targets", 3))
     if args.ligand_library is None:
@@ -2578,6 +2582,12 @@ def build_parser() -> argparse.ArgumentParser:
     )
     parser.add_argument("--species", choices=["hs", "mm", "auto"])
     parser.add_argument("--top-genes", type=int, help="number of key genes to keep")
+    parser.add_argument(
+        "--ml-model",
+        choices=["xgb", "rf", "gbm", "mlp", "lasso_svm"],
+        default=None,
+        help="single-cell ML model used by the integrated pipeline",
+    )
     parser.add_argument("--docking-targets", type=int, help="max genes to dock")
     parser.add_argument("--ligand-library", help="ligand library file (.smi/.sdf/.csv)")
     parser.add_argument("--case-label", help="case group label for knockout")

@@ -1,6 +1,6 @@
 # Liver Cancer Bioinformatics Workflow
 
-> 当前版本：0.6.0
+> 当前版本：0.6.1
 
 面向肝癌研究的本地生信自动化工作流，整合三条可实际运行的流水线：
 
@@ -131,6 +131,7 @@
 全自动流水线页同步新增 QC 门控与差异丰度检验开关、`dry-run` 仅预演选项；流程结果区新增 QC 门控表和细胞类型差异丰度表，结果清单页补充 `qc_metrics.json` 与 `differential_abundance.csv` 的说明。
 网页版整体布局优化：各页面统一页头与快捷入口、表单按“基础/分析/运行”分组折叠、全自动流水线与单细胞表单支持设置保存/恢复/重置、结果区增加统计卡片、任务页增加数量统计、结果清单页支持按文件名/用途筛选。
 虚拟筛选页新增“网络毒理学分析”与“FAERS 不相称性信号检测”卡片：填写工作目录和输入文件后可直接运行，页面展示交集基因表、PPI hub 评分、Venn 图、C-T-P-D 网络文件和 FAERS 信号表，并支持文件下载。结果清单页与结果图指南同步补充这两类输出的路径、用途与判读标准。
+近期功能已全部接入网页端：单细胞分析页支持 `xgb` / `rf` / `gbm` / `mlp` / `lasso_svm` ML 模型选择；全自动流水线页新增 ML 模型、DepMap 依赖表和 PPI 网络边表；虚拟筛选页新增重打分 ML 模型/训练 CSV/标签列，以及虚拟敲除 PPI 边表；结果清单补充 ML 校准曲线与 `lasso_svm` 选定特征表。
 
 ### 2.6 真实数据验证与可复现性
 
@@ -334,6 +335,8 @@ python scripts\run_full_pipeline.py \
 - `--ligand-library`：自定义配体库（`.smi` / `.sdf` / `.csv`），也可放到 `dock/data/ligands/`。
 - `--case-label` / `--normal-label`：虚拟敲除的病例/正常分组标签。
 - `--ppi-network-csv`：STRING 风格 PPI 边表，用于虚拟敲除的 PPI hub 维度评分。
+- `--depmap-csv`：DepMap CRISPR 基因效应表，用于虚拟敲除依赖评分。
+- `--ml-model`：单细胞 ML 模型，可选 `xgb` / `rf` / `gbm` / `mlp` / `lasso_svm`。
 - `--start-stage 08`：从指定阶段继续，之前阶段自动标记为跳过。
 - `--dry-run`：不执行任何阶段，只打印每个阶段会运行还是跳过及原因。
 - `--skip-qc-gate` / `--skip-differential-abundance`：分别关闭 QC 门控和细胞组成差异检验。
@@ -645,6 +648,15 @@ GSE165816 和 TCGA PanCancer Atlas 仅用于真实数据验证。
 MIT License. See `LICENSE` for details.
 
 ## 9. 更新日志
+
+### v0.6.1
+
+- 网页端整合近期全部功能：单细胞分析页新增 ML 模型选择，支持 `xgb` / `rf` / `gbm` / `mlp` / `lasso_svm`。
+- 全自动流水线页新增单细胞 ML 模型、DepMap 依赖表和 PPI 网络边表输入，后端同步追加 `--ml-model`、`--depmap-csv`、`--ppi-network-csv`。
+- 虚拟筛选页新增重打分 ML 模型/训练 CSV/标签列，以及虚拟敲除 PPI 网络边表输入。
+- 结果清单和结果图指南补充 ML 校准曲线与 `lasso_svm` 选定特征表。
+- `run_full_pipeline.py` 新增 `--ml-model`，使全自动流水线可传递单细胞 ML 模型选择。
+- 补充网页控件、命令行参数和结果清单测试。
 
 ### v0.6.0
 
