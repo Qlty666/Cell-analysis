@@ -4,6 +4,7 @@
 from __future__ import annotations
 
 import socket
+import json
 import sys
 import tempfile
 import time
@@ -18,6 +19,7 @@ if str(APP_ROOT / "web") not in sys.path:
 import web_ui as web_ui_module  # noqa: E402
 
 from web_ui import (  # noqa: E402
+    DOCK_JOBS,
     FINISHED_NOTIFICATIONS,
     FULL_JOBS,
     HEARTBEAT_CLIENTS,
@@ -38,6 +40,7 @@ from web_ui import (  # noqa: E402
     register_heartbeat,
     run_faers_request,
     run_network_request,
+    start_dock_job,
     start_full_job,
     unregister_heartbeat,
 )
@@ -211,6 +214,68 @@ class TestNetworkAndFaersWeb(unittest.TestCase):
         self.assertIn("### 6.3 网络毒理学与 FAERS 信号", guide)
 
 
+class TestRecentWebIntegration(unittest.TestCase):
+    def test_dock_job_passes_ml_model_options(self):
+        with tempfile.TemporaryDirectory() as tmp:
+            workdir = Path(tmp) / "work"
+            workdir.mkdir()
+            with mock.patch("web_ui._drain_dock_queue"):
+                result = start_dock_job(
+                    {
+                        "workdir": [str(workdir)],
+                        "stage": ["ml-train"],
+                        "model": ["lasso_svm"],
+                        "training_csv": ["data/ml/training.csv"],
+                        "label_column": ["active"],
+                    }
+                )
+            job_id = result["job"]
+            try:
+                info = DOCK_JOBS[job_id]
+                cfg_path = workdir / "config" / f"docking_web_{job_id}.json"
+                cfg = json.loads(cfg_path.read_text(encoding="utf-8"))
+                self.assertEqual(cfg["ml"]["model"], "lasso_svm")
+                self.assertEqual(
+                    cfg["ml"]["training_csv"],
+                    "data/ml/training.csv",
+                )
+                self.assertEqual(cfg["ml"]["label_column"], "active")
+                self.assertEqual(info["stage"], "ml-train")
+            finally:
+                DOCK_JOBS.pop(job_id, None)
+
+    def test_templates_expose_recent_controls(self):
+        single = (APP_ROOT / "web" / "templates" / "web_page_template.html").read_text(
+            encoding="utf-8"
+        )
+        full = (APP_ROOT / "web" / "templates" / "full_page_template.html").read_text(
+            encoding="utf-8"
+        )
+        dock = (APP_ROOT / "web" / "templates" / "dock_page_template.html").read_text(
+            encoding="utf-8"
+        )
+        self.assertIn('name="LIVER_ML_MODEL"', single)
+        self.assertIn('name="ml_model"', full)
+        self.assertIn('name="ppi_network_csv"', full)
+        self.assertIn('name="depmap_csv"', full)
+        self.assertIn('name="model"', dock)
+        self.assertIn('name="training_csv"', dock)
+        self.assertIn('name="ko_ppi"', dock)
+
+    def test_figures_and_manifest_include_calibration(self):
+        self.assertIn(
+            "fig_45_ml_calibration_curve.png",
+            web_ui_module.FIGURE_NAMES,
+        )
+        page = web_ui_module.render_page()
+        self.assertIn("fig_45_ml_calibration_curve.png", page)
+        results = (
+            APP_ROOT / "web" / "templates" / "results_manifest_optimized.html"
+        ).read_text(encoding="utf-8")
+        self.assertIn("fig_45_ml_calibration_curve.png", results)
+        self.assertIn("fig_24_ml_selected_features.csv", results)
+
+
 class TestHeartbeatAutoShutdown(unittest.TestCase):
     def setUp(self) -> None:
         with HEARTBEAT_LOCK:
@@ -337,6 +402,9 @@ class TestFullStatus(unittest.TestCase):
                         "skip_qc_gate": ["1"],
                         "skip_differential_abundance": ["1"],
                         "dry_run": ["1"],
+                        "ml_model": ["lasso_svm"],
+                        "ppi_network_csv": ["data/network/string_edges.tsv"],
+                        "depmap_csv": ["data/knockout/depmap.csv"],
                     }
                 )
             job_id = result["job"]
@@ -345,6 +413,13 @@ class TestFullStatus(unittest.TestCase):
                 self.assertIn("--skip-qc-gate", cmd)
                 self.assertIn("--skip-differential-abundance", cmd)
                 self.assertIn("--dry-run", cmd)
+                self.assertIn("--ml-model", cmd)
+                self.assertEqual(
+                    cmd[cmd.index("--ml-model") + 1],
+                    "lasso_svm",
+                )
+                self.assertIn("--ppi-network-csv", cmd)
+                self.assertIn("--depmap-csv", cmd)
             finally:
                 FULL_JOBS.pop(job_id, None)
 
