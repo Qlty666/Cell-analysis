@@ -2042,6 +2042,14 @@ def _full_result_files(workdir: Path) -> list[str]:
         (workdir / "outputs" / "integration", ""),
         (workdir / "outputs" / "run_001" / "results", "outputs/run_001/results"),
         (workdir / "outputs" / "run_001" / "docked", "outputs/run_001/docked"),
+        (
+            workdir / "outputs" / "run_001" / "network_toxicology",
+            "outputs/run_001/network_toxicology",
+        ),
+        (
+            workdir / "outputs" / "run_001" / "faers",
+            "outputs/run_001/faers",
+        ),
     ]
     single_cell_root = _single_cell_root_from_workdir(workdir)
     if single_cell_root:
@@ -2160,6 +2168,8 @@ def _full_file_path(workdir: Path, name: str) -> Path | None:
         (workdir / "outputs" / "integration").resolve(),
         (workdir / "outputs" / "run_001" / "results").resolve(),
         (workdir / "outputs" / "run_001" / "docked").resolve(),
+        (workdir / "outputs" / "run_001" / "network_toxicology").resolve(),
+        (workdir / "outputs" / "run_001" / "faers").resolve(),
         (workdir / "work").resolve(),
         (workdir / "data" / "knockout").resolve(),
     ]
@@ -2418,6 +2428,161 @@ def run_validation_request(data: dict) -> dict:
         "output_dir": str(val_dir),
         "workdir": str(workdir),
     }
+
+
+def run_network_request(data: dict) -> dict:
+    from docking.config import load_config
+    from docking.network_toxicology import run_network_toxicology
+
+    workdir = Path(
+        _first(data, "net_workdir", str(APP_ROOT / "dock"))
+    ).expanduser().resolve()
+    workdir.mkdir(parents=True, exist_ok=True)
+    overrides = {
+        "workdir": str(workdir),
+        "compound_name": _first(data, "net_compound_name", "") or None,
+        "disease_name": _first(data, "net_disease_name", "") or None,
+        "compound_targets_csv": (
+            _first(data, "net_compound_targets", "") or None
+        ),
+        "disease_genes_csv": _first(data, "net_disease_genes", "") or None,
+        "ppi_network_csv": _first(data, "net_ppi", "") or None,
+    }
+    cfg = load_config(
+        APP_ROOT / "config" / "docking_config.json",
+        overrides,
+    )
+    import logging
+
+    summary = run_network_toxicology(
+        cfg,
+        logging.getLogger("docking.web_network"),
+    )
+    out_dir = cfg._resolve(
+        cfg.data.get("network_toxicology", {}).get("output_dir")
+        or "outputs/run_001/network_toxicology",
+        cfg.workdir,
+    )
+    rows: list[dict] = []
+    overlap = out_dir / "data" / "compound_disease_overlap.csv"
+    if overlap.exists():
+        import csv as csv_module
+
+        with overlap.open("r", newline="", encoding="utf-8") as fh:
+            for i, row in enumerate(csv_module.DictReader(fh)):
+                if i >= 200:
+                    break
+                rows.append(row)
+    return {
+        "summary": summary,
+        "rows": rows,
+        "figures": _analysis_files(out_dir, images_only=True),
+        "files": _analysis_files(out_dir),
+        "output_dir": str(out_dir),
+        "workdir": str(workdir),
+    }
+
+
+def run_faers_request(data: dict) -> dict:
+    from docking.config import load_config
+    from docking.signal_detection import run_faers
+
+    workdir = Path(
+        _first(data, "faers_workdir", str(APP_ROOT / "dock"))
+    ).expanduser().resolve()
+    workdir.mkdir(parents=True, exist_ok=True)
+    overrides = {
+        "workdir": str(workdir),
+        "faers_input": _first(data, "faers_input", "") or None,
+        "faers_drug_column": _first(data, "faers_drug_column", "drug"),
+        "faers_event_column": _first(data, "faers_event_column", "event"),
+        "faers_count_column": _first(data, "faers_count_column", "") or None,
+        "faers_min_count": _int_field(data, "faers_min_count") or 3,
+    }
+    cfg = load_config(
+        APP_ROOT / "config" / "docking_config.json",
+        overrides,
+    )
+    import logging
+
+    summary = run_faers(
+        cfg,
+        logging.getLogger("docking.web_faers"),
+    )
+    out_dir = cfg._resolve(
+        cfg.data.get("faers", {}).get("output_dir")
+        or "outputs/run_001/faers",
+        cfg.workdir,
+    )
+    rows: list[dict] = []
+    signals = out_dir / "data" / "faers_signals.csv"
+    if signals.exists():
+        import csv as csv_module
+
+        with signals.open("r", newline="", encoding="utf-8") as fh:
+            for i, row in enumerate(csv_module.DictReader(fh)):
+                if i >= 200:
+                    break
+                rows.append(row)
+    return {
+        "summary": summary,
+        "rows": rows,
+        "figures": _analysis_files(out_dir, images_only=True),
+        "files": _analysis_files(out_dir),
+        "output_dir": str(out_dir),
+        "workdir": str(workdir),
+    }
+
+
+def _analysis_files(root: Path, images_only: bool = False) -> list[str]:
+    if not root.exists() or not root.is_dir():
+        return []
+    suffixes = (
+        RESULT_IMAGE_SUFFIXES
+        if images_only
+        else RESULT_IMAGE_SUFFIXES
+        | {".csv", ".html", ".json", ".md", ".xlsx"}
+    )
+    return sorted(
+        p.relative_to(root).as_posix()
+        for p in root.rglob("*")
+        if p.is_file() and p.suffix.lower() in suffixes
+    )
+
+
+def _analysis_file_path(workdir: str, name: str, kind: str):
+    from docking.config import load_config
+
+    work = Path(workdir).expanduser().resolve()
+    cfg = load_config(
+        APP_ROOT / "config" / "docking_config.json",
+        {"workdir": str(work)},
+    )
+    if kind == "network":
+        section = cfg.data.get("network_toxicology", {})
+        default = "outputs/run_001/network_toxicology"
+    else:
+        section = cfg.data.get("faers", {})
+        default = "outputs/run_001/faers"
+    root = cfg._resolve(
+        section.get("output_dir") or default,
+        cfg.workdir,
+    ).resolve()
+    target = (root / Path(name)).resolve()
+    allowed_suffixes = RESULT_IMAGE_SUFFIXES | {
+        ".csv",
+        ".html",
+        ".json",
+        ".md",
+        ".xlsx",
+    }
+    if (
+        target.is_file()
+        and target.suffix.lower() in allowed_suffixes
+        and root in target.parents
+    ):
+        return target
+    return None
 
 
 def _ko_file_path(workdir: str, name: str):
@@ -2810,6 +2975,40 @@ class Handler(BaseHTTPRequestHandler):
                 ensure_ascii=False,
             ).encode("utf-8")
             self._send(200, body, "application/json")
+            return
+        if parsed.path in ("/dock/network/file", "/dock/faers/file"):
+            query = parse_qs(parsed.query)
+            workdir = query.get("workdir", [""])[0]
+            name = query.get("name", [""])[0]
+            kind = (
+                "network"
+                if parsed.path == "/dock/network/file"
+                else "faers"
+            )
+            if not workdir or not name:
+                self._send(
+                    400,
+                    b"workdir and name required",
+                    "text/plain; charset=utf-8",
+                )
+                return
+            target = _analysis_file_path(workdir, name, kind)
+            if not target:
+                self._send(404, b"file not found", "text/plain; charset=utf-8")
+                return
+            content_type = {
+                ".png": "image/png",
+                ".jpg": "image/jpeg",
+                ".jpeg": "image/jpeg",
+                ".svg": "image/svg+xml",
+                ".pdf": "application/pdf",
+                ".csv": "text/csv; charset=utf-8",
+                ".html": "text/html; charset=utf-8",
+                ".json": "application/json",
+                ".md": "text/markdown; charset=utf-8",
+                ".xlsx": "application/vnd.openxmlformats-officedocument.spreadsheetml.sheet",
+            }.get(target.suffix.lower(), "application/octet-stream")
+            self._send(200, target.read_bytes(), content_type)
             return
         if parsed.path == "/dock/knockout/file":
             query = parse_qs(parsed.query)
@@ -3223,6 +3422,30 @@ class Handler(BaseHTTPRequestHandler):
                     json.dumps({"error": str(exc)}).encode("utf-8"),
                     "application/json",
                 )
+            return
+
+        if parsed.path == "/dock/network":
+            try:
+                result = run_network_request(data)
+                body = json.dumps(result, ensure_ascii=False).encode("utf-8")
+                self._send(200, body, "application/json")
+            except Exception as exc:
+                body = json.dumps(
+                    {"error": str(exc)}, ensure_ascii=False
+                ).encode("utf-8")
+                self._send(400, body, "application/json")
+            return
+
+        if parsed.path == "/dock/faers":
+            try:
+                result = run_faers_request(data)
+                body = json.dumps(result, ensure_ascii=False).encode("utf-8")
+                self._send(200, body, "application/json")
+            except Exception as exc:
+                body = json.dumps(
+                    {"error": str(exc)}, ensure_ascii=False
+                ).encode("utf-8")
+                self._send(400, body, "application/json")
             return
 
         if parsed.path == "/dock/knockout":
