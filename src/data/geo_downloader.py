@@ -1,6 +1,7 @@
 """Generic GEO supplementary-file downloader."""
 
 from pathlib import Path
+import concurrent.futures
 import json
 import gzip
 import re
@@ -261,10 +262,8 @@ def _convert_downloaded(downloaded: dict, raw_dir: Path) -> dict:
     except ImportError:
         convert_h5ad = None
         convert_loom = None
-    matrix = []
-    barcodes = []
-    genes = []
-    for name in downloaded["matrix"]:
+
+    def convert_one(name: str) -> dict:
         path = raw_dir / name
         prefix = Path(name).parent.as_posix()
         if prefix == ".":
@@ -276,13 +275,13 @@ def _convert_downloaded(downloaded: dict, raw_dir: Path) -> dict:
                     "run: python -m pip install h5py scipy"
                 )
             result = convert_h5ad(path)
-            matrix.append(f"{prefix}/{result['matrix']}" if prefix else result["matrix"])
-            barcodes.append(
-                f"{prefix}/{result['barcodes']}" if prefix else result["barcodes"]
-            )
-            genes.append(
-                f"{prefix}/{result['genes']}" if prefix else result["genes"]
-            )
+            return {
+                "matrix": f"{prefix}/{result['matrix']}" if prefix else result["matrix"],
+                "barcodes": (
+                    f"{prefix}/{result['barcodes']}" if prefix else result["barcodes"]
+                ),
+                "genes": f"{prefix}/{result['genes']}" if prefix else result["genes"],
+            }
         elif name.lower().endswith(".loom"):
             if convert_loom is None:
                 raise RuntimeError(
@@ -290,15 +289,36 @@ def _convert_downloaded(downloaded: dict, raw_dir: Path) -> dict:
                     "run: python -m pip install h5py scipy"
                 )
             result = convert_loom(path)
-            matrix.append(f"{prefix}/{result['matrix']}" if prefix else result["matrix"])
-            barcodes.append(
-                f"{prefix}/{result['barcodes']}" if prefix else result["barcodes"]
-            )
-            genes.append(
-                f"{prefix}/{result['genes']}" if prefix else result["genes"]
-            )
-        else:
-            matrix.append(name)
+            return {
+                "matrix": f"{prefix}/{result['matrix']}" if prefix else result["matrix"],
+                "barcodes": (
+                    f"{prefix}/{result['barcodes']}" if prefix else result["barcodes"]
+                ),
+                "genes": f"{prefix}/{result['genes']}" if prefix else result["genes"],
+            }
+        return {"matrix": name, "barcodes": [], "genes": []}
+
+    names = downloaded["matrix"]
+    with concurrent.futures.ThreadPoolExecutor(
+        max_workers=min(4, max(1, len(names)))
+    ) as pool:
+        results = list(pool.map(convert_one, names))
+
+    matrix = []
+    barcodes = []
+    genes = []
+    for result in results:
+        matrix.append(result["matrix"])
+        barcodes.extend(
+            result["barcodes"]
+            if isinstance(result["barcodes"], list)
+            else [result["barcodes"]]
+        )
+        genes.extend(
+            result["genes"]
+            if isinstance(result["genes"], list)
+            else [result["genes"]]
+        )
     downloaded["matrix"] = matrix
     downloaded["barcodes"] = barcodes or downloaded["barcodes"]
     downloaded["genes"] = genes or downloaded["genes"]

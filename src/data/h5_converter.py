@@ -46,6 +46,11 @@ def _read_text(ds) -> list[str]:
 def _find_dataset(group, keys: list[str]):
     if not isinstance(group, h5py.Group):
         return None
+    index_name = group.attrs.get("_index")
+    if isinstance(index_name, str) and index_name in group:
+        item = group[index_name]
+        if isinstance(item, h5py.Dataset):
+            return item
     for key in keys:
         if key in group:
             item = group[key]
