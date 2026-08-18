@@ -276,6 +276,73 @@ a.file-link { color: #1665c0; text-decoration: none; margin-right: 12px; }
 </div>
 
 <div class="card">
+  <h2>网络毒理学分析</h2>
+  <form id="netForm">
+    <div class="grid wide">
+      <label>工作目录
+        <input name="net_workdir" placeholder="默认 dock">
+      </label>
+      <label>化合物名称
+        <input name="net_compound_name" placeholder="Bisphenol A">
+      </label>
+      <label>疾病名称
+        <input name="net_disease_name" placeholder="Hepatocellular Carcinoma">
+      </label>
+      <label>化合物靶点 CSV（相对工作目录）
+        <input name="net_compound_targets" placeholder="data/network/compound_targets.csv" required>
+      </label>
+      <label>疾病基因 CSV（相对工作目录）
+        <input name="net_disease_genes" placeholder="data/network/disease_genes.csv" required>
+      </label>
+      <label>PPI 边表（可选）
+        <input name="net_ppi" placeholder="data/network/string_edges.tsv">
+      </label>
+    </div>
+    <div class="actions">
+      <button type="button" onclick="runNetwork(this)">运行网络毒理学</button>
+    </div>
+  </form>
+  <div id="netMessage"></div>
+  <div id="netSummary"></div>
+  <div id="netFiles"></div>
+  <div class="tablebox"><table id="netTable"></table></div>
+  <div id="netGallery" class="gallery"></div>
+</div>
+
+<div class="card">
+  <h2>FAERS 不相称性信号检测</h2>
+  <form id="faersForm">
+    <div class="grid wide">
+      <label>工作目录
+        <input name="faers_workdir" placeholder="默认 dock">
+      </label>
+      <label>事件表 CSV（相对工作目录）
+        <input name="faers_input" placeholder="data/faers/events.csv" required>
+      </label>
+      <label>药物列
+        <input name="faers_drug_column" value="drug">
+      </label>
+      <label>事件列
+        <input name="faers_event_column" value="event">
+      </label>
+      <label>计数列（可选）
+        <input name="faers_count_column" value="count">
+      </label>
+      <label>最小计数
+        <input name="faers_min_count" type="number" min="1" value="3">
+      </label>
+    </div>
+    <div class="actions">
+      <button type="button" onclick="runFaers(this)">运行 FAERS 信号检测</button>
+    </div>
+  </form>
+  <div id="faersMessage"></div>
+  <div id="faersSummary"></div>
+  <div id="faersFiles"></div>
+  <div class="tablebox"><table id="faersTable"></table></div>
+</div>
+
+<div class="card">
   <h2>随机真实 GSE 验证报告</h2>
   <div class="actions" style="margin-top:0;">
     <button type="button" onclick="loadValidationReport()">查看验证报告</button>
@@ -824,6 +891,135 @@ function renderKnockout(data) {
     '<figure><img src="' + linkBase + encodeURIComponent(name) +
     '"><figcaption>' + esc(name) + '</figcaption></figure>'
   ).join('');
+}
+
+function netMsg(text, cls) {
+  const el = document.getElementById('netMessage');
+  el.className = cls || '';
+  el.textContent = text;
+}
+
+async function runNetwork(btn) {
+  const form = document.getElementById('netForm');
+  const data = new URLSearchParams(new FormData(form));
+  btn.disabled = true;
+  netMsg('正在运行网络毒理学分析...');
+  try {
+    const resp = await fetch('/dock/network', {method: 'POST', body: data});
+    const result = await resp.json();
+    if (!resp.ok) throw new Error(result.error || '网络毒理学分析失败');
+    renderNetwork(result);
+    netMsg('网络毒理学分析完成。', 'ok');
+  } catch (e) {
+    netMsg(String(e.message || e), 'error');
+  } finally {
+    btn.disabled = false;
+  }
+}
+
+function renderNetwork(data) {
+  const summary = data.summary || {};
+  document.getElementById('netSummary').innerHTML =
+    '<p class="muted">化合物靶点 ' + esc(summary.compound_targets || 0) +
+    ' 个，疾病基因 ' + esc(summary.disease_genes || 0) +
+    '，交集基因 ' + esc(summary.overlap_genes || 0) +
+    '，PPI hub 评分 ' + (summary.ppi_hub_scored ? '已启用' : '未启用') +
+    '。输出目录：' + esc(data.output_dir) + '</p>';
+
+  const linkBase = '/dock/network/file?workdir=' +
+    encodeURIComponent(data.workdir) + '&name=';
+  document.getElementById('netFiles').innerHTML = (data.files || []).map(name =>
+    '<a class="file-link" href="' + linkBase + encodeURIComponent(name) +
+    '" download>' + esc(name) + '</a>'
+  ).join('');
+
+  const headers = ['基因', '来源数', '来源', 'PPI degree', 'PPI betweenness',
+    'PPI clustering', 'PPI hub'];
+  const keys = ['gene', 'n_sources', 'sources', 'ppi_degree',
+    'ppi_betweenness', 'ppi_clustering', 'ppi_hub_score'];
+  const table = document.getElementById('netTable');
+  if (data.rows && data.rows.length) {
+    table.innerHTML = '<thead><tr>' + headers.map(h =>
+      '<th>' + h + '</th>'
+    ).join('') + '</tr></thead><tbody>' + data.rows.map(row => {
+      return '<tr>' + keys.map(key => {
+        let value = row[key];
+        if (value === '' || value === undefined || value === null) value = '-';
+        return '<td>' + esc(value) + '</td>';
+      }).join('') + '</tr>';
+    }).join('') + '</tbody>';
+  } else {
+    table.innerHTML = '<tbody><tr><td>暂无交集基因</td></tr></tbody>';
+  }
+  document.getElementById('netGallery').innerHTML = (data.figures || []).map(name =>
+    '<figure><img src="' + linkBase + encodeURIComponent(name) +
+    '"><figcaption>' + esc(name) + '</figcaption></figure>'
+  ).join('');
+}
+
+function faersMsg(text, cls) {
+  const el = document.getElementById('faersMessage');
+  el.className = cls || '';
+  el.textContent = text;
+}
+
+async function runFaers(btn) {
+  const form = document.getElementById('faersForm');
+  const data = new URLSearchParams(new FormData(form));
+  btn.disabled = true;
+  faersMsg('正在运行 FAERS 信号检测...');
+  try {
+    const resp = await fetch('/dock/faers', {method: 'POST', body: data});
+    const result = await resp.json();
+    if (!resp.ok) throw new Error(result.error || 'FAERS 信号检测失败');
+    renderFaers(result);
+    faersMsg('FAERS 信号检测完成。', 'ok');
+  } catch (e) {
+    faersMsg(String(e.message || e), 'error');
+  } finally {
+    btn.disabled = false;
+  }
+}
+
+function renderFaers(data) {
+  const summary = data.summary || {};
+  document.getElementById('faersSummary').innerHTML =
+    '<p class="muted">药物-事件组合 ' + esc(summary.pairs || 0) +
+    ' 个，信号 ' + esc(summary.signals || 0) +
+    ' 个，最小计数 ' + esc(summary.min_count || 3) +
+    '。输出目录：' + esc(data.output_dir) + '</p>';
+
+  const linkBase = '/dock/faers/file?workdir=' +
+    encodeURIComponent(data.workdir) + '&name=';
+  document.getElementById('faersFiles').innerHTML = (data.files || []).map(name =>
+    '<a class="file-link" href="' + linkBase + encodeURIComponent(name) +
+    '" download>' + esc(name) + '</a>'
+  ).join('');
+
+  const headers = ['药物', '事件', '计数', 'ROR', 'ROR 下限', 'PRR',
+    'IC', 'EBGM', '信号'];
+  const keys = ['drug', 'event', 'a', 'ror', 'ror_lower', 'prr',
+    'ic', 'ebgm', 'signal'];
+  const table = document.getElementById('faersTable');
+  if (data.rows && data.rows.length) {
+    table.innerHTML = '<thead><tr>' + headers.map(h =>
+      '<th>' + h + '</th>'
+    ).join('') + '</tr></thead><tbody>' + data.rows.map(row => {
+      return '<tr>' + keys.map(key => {
+        let value = row[key];
+        if (key === 'ror' || key === 'ror_lower' || key === 'prr' ||
+            key === 'ic' || key === 'ebgm') {
+          if (value !== '' && value !== undefined && value !== null) {
+            value = Number(value).toFixed(3);
+          }
+        }
+        if (value === '' || value === undefined || value === null) value = '-';
+        return '<td>' + esc(value) + '</td>';
+      }).join('') + '</tr>';
+    }).join('') + '</tbody>';
+  } else {
+    table.innerHTML = '<tbody><tr><td>暂无信号结果</td></tr></tbody>';
+  }
 }
 
 loadDockHistory();

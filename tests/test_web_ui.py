@@ -23,6 +23,7 @@ from web_ui import (  # noqa: E402
     HEARTBEAT_CLIENTS,
     HEARTBEAT_LOCK,
     NOTIFY_LOCK,
+    _analysis_file_path,
     _dock_file_path,
     _full_file_path,
     _full_status,
@@ -35,6 +36,8 @@ from web_ui import (  # noqa: E402
     dock_results,
     full_results,
     register_heartbeat,
+    run_faers_request,
+    run_network_request,
     start_full_job,
     unregister_heartbeat,
 )
@@ -111,6 +114,101 @@ class TestJobRecordPersistence(unittest.TestCase):
             )
             self.assertNotIn("clearJobRecordsOnReload", template)
             self.assertNotIn("nav.type === 'reload'", template)
+
+
+class TestNetworkAndFaersWeb(unittest.TestCase):
+    def test_network_request_runs_and_lists_files(self):
+        with tempfile.TemporaryDirectory() as tmp:
+            workdir = Path(tmp) / "work"
+            workdir.mkdir()
+            data_dir = workdir / "data" / "network"
+            data_dir.mkdir(parents=True)
+            (data_dir / "targets.csv").write_text(
+                "gene,source\nALB,CTD\nGPC3,ChEMBL\nMMP9,CTD\n",
+                encoding="utf-8",
+            )
+            (data_dir / "disease.csv").write_text(
+                "gene\nALB\nGPC3\nEGFR\n",
+                encoding="utf-8",
+            )
+            (data_dir / "ppi.tsv").write_text(
+                "protein1\tprotein2\nALB\tGPC3\n",
+                encoding="utf-8",
+            )
+            result = run_network_request(
+                {
+                    "net_workdir": [str(workdir)],
+                    "net_compound_name": ["Test"],
+                    "net_disease_name": ["Liver"],
+                    "net_compound_targets": ["data/network/targets.csv"],
+                    "net_disease_genes": ["data/network/disease.csv"],
+                    "net_ppi": ["data/network/ppi.tsv"],
+                }
+            )
+            self.assertEqual(result["summary"]["overlap_genes"], 2)
+            self.assertTrue(result["summary"]["ppi_hub_scored"])
+            self.assertTrue(
+                any("compound_disease_overlap.csv" in f for f in result["files"])
+            )
+            out = Path(result["output_dir"])
+            self.assertTrue((out / "figures" / "compound_disease_venn.png").exists())
+
+    def test_faers_request_runs_and_lists_files(self):
+        with tempfile.TemporaryDirectory() as tmp:
+            workdir = Path(tmp) / "work"
+            workdir.mkdir()
+            data_dir = workdir / "data" / "faers"
+            data_dir.mkdir(parents=True)
+            (data_dir / "events.csv").write_text(
+                "drug,event,count\nA,X,10\nA,Y,2\nB,X,2\nB,Y,20\n",
+                encoding="utf-8",
+            )
+            result = run_faers_request(
+                {
+                    "faers_workdir": [str(workdir)],
+                    "faers_input": ["data/faers/events.csv"],
+                    "faers_min_count": ["3"],
+                }
+            )
+            self.assertGreaterEqual(result["summary"]["signals"], 1)
+            self.assertTrue(
+                any("faers_signals.csv" in f for f in result["files"])
+            )
+
+    def test_analysis_file_path_rejects_escape(self):
+        with tempfile.TemporaryDirectory() as tmp:
+            workdir = Path(tmp) / "work"
+            workdir.mkdir()
+            out_dir = workdir / "outputs" / "run_001" / "network_toxicology" / "data"
+            out_dir.mkdir(parents=True)
+            target = out_dir / "compound_disease_overlap.csv"
+            target.write_text("gene,n_sources,sources\nALB,1,CTD\n", encoding="utf-8")
+            self.assertEqual(
+                _analysis_file_path(
+                    str(workdir),
+                    "data/compound_disease_overlap.csv",
+                    "network",
+                ),
+                target.resolve(),
+            )
+            self.assertIsNone(
+                _analysis_file_path(str(workdir), "../escape.csv", "network")
+            )
+
+    def test_web_templates_expose_new_sections(self):
+        dock = (APP_ROOT / "web" / "templates" / "dock_page_template.html").read_text(
+            encoding="utf-8"
+        )
+        results = (
+            APP_ROOT / "web" / "templates" / "results_manifest_optimized.html"
+        ).read_text(encoding="utf-8")
+        guide = (APP_ROOT / "docs" / "result_figure_guide.md").read_text(
+            encoding="utf-8"
+        )
+        self.assertIn("网络毒理学分析", dock)
+        self.assertIn("FAERS 不相称性信号检测", dock)
+        self.assertIn("网络毒理学与 FAERS 信号", results)
+        self.assertIn("### 6.3 网络毒理学与 FAERS 信号", guide)
 
 
 class TestHeartbeatAutoShutdown(unittest.TestCase):

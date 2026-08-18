@@ -18,6 +18,8 @@
    - 单细胞：检查 `results/pipeline_complete.json`、`results/summary.json`、`results/result_report.html`。
    - 虚拟筛选：检查 `outputs/run_001/results/01_analysis/summary.json`、`outputs/run_001/results/docking_report.html` 和各阶段 `.done` 标记。
    - 全自动集成：检查 `outputs/integration/run_manifest.json`、`integration_summary.json`，以及 `cell_feedback/cell_feedback_summary.json`。
+   - 网络毒理学：检查 `outputs/run_001/network_toxicology/network_toxicology_summary.json` 和 `compound_disease_overlap.csv`。
+   - FAERS：检查 `outputs/run_001/faers/faers_summary.json` 和 `faers_signals.csv`。
 2. 确认图片文件存在且非空，并能被图片查看器打开。
 3. 确认对应状态文件没有 `skipped`、`failed`、`SHAP plot skipped` 等标记。
 4. 打开与图片同名的结果数据表，核对样本数、细胞数、P 值、分数、命中数等是否与图片一致。
@@ -290,6 +292,36 @@
 | `fig_57_feedback_celltype_boxplot.png` | 模块得分按细胞类型和条件分布，用于查看细胞类型特异性 | 至少 2 个细胞类型，箱线/小提琴分布可见 | 只有 1 个细胞类型时不生成；分布无差异时只能说明特异性弱 |
 | `fig_58_feedback_celltype_heatmap.png` | 候选基因平均表达按细胞类型聚类热图 | 至少 2 个基因，热图有颜色结构，行/列聚类可见 | 只有 1 个基因或 `pheatmap` 不可用时不生成；全图同色时不可用 |
 
+### 6.3 网络毒理学与 FAERS 信号
+
+这两个分析由虚拟筛选页或独立命令运行，不属于全自动流水线阶段，输出位于：
+
+```text
+<workdir>/outputs/run_001/network_toxicology/
+  network_toxicology_summary.json
+  figures/compound_disease_venn.png
+  data/compound_disease_overlap.csv
+  data/ppi_hub_scores.csv
+  data/ctpd_nodes.csv
+  data/ctpd_edges.csv
+  data/ctpd_network.html
+<workdir>/outputs/run_001/faers/
+  faers_summary.json
+  data/faers_signals.csv
+  data/faers_signals.html
+```
+
+| 文件 | 内容与用途 | 合格判据 | 不可用或警示 |
+| --- | --- | --- | --- |
+| `compound_disease_venn.png` | 化合物靶点与疾病基因的 Venn 图，用于查看交集规模和来源 | 图片可打开，交集基因数与 `compound_disease_overlap.csv` 一致，来源标签清晰 | 只有 1 个基因集或输入文件缺失时不生成；交集为 0 时只能说明无重叠，不能作为阳性证据 |
+| `compound_disease_overlap.csv` | 核心交集靶点及来源数据库计数 | 至少 1 个交集基因，`n_sources` 可读 | 交集为 0 或输入表不完整时需复核数据库下载 |
+| `ppi_hub_scores.csv` | STRING PPI 的 degree、betweenness、clustering 与 hub 评分 | 提供 PPI 边表时生成，基因名可匹配 | 未提供 `--ppi-network-csv` 时不生成；匹配率过低时 hub 评分代表性不足 |
+| `ctpd_network.html` | C-T-P-D 网络可视化页 | HTML 可打开，节点和边数与 CSV 一致 | 输入不完整时不生成 |
+| `faers_signals.csv` | ROR/PRR/BCPNN/EBGM 信号表 | 组合数 > 0，计数列被正确汇总，信号判定可解释 | 事件表为空、药物/事件列名错误或计数未识别时不生成 |
+| `faers_signals.html` | Top FAERS 信号浏览页 | HTML 可打开，数字与 CSV 一致 | 无信号时只说明当前阈值下未检出 |
+
+注意：FAERS 的 BCPNN IC 与 EBGM 使用常用近似公式，适合筛选，不作为正式药物警戒统计结论。
+
 ## 7. 结果图的主要用途
 
 ### 7.1 单细胞分析
@@ -316,6 +348,12 @@
 - 细胞反馈图把虚拟筛选/虚拟敲除结果映射回单细胞图谱，用于判断候选基因表达在哪些细胞类型中，是否具备细胞类型特异性。
 - `feedback_targets.csv` 中的 `cell_support_score` 可把筛选优先级和细胞表达特异性合并，用于下一轮靶点收敛。
 - 集成报告用于汇总 QC 门控、差异丰度、关键基因、敲除、对接和细胞反馈状态。
+
+### 7.4 网络毒理学与 FAERS
+
+- 网络毒理学 Venn 图用于判断化合物靶点与疾病基因的交集规模，交集表用于确定后续 PPI/富集/对接的核心基因集合。
+- PPI hub 评分用于把 STRING 拓扑信息纳入候选靶点排序，配合虚拟敲除可形成“网络毒理学 → 靶点优先级”的闭环。
+- FAERS 信号表用于从药物不良反应报告中发现风险信号，不能单独证明因果关系，需要结合机制和临床证据复核。
 
 ## 8. 建议验收清单
 
