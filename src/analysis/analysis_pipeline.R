@@ -2656,10 +2656,10 @@ if (stage_allowed("08")) run_stage("08_publication_analyses", {
   if (length(unique(seurat$sample)) > 1) {
     sample_levels <- unique(as.character(seurat$sample))
     sample_labels <- wrap_labels(sample_levels, width = 22)
-    seurat$sample_label <- factor(
-      sample_labels[match(as.character(seurat$sample), sample_levels)],
-      levels = sample_labels
-    )
+  seurat$sample_label <- unname(factor(
+    sample_labels[match(as.character(seurat$sample), sample_levels)],
+    levels = sample_labels
+  ))
     legend_cols <- if (length(sample_levels) > 80) {
       3
     } else if (length(sample_levels) > 30) {
