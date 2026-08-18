@@ -125,8 +125,8 @@ a { color: #1665c0; text-decoration: none; }
 <div class="wrap">
 <div class="page-head">
   <div class="page-title">
-    <h1>单细胞数据集分析</h1>
-    <p class="page-sub">输入 GEO 数据集编号和输出路径，自动完成下载、质控、双细胞、聚类、注释、差异表达与富集分析。</p>
+    <h1>表达数据集分析</h1>
+    <p class="page-sub">输入 GEO 数据集编号和输出路径，自动完成下载、质控、差异表达与富集分析；单细胞数据额外执行双细胞、聚类与注释。</p>
   </div>
   <div class="page-actions">
     <a class="link-button" href="/full">全自动流水线</a>
@@ -145,7 +145,7 @@ a { color: #1665c0; text-decoration: none; }
       <summary>基础设置</summary>
       <label for="acc">GSE 数据集编号</label>
       <input id="acc" name="accession" placeholder="请输入数据集编号" required>
-      <p class="muted">仅支持单细胞数据集；bulk 数据集会被明确拒绝并提示改用单细胞编号。</p>
+      <p class="muted">支持单细胞、bulk RNA-seq、microarray 等表达数据集；非单细胞数据按样本级分析运行。</p>
       <label for="out">结果保存路径</label>
       <input id="out" name="output" placeholder="请输入结果保存地址" required>
       <label for="sp">物种</label>

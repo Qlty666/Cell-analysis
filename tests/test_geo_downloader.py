@@ -3,6 +3,7 @@
 
 from __future__ import annotations
 
+import gzip
 import io
 import subprocess
 import sys
@@ -21,6 +22,7 @@ from data.geo_downloader import (  # noqa: E402
     _convert_downloaded,
     _download,
     _expand_archive_files,
+    _matrix_header_looks_single_cell,
     _refresh_manifest_mode,
     _select_files,
 )
@@ -131,7 +133,7 @@ class TestRefreshManifestMode(unittest.TestCase):
             },
         }
         updated = _refresh_manifest_mode(manifest)
-        self.assertEqual(updated["mode"], "generic")
+        self.assertEqual(updated["mode"], "single_cell")
 
     def test_keeps_per_sample_count_tables_bulk(self):
         manifest = {
@@ -148,6 +150,47 @@ class TestRefreshManifestMode(unittest.TestCase):
         }
         updated = _refresh_manifest_mode(manifest)
         self.assertEqual(updated["mode"], "bulk")
+
+    def test_single_cell_hint_overrides_bulk_file_pattern(self):
+        manifest = {
+            "accession": "GSE165816",
+            "mode": "bulk",
+            "single_cell_hint": True,
+            "files": {
+                "matrix": ["_extracted/GSM5050521_G1counts.csv.gz"],
+                "barcodes": [],
+                "genes": [],
+                "metadata": [],
+                "series_matrices": [],
+            },
+        }
+        updated = _refresh_manifest_mode(manifest)
+        self.assertEqual(updated["mode"], "single_cell")
+
+    def test_barcode_header_csv_is_reclassified_as_single_cell(self):
+        with tempfile.TemporaryDirectory() as tmp:
+            base = Path(tmp)
+            matrix = base / "GSM5050521_G1counts.csv.gz"
+            with gzip.open(matrix, "wt", encoding="utf-8") as fh:
+                fh.write(
+                    "AAACCTGAGGCTCTTA,AAACCTGCAACTTGAC,AAACCTGCACGAAATA\n"
+                    "AL627309.1,0,0,1\n"
+                    "AL669831.5,1,0,0\n"
+                )
+            manifest = {
+                "accession": "GSE165816",
+                "mode": "bulk",
+                "files": {
+                    "matrix": [matrix.name],
+                    "barcodes": [],
+                    "genes": [],
+                    "metadata": [],
+                    "series_matrices": [],
+                },
+            }
+            self.assertTrue(_matrix_header_looks_single_cell(matrix))
+            updated = _refresh_manifest_mode(manifest, base)
+            self.assertEqual(updated["mode"], "single_cell")
 
 
 class TestExpandArchiveFiles(unittest.TestCase):

@@ -141,7 +141,7 @@ a.file-link { color: #1665c0; text-decoration: none; margin-right: 12px; }
 <body>
 <div class="topnav">
   <a href="/full" class="active">全自动流水线</a>
-  <a href="/">单细胞分析</a>
+  <a href="/">表达分析</a>
   <a href="/datasets">数据集搜索</a>
   <a href="/dock">虚拟筛选</a>
   <a href="/results">结果清单</a>
@@ -209,7 +209,7 @@ a.file-link { color: #1665c0; text-decoration: none; margin-right: 12px; }
       <tbody id="pipelineSearchBody"><tr><td colspan="6" class="muted">暂无结果</td></tr></tbody>
     </table>
   </div>
-  <p class="muted" style="margin-top: 6px;">全自动流水线仅支持 single-cell 数据集；bulk 数据集只能下载，不能选择运行。</p>
+  <p class="muted" style="margin-top: 6px;">全自动流水线支持 single-cell、bulk RNA-seq、microarray 等表达数据集；非单细胞数据按样本级分析运行。</p>
 </div>
 
 <div class="card">
@@ -224,9 +224,9 @@ a.file-link { color: #1665c0; text-decoration: none; margin-right: 12px; }
       <div class="grid wide">
         <label>GEO 数据集编号
           <input name="accession" value="" placeholder="请输入数据集编号">
-          <span class="field-hint">格式如 GSE125449；仅支持单细胞数据集，bulk 数据集会被明确拒绝。</span>
+          <span class="field-hint">格式如 GSE125449；支持单细胞、bulk RNA-seq、microarray 等表达数据集。</span>
         </label>
-        <label>单细胞结果目录
+        <label>表达分析结果目录
           <input name="output" placeholder="请输入结果保存地址" required>
         </label>
         <label>工作目录
@@ -394,13 +394,8 @@ function applyDatasetPrefill() {
     const note = document.getElementById('datasetPrefillNote');
     if (note) {
       const label = prefillDataType ? '（' + prefillDataType + '）' : '';
-      if (prefillDataType === 'bulk') {
-        note.className = 'error';
-        note.textContent = '已带入数据集：' + accession.toUpperCase() + label + ' · ' + (title || '') + '。该数据集为 bulk RNA-seq，无法运行全自动流水线，请改用单细胞数据集。';
-      } else {
-        note.className = 'ok';
-        note.textContent = '已带入数据集：' + accession.toUpperCase() + label + (title ? ' · ' + title : '');
-      }
+      note.className = 'ok';
+      note.textContent = '已带入数据集：' + accession.toUpperCase() + label + (title ? ' · ' + title : '');
     }
     const url = new URL(window.location.href);
     url.searchParams.delete('accession');
@@ -442,9 +437,7 @@ function renderPipelineSearchResults() {
   body.innerHTML = pipelineSearchResults.map((row, index) => {
     const type = row.data_type || 'other';
     const badge = '<span class="badge ' + esc(type) + '">' + esc(type) + '</span>';
-    const action = type === 'bulk'
-      ? '<span class="badge bulk">仅支持单细胞</span>'
-      : '<button class="secondary" type="button" onclick="choosePipelineDataset(' + index + ')">选择</button>';
+    const action = '<button class="secondary" type="button" onclick="choosePipelineDataset(' + index + ')">选择</button>';
     return '<tr><td>' + (index + 1) + '</td>' +
       '<td><a href="' + esc(row.url) + '" target="_blank" rel="noopener">' + esc(row.accession) + '</a></td>' +
       '<td>' + esc(row.title) + '</td>' +
@@ -458,10 +451,6 @@ function choosePipelineDataset(index) {
   const row = pipelineSearchResults[index];
   if (!row) return;
   prefillDataType = (row.data_type || 'other').toLowerCase();
-  if (prefillDataType === 'bulk') {
-    msg(row.accession + ' 是 bulk RNA-seq 数据集，无法运行全自动流水线，请选择 single-cell 数据集。', 'error');
-    return;
-  }
   const input = document.querySelector('input[name="accession"]');
   if (input) input.value = row.accession;
   const speciesSelect = document.querySelector('select[name="species"]');
@@ -618,14 +607,6 @@ async function startRun() {
   const form = document.getElementById('form');
   const data = new URLSearchParams(new FormData(form));
   const accession = (data.get('accession') || '').trim().toUpperCase();
-  const knownBulk = pipelineSearchResults.some(row =>
-    String(row.accession || '').toUpperCase() === accession &&
-    String(row.data_type || '').toLowerCase() === 'bulk'
-  );
-  if (prefillDataType === 'bulk' || knownBulk) {
-    msg('该数据集为 bulk RNA-seq，无法运行全自动流水线；请改用 single-cell 数据集。', 'error');
-    return;
-  }
     const btn = document.getElementById('startBtn');
     btn.disabled = true;
     jobAlerted = false;

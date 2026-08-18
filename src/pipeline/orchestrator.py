@@ -1,9 +1,9 @@
 #!/usr/bin/env python3
-"""Orchestrator for the liver cancer single-cell pipeline.
+"""Orchestrator for the liver cancer expression analysis pipeline.
 
-Auto-downloads data, checks R dependencies, runs the Seurat analysis with
-stage markers, watches for stalls every 10 minutes, diagnoses failures, and
-regenerates the HTML report.
+Auto-downloads data, checks R dependencies, runs the Seurat expression
+analysis (single-cell or sample-level bulk) with stage markers, watches for
+stalls every 10 minutes, diagnoses failures, and regenerates the HTML report.
 """
 
 import argparse
@@ -423,13 +423,8 @@ def run_pipeline(
             except (OSError, ValueError):
                 manifest = {}
             species = manifest.get("organism", "hs")
-            if manifest.get("mode") == "bulk":
-                raise RuntimeError(
-                    f"{accession} is a bulk RNA-seq dataset, not "
-                    "single-cell; the single-cell pipeline and the full "
-                    "pipeline only support single-cell datasets. Use a "
-                    "single-cell GSE accession instead."
-                )
+            mode = manifest.get("mode", "generic")
+            log(f"dataset mode: {mode}")
             if species not in ("hs", "mm"):
                 species = "hs"
         else:
@@ -498,7 +493,7 @@ def run_pipeline(
 
 
 def main() -> int:
-    parser = argparse.ArgumentParser(description="Liver cancer scRNA-seq pipeline")
+    parser = argparse.ArgumentParser(description="Liver cancer expression analysis pipeline")
     parser.add_argument(
         "accession",
         help="GEO dataset accession (e.g. GSE125449)",

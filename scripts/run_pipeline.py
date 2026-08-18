@@ -1,5 +1,5 @@
 #!/usr/bin/env python3
-"""CLI entry point for the liver cancer single-cell pipeline."""
+"""CLI entry point for the liver cancer expression analysis pipeline."""
 
 import sys
 from pathlib import Path

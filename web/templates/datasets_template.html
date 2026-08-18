@@ -139,7 +139,7 @@ a { color: #1665c0; text-decoration: none; }
 <body>
 <div class="topnav">
   <a href="/full">全自动流水线</a>
-  <a href="/">单细胞分析</a>
+  <a href="/">表达分析</a>
   <a href="/datasets" class="active">数据集搜索</a>
   <a href="/dock">虚拟筛选</a>
   <a href="/results">结果清单</a>
@@ -208,7 +208,7 @@ a { color: #1665c0; text-decoration: none; }
       <select id="filterDataType" onchange="applyFilters()">
         <option value="all">全部</option>
         <option value="single-cell">single-cell（支持全自动流水线）</option>
-        <option value="bulk">bulk（仅可下载）</option>
+        <option value="bulk">bulk（支持全自动流水线）</option>
         <option value="other">other</option>
       </select>
     </label>
@@ -231,7 +231,7 @@ a { color: #1665c0; text-decoration: none; }
       <input id="filterType" placeholder="high throughput sequencing" oninput="applyFilters()">
     </label>
   </div>
-  <p class="muted">全自动流水线仅支持 single-cell 数据集；bulk 数据集可直接下载，但无法直接运行全自动流水线。</p>
+  <p class="muted">全自动流水线支持 single-cell、bulk RNA-seq、microarray 等表达数据集；非单细胞数据按样本级分析运行。</p>
   <div id="resultMeta" class="muted"></div>
   <div class="tablebox">
     <table>
@@ -379,9 +379,7 @@ function renderResults() {
       '<td>' + badge + '</td>' +
       '<td>' + score + '</td>' +
       '<td><button class="secondary" type="button" onclick="startDownload(\'' + esc(row.accession) + '\')">下载</button>' +
-      (type === 'bulk'
-        ? '<span class="badge bulk">全自动流水线仅支持单细胞</span>'
-        : '<a class="link-button" href="' + esc(row.full_pipeline_url || ('/full?accession=' + encodeURIComponent(row.accession))) + '">全自动流水线</a>') + '</td></tr>';
+      '<a class="link-button" href="' + esc(row.full_pipeline_url || ('/full?accession=' + encodeURIComponent(row.accession))) + '">全自动流水线</a>' + '</td></tr>';
   }).join('');
 }
 
