@@ -94,6 +94,231 @@ def _kegg_pathways(gene: str, max_items: int = 10, timeout: int = 90) -> dict:
         return {"ok": False, "error": {"message": str(exc)}}
 
 
+def _alphafold_evidence(
+    uniprot: str,
+    max_items: int = 10,
+    timeout: int = 90,
+    log=None,
+) -> dict:
+    if not uniprot:
+        return {"ok": False, "error": {"message": "no UniProt accession"}}
+    return call_skill(
+        "alphafold",
+        {
+            "base_url": "https://alphafold.ebi.ac.uk/api",
+            "path": f"prediction/{uniprot}",
+            "max_items": max_items,
+        },
+        timeout=timeout,
+        log=log,
+    )
+
+
+def _string_evidence(
+    identifier: str,
+    max_items: int = 10,
+    timeout: int = 90,
+    log=None,
+) -> dict:
+    if not identifier:
+        return {"ok": False, "error": {"message": "no gene identifier"}}
+    return call_skill(
+        "string",
+        {
+            "base_url": "https://string-db.org/api/json",
+            "path": "interaction_partners",
+            "method": "POST",
+            "form_body": {
+                "identifier": identifier,
+                "species": 9606,
+                "caller_identity": "liver-cancer-pipeline",
+                "limit": max(1, min(int(max_items), 10)),
+            },
+            "max_items": max_items,
+        },
+        timeout=timeout,
+        log=log,
+    )
+
+
+def _reactome_evidence(
+    identifier: str,
+    max_items: int = 10,
+    timeout: int = 90,
+    log=None,
+) -> dict:
+    if not identifier:
+        return {"ok": False, "error": {"message": "no gene identifier"}}
+    return call_skill(
+        "reactome",
+        {
+            "base_url": "https://reactome.org/ContentService",
+            "path": "search/query",
+            "params": {
+                "query": identifier,
+                "species": "Homo sapiens",
+                "types": "Pathway",
+            },
+            "headers": {"Accept": "application/json"},
+            "record_path": "results.0.entries",
+            "max_items": max_items,
+        },
+        timeout=timeout,
+        log=log,
+    )
+
+
+def _pharmgkb_evidence(
+    gene: str,
+    max_items: int = 10,
+    timeout: int = 90,
+    log=None,
+) -> dict:
+    if not gene:
+        return {"ok": False, "error": {"message": "no gene name"}}
+    return call_skill(
+        "pharmgkb",
+        {
+            "base_url": "https://api.pharmgkb.org/v1/data",
+            "path": "search",
+            "params": {"q": gene, "type": "Gene", "limit": max_items},
+            "max_items": max_items,
+        },
+        timeout=timeout,
+        log=log,
+    )
+
+
+def _opentargets_evidence(
+    gene: str,
+    max_items: int = 10,
+    timeout: int = 90,
+    log=None,
+) -> dict:
+    if not gene:
+        return {"ok": False, "error": {"message": "no gene name"}}
+    return call_skill(
+        "opentargets",
+        {
+            "query": (
+                "query searchAny($q: String!) { "
+                "search(queryString: $q) { total hits { entity score "
+                "object { ... on Target { id approvedSymbol } } } } }"
+            ),
+            "variables": {"q": gene},
+            "max_items": max_items,
+            "max_depth": 6,
+        },
+        timeout=timeout,
+        log=log,
+    )
+
+
+def _ids_from_records(res: dict, keys: list[str], limit: int = 10) -> list[str]:
+    records = res.get("records") if isinstance(res, dict) else None
+    if not isinstance(records, list):
+        return []
+    ids: list[str] = []
+    for record in records:
+        if not isinstance(record, dict):
+            continue
+        for key in keys:
+            value = record.get(key)
+            if value and isinstance(value, str) and value not in ids:
+                ids.append(value)
+                break
+        if len(ids) >= limit:
+            break
+    return ids
+
+
+def _opentargets_target_hits(res: dict, max_items: int = 10) -> tuple[int, list[str]]:
+    search = (res.get("summary") or {}).get("search") or {}
+    hits = search.get("hits") or []
+    if not isinstance(hits, list):
+        return 0, []
+    ids: list[str] = []
+    for hit in hits:
+        if not isinstance(hit, dict) or hit.get("entity") != "target":
+            continue
+        obj = hit.get("object")
+        if isinstance(obj, dict):
+            value = obj.get("id") or obj.get("approvedSymbol") or ""
+            if value and value not in ids:
+                ids.append(value)
+    return len(ids), ids[:max_items]
+
+
+def collect_gene_database_evidence(
+    gene: str,
+    max_items: int = 10,
+    timeout: int = 90,
+    uniprot: str = "",
+    ensembl: str = "",
+) -> dict:
+    """Collect compact per-gene counts for the full-pipeline evidence table."""
+    sections = {
+        "alphafold": _alphafold_evidence(uniprot, max_items, timeout),
+        "string": _string_evidence(gene, max_items, timeout),
+        "reactome": _reactome_evidence(gene, max_items, timeout),
+        "pharmgkb": _pharmgkb_evidence(gene, max_items, timeout),
+        "opentargets": _opentargets_evidence(gene, max_items, timeout),
+        "kegg": _kegg_pathways(gene, max_items, timeout),
+    }
+    ot_hits, ot_ids = _opentargets_target_hits(
+        sections["opentargets"],
+        max_items,
+    )
+    kegg = sections["kegg"] or {}
+    return {
+        "string_partners": _record_count(sections["string"]),
+        "string_partner_ids": ",".join(
+            _ids_from_records(
+                sections["string"],
+                ["preferredName_B", "stringId_B"],
+                max_items,
+            )
+        ),
+        "reactome_pathways": _record_count(sections["reactome"]),
+        "reactome_pathway_ids": ",".join(
+            _ids_from_records(
+                sections["reactome"],
+                ["stId", "id"],
+                max_items,
+            )
+        ),
+        "pharmgkb_annotations": _record_count(sections["pharmgkb"]),
+        "pharmgkb_ids": ",".join(
+            _ids_from_records(
+                sections["pharmgkb"],
+                ["id", "accessionId"],
+                max_items,
+            )
+        ),
+        "alphafold_structures": _record_count(sections["alphafold"]),
+        "alphafold_ids": ",".join(
+            _ids_from_records(
+                sections["alphafold"],
+                ["entryId", "uniprotAccession", "id"],
+                max_items,
+            )
+        ),
+        "opentargets_hits": ot_hits,
+        "opentargets_target_ids": ",".join(ot_ids),
+        "kegg_pathways": int(kegg.get("pathway_count") or 0),
+        "kegg_pathway_ids": ",".join(kegg.get("pathways") or []),
+        "database_sources": ",".join(
+            sorted(
+                name
+                for name, section in sections.items()
+                if bool(
+                    section.get("ok", section.get("status_code", 0) == 200)
+                )
+            )
+        ),
+    }
+
+
 def gather_evidence(cfg: ResolvedConfig, log) -> dict:
     ev = cfg.data.get("evidence", {})
     acc = ev.get("uniprot_accession") or ""
@@ -265,88 +490,31 @@ def gather_evidence(cfg: ResolvedConfig, log) -> dict:
         sections["chebi"] = res
 
     query_label = target_name or acc
-    if acc:
-        res = call_skill(
-            "alphafold",
-            {
-                "base_url": "https://alphafold.ebi.ac.uk/api",
-                "path": f"prediction/{acc}",
-                "max_items": max_items,
-            },
-            log=log,
-        )
-        sections["alphafold"] = res
-
-    if query_label:
-        res = call_skill(
-            "string",
-            {
-                "base_url": "https://string-db.org/api/json",
-                "path": "interaction_partners",
-                "method": "POST",
-                "form_body": {
-                    "identifier": query_label,
-                    "species": 9606,
-                    "caller_identity": "liver-cancer-pipeline",
-                    "limit": max(1, min(int(max_items), 10)),
-                },
-                "max_items": max_items,
-            },
-            log=log,
-        )
-        sections["string"] = res
-
-    if query_label:
-        res = call_skill(
-            "reactome",
-            {
-                "base_url": "https://reactome.org/ContentService",
-                "path": "search/query",
-                "params": {
-                    "query": query_label,
-                    "species": "Homo sapiens",
-                    "types": "Pathway",
-                },
-                "headers": {"Accept": "application/json"},
-                "record_path": "results.0.entries",
-                "max_items": max_items,
-            },
-            log=log,
-        )
-        sections["reactome"] = res
-
-    if target_name:
-        res = call_skill(
-            "pharmgkb",
-            {
-                "base_url": "https://api.pharmgkb.org/v1/data",
-                "path": "search",
-                "params": {
-                    "q": target_name,
-                    "type": "Gene",
-                    "limit": max_items,
-                },
-                "max_items": max_items,
-            },
-            log=log,
-        )
-        sections["pharmgkb"] = res
-        res = call_skill(
-            "opentargets",
-            {
-                "query": (
-                    "query searchAny($q: String!) { "
-                    "search(queryString: $q) { total hits { entity score "
-                    "object { ... on Target { id approvedSymbol } } } } }"
-                ),
-                "variables": {"q": target_name},
-                "max_items": max_items,
-                "max_depth": 4,
-            },
-            log=log,
-        )
-        sections["opentargets"] = res
-
+    sections["alphafold"] = _alphafold_evidence(
+        acc,
+        max_items,
+        log=log,
+    )
+    sections["string"] = _string_evidence(
+        query_label,
+        max_items,
+        log=log,
+    )
+    sections["reactome"] = _reactome_evidence(
+        query_label,
+        max_items,
+        log=log,
+    )
+    sections["pharmgkb"] = _pharmgkb_evidence(
+        target_name,
+        max_items,
+        log=log,
+    )
+    sections["opentargets"] = _opentargets_evidence(
+        target_name,
+        max_items,
+        log=log,
+    )
     sections["kegg"] = _kegg_pathways(query_label, max_items)
 
     known_ligands = out_dir / "known_ligands.csv"
@@ -519,4 +687,6 @@ def _record_count(res: dict) -> int:
                 return value
             if isinstance(value, str) and value.isdigit():
                 return int(value)
+            if isinstance(value, list):
+                return len(value)
     return 0
