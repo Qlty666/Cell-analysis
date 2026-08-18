@@ -523,6 +523,25 @@ footer { color: #64748b; font-size: 12px; margin: 30px 0 8px; }
 </div>
 
 <div class="card">
+  <h2>网络毒理学与 FAERS 信号</h2>
+  <p class="muted">位置：<span class="path">&lt;workdir&gt;/outputs/run_001/</span>；网络毒理学与 FAERS 为独立命令，未运行时不生成。</p>
+  <table>
+    <thead><tr><th>文件</th><th>内容</th><th>类型</th><th>用途</th></tr></thead>
+    <tbody>
+      <tr><td><code>network_toxicology/data/compound_disease_overlap.csv</code></td><td>化合物靶点与疾病基因交集表</td><td><span class="badge data">结果数据</span></td><td>核心交集靶点及来源数</td></tr>
+      <tr><td><code>network_toxicology/data/ppi_hub_scores.csv</code></td><td>STRING PPI degree/betweenness/clustering 评分</td><td><span class="badge data">结果数据</span></td><td>PPI hub 靶点评分 <span class="badge opt">条件</span></td></tr>
+      <tr><td><code>network_toxicology/data/ctpd_nodes.csv</code></td><td>C-T-P-D 网络节点表</td><td><span class="badge data">结果数据</span></td><td>化合物、靶点、疾病节点</td></tr>
+      <tr><td><code>network_toxicology/data/ctpd_edges.csv</code></td><td>C-T-P-D 网络边表</td><td><span class="badge data">结果数据</span></td><td>化合物-靶点、靶点-疾病、PPI 边</td></tr>
+      <tr><td><code>network_toxicology/data/ctpd_network.html</code></td><td>C-T-P-D 网络可视化页</td><td><span class="badge data">结果数据</span></td><td>快速查看网络关系</td></tr>
+      <tr><td><code>network_toxicology/figures/compound_disease_venn.png</code></td><td>化合物-疾病交集 Venn 图</td><td><span class="badge fig">结果图</span></td><td>展示交集规模与来源分布</td></tr>
+      <tr><td><code>faers/data/faers_signals.csv</code></td><td>ROR/PRR/BCPNN/EBGM 信号表</td><td><span class="badge data">结果数据</span></td><td>药物-事件不相称性信号</td></tr>
+      <tr><td><code>faers/data/faers_signals.html</code></td><td>FAERS 信号结果页</td><td><span class="badge data">结果数据</span></td><td>Top 信号快速浏览</td></tr>
+      <tr><td><code>faers/faers_summary.json</code></td><td>FAERS 汇总统计</td><td><span class="badge data">结果数据</span></td><td>组合数、信号数、Top 药物</td></tr>
+    </tbody>
+  </table>
+</div>
+
+<div class="card">
   <h2>08 集成报告与溯源</h2>
   <p class="muted">位置：<span class="path">&lt;workdir&gt;/outputs/integration/</span></p>
   <p class="muted">无结果图/结果数据。本阶段仅生成 HTML 报告、汇总与溯源文件，不列入本清单。</p>
