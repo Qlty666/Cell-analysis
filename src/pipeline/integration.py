@@ -395,6 +395,19 @@ def _recorded_single_cell_root(workdir: Path) -> Path | None:
     return None
 
 
+def _dataset_mode_from_root(root: Path) -> str:
+    summary_path = root / "results" / "summary.json"
+    if summary_path.exists():
+        try:
+            summary = json.loads(summary_path.read_text(encoding="utf-8"))
+            mode = str(summary.get("dataset_mode", "")).strip()
+            if mode:
+                return mode
+        except (OSError, ValueError):
+            pass
+    return "single_cell"
+
+
 def _invalidate_markers_for_changed_root(
     workdir: Path,
     single_cell_root: Path,
@@ -1897,6 +1910,8 @@ def generate_integrated_report(
     out_dir.mkdir(parents=True, exist_ok=True)
 
     sc_summary = _read_json(single_cell_root / "results" / "summary.json")
+    dataset_mode = str(sc_summary.get("dataset_mode", "single_cell"))
+    sample_label = "samples" if dataset_mode != "single_cell" else "cells"
     key_genes = pd.read_csv(out_dir / "key_genes.csv") if (out_dir / "key_genes.csv").exists() else pd.DataFrame()
     ko_summary = _read_json(out_dir / "knockout_summary.json")
     ko_top = pd.DataFrame()
@@ -1955,14 +1970,14 @@ def generate_integrated_report(
             [
                 {
                     "accession": sc_summary.get("dataset", ""),
-                    "cells": sc_summary.get("n_cells_after_doublet_removal", ""),
+                    sample_label: sc_summary.get("n_cells_after_doublet_removal", ""),
                     "genes": sc_summary.get("n_genes", ""),
                     "deg_up": sc_summary.get("deg_up", ""),
                     "deg_down": sc_summary.get("deg_down", ""),
                 }
             ]
         ),
-        ["accession", "cells", "genes", "deg_up", "deg_down"],
+        ["accession", sample_label, "genes", "deg_up", "deg_down"],
     )
     ko_cols = [
         c
@@ -2067,12 +2082,12 @@ a {{ color: #1d4ed8; }}
 <body>
 <h1>Integrated Discovery Pipeline Report</h1>
 <div class="card">
-  <p><b>Single-cell output:</b> {rel(single_cell_root)}</p>
+  <p><b>Analysis output:</b> {rel(single_cell_root)}</p>
   <p><b>Integration output:</b> {rel(out_dir)}</p>
   <p><b>Docking summary:</b> {_esc(docking_summary)}</p>
 </div>
 <div class="card">
-  <h2>Single-cell summary</h2>
+  <h2>Expression analysis summary</h2>
   {sc_html}
 </div>
 <div class="card">
@@ -2181,14 +2196,16 @@ a {{ color: #1d4ed8; }}
 
 def _stage_single_cell(args, workdir: Path, ctx: dict) -> None:
     root = ctx["single_cell_root"]
+    accession = str(getattr(args, "accession", "") or "").strip().upper()
+    dataset_mode = "single_cell"
     if args.skip_scrna:
         if not (root / "results" / "pipeline_complete.json").exists():
             raise IntegrationError(
                 f"single-cell outputs not found under {root}; remove --skip-scrna"
             )
         log.info("using existing single-cell outputs: %s", root)
+        dataset_mode = _dataset_mode_from_root(root)
     else:
-        accession = str(getattr(args, "accession", "") or "").strip().upper()
         if accession:
             manifest_path = (
                 root / "data" / f"{accession}_manifest.json"
@@ -2199,12 +2216,11 @@ def _stage_single_cell(args, workdir: Path, ctx: dict) -> None:
                 )
             except (OSError, ValueError):
                 manifest = {}
-            if manifest.get("mode") == "bulk":
-                raise IntegrationError(
-                    f"{accession} is a bulk RNA-seq dataset, not "
-                    "single-cell; the full pipeline only supports "
-                    "single-cell datasets."
-                )
+            dataset_mode = (
+                "single_cell"
+                if manifest.get("mode") == "single_cell"
+                else "sample_level"
+            )
         code = orchestrator.run_pipeline(
             args.force,
             args.skip_download,
@@ -2218,6 +2234,8 @@ def _stage_single_cell(args, workdir: Path, ctx: dict) -> None:
             raise PauseRequested("single-cell pipeline paused; run again to resume")
         if code != 0:
             raise IntegrationError(f"single-cell pipeline exited with code {code}")
+        dataset_mode = _dataset_mode_from_root(root)
+    ctx["dataset_mode"] = dataset_mode
 
     metrics = write_qc_metrics(workdir, root, getattr(args, "qc_gate", {}))
     gate = metrics["qc_gate"]
@@ -2228,16 +2246,21 @@ def _stage_single_cell(args, workdir: Path, ctx: dict) -> None:
     ctx["qc_metrics"] = metrics
 
     da_config = getattr(args, "differential_abundance", {}) or {}
-    if da_config.get("enabled", True):
+    if da_config.get("enabled", True) and dataset_mode == "single_cell":
         ctx["differential_abundance"] = run_differential_abundance(
             root,
             _integration_dir(workdir),
             da_config,
         )
     else:
+        reason = (
+            "differential abundance is not applicable to sample-level datasets"
+            if dataset_mode != "single_cell"
+            else "differential abundance disabled by configuration"
+        )
         summary = {
             "status": "skipped",
-            "reason": "differential abundance disabled by configuration",
+            "reason": reason,
             "output_csv": "",
         }
         write_json(
@@ -2335,10 +2358,17 @@ def _stage_docking(args, workdir: Path, ctx: dict) -> None:
 
 
 def _stage_cell_feedback(args, workdir: Path, ctx: dict) -> None:
-    if args.skip_cell_feedback:
+    if ctx.get("dataset_mode") is None:
+        ctx["dataset_mode"] = _dataset_mode_from_root(ctx["single_cell_root"])
+    sample_level_mode = ctx.get("dataset_mode") != "single_cell"
+    if args.skip_cell_feedback or sample_level_mode:
         summary = {
             "status": "skipped",
-            "reason": "cell feedback disabled by arguments",
+            "reason": (
+                "cell-level feedback is not applicable to sample-level datasets"
+                if sample_level_mode
+                else "cell feedback disabled by arguments"
+            ),
         }
         write_json(
             _integration_dir(workdir) / "cell_feedback" / "cell_feedback_summary.json",
