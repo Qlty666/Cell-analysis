@@ -14,6 +14,8 @@ from sklearn.ensemble import (
     RandomForestClassifier,
     RandomForestRegressor,
 )
+from sklearn.feature_selection import RFE, SelectFromModel
+from sklearn.linear_model import LogisticRegression
 from sklearn.metrics import (
     accuracy_score,
     average_precision_score,
@@ -25,6 +27,7 @@ from sklearn.metrics import (
 from sklearn.model_selection import train_test_split
 from sklearn.neural_network import MLPClassifier, MLPRegressor
 from sklearn.preprocessing import LabelEncoder, StandardScaler
+from sklearn.svm import SVC
 
 from .config import ResolvedConfig
 from .utils import DockingError, write_json
@@ -97,6 +100,8 @@ def train_ml(
 
     test_size = float(cfg.get("ml", "test_size", 0.2))
     stratify = y if task == "classification" and len(set(y)) > 1 else None
+    all_feature_names = feature_names()[: X.shape[1]]
+    selected_feature_names = list(all_feature_names)
     X_train, X_test, y_train, y_test = train_test_split(
         X,
         y,
@@ -104,6 +109,40 @@ def train_ml(
         random_state=int(cfg.get("ml", "random_state", 42)),
         stratify=stratify,
     )
+
+    original_model_type = model_type
+    if model_type == "lasso_svm":
+        if task != "classification":
+            raise DockingError("lasso_svm is only supported for classification")
+        lasso_selector = SelectFromModel(
+            LogisticRegression(
+                penalty="l1",
+                solver="liblinear",
+                C=1.0,
+                max_iter=1000,
+                random_state=int(cfg.get("ml", "random_state", 42)),
+            )
+        )
+        lasso_selector.fit(X_train, y_train)
+        X_train = lasso_selector.transform(X_train)
+        X_test = lasso_selector.transform(X_test)
+        selected_feature_names = np.asarray(all_feature_names)[
+            lasso_selector.get_support()
+        ].tolist()
+        if X_train.shape[1] >= 2:
+            n_features = max(2, min(15, X_train.shape[1]))
+            rfe = RFE(
+                SVC(kernel="linear", probability=True, random_state=42),
+                n_features_to_select=n_features,
+            )
+            rfe.fit(X_train, y_train)
+            keep = rfe.get_support()
+            X_train = X_train[:, keep]
+            X_test = X_test[:, keep]
+            selected_feature_names = np.asarray(selected_feature_names)[
+                keep
+            ].tolist()
+        model_type = "svm_linear"
 
     model = _build_model(
         model_type,
@@ -130,7 +169,8 @@ def train_ml(
 
     metrics = _evaluate(model, X_test, y_test, task, encoder if task == "classification" else None)
     info = {
-        "model_type": model_type,
+        "model_type": original_model_type,
+        "selected_features": X_train.shape[1],
         "task": task,
         "model_file": str(model_file),
         "feature_count": X.shape[1],
@@ -144,6 +184,8 @@ def train_ml(
 
     if hasattr(model, "feature_importances_"):
         _save_importance(model, X.shape[1], reports)
+    elif hasattr(model, "coef_"):
+        _save_coefficients(model, selected_feature_names, reports)
     if task == "classification" and hasattr(model, "predict_proba"):
         _save_roc(model, X_test, y_test, reports)
 
@@ -253,6 +295,10 @@ def _build_model(model_type, task, hidden, epochs, random_state):
         if task == "classification":
             return GradientBoostingClassifier(random_state=random_state)
         return GradientBoostingRegressor(random_state=random_state)
+    if model_type == "svm_linear":
+        if task != "classification":
+            raise DockingError("svm_linear is only supported for classification")
+        return SVC(kernel="linear", probability=True, random_state=random_state)
     if model_type == "torch":
         try:
             import torch  # noqa: F401
@@ -387,6 +433,36 @@ def _save_importance(model, n_features, reports):
         fig, ax = plt.subplots(figsize=(7, 5))
         ax.barh(top["feature"], top["importance"], color="#1665c0")
         ax.set_title("ML feature importance")
+        fig.tight_layout()
+        fig.savefig(figures_dir / "fig_50_ml_feature_importance.png", dpi=150)
+        plt.close(fig)
+
+
+def _save_coefficients(model, names, reports):
+    coef = np.asarray(model.coef_, dtype=float)
+    values = np.abs(coef).mean(axis=0) if coef.ndim > 1 else np.abs(coef)
+    frame = pd.DataFrame(
+        {
+            "feature": list(names)[: len(values)],
+            "importance": values,
+        }
+    )
+    frame = frame.sort_values("importance", ascending=False)
+    data_dir = reports / "data"
+    figures_dir = reports / "figures"
+    data_dir.mkdir(parents=True, exist_ok=True)
+    figures_dir.mkdir(parents=True, exist_ok=True)
+    frame.to_csv(data_dir / "fig_50_ml_feature_importance.csv", index=False)
+    top = frame.head(20).iloc[::-1]
+    if not top.empty:
+        import matplotlib
+
+        matplotlib.use("Agg")
+        import matplotlib.pyplot as plt
+
+        fig, ax = plt.subplots(figsize=(7, 5))
+        ax.barh(top["feature"], top["importance"], color="#1665c0")
+        ax.set_title("LASSO+SVM-RFE feature importance")
         fig.tight_layout()
         fig.savefig(figures_dir / "fig_50_ml_feature_importance.png", dpi=150)
         plt.close(fig)
