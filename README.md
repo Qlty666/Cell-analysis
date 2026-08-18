@@ -1,6 +1,6 @@
 # Liver Cancer Bioinformatics Workflow
 
-> 当前版本：0.8.1
+> 当前版本：0.8.2
 
 面向肝癌研究的本地生信自动化工作流，整合三条可实际运行的流水线：
 
@@ -648,6 +648,10 @@ GSE165816 和 TCGA PanCancer Atlas 仅用于真实数据验证。
 MIT License. See `LICENSE` for details.
 
 ## 9. 更新日志
+
+### v0.8.2
+
+- 修复 stage 08 发表分析阶段给 Seurat 对象写入 `sample_label` 时携带样本名而非细胞条形码名，导致 `AddMetaData` 报 `No cell overlap between new meta data and Seurat object` 的问题：写入前移除向量 names，多样本数据集可正常完成发表分析。
 
 ### v0.8.1
 
