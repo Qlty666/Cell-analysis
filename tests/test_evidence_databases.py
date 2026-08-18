@@ -103,6 +103,94 @@ class TestExpandedDatabases(unittest.TestCase):
                 self.assertIn(name, sections)
             self.assertEqual(result["known_ligands"], 0)
 
+    def test_collect_gene_database_evidence_summarizes_sources(self):
+        def fake_call(name, payload, timeout=90, log=None):
+            if name == "opentargets":
+                return {
+                    "ok": True,
+                    "summary": {
+                        "search": {
+                            "total": 50,
+                            "hits": [
+                                {
+                                    "entity": "target",
+                                    "object": {
+                                        "id": "ENSG00000146648",
+                                        "approvedSymbol": "EGFR",
+                                    },
+                                },
+                                {"entity": "disease", "object": {}},
+                            ],
+                        }
+                    },
+                }
+            if name == "string":
+                return {
+                    "ok": True,
+                    "records": [
+                        {
+                            "preferredName_B": "GRB2",
+                            "stringId_B": "9606.ENSP00000275493",
+                        },
+                        {
+                            "preferredName_B": "EGF",
+                            "stringId_B": "9606.ENSP00000265193",
+                        },
+                    ],
+                }
+            if name == "reactome":
+                return {
+                    "ok": True,
+                    "records": [
+                        {"stId": "R-HSA-177929", "id": "R-HSA-177929"}
+                    ],
+                }
+            if name == "pharmgkb":
+                return {
+                    "ok": True,
+                    "records": [{"id": "PA36679"}],
+                }
+            if name == "alphafold":
+                return {
+                    "ok": True,
+                    "records": [{"entryId": "AF-P00533-F1"}],
+                }
+            return {"ok": True, "records": []}
+
+        with (
+            mock.patch.object(
+                evidence_mod,
+                "call_skill",
+                side_effect=fake_call,
+            ),
+            mock.patch.object(
+                evidence_mod,
+                "_kegg_pathways",
+                return_value={
+                    "ok": True,
+                    "pathways": ["path:hsa05200"],
+                    "pathway_count": 1,
+                },
+            ),
+        ):
+            result = evidence_mod.collect_gene_database_evidence(
+                "EGFR",
+                max_items=5,
+                uniprot="P00533",
+            )
+
+        self.assertEqual(result["string_partners"], 2)
+        self.assertEqual(result["reactome_pathways"], 1)
+        self.assertEqual(result["pharmgkb_annotations"], 1)
+        self.assertEqual(result["alphafold_structures"], 1)
+        self.assertEqual(result["opentargets_hits"], 1)
+        self.assertEqual(result["kegg_pathways"], 1)
+        self.assertIn("kegg", result["database_sources"])
+        self.assertEqual(
+            result["opentargets_target_ids"],
+            "ENSG00000146648",
+        )
+
 
 if __name__ == "__main__":
     unittest.main()
