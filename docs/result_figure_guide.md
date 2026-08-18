@@ -152,6 +152,8 @@
 | `fig_43_ml_confusion_matrix.png` | 交叉验证混淆矩阵，用于查看具体错分 | 类别标签正确，对角线数量清楚，样本数可对应 | 样本量很小或模型状态失败时只能谨慎解释 |
 | `fig_44_ml_roc_pr.png` | ROC 与 PR 曲线，用于评估分类能力 | 曲线高于随机线，AUC/AP 可见，不是全部等于随机水平 | AUC 接近 0.5、样本极少或类别不平衡时不能用于强结论 |
 | `fig_45_ml_cv_scores.png` | 交叉验证准确率分布，用于评估模型稳定性 | 有 CV 分数点，均值和离散程度可读 | CV 分数波动过大或状态失败时不可用 |
+| `fig_45_ml_calibration_curve.png` | 校准曲线，用于检查预测概率是否可靠 | 校准点接近对角线，样本量足够 | 样本极少、曲线无法计算或模型状态失败时不可用 |
+| `data/07_ml/fig_24_ml_selected_features.csv` | `lasso_svm` 模型 LASSO 初筛 + SVM-RFE 选定的特征 | 状态为 `completed`，特征数 > 0 | 未选择 `lasso_svm` 时不生成，缺失正常 |
 
 ### 4.7 高级分析与发表图
 

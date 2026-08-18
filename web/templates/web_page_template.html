@@ -169,6 +169,15 @@ a { color: #1665c0; text-decoration: none; }
         <label>差异表达 Padj 阈值 <input type="number" step="0.01" name="LIVER_DE_PADJ" placeholder="0.05"></label>
         <label>Top DEG 小提琴基因数 <input type="number" name="LIVER_DE_VIOLIN_TOP_N" placeholder="12"></label>
         <label>Top DEG 小提琴每条件细胞数 <input type="number" name="LIVER_DE_VIOLIN_MAX_CELLS" placeholder="1000"></label>
+        <label>ML 模型
+          <select name="LIVER_ML_MODEL">
+            <option value="xgb">xgb - XGBoost</option>
+            <option value="rf">rf - Random Forest</option>
+            <option value="gbm">gbm - GBM</option>
+            <option value="mlp">mlp - MLP</option>
+            <option value="lasso_svm">lasso_svm - LASSO+SVM-RFE</option>
+          </select>
+        </label>
       </div>
     </details>
     <details class="form-section">

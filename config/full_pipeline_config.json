@@ -5,6 +5,7 @@
   "species": "auto",
   "top_genes": 50,
   "docking_targets": 3,
+  "ml_model": "xgb",
   "keep_all_genes": false,
   "case_label": null,
   "normal_label": null,

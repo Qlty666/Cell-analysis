@@ -220,6 +220,21 @@ a.file-link { color: #1665c0; text-decoration: none; margin-right: 12px; }
             <option value="mm">mm - Mouse</option>
           </select>
         </label>
+        <label>单细胞 ML 模型
+          <select name="ml_model">
+            <option value="xgb">xgb - XGBoost</option>
+            <option value="rf">rf - Random Forest</option>
+            <option value="gbm">gbm - GBM</option>
+            <option value="mlp">mlp - MLP</option>
+            <option value="lasso_svm">lasso_svm - LASSO+SVM-RFE</option>
+          </select>
+        </label>
+        <label>DepMap 依赖 CSV（可选）
+          <input name="depmap_csv" placeholder="data/knockout/depmap_gene_effect.csv">
+        </label>
+        <label>PPI 网络边表 CSV/TSV（可选）
+          <input name="ppi_network_csv" placeholder="data/network/string_edges.tsv">
+        </label>
         <label>关键基因数
           <input name="top_genes" type="number" min="1" value="50">
         </label>
@@ -762,7 +777,7 @@ function renderResults(data) {
     'celltype', 'n_cells', 'chi2', 'p_value', 'p_adjust', 'significant', 'direction'
   ]);
   renderTable('keyTable', data.key_genes, ['rank', 'gene', 'direction', 'avg_log2fc', 'p_val_adj']);
-  renderTable('koTable', data.knockout, ['rank', 'gene', 'target_class', 'target_score', 'knockout_score']);
+  renderTable('koTable', data.knockout, ['rank', 'gene', 'target_class', 'target_score', 'knockout_score', 'ppi_hub_score']);
   renderTable('dockTable', data.docking, ['gene', 'status', 'pdb_id', 'ligand_count', 'hits', 'best_affinity']);
   renderTable('feedbackTable', data.cell_feedback, ['gene', 'source', 'feedback_score', 'knockout_score', 'docking_hits', 'cell_detection_rate', 'celltype_specificity', 'cell_support_score', 'top_celltype']);
 }
