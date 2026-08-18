@@ -24,13 +24,26 @@ def _read_gzip(path: Path) -> str:
         return fh.read()
 
 
-def _write_sparse_h5ad(path: Path, with_names: bool = True) -> None:
+def _write_sparse_h5ad(
+    path: Path,
+    with_names: bool = True,
+    with_counts_layer: bool = False,
+) -> None:
     with h5py.File(path, "w") as f:
         x = f.create_group("X")
         x.create_dataset("data", data=np.array([1.0, 2.0], dtype=np.float32))
         x.create_dataset("indices", data=np.array([0, 1], dtype=np.int64))
         x.create_dataset("indptr", data=np.array([0, 1, 2], dtype=np.int64))
         x.attrs["shape"] = np.array([2, 2], dtype=np.int64)
+        if with_counts_layer:
+            layers = f.create_group("layers")
+            counts = layers.create_group("counts")
+            counts.create_dataset(
+                "data", data=np.array([5.0, 6.0], dtype=np.float32)
+            )
+            counts.create_dataset("indices", data=np.array([0, 1], dtype=np.int64))
+            counts.create_dataset("indptr", data=np.array([0, 1, 2], dtype=np.int64))
+            counts.attrs["shape"] = np.array([2, 2], dtype=np.int64)
         obs = f.create_group("obs")
         var = f.create_group("var")
         if with_names:
@@ -64,6 +77,19 @@ class TestH5adConversion(unittest.TestCase):
             genes = _read_gzip(path.with_name(result["genes"]))
             self.assertEqual(barcodes.splitlines(), ["Cell1", "Cell2"])
             self.assertEqual(genes.splitlines(), ["Gene1", "Gene2"])
+
+    def test_prefers_counts_layer_over_normalized_x(self):
+        with tempfile.TemporaryDirectory() as tmp:
+            path = Path(tmp) / "sample.h5ad"
+            _write_sparse_h5ad(
+                path,
+                with_names=True,
+                with_counts_layer=True,
+            )
+            result = convert_h5ad(path)
+            matrix_text = _read_gzip(path.with_name(result["matrix"]))
+            self.assertIn(" 5", matrix_text)
+            self.assertIn(" 6", matrix_text)
 
 
 class TestLoomConversion(unittest.TestCase):

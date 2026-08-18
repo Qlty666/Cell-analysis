@@ -14,7 +14,11 @@ def _write_mtx(path: Path, matrix: sp.spmatrix, genes, cells) -> None:
         fh.write("%%MatrixMarket matrix coordinate integer general\n")
         fh.write(f"{matrix.shape[0]} {matrix.shape[1]} {matrix.nnz}\n")
         for i, j, v in zip(matrix.row, matrix.col, matrix.data):
-            fh.write(f"{i + 1} {j + 1} {int(v)}\n")
+            try:
+                value = int(round(float(v)))
+            except (TypeError, ValueError, OverflowError):
+                value = 0
+            fh.write(f"{i + 1} {j + 1} {value}\n")
     with gzip.open(path.with_name(path.name.replace("matrix.mtx", "barcodes.tsv")), "wt", encoding="utf-8") as fh:
         fh.write("\n".join(cells) + "\n")
     with gzip.open(path.with_name(path.name.replace("matrix.mtx", "genes.tsv")), "wt", encoding="utf-8") as fh:
@@ -54,17 +58,28 @@ def _fallback_names(prefix: str, count: int) -> list[str]:
     return [f"{prefix}{i + 1}" for i in range(count)]
 
 
+def _load_count_matrix(x) -> sp.spmatrix:
+    if isinstance(x, h5py.Group):
+        data = x["data"][:]
+        indices = x["indices"][:]
+        indptr = x["indptr"][:]
+        shape = tuple(int(v) for v in x.attrs["shape"])
+        return sp.csr_matrix((data, indices, indptr), shape=shape)
+    return sp.csr_matrix(np.asarray(x))
+
+
 def convert_h5ad(path: Path) -> dict:
     with h5py.File(path, "r") as f:
-        x = f["X"]
-        if isinstance(x, h5py.Group):
-            data = x["data"][:]
-            indices = x["indices"][:]
-            indptr = x["indptr"][:]
-            shape = tuple(int(v) for v in x.attrs["shape"])
-            matrix = sp.csr_matrix((data, indices, indptr), shape=shape)
-        else:
-            matrix = sp.csr_matrix(np.asarray(x))
+        x = None
+        layers = f.get("layers")
+        if isinstance(layers, h5py.Group):
+            for name in ("counts", "raw_counts", "count"):
+                if name in layers:
+                    x = layers[name]
+                    break
+        if x is None:
+            x = f["X"]
+        matrix = _load_count_matrix(x)
 
         obs = f.get("obs")
         var = f.get("var")

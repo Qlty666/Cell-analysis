@@ -653,6 +653,7 @@ MIT License. See `LICENSE` for details.
 
 - 彻底修复 h5ad/loom 转换：正确解码 h5ad 中 bytes 类型的 obs/var 索引，避免 barcodes 为空或基因名变成 `b'...'`。
 - obs/var 缺少索引时自动生成 `Cell1...CellN` / `Gene1...GeneN`，不会生成空 barcodes 文件。
+- h5ad 优先读取 `layers/counts` 原始计数层，X 为归一化数据时不再丢失真实计数；矩阵值非数值时自动置零。
 - R 流水线增加防御性回退：barcodes/genes 文件为空或损坏时自动补位，不再因单个空文件导致整个 stage 01 反复失败。
 
 ### v0.7.1
