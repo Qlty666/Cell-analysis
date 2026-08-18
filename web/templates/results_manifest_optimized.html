@@ -61,6 +61,48 @@ h3 { font-size: 15px; margin: 18px 0 8px; }
 .badge.fig { background: #dbeafe; color: #1e40af; }
 .badge.data { background: #dcfce7; color: #166534; }
 .badge.opt { background: #fef3c7; color: #92400e; }
+.result-toggle-cell { padding: 0; }
+.result-toggle {
+  display: flex;
+  align-items: center;
+  gap: 8px;
+  width: 100%;
+  border: 0;
+  background: transparent;
+  padding: 8px;
+  font: inherit;
+  color: inherit;
+  text-align: left;
+  cursor: pointer;
+}
+.result-toggle:hover { background: #f1f5f9; }
+.result-toggle:focus { outline: 2px solid #1665c0; outline-offset: -2px; }
+.result-chevron {
+  display: inline-block;
+  width: 14px;
+  color: #64748b;
+  transition: transform 0.15s ease;
+}
+tr.result-open .result-chevron { transform: rotate(90deg); }
+.result-detail-row { display: none; }
+tr.result-open + tr.result-detail-row { display: table-row; }
+.result-detail-row td { background: #f8fafc; }
+.result-detail {
+  display: grid;
+  grid-template-columns: 56px 1fr;
+  gap: 8px 12px;
+  padding: 10px 12px;
+}
+.result-detail .detail-label {
+  color: #52606d;
+  font-size: 12px;
+  font-weight: 600;
+}
+.result-detail .detail-value {
+  color: #1f2933;
+  font-size: 12px;
+  line-height: 1.65;
+}
 .path {
   display: inline-block;
   background: #f1f5f9;
@@ -236,6 +278,7 @@ footer { color: #64748b; font-size: 12px; margin: 30px 0 8px; }
   th, td { padding: 5px 6px; }
   .tree { font-size: 11px; }
   .toolbar input[type="search"] { min-width: 100%; }
+  .result-detail { grid-template-columns: 1fr; gap: 4px 0; }
 }
 </style>
 </head>
@@ -561,6 +604,7 @@ footer { color: #64748b; font-size: 12px; margin: 30px 0 8px; }
 (function () {
   const state = { query: '', stage: 'all', type: 'all' };
   let guideSections = [];
+  let resultDetails = {};
 
   function escapeHtml(value) {
     return String(value == null ? '' : value)
@@ -686,7 +730,7 @@ footer { color: #64748b; font-size: 12px; margin: 30px 0 8px; }
       const h2 = card.querySelector('h2');
       const stage = stageKey(h2 ? h2.textContent : '');
       card.dataset.stage = stage;
-      card.querySelectorAll('table tbody tr').forEach(tr => {
+      card.querySelectorAll('table tbody tr:not(.result-detail-row)').forEach(tr => {
         const fileCode = tr.querySelector('code');
         const file = fileCode ? fileCode.textContent.trim() : '';
         const badge = tr.querySelector('.badge');
@@ -695,7 +739,9 @@ footer { color: #64748b; font-size: 12px; margin: 30px 0 8px; }
         tr.dataset.file = file;
         tr.dataset.stage = stage;
         tr.dataset.type = type;
-        tr.dataset.search = (tr.textContent + ' ' + file + ' ' + type).toLowerCase();
+        if (!tr.dataset.transformed) {
+          tr.dataset.search = (tr.textContent + ' ' + file + ' ' + type).toLowerCase();
+        }
       });
     });
   }
@@ -722,6 +768,82 @@ footer { color: #64748b; font-size: 12px; margin: 30px 0 8px; }
   function extractFiles(text) {
     const re = /fig_[A-Za-z0-9_.-]+\.(?:png|csv|json|rds|txt)/g;
     return Array.from(new Set(String(text || '').match(re) || []));
+  }
+
+  function resultDetailEntry(file) {
+    const name = String(file || '').split('/').pop().toLowerCase();
+    return resultDetails[name] || resultDetails[String(file || '').toLowerCase()] || null;
+  }
+
+  function transformResultRows() {
+    document.querySelectorAll('.card table tbody tr').forEach(tr => {
+      if (tr.classList.contains('result-detail-row') || tr.dataset.transformed) return;
+      const fileCode = tr.querySelector('code');
+      const file = fileCode ? fileCode.textContent.trim() : '';
+      const badge = tr.querySelector('.badge');
+      const badgeText = badge ? badge.textContent.trim() : '';
+      const badgeClass = badge ? badge.className : '';
+      const optional = tr.querySelector('.badge.opt');
+      const kind = badgeText.includes('结果图') ? 'fig' : badgeText.includes('结果数据') ? 'data' : 'other';
+      const entry = resultDetailEntry(file);
+      const content = entry ? entry.content : (tr.cells[1] ? tr.cells[1].textContent.trim() : '');
+      const type = entry ? entry.type : (tr.cells[2] ? tr.cells[2].textContent.trim() : badgeText);
+      const use = entry ? entry.use : (tr.cells[3] ? tr.cells[3].textContent.trim() : '');
+
+      const button = document.createElement('button');
+      button.type = 'button';
+      button.className = 'result-toggle';
+      button.setAttribute('aria-expanded', 'false');
+      button.title = '展开详情';
+      button.innerHTML =
+        '<span class="result-chevron" aria-hidden="true">▸</span>' +
+        '<code>' + escapeHtml(file) + '</code>' +
+        (badgeClass ? '<span class="' + badgeClass + '">' + escapeHtml(badgeText) + '</span>' : '') +
+        (optional ? '<span class="badge opt">' + escapeHtml(optional.textContent.trim()) + '</span>' : '');
+
+      const cell = document.createElement('td');
+      cell.className = 'result-toggle-cell';
+      cell.appendChild(button);
+      tr.innerHTML = '';
+      tr.appendChild(cell);
+      tr.classList.add('result-item');
+      tr.dataset.transformed = '1';
+      tr.dataset.file = file;
+      tr.dataset.type = kind;
+      tr.dataset.search = [file, file.split('/').pop(), content, type, use].join(' ').toLowerCase();
+
+      const detailRow = document.createElement('tr');
+      detailRow.className = 'result-detail-row';
+      detailRow.innerHTML =
+        '<td colspan="4"><div class="result-detail">' +
+        '<span class="detail-label">内容</span><span class="detail-value">' + escapeHtml(content) + '</span>' +
+        '<span class="detail-label">类型</span><span class="detail-value">' + escapeHtml(type) + '</span>' +
+        '<span class="detail-label">用途</span><span class="detail-value">' + escapeHtml(use) + '</span>' +
+        '</div></td>';
+      tr.after(detailRow);
+
+      button.addEventListener('click', function () {
+        const open = tr.classList.toggle('result-open');
+        detailRow.style.display = open ? 'table-row' : 'none';
+        button.setAttribute('aria-expanded', String(open));
+      });
+    });
+  }
+
+  async function loadResultDetails() {
+    try {
+      const resp = await fetch('/result-details');
+      if (!resp.ok) throw new Error('HTTP ' + resp.status);
+      const data = await resp.json();
+      (data.entries || []).forEach(entry => {
+        const nameKey = String(entry.name || entry.file || '').toLowerCase();
+        const fileKey = String(entry.file || '').toLowerCase();
+        if (nameKey) resultDetails[nameKey] = entry;
+        if (fileKey) resultDetails[fileKey] = entry;
+      });
+    } catch (error) {
+      resultDetails = {};
+    }
   }
 
   function renderGuide(sections) {
@@ -793,7 +915,7 @@ footer { color: #64748b; font-size: 12px; margin: 30px 0 8px; }
     });
 
     let rowHits = 0;
-    const rows = Array.from(document.querySelectorAll('.card table tbody tr'));
+    const rows = Array.from(document.querySelectorAll('.card table tbody tr:not(.result-detail-row)'));
     rows.forEach(tr => {
       const queryOk = !q || (tr.dataset.search || '').includes(q);
       const guideOk = Array.from(matchedFiles).some(file => (tr.dataset.file || '').toLowerCase().includes(file));
@@ -802,13 +924,17 @@ footer { color: #64748b; font-size: 12px; margin: 30px 0 8px; }
         (state.type === 'all' || tr.dataset.type === state.type) &&
         (queryOk || guideOk);
       tr.style.display = show ? '' : 'none';
+      const detailRow = tr.nextElementSibling;
+      if (detailRow && detailRow.classList.contains('result-detail-row')) {
+        detailRow.style.display = show && tr.classList.contains('result-open') ? 'table-row' : 'none';
+      }
       if (show && q) rowHits++;
     });
 
     const filterActive = Boolean(q) || state.stage !== 'all' || state.type !== 'all';
     document.querySelectorAll('.card').forEach(card => {
       if (card.id === 'guideCard') return;
-      const tableRows = card.querySelectorAll('table tbody tr');
+      const tableRows = card.querySelectorAll('table tbody tr:not(.result-detail-row)');
       const hasVisible = Array.from(tableRows).some(tr => tr.style.display !== 'none');
       card.style.display = !filterActive || hasVisible ? '' : 'none';
     });
@@ -861,9 +987,13 @@ footer { color: #64748b; font-size: 12px; margin: 30px 0 8px; }
 
   window.filterResults = filterResults;
   window.clearResultFilter = clearResultFilter;
-  indexRows();
-  bindFilters();
-  loadGuide();
+  (async () => {
+    await loadResultDetails();
+    transformResultRows();
+    indexRows();
+    bindFilters();
+    loadGuide();
+  })();
 })();
 </script>
 </body>

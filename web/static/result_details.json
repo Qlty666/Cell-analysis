@@ -1,0 +1,1166 @@
+{
+  "version": 1,
+  "entries": [
+    {
+      "file": "figures/01_qc/fig_01_qc_raw_violin.png",
+      "name": "fig_01_qc_raw_violin.png",
+      "kind": "fig",
+      "content": "过滤前 nFeature_RNA、nCount_RNA、percent.mt 按条件展示的原始分布。",
+      "type": "小提琴图（多面板）",
+      "use": "判断原始数据质量，识别低质量细胞尾部、条件间差异和异常样本。",
+      "optional": false
+    },
+    {
+      "file": "figures/01_qc/fig_01_qc_filtered_violin.png",
+      "name": "fig_01_qc_filtered_violin.png",
+      "kind": "fig",
+      "content": "过滤后保留细胞的 nFeature_RNA、nCount_RNA、percent.mt 分布。",
+      "type": "小提琴图（多面板）",
+      "use": "确认过滤阈值是否合理，验证低质量尾部被去除且主要细胞群保留。",
+      "optional": false
+    },
+    {
+      "file": "figures/01_qc/fig_48_qc_pvalue_comparison.png",
+      "name": "fig_48_qc_pvalue_comparison.png",
+      "kind": "fig",
+      "content": "过滤前后各 QC 指标在条件间的 Wilcoxon 检验 -log10 P 值对比，标注 P=0.05 参考线。",
+      "type": "分组条形图（按原始/过滤后面板分面）",
+      "use": "量化过滤是否改变条件间质量差异，辅助判断 QC 是否引入偏倚。",
+      "optional": false
+    },
+    {
+      "file": "figures/02_doublets/fig_02_doublet_scores.png",
+      "name": "fig_02_doublet_scores.png",
+      "kind": "fig",
+      "content": "scDblFinder 双细胞得分按 singlet/doublet 分类的分布。",
+      "type": "小提琴图叠加箱线图",
+      "use": "判断双细胞检测的区分度与过滤边界，识别异常高得分的双细胞候选。",
+      "optional": false
+    },
+    {
+      "file": "figures/03_cluster/fig_03_umap_clusters.png",
+      "name": "fig_03_umap_clusters.png",
+      "kind": "fig",
+      "content": "Seurat 聚类结果在 UMAP 上的分布。",
+      "type": "UMAP 散点图",
+      "use": "检查聚类结构、聚类边界和过度/欠聚类。",
+      "optional": false
+    },
+    {
+      "file": "figures/03_cluster/fig_04_umap_condition.png",
+      "name": "fig_04_umap_condition.png",
+      "kind": "fig",
+      "content": "UMAP 按条件着色。",
+      "type": "UMAP 散点图",
+      "use": "评估条件间分布、批次效应和分组混杂。",
+      "optional": false
+    },
+    {
+      "file": "figures/04_annotation/fig_05_umap_annotation.png",
+      "name": "fig_05_umap_annotation.png",
+      "kind": "fig",
+      "content": "marker 注释与发表注释并排 UMAP。",
+      "type": "UMAP 散点图（双面板）",
+      "use": "比较两种注释的细胞类型分布是否一致。",
+      "optional": false
+    },
+    {
+      "file": "figures/04_annotation/fig_06_dotplot_markers.png",
+      "name": "fig_06_dotplot_markers.png",
+      "kind": "fig",
+      "content": "marker 基因在各细胞类型中的表达比例和平均表达量。",
+      "type": "点图（DotPlot）",
+      "use": "验证细胞类型注释的 marker 特异性。",
+      "optional": false
+    },
+    {
+      "file": "figures/04_annotation/fig_07_annotation_confusion_heatmap.png",
+      "name": "fig_07_annotation_confusion_heatmap.png",
+      "kind": "fig",
+      "content": "marker 注释与发表注释的混淆矩阵。",
+      "type": "热图（带计数）",
+      "use": "评估注释一致性和主要对应关系。",
+      "optional": false
+    },
+    {
+      "file": "figures/05_deg/fig_08_volcano.png",
+      "name": "fig_08_volcano.png",
+      "kind": "fig",
+      "content": "差异基因的 log2FC 与 -log10 校正 P 值。",
+      "type": "火山图（可回退为 MA 图）",
+      "use": "查看差异表达基因数量、方向和显著性。",
+      "optional": false
+    },
+    {
+      "file": "figures/05_deg/fig_09_deg_heatmap.png",
+      "name": "fig_09_deg_heatmap.png",
+      "kind": "fig",
+      "content": "Top DEG 在条件/样本中的表达热图。",
+      "type": "热图",
+      "use": "查看显著基因的整体表达模式。",
+      "optional": false
+    },
+    {
+      "file": "figures/05_deg/fig_09_deg_horizontal_violin.png",
+      "name": "fig_09_deg_horizontal_violin.png",
+      "kind": "fig",
+      "content": "按校正 P 值排序的 Top DEG 表达分布并标注 P 值。",
+      "type": "横向小提琴图",
+      "use": "优先查看差异最显著基因的表达差异。",
+      "optional": false
+    },
+    {
+      "file": "figures/06_enrichment/fig_10_go_up.png",
+      "name": "fig_10_go_up.png",
+      "kind": "fig",
+      "content": "上调基因 GO BP 富集结果。",
+      "type": "富集气泡图/点图",
+      "use": "查看上调基因富集的生物学过程。",
+      "optional": false
+    },
+    {
+      "file": "figures/06_enrichment/fig_11_go_down.png",
+      "name": "fig_11_go_down.png",
+      "kind": "fig",
+      "content": "下调基因 GO BP 富集结果。",
+      "type": "富集气泡图/点图",
+      "use": "查看下调基因富集的生物学过程。",
+      "optional": false
+    },
+    {
+      "file": "figures/06_enrichment/fig_12_kegg_up.png",
+      "name": "fig_12_kegg_up.png",
+      "kind": "fig",
+      "content": "上调基因 KEGG 富集结果。",
+      "type": "富集气泡图/点图",
+      "use": "查看上调基因相关 KEGG 通路。",
+      "optional": false
+    },
+    {
+      "file": "figures/06_enrichment/fig_13_kegg_down.png",
+      "name": "fig_13_kegg_down.png",
+      "kind": "fig",
+      "content": "下调基因 KEGG 富集结果。",
+      "type": "富集气泡图/点图",
+      "use": "查看下调基因相关 KEGG 通路。",
+      "optional": false
+    },
+    {
+      "file": "figures/03_cluster/fig_14_pca.png",
+      "name": "fig_14_pca.png",
+      "kind": "fig",
+      "content": "主成分空间中细胞按条件着色。",
+      "type": "PCA 散点图",
+      "use": "查看主要变异来源、条件/批次分离和离群细胞。",
+      "optional": false
+    },
+    {
+      "file": "figures/03_cluster/fig_15_elbow.png",
+      "name": "fig_15_elbow.png",
+      "kind": "fig",
+      "content": "各主成分标准差。",
+      "type": "折线图（碎石图）",
+      "use": "辅助确定下游使用的 PCA 维度数。",
+      "optional": false
+    },
+    {
+      "file": "figures/04_annotation/fig_16_featureplot_markers.png",
+      "name": "fig_16_featureplot_markers.png",
+      "kind": "fig",
+      "content": "marker 基因在 UMAP 上的表达位置。",
+      "type": "UMAP 特征图（FeaturePlot）",
+      "use": "检查 marker 表达是否集中在预期细胞类型区域。",
+      "optional": true
+    },
+    {
+      "file": "figures/04_annotation/fig_17_marker_violin.png",
+      "name": "fig_17_marker_violin.png",
+      "kind": "fig",
+      "content": "marker 基因在各细胞类型中的表达分布。",
+      "type": "小提琴图（多面板）",
+      "use": "验证 marker 在对应细胞类型中表达更高。",
+      "optional": true
+    },
+    {
+      "file": "figures/04_annotation/fig_18_celltype_proportion.png",
+      "name": "fig_18_celltype_proportion.png",
+      "kind": "fig",
+      "content": "各细胞类型在条件中的比例堆叠。",
+      "type": "堆叠条形图",
+      "use": "比较条件间细胞类型构成差异。",
+      "optional": false
+    },
+    {
+      "file": "figures/04_annotation/fig_19_condition_proportion.png",
+      "name": "fig_19_condition_proportion.png",
+      "kind": "fig",
+      "content": "每个细胞类型中条件构成比例。",
+      "type": "堆叠条形图（横向）",
+      "use": "观察每个细胞类型内部的条件组成。",
+      "optional": false
+    },
+    {
+      "file": "figures/06_enrichment/fig_20_gsea_go.png",
+      "name": "fig_20_gsea_go.png",
+      "kind": "fig",
+      "content": "GO BP GSEA 富集结果。",
+      "type": "GSEA 富集图（折线/条带组合）",
+      "use": "查看 GO 通路整体富集方向和显著性。",
+      "optional": false
+    },
+    {
+      "file": "figures/06_enrichment/fig_21_gsea_kegg.png",
+      "name": "fig_21_gsea_kegg.png",
+      "kind": "fig",
+      "content": "KEGG GSEA 富集结果。",
+      "type": "GSEA 富集图（折线/条带组合）",
+      "use": "查看 KEGG 通路整体富集方向和显著性。",
+      "optional": false
+    },
+    {
+      "file": "figures/06_enrichment/fig_22_go_network.png",
+      "name": "fig_22_go_network.png",
+      "kind": "fig",
+      "content": "上调 GO 通路经校正 P 值筛选后的 Top5 通路-基因网络。",
+      "type": "网络图（cnetplot）",
+      "use": "查看通路与基因的关联结构。",
+      "optional": false
+    },
+    {
+      "file": "figures/06_enrichment/fig_23_kegg_network.png",
+      "name": "fig_23_kegg_network.png",
+      "kind": "fig",
+      "content": "上调 KEGG 通路筛选后的 Top5 通路-基因网络。",
+      "type": "网络图（cnetplot）",
+      "use": "查看 KEGG 通路与基因的关联结构。",
+      "optional": false
+    },
+    {
+      "file": "figures/06_enrichment/fig_46_go_top5.png",
+      "name": "fig_46_go_top5.png",
+      "kind": "fig",
+      "content": "GO BP 筛选后 Top5 通路富集。",
+      "type": "气泡图",
+      "use": "快速查看最显著的上调 GO 通路。",
+      "optional": false
+    },
+    {
+      "file": "figures/06_enrichment/fig_47_kegg_top5.png",
+      "name": "fig_47_kegg_top5.png",
+      "kind": "fig",
+      "content": "KEGG 筛选后 Top5 通路富集。",
+      "type": "气泡图",
+      "use": "快速查看最显著的上调 KEGG 通路。",
+      "optional": false
+    },
+    {
+      "file": "figures/07_ml/fig_24_ml_feature_importance.png",
+      "name": "fig_24_ml_feature_importance.png",
+      "kind": "fig",
+      "content": "单细胞 ML 分类模型的特征重要性。",
+      "type": "条形图（横向排序）",
+      "use": "筛选影响样本分类的关键特征。",
+      "optional": false
+    },
+    {
+      "file": "figures/07_ml/fig_25_ml_shap.png",
+      "name": "fig_25_ml_shap.png",
+      "kind": "fig",
+      "content": "SHAP 值对预测方向和贡献的解释。",
+      "type": "SHAP 蜂群图",
+      "use": "解释特征如何影响模型预测。",
+      "optional": false
+    },
+    {
+      "file": "figures/08_publication/fig_26_cellcycle_umap.png",
+      "name": "fig_26_cellcycle_umap.png",
+      "kind": "fig",
+      "content": "细胞周期阶段在 UMAP 上的分布。",
+      "type": "UMAP 散点图",
+      "use": "检查细胞周期是否干扰聚类结构。",
+      "optional": true
+    },
+    {
+      "file": "figures/08_publication/fig_27_cellcycle_proportion.png",
+      "name": "fig_27_cellcycle_proportion.png",
+      "kind": "fig",
+      "content": "细胞周期阶段按分组/细胞类型的比例。",
+      "type": "堆叠条形图",
+      "use": "比较细胞周期构成差异。",
+      "optional": true
+    },
+    {
+      "file": "figures/08_publication/fig_28_umap_sample.png",
+      "name": "fig_28_umap_sample.png",
+      "kind": "fig",
+      "content": "UMAP 按样本着色。",
+      "type": "UMAP 散点图",
+      "use": "检查多样本混合和批次效应。",
+      "optional": true
+    },
+    {
+      "file": "figures/08_publication/fig_29_doublet_rate_sample.png",
+      "name": "fig_29_doublet_rate_sample.png",
+      "kind": "fig",
+      "content": "每个样本的双细胞率。",
+      "type": "条形图",
+      "use": "识别双细胞率异常偏高的样本。",
+      "optional": false
+    },
+    {
+      "file": "figures/08_publication/fig_30_sample_proportion.png",
+      "name": "fig_30_sample_proportion.png",
+      "kind": "fig",
+      "content": "每样本各细胞类型比例。",
+      "type": "堆叠条形图",
+      "use": "比较样本间细胞类型构成和异质性。",
+      "optional": false
+    },
+    {
+      "file": "figures/08_publication/fig_31_cluster_marker_heatmap.png",
+      "name": "fig_31_cluster_marker_heatmap.png",
+      "kind": "fig",
+      "content": "各聚类 marker 基因平均表达热图。",
+      "type": "热图",
+      "use": "查看聚类 marker 表达模式，辅助定义聚类标签。",
+      "optional": true
+    },
+    {
+      "file": "figures/08_publication/fig_32_cluster_marker_dotplot.png",
+      "name": "fig_32_cluster_marker_dotplot.png",
+      "kind": "fig",
+      "content": "各聚类 marker 基因表达比例与水平。",
+      "type": "点图（DotPlot）",
+      "use": "检查 marker 是否具有聚类特异性。",
+      "optional": true
+    },
+    {
+      "file": "figures/08_publication/fig_33_signature_scores_umap.png",
+      "name": "fig_33_signature_scores_umap.png",
+      "kind": "fig",
+      "content": "增殖、EMT、缺氧等功能签名得分在 UMAP 上的分布。",
+      "type": "UMAP 特征图（多面板）",
+      "use": "查看功能签名是否集中在特定细胞群。",
+      "optional": true
+    },
+    {
+      "file": "figures/08_publication/fig_34_signature_scores_boxplot.png",
+      "name": "fig_34_signature_scores_boxplot.png",
+      "kind": "fig",
+      "content": "功能签名得分按条件/细胞类型分布。",
+      "type": "箱线图或小提琴图",
+      "use": "比较条件间签名活性差异。",
+      "optional": true
+    },
+    {
+      "file": "figures/08_publication/fig_35_celltype_abundance_effect.png",
+      "name": "fig_35_celltype_abundance_effect.png",
+      "kind": "fig",
+      "content": "细胞类型丰度变化的 log2OR 与 -log10 校正 P 值。",
+      "type": "散点图（类火山图）",
+      "use": "判断哪些细胞类型在条件间显著增多或减少。",
+      "optional": false
+    },
+    {
+      "file": "figures/08_publication/fig_36_cnv_heatmap.png",
+      "name": "fig_36_cnv_heatmap.png",
+      "kind": "fig",
+      "content": "基于染色体滑动窗口均值的推断 CNV 模式。",
+      "type": "热图",
+      "use": "查看细胞亚群的染色体拷贝数变化和肿瘤异质性。",
+      "optional": true
+    },
+    {
+      "file": "figures/08_publication/fig_37_singler_umap.png",
+      "name": "fig_37_singler_umap.png",
+      "kind": "fig",
+      "content": "SingleR 参考注释在 UMAP 上的分布。",
+      "type": "UMAP 散点图",
+      "use": "查看参考注释与现有注释的空间一致性。",
+      "optional": true
+    },
+    {
+      "file": "figures/08_publication/fig_38_singler_confusion_heatmap.png",
+      "name": "fig_38_singler_confusion_heatmap.png",
+      "kind": "fig",
+      "content": "SingleR 注释与现有注释的混淆矩阵。",
+      "type": "热图",
+      "use": "定量评估注释一致性。",
+      "optional": true
+    },
+    {
+      "file": "figures/08_publication/fig_39_trajectory_umap.png",
+      "name": "fig_39_trajectory_umap.png",
+      "kind": "fig",
+      "content": "slingshot 拟时序轨迹及细胞 UMAP 分布。",
+      "type": "UMAP 轨迹图",
+      "use": "查看分化轨迹、伪时序梯度和谱系结构。",
+      "optional": true
+    },
+    {
+      "file": "figures/09_cellchat/fig_40_cellchat_network.png",
+      "name": "fig_40_cellchat_network.png",
+      "kind": "fig",
+      "content": "细胞类型间的通讯数量网络。",
+      "type": "网络图",
+      "use": "查看细胞间通讯关系和强度。",
+      "optional": true
+    },
+    {
+      "file": "figures/09_cellchat/fig_41_cellchat_heatmap.png",
+      "name": "fig_41_cellchat_heatmap.png",
+      "kind": "fig",
+      "content": "细胞类型对间的通讯强度。",
+      "type": "热图",
+      "use": "比较不同细胞类型对之间的通讯强度。",
+      "optional": true
+    },
+    {
+      "file": "figures/09_cellchat/fig_42_cellchat_bubble.png",
+      "name": "fig_42_cellchat_bubble.png",
+      "kind": "fig",
+      "content": "配体受体对在细胞类型对中的通讯证据。",
+      "type": "气泡图",
+      "use": "筛选候选配体受体互作。",
+      "optional": true
+    },
+    {
+      "file": "figures/07_ml/fig_43_ml_confusion_matrix.png",
+      "name": "fig_43_ml_confusion_matrix.png",
+      "kind": "fig",
+      "content": "交叉验证分类混淆矩阵。",
+      "type": "热图/混淆矩阵图",
+      "use": "查看模型错分模式和分类准确度。",
+      "optional": false
+    },
+    {
+      "file": "figures/07_ml/fig_44_ml_roc_pr.png",
+      "name": "fig_44_ml_roc_pr.png",
+      "kind": "fig",
+      "content": "二分类或多分类 ROC 与 PR 曲线。",
+      "type": "折线图（双面板）",
+      "use": "评估模型区分能力和类别性能。",
+      "optional": false
+    },
+    {
+      "file": "figures/07_ml/fig_45_ml_cv_scores.png",
+      "name": "fig_45_ml_cv_scores.png",
+      "kind": "fig",
+      "content": "交叉验证准确率分布。",
+      "type": "箱线图叠加散点图",
+      "use": "评估模型稳定性。",
+      "optional": false
+    },
+    {
+      "file": "figures/07_ml/fig_45_ml_calibration_curve.png",
+      "name": "fig_45_ml_calibration_curve.png",
+      "kind": "fig",
+      "content": "二分类模型预测概率与观测频率的校准曲线。",
+      "type": "折线图（带完美校准参考线）",
+      "use": "检查预测概率是否校准，辅助判断概率阈值可靠性。",
+      "optional": true
+    },
+    {
+      "file": "data/07_ml/fig_24_ml_selected_features.csv",
+      "name": "fig_24_ml_selected_features.csv",
+      "kind": "data",
+      "content": "ML 选定特征表",
+      "type": "CSV 数据表",
+      "use": "LASSO+SVM-RFE 选定特征；该表用于复现对应图表、复核统计结果，并作为下游筛选或报告汇总的输入。",
+      "optional": true
+    },
+    {
+      "file": "data/01_qc/fig_01_qc_metrics.csv",
+      "name": "fig_01_qc_metrics.csv",
+      "kind": "data",
+      "content": "QC 指标表",
+      "type": "CSV 数据表",
+      "use": "复现质控结果；该表用于复现对应图表、复核统计结果，并作为下游筛选或报告汇总的输入。",
+      "optional": false
+    },
+    {
+      "file": "data/01_qc/fig_48_qc_pvalue_comparison.csv",
+      "name": "fig_48_qc_pvalue_comparison.csv",
+      "kind": "data",
+      "content": "QC 质控差异度 P 值数据",
+      "type": "CSV 数据表",
+      "use": "Wilcoxon 秩和检验与 BH FDR 结果；该表用于复现对应图表、复核统计结果，并作为下游筛选或报告汇总的输入。",
+      "optional": false
+    },
+    {
+      "file": "data/01_qc/sample_annotations.csv",
+      "name": "sample_annotations.csv",
+      "kind": "data",
+      "content": "样本分组注释",
+      "type": "CSV 数据表",
+      "use": "对应样本与分组；该表用于复现对应图表、复核统计结果，并作为下游筛选或报告汇总的输入。",
+      "optional": false
+    },
+    {
+      "file": "data/02_doublets/fig_02_doublet_results.csv",
+      "name": "fig_02_doublet_results.csv",
+      "kind": "data",
+      "content": "双细胞检测结果",
+      "type": "CSV 数据表",
+      "use": "每细胞双细胞得分和判定；该表用于复现对应图表、复核统计结果，并作为下游筛选或报告汇总的输入。",
+      "optional": false
+    },
+    {
+      "file": "data/03_cluster/fig_03_04_05_umap_coordinates.csv",
+      "name": "fig_03_04_05_umap_coordinates.csv",
+      "kind": "data",
+      "content": "UMAP 坐标",
+      "type": "CSV 数据表",
+      "use": "复现聚类和注释图；该表用于复现对应图表、复核统计结果，并作为下游筛选或报告汇总的输入。",
+      "optional": false
+    },
+    {
+      "file": "data/04_annotation/fig_18_19_30_cluster_composition.csv",
+      "name": "fig_18_19_30_cluster_composition.csv",
+      "kind": "data",
+      "content": "聚类组成",
+      "type": "CSV 数据表",
+      "use": "聚类-分组-样本计数；该表用于复现对应图表、复核统计结果，并作为下游筛选或报告汇总的输入。",
+      "optional": false
+    },
+    {
+      "file": "data/04_annotation/fig_05_16_17_cell_annotations.csv",
+      "name": "fig_05_16_17_cell_annotations.csv",
+      "kind": "data",
+      "content": "细胞类型注释",
+      "type": "CSV 数据表",
+      "use": "每细胞注释结果；该表用于复现对应图表、复核统计结果，并作为下游筛选或报告汇总的输入。",
+      "optional": false
+    },
+    {
+      "file": "data/04_annotation/fig_18_19_celltype_proportion_stats.csv",
+      "name": "fig_18_19_celltype_proportion_stats.csv",
+      "kind": "data",
+      "content": "细胞类型比例统计",
+      "type": "CSV 数据表",
+      "use": "组间比例检验；该表用于复现对应图表、复核统计结果，并作为下游筛选或报告汇总的输入。",
+      "optional": false
+    },
+    {
+      "file": "data/04_annotation/fig_07_annotation_confusion.csv",
+      "name": "fig_07_annotation_confusion.csv",
+      "kind": "data",
+      "content": "注释混淆矩阵",
+      "type": "CSV 数据表",
+      "use": "注释一致性；该表用于复现对应图表、复核统计结果，并作为下游筛选或报告汇总的输入。",
+      "optional": false
+    },
+    {
+      "file": "data/05_deg/fig_08_deg_all.csv",
+      "name": "fig_08_deg_all.csv",
+      "kind": "data",
+      "content": "全部差异表达基因",
+      "type": "CSV 数据表",
+      "use": "差异表达全表；该表用于复现对应图表、复核统计结果，并作为下游筛选或报告汇总的输入。",
+      "optional": false
+    },
+    {
+      "file": "data/05_deg/fig_09_deg_significant.csv",
+      "name": "fig_09_deg_significant.csv",
+      "kind": "data",
+      "content": "显著差异表达基因",
+      "type": "CSV 数据表",
+      "use": "下游筛选输入；该表用于复现对应图表、复核统计结果，并作为下游筛选或报告汇总的输入。",
+      "optional": false
+    },
+    {
+      "file": "data/05_deg/fig_09_deg_horizontal_violin.csv",
+      "name": "fig_09_deg_horizontal_violin.csv",
+      "kind": "data",
+      "content": "Top DEG 横向小提琴图数据",
+      "type": "CSV 数据表",
+      "use": "图中基因与校正 P 值；该表用于复现对应图表、复核统计结果，并作为下游筛选或报告汇总的输入。",
+      "optional": false
+    },
+    {
+      "file": "data/06_enrichment/fig_10_enrichment_up_go.csv",
+      "name": "fig_10_enrichment_up_go.csv",
+      "kind": "data",
+      "content": "上调基因 GO 富集表",
+      "type": "CSV 数据表",
+      "use": "通路结果表；该表用于复现对应图表、复核统计结果，并作为下游筛选或报告汇总的输入。",
+      "optional": false
+    },
+    {
+      "file": "data/06_enrichment/fig_11_enrichment_down_go.csv",
+      "name": "fig_11_enrichment_down_go.csv",
+      "kind": "data",
+      "content": "下调基因 GO 富集表",
+      "type": "CSV 数据表",
+      "use": "通路结果表；该表用于复现对应图表、复核统计结果，并作为下游筛选或报告汇总的输入。",
+      "optional": false
+    },
+    {
+      "file": "data/06_enrichment/fig_12_enrichment_up_kegg.csv",
+      "name": "fig_12_enrichment_up_kegg.csv",
+      "kind": "data",
+      "content": "上调基因 KEGG 富集表",
+      "type": "CSV 数据表",
+      "use": "通路结果表；该表用于复现对应图表、复核统计结果，并作为下游筛选或报告汇总的输入。",
+      "optional": false
+    },
+    {
+      "file": "data/06_enrichment/fig_13_enrichment_down_kegg.csv",
+      "name": "fig_13_enrichment_down_kegg.csv",
+      "kind": "data",
+      "content": "下调基因 KEGG 富集表",
+      "type": "CSV 数据表",
+      "use": "通路结果表；该表用于复现对应图表、复核统计结果，并作为下游筛选或报告汇总的输入。",
+      "optional": false
+    },
+    {
+      "file": "data/04_annotation/fig_16_17_31_32_cluster_markers.csv",
+      "name": "fig_16_17_31_32_cluster_markers.csv",
+      "kind": "data",
+      "content": "聚类 marker 基因",
+      "type": "CSV 数据表",
+      "use": "marker 列表；该表用于复现对应图表、复核统计结果，并作为下游筛选或报告汇总的输入。",
+      "optional": true
+    },
+    {
+      "file": "data/08_publication/fig_26_27_cell_cycle_scores.csv",
+      "name": "fig_26_27_cell_cycle_scores.csv",
+      "kind": "data",
+      "content": "细胞周期评分",
+      "type": "CSV 数据表",
+      "use": "每细胞周期评分；该表用于复现对应图表、复核统计结果，并作为下游筛选或报告汇总的输入。",
+      "optional": true
+    },
+    {
+      "file": "data/08_publication/fig_29_doublet_rate_by_sample.csv",
+      "name": "fig_29_doublet_rate_by_sample.csv",
+      "kind": "data",
+      "content": "样本双细胞率",
+      "type": "CSV 数据表",
+      "use": "样本质量统计；该表用于复现对应图表、复核统计结果，并作为下游筛选或报告汇总的输入。",
+      "optional": false
+    },
+    {
+      "file": "data/08_publication/fig_33_34_35_signature_scores.csv",
+      "name": "fig_33_34_35_signature_scores.csv",
+      "kind": "data",
+      "content": "功能签名评分",
+      "type": "CSV 数据表",
+      "use": "每细胞签名评分；该表用于复现对应图表、复核统计结果，并作为下游筛选或报告汇总的输入。",
+      "optional": true
+    },
+    {
+      "file": "data/08_publication/fig_36_cnv_heatmap.csv",
+      "name": "fig_36_cnv_heatmap.csv",
+      "kind": "data",
+      "content": "CNV 热图矩阵",
+      "type": "CSV 数据表",
+      "use": "推断 CNV 数据；该表用于复现对应图表、复核统计结果，并作为下游筛选或报告汇总的输入。",
+      "optional": true
+    },
+    {
+      "file": "data/08_publication/fig_37_singleR_annotations.csv",
+      "name": "fig_37_singleR_annotations.csv",
+      "kind": "data",
+      "content": "SingleR 注释",
+      "type": "CSV 数据表",
+      "use": "参考注释结果；该表用于复现对应图表、复核统计结果，并作为下游筛选或报告汇总的输入。",
+      "optional": true
+    },
+    {
+      "file": "data/08_publication/fig_38_singleR_confusion.csv",
+      "name": "fig_38_singleR_confusion.csv",
+      "kind": "data",
+      "content": "SingleR 混淆矩阵",
+      "type": "CSV 数据表",
+      "use": "注释一致性；该表用于复现对应图表、复核统计结果，并作为下游筛选或报告汇总的输入。",
+      "optional": true
+    },
+    {
+      "file": "data/08_publication/fig_39_trajectory_pseudotime.csv",
+      "name": "fig_39_trajectory_pseudotime.csv",
+      "kind": "data",
+      "content": "拟时序结果",
+      "type": "CSV 数据表",
+      "use": "每细胞伪时间；该表用于复现对应图表、复核统计结果，并作为下游筛选或报告汇总的输入。",
+      "optional": true
+    },
+    {
+      "file": "data/liver_cancer_seurat.rds",
+      "name": "liver_cancer_seurat.rds",
+      "kind": "data",
+      "content": "最终 Seurat 对象",
+      "type": "R 对象（RDS）",
+      "use": "完整单细胞对象；该对象用于断点续跑、深度复核或后续分析。",
+      "optional": false
+    },
+    {
+      "file": "data/07_ml/fig_24_ml_feature_importance.csv",
+      "name": "fig_24_ml_feature_importance.csv",
+      "kind": "data",
+      "content": "ML 特征重要性",
+      "type": "CSV 数据表",
+      "use": "特征排序；该表用于复现对应图表、复核统计结果，并作为下游筛选或报告汇总的输入。",
+      "optional": false
+    },
+    {
+      "file": "data/07_ml/fig_43_44_45_ml_classification_results.csv",
+      "name": "fig_43_44_45_ml_classification_results.csv",
+      "kind": "data",
+      "content": "ML 分类预测",
+      "type": "CSV 数据表",
+      "use": "每样本预测结果；该表用于复现对应图表、复核统计结果，并作为下游筛选或报告汇总的输入。",
+      "optional": false
+    },
+    {
+      "file": "data/07_ml/fig_43_44_45_ml_classification_report.csv",
+      "name": "fig_43_44_45_ml_classification_report.csv",
+      "kind": "data",
+      "content": "ML 分类报告表",
+      "type": "CSV 数据表",
+      "use": "分类指标；该表用于复现对应图表、复核统计结果，并作为下游筛选或报告汇总的输入。",
+      "optional": false
+    },
+    {
+      "file": "data/09_cellchat/fig_40_cellchat_communication.csv",
+      "name": "fig_40_cellchat_communication.csv",
+      "kind": "data",
+      "content": "CellChat 通讯计数",
+      "type": "CSV 数据表",
+      "use": "通讯对数；该表用于复现对应图表、复核统计结果，并作为下游筛选或报告汇总的输入。",
+      "optional": true
+    },
+    {
+      "file": "data/09_cellchat/fig_40_cellchat_communication_weight.csv",
+      "name": "fig_40_cellchat_communication_weight.csv",
+      "kind": "data",
+      "content": "CellChat 通讯权重",
+      "type": "CSV 数据表",
+      "use": "通讯强度；该表用于复现对应图表、复核统计结果，并作为下游筛选或报告汇总的输入。",
+      "optional": true
+    },
+    {
+      "file": "data/09_cellchat/fig_42_cellchat_pathways.csv",
+      "name": "fig_42_cellchat_pathways.csv",
+      "kind": "data",
+      "content": "CellChat 通路结果",
+      "type": "CSV 数据表",
+      "use": "通路通讯结果；该表用于复现对应图表、复核统计结果，并作为下游筛选或报告汇总的输入。",
+      "optional": true
+    },
+    {
+      "file": "data/09_cellchat/cellchat_object.rds",
+      "name": "cellchat_object.rds",
+      "kind": "data",
+      "content": "CellChat 对象",
+      "type": "R 对象（RDS）",
+      "use": "完整通讯分析对象；该对象用于断点续跑、深度复核或后续分析。",
+      "optional": true
+    },
+    {
+      "file": "differential_abundance.csv",
+      "name": "differential_abundance.csv",
+      "kind": "data",
+      "content": "条件间细胞类型组成差异检验（2×2 卡方 + BH FDR）",
+      "type": "CSV 数据表",
+      "use": "检查细胞比例偏移；该表用于复现对应图表、复核统计结果，并作为下游筛选或报告汇总的输入。",
+      "optional": false
+    },
+    {
+      "file": "qc_metrics.json",
+      "name": "qc_metrics.json",
+      "kind": "data",
+      "content": "QC 汇总与门控结果（pass/warn/fail）",
+      "type": "JSON 汇总文件",
+      "use": "数据质量门控；该文件用于程序读取状态、汇总指标和门控判定，也可人工复核。",
+      "optional": false
+    },
+    {
+      "file": "key_genes.csv",
+      "name": "key_genes.csv",
+      "kind": "data",
+      "content": "按 Padj 与 log2FC 排序的关键基因/蛋白表",
+      "type": "CSV 数据表",
+      "use": "证据富集与对接候选；该表用于复现对应图表、复核统计结果，并作为下游筛选或报告汇总的输入。",
+      "optional": false
+    },
+    {
+      "file": "gene_evidence.csv",
+      "name": "gene_evidence.csv",
+      "kind": "data",
+      "content": "每基因的 UniProt、PDB、ChEMBL、已知配体与脱靶信息",
+      "type": "CSV 数据表",
+      "use": "评估可成药性与对接可行性；该表用于复现对应图表、复核统计结果，并作为下游筛选或报告汇总的输入。",
+      "optional": false
+    },
+    {
+      "file": "04_knockout/figures/fig_52_knockout_top_candidates.png",
+      "name": "fig_52_knockout_top_candidates.png",
+      "kind": "fig",
+      "content": "Top N 候选基因的 knockout_score。",
+      "type": "条形图",
+      "use": "快速查看高优先级候选基因。",
+      "optional": false
+    },
+    {
+      "file": "04_knockout/figures/fig_53_knockout_score_distribution.png",
+      "name": "fig_53_knockout_score_distribution.png",
+      "kind": "fig",
+      "content": "全部基因 knockout_score 分布。",
+      "type": "直方图",
+      "use": "判断评分是否有区分度和分层能力。",
+      "optional": false
+    },
+    {
+      "file": "04_knockout/data/fig_52_53_ranked_knockout.csv",
+      "name": "fig_52_53_ranked_knockout.csv",
+      "kind": "data",
+      "content": "全部基因多维度敲除评分表",
+      "type": "CSV 数据表",
+      "use": "评分主表；该表用于复现对应图表、复核统计结果，并作为下游筛选或报告汇总的输入。",
+      "optional": false
+    },
+    {
+      "file": "04_knockout/data/fig_52_target_candidates.csv",
+      "name": "fig_52_target_candidates.csv",
+      "kind": "data",
+      "content": "Top N 靶点候选表",
+      "type": "CSV 数据表",
+      "use": "候选靶点筛选；该表用于复现对应图表、复核统计结果，并作为下游筛选或报告汇总的输入。",
+      "optional": false
+    },
+    {
+      "file": "05_validation/data/validation_candidates.csv",
+      "name": "validation_candidates.csv",
+      "kind": "data",
+      "content": "湿实验验证候选及分阶段实验方案",
+      "type": "CSV 数据表",
+      "use": "验证实验设计；该表用于复现对应图表、复核统计结果，并作为下游筛选或报告汇总的输入。",
+      "optional": false
+    },
+    {
+      "file": "outputs/integration/docking_targets.csv",
+      "name": "docking_targets.csv",
+      "kind": "data",
+      "content": "每靶点状态、PDB、配体数、命中数与最佳亲和力",
+      "type": "CSV 数据表",
+      "use": "汇总各靶点对接结果；该表用于复现对应图表、复核统计结果，并作为下游筛选或报告汇总的输入。",
+      "optional": false
+    },
+    {
+      "file": "docked/results.csv",
+      "name": "results.csv",
+      "kind": "data",
+      "content": "Vina 原始对接结果",
+      "type": "CSV 数据表",
+      "use": "每配体亲和力与模式；该表用于复现对应图表、复核统计结果，并作为下游筛选或报告汇总的输入。",
+      "optional": false
+    },
+    {
+      "file": "results/01_analysis/figures/fig_46_affinity_distribution.png",
+      "name": "fig_46_affinity_distribution.png",
+      "kind": "fig",
+      "content": "全部成功对接配体的亲和力分布及命中阈值线。",
+      "type": "直方图/密度图",
+      "use": "查看整体对接分数、命中分布和阈值合理性。",
+      "optional": false
+    },
+    {
+      "file": "results/01_analysis/figures/fig_47_top_hits.png",
+      "name": "fig_47_top_hits.png",
+      "kind": "fig",
+      "content": "排序后的 Top 命中或候选配体亲和力。",
+      "type": "条形图",
+      "use": "快速选择排名靠前的候选配体。",
+      "optional": false
+    },
+    {
+      "file": "results/01_analysis/figures/fig_48_diverse_hits.png",
+      "name": "fig_48_diverse_hits.png",
+      "kind": "fig",
+      "content": "Tanimoto 多样性选择后的命中候选。",
+      "type": "条形图",
+      "use": "减少同一化学骨架重复，提高候选多样性。",
+      "optional": false
+    },
+    {
+      "file": "results/01_analysis/data/fig_46_47_ranked_results.csv",
+      "name": "fig_46_47_ranked_results.csv",
+      "kind": "data",
+      "content": "按亲和力排序结果",
+      "type": "CSV 数据表",
+      "use": "全部对接排序；该表用于复现对应图表、复核统计结果，并作为下游筛选或报告汇总的输入。",
+      "optional": false
+    },
+    {
+      "file": "results/01_analysis/data/fig_47_top_hits.csv",
+      "name": "fig_47_top_hits.csv",
+      "kind": "data",
+      "content": "命中配体表",
+      "type": "CSV 数据表",
+      "use": "低于阈值候选；该表用于复现对应图表、复核统计结果，并作为下游筛选或报告汇总的输入。",
+      "optional": false
+    },
+    {
+      "file": "results/01_analysis/data/fig_48_diverse_hits.csv",
+      "name": "fig_48_diverse_hits.csv",
+      "kind": "data",
+      "content": "多样性命中表",
+      "type": "CSV 数据表",
+      "use": "Tanimoto 选择结果；该表用于复现对应图表、复核统计结果，并作为下游筛选或报告汇总的输入。",
+      "optional": false
+    },
+    {
+      "file": "results/01_analysis/data/docking_results.xlsx",
+      "name": "docking_results.xlsx",
+      "kind": "data",
+      "content": "多工作表 Excel",
+      "type": "Excel 工作簿（XLSX）",
+      "use": "all / hits / top / diverse 表；该工作簿用于 Excel 查看、筛选和交付。",
+      "optional": false
+    },
+    {
+      "file": "results/02_redock/figures/fig_49_redock_comparison.png",
+      "name": "fig_49_redock_comparison.png",
+      "kind": "fig",
+      "content": "初始亲和力与重对接亲和力比较及变化量分布。",
+      "type": "散点图 + 直方图（双面板）",
+      "use": "检查初筛排序和亲和力的稳定性。",
+      "optional": true
+    },
+    {
+      "file": "results/02_redock/data/fig_49_redock_results.csv",
+      "name": "fig_49_redock_results.csv",
+      "kind": "data",
+      "content": "精修重对接结果",
+      "type": "CSV 数据表",
+      "use": "Top 命中精修表；该表用于复现对应图表、复核统计结果，并作为下游筛选或报告汇总的输入。",
+      "optional": false
+    },
+    {
+      "file": "results/02_redock/data/fig_49_redock_comparison.csv",
+      "name": "fig_49_redock_comparison.csv",
+      "kind": "data",
+      "content": "初对接与重对接对比数据",
+      "type": "CSV 数据表",
+      "use": "一致性对比；该表用于复现对应图表、复核统计结果，并作为下游筛选或报告汇总的输入。",
+      "optional": true
+    },
+    {
+      "file": "results/03_ml/figures/fig_50_ml_feature_importance.png",
+      "name": "fig_50_ml_feature_importance.png",
+      "kind": "fig",
+      "content": "对接 ML 重打分模型的特征重要性。",
+      "type": "条形图",
+      "use": "解释哪些分子特征影响重打分结果。",
+      "optional": true
+    },
+    {
+      "file": "results/03_ml/figures/fig_51_ml_roc.png",
+      "name": "fig_51_ml_roc.png",
+      "kind": "fig",
+      "content": "对接 ML 分类模型的 ROC 曲线。",
+      "type": "折线图",
+      "use": "评估分类模型排序能力。",
+      "optional": true
+    },
+    {
+      "file": "results/03_ml/data/fig_50_ml_feature_importance.csv",
+      "name": "fig_50_ml_feature_importance.csv",
+      "kind": "data",
+      "content": "ML 特征重要性数据",
+      "type": "CSV 数据表",
+      "use": "特征排序；该表用于复现对应图表、复核统计结果，并作为下游筛选或报告汇总的输入。",
+      "optional": true
+    },
+    {
+      "file": "results/03_ml/data/fig_51_ml_roc.csv",
+      "name": "fig_51_ml_roc.csv",
+      "kind": "data",
+      "content": "ML ROC 数据",
+      "type": "CSV 数据表",
+      "use": "绘制 ROC 的数据；该表用于复现对应图表、复核统计结果，并作为下游筛选或报告汇总的输入。",
+      "optional": true
+    },
+    {
+      "file": "results/03_ml/data/ml_ranked_results.csv",
+      "name": "ml_ranked_results.csv",
+      "kind": "data",
+      "content": "ML 重打分排序结果",
+      "type": "CSV 数据表",
+      "use": "融合亲和力与 ML 排名；该表用于复现对应图表、复核统计结果，并作为下游筛选或报告汇总的输入。",
+      "optional": true
+    },
+    {
+      "file": "figures/fig_54_feedback_module_umap.png",
+      "name": "fig_54_feedback_module_umap.png",
+      "kind": "fig",
+      "content": "筛选靶点模块得分在 UMAP 上的分布。",
+      "type": "UMAP 特征图",
+      "use": "查看候选靶点模块是否集中在特定细胞群。",
+      "optional": false
+    },
+    {
+      "file": "figures/fig_55_feedback_target_expression_umap.png",
+      "name": "fig_55_feedback_target_expression_umap.png",
+      "kind": "fig",
+      "content": "候选靶基因在 UMAP 上的表达。",
+      "type": "UMAP 特征图（多面板）",
+      "use": "查看单个候选基因的细胞类型表达位置。",
+      "optional": false
+    },
+    {
+      "file": "figures/fig_56_feedback_celltype_dotplot.png",
+      "name": "fig_56_feedback_celltype_dotplot.png",
+      "kind": "fig",
+      "content": "候选靶基因在细胞类型中的表达比例和水平。",
+      "type": "点图（DotPlot）",
+      "use": "比较候选基因的细胞类型特异性。",
+      "optional": false
+    },
+    {
+      "file": "figures/fig_57_feedback_celltype_boxplot.png",
+      "name": "fig_57_feedback_celltype_boxplot.png",
+      "kind": "fig",
+      "content": "模块得分按细胞类型和条件分布。",
+      "type": "箱线图/小提琴图",
+      "use": "查看模块活性的细胞类型和条件差异。",
+      "optional": false
+    },
+    {
+      "file": "figures/fig_58_feedback_celltype_heatmap.png",
+      "name": "fig_58_feedback_celltype_heatmap.png",
+      "kind": "fig",
+      "content": "候选基因平均表达按细胞类型聚类。",
+      "type": "热图",
+      "use": "查看候选基因表达谱的细胞类型模式。",
+      "optional": false
+    },
+    {
+      "file": "data/feedback_targets.csv",
+      "name": "feedback_targets.csv",
+      "kind": "data",
+      "content": "细胞支持度重排序靶点",
+      "type": "CSV 数据表",
+      "use": "筛选结果返回单细胞后的精细化靶点；该表用于复现对应图表、复核统计结果，并作为下游筛选或报告汇总的输入。",
+      "optional": false
+    },
+    {
+      "file": "data/cell_scores.csv",
+      "name": "cell_scores.csv",
+      "kind": "data",
+      "content": "每细胞靶基因表达与模块评分",
+      "type": "CSV 数据表",
+      "use": "细胞级反馈分析主表；该表用于复现对应图表、复核统计结果，并作为下游筛选或报告汇总的输入。",
+      "optional": false
+    },
+    {
+      "file": "data/celltype_summary.csv",
+      "name": "celltype_summary.csv",
+      "kind": "data",
+      "content": "细胞类型表达汇总",
+      "type": "CSV 数据表",
+      "use": "查看靶基因的细胞类型偏好；该表用于复现对应图表、复核统计结果，并作为下游筛选或报告汇总的输入。",
+      "optional": false
+    },
+    {
+      "file": "data/celltype_enrichment.csv",
+      "name": "celltype_enrichment.csv",
+      "kind": "data",
+      "content": "细胞类型模块富集检验",
+      "type": "CSV 数据表",
+      "use": "比较细胞类型间模块评分；该表用于复现对应图表、复核统计结果，并作为下游筛选或报告汇总的输入。",
+      "optional": false
+    },
+    {
+      "file": "data/condition_summary.csv",
+      "name": "condition_summary.csv",
+      "kind": "data",
+      "content": "条件×细胞类型表达汇总",
+      "type": "CSV 数据表",
+      "use": "查看分组间细胞类型靶点活性；该表用于复现对应图表、复核统计结果，并作为下游筛选或报告汇总的输入。",
+      "optional": false
+    },
+    {
+      "file": "network_toxicology/data/compound_disease_overlap.csv",
+      "name": "compound_disease_overlap.csv",
+      "kind": "data",
+      "content": "化合物靶点与疾病基因交集表",
+      "type": "CSV 数据表",
+      "use": "核心交集靶点及来源数；该表用于复现对应图表、复核统计结果，并作为下游筛选或报告汇总的输入。",
+      "optional": false
+    },
+    {
+      "file": "network_toxicology/data/ppi_hub_scores.csv",
+      "name": "ppi_hub_scores.csv",
+      "kind": "data",
+      "content": "STRING PPI degree/betweenness/clustering 评分",
+      "type": "CSV 数据表",
+      "use": "PPI hub 靶点评分；该表用于复现对应图表、复核统计结果，并作为下游筛选或报告汇总的输入。",
+      "optional": true
+    },
+    {
+      "file": "network_toxicology/data/ctpd_nodes.csv",
+      "name": "ctpd_nodes.csv",
+      "kind": "data",
+      "content": "C-T-P-D 网络节点表",
+      "type": "CSV 数据表",
+      "use": "化合物、靶点、疾病节点；该表用于复现对应图表、复核统计结果，并作为下游筛选或报告汇总的输入。",
+      "optional": false
+    },
+    {
+      "file": "network_toxicology/data/ctpd_edges.csv",
+      "name": "ctpd_edges.csv",
+      "kind": "data",
+      "content": "C-T-P-D 网络边表",
+      "type": "CSV 数据表",
+      "use": "化合物-靶点、靶点-疾病、PPI 边；该表用于复现对应图表、复核统计结果，并作为下游筛选或报告汇总的输入。",
+      "optional": false
+    },
+    {
+      "file": "network_toxicology/data/ctpd_network.html",
+      "name": "ctpd_network.html",
+      "kind": "data",
+      "content": "C-T-P-D 网络可视化页",
+      "type": "HTML 页面",
+      "use": "快速查看网络关系；该页面用于快速浏览、交互查看和交付。",
+      "optional": false
+    },
+    {
+      "file": "network_toxicology/figures/compound_disease_venn.png",
+      "name": "compound_disease_venn.png",
+      "kind": "fig",
+      "content": "化合物靶点与疾病基因的交集。",
+      "type": "Venn 图",
+      "use": "查看交集规模及来源，确定核心分析基因集。",
+      "optional": false
+    },
+    {
+      "file": "faers/data/faers_signals.csv",
+      "name": "faers_signals.csv",
+      "kind": "data",
+      "content": "ROR/PRR/BCPNN/EBGM 信号表",
+      "type": "CSV 数据表",
+      "use": "药物-事件不相称性信号；该表用于复现对应图表、复核统计结果，并作为下游筛选或报告汇总的输入。",
+      "optional": false
+    },
+    {
+      "file": "faers/data/faers_signals.html",
+      "name": "faers_signals.html",
+      "kind": "data",
+      "content": "FAERS 信号结果页",
+      "type": "HTML 页面",
+      "use": "Top 信号快速浏览；该页面用于快速浏览、交互查看和交付。",
+      "optional": false
+    },
+    {
+      "file": "faers/faers_summary.json",
+      "name": "faers_summary.json",
+      "kind": "data",
+      "content": "FAERS 汇总统计",
+      "type": "JSON 汇总文件",
+      "use": "组合数、信号数、Top 药物；该文件用于程序读取状态、汇总指标和门控判定，也可人工复核。",
+      "optional": false
+    }
+  ]
+}
