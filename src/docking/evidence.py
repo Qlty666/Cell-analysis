@@ -9,6 +9,7 @@ import os
 import subprocess
 import sys
 import urllib.parse
+import urllib.request
 from pathlib import Path
 
 from .config import ResolvedConfig
@@ -24,6 +25,13 @@ SKILL_SCRIPTS = {
     "bindingdb": SKILLS_ROOT / "bindingdb-skill" / "scripts" / "rest_request.py",
     "pubchem": SKILLS_ROOT / "pubchem-pug-skill" / "scripts" / "rest_request.py",
     "chebi": SKILLS_ROOT / "chebi-skill" / "scripts" / "rest_request.py",
+    "string": SKILLS_ROOT / "string-skill" / "scripts" / "rest_request.py",
+    "reactome": SKILLS_ROOT / "reactome-skill" / "scripts" / "rest_request.py",
+    "pharmgkb": SKILLS_ROOT / "pharmgkb-skill" / "scripts" / "rest_request.py",
+    "alphafold": SKILLS_ROOT / "alphafold-skill" / "scripts" / "rest_request.py",
+    "opentargets": (
+        SKILLS_ROOT / "opentargets-skill" / "scripts" / "opentargets_graphql.py"
+    ),
 }
 
 
@@ -48,11 +56,50 @@ def call_skill(name: str, payload: dict, timeout: int = 90, log=None) -> dict:
         return {"ok": False, "error": {"message": str(exc)}}
 
 
+def _http_text(url: str, timeout: int = 90) -> str:
+    req = urllib.request.Request(url, headers={"User-Agent": "Mozilla/5.0"})
+    with urllib.request.urlopen(req, timeout=timeout) as resp:
+        return resp.read().decode("utf-8", "replace")
+
+
+def _kegg_pathways(gene: str, max_items: int = 10, timeout: int = 90) -> dict:
+    """Resolve a gene to KEGG pathways using the public REST API."""
+    if not gene:
+        return {"ok": False, "error": {"message": "no gene identifier"}}
+    try:
+        find_url = "https://rest.kegg.jp/find/genes/" + urllib.parse.quote(gene)
+        find_text = _http_text(find_url, timeout)
+        kegg_gene = ""
+        for line in find_text.splitlines():
+            parts = line.split("\t")
+            if parts and ":" in parts[0]:
+                kegg_gene = parts[0]
+                break
+        if not kegg_gene:
+            return {"ok": False, "error": {"message": "gene not found in KEGG"}}
+        link_url = "https://rest.kegg.jp/link/pathway/" + kegg_gene
+        link_text = _http_text(link_url, timeout)
+        pathways: list[str] = []
+        for line in link_text.splitlines():
+            parts = line.split("\t")
+            if len(parts) >= 2 and parts[1] not in pathways:
+                pathways.append(parts[1])
+        return {
+            "ok": True,
+            "kegg_gene": kegg_gene,
+            "pathways": pathways[:max_items],
+            "pathway_count": len(pathways),
+        }
+    except Exception as exc:  # noqa: BLE001
+        return {"ok": False, "error": {"message": str(exc)}}
+
+
 def gather_evidence(cfg: ResolvedConfig, log) -> dict:
     ev = cfg.data.get("evidence", {})
     acc = ev.get("uniprot_accession") or ""
     pdb_id = ev.get("pdb_id") or ""
     chembl_id = ev.get("chembl_target_id") or ""
+    target_name = ev.get("target_name") or ""
     ligand_name = ev.get("ligand_name") or ""
     ligand_smiles = ev.get("ligand_smiles") or ""
     max_items = int(ev.get("max_items", 10))
@@ -217,6 +264,91 @@ def gather_evidence(cfg: ResolvedConfig, log) -> dict:
         )
         sections["chebi"] = res
 
+    query_label = target_name or acc
+    if acc:
+        res = call_skill(
+            "alphafold",
+            {
+                "base_url": "https://alphafold.ebi.ac.uk/api",
+                "path": f"prediction/{acc}",
+                "max_items": max_items,
+            },
+            log=log,
+        )
+        sections["alphafold"] = res
+
+    if query_label:
+        res = call_skill(
+            "string",
+            {
+                "base_url": "https://string-db.org/api/json",
+                "path": "interaction_partners",
+                "method": "POST",
+                "form_body": {
+                    "identifier": query_label,
+                    "species": 9606,
+                    "caller_identity": "liver-cancer-pipeline",
+                    "limit": max(1, min(int(max_items), 10)),
+                },
+                "max_items": max_items,
+            },
+            log=log,
+        )
+        sections["string"] = res
+
+    if query_label:
+        res = call_skill(
+            "reactome",
+            {
+                "base_url": "https://reactome.org/ContentService",
+                "path": "search/query",
+                "params": {
+                    "query": query_label,
+                    "species": "Homo sapiens",
+                    "types": "Pathway",
+                },
+                "headers": {"Accept": "application/json"},
+                "record_path": "results.0.entries",
+                "max_items": max_items,
+            },
+            log=log,
+        )
+        sections["reactome"] = res
+
+    if target_name:
+        res = call_skill(
+            "pharmgkb",
+            {
+                "base_url": "https://api.pharmgkb.org/v1/data",
+                "path": "search",
+                "params": {
+                    "q": target_name,
+                    "type": "Gene",
+                    "limit": max_items,
+                },
+                "max_items": max_items,
+            },
+            log=log,
+        )
+        sections["pharmgkb"] = res
+        res = call_skill(
+            "opentargets",
+            {
+                "query": (
+                    "query searchAny($q: String!) { "
+                    "search(queryString: $q) { total hits { entity score "
+                    "object { ... on Target { id approvedSymbol } } } } }"
+                ),
+                "variables": {"q": target_name},
+                "max_items": max_items,
+                "max_depth": 4,
+            },
+            log=log,
+        )
+        sections["opentargets"] = res
+
+    sections["kegg"] = _kegg_pathways(query_label, max_items)
+
     known_ligands = out_dir / "known_ligands.csv"
     if ligand_rows:
         with known_ligands.open("w", newline="", encoding="utf-8") as fh:
@@ -333,9 +465,19 @@ def _render_report(ev: dict, sections: dict, rows: list[dict], out_dir: Path) ->
         "## Sections",
         "",
     ]
-    for name, res in sections.items():
-        ok = bool(res.get("ok", res.get("status_code", 0) == 200))
-        lines.append(f"- `{name}`: {'ok' if ok else 'failed'}")
+    if sections:
+        lines += [
+            "| database | status | records |",
+            "|---|---|---|",
+        ]
+        for name, res in sections.items():
+            ok = bool(res.get("ok", res.get("status_code", 0) == 200))
+            lines.append(
+                f"| `{name}` | {'ok' if ok else 'failed'} | "
+                f"{_record_count(res)} |"
+            )
+    else:
+        lines.append("- no database sections requested")
     if rows:
         lines += [
             "",
@@ -358,3 +500,23 @@ def _render_report(ev: dict, sections: dict, rows: list[dict], out_dir: Path) ->
         "",
     ]
     return "\n".join(lines)
+
+
+def _record_count(res: dict) -> int:
+    """Best-effort record count from a compact skill response."""
+    if not isinstance(res, dict):
+        return 0
+    records = res.get("records")
+    if isinstance(records, list):
+        return len(records)
+    if isinstance(res.get("pathway_count"), int):
+        return res["pathway_count"]
+    summary = res.get("summary") or {}
+    if isinstance(summary, dict):
+        for key in ("total", "count", "hits", "pathways"):
+            value = summary.get(key)
+            if isinstance(value, int):
+                return value
+            if isinstance(value, str) and value.isdigit():
+                return int(value)
+    return 0

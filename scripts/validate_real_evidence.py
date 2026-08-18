@@ -15,6 +15,10 @@ SKILL_NAMES = {
     "bindingdb": "bindingdb-skill",
     "pubchem": "pubchem-pug-skill",
     "chebi": "chebi-skill",
+    "string": "string-skill",
+    "reactome": "reactome-skill",
+    "pharmgkb": "pharmgkb-skill",
+    "alphafold": "alphafold-skill",
 }
 ROOT = Path(__file__).resolve().parent.parent
 OUT_DIR = ROOT / "dock" / "validation_real"

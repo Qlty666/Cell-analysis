@@ -1,6 +1,6 @@
 # Liver Cancer Bioinformatics Workflow
 
-> 当前版本：0.6.1
+> 当前版本：0.7.0
 
 面向肝癌研究的本地生信自动化工作流，整合三条可实际运行的流水线：
 
@@ -58,7 +58,7 @@
 | 命令 | 说明 |
 | --- | --- |
 | `init` | 创建 docking 工作目录骨架和配置文件 |
-| `evidence` | 调用数据库 skill 收集靶点和已知配体证据 |
+| `evidence` | 调用数据库 skill 收集靶点、通路和已知配体证据 |
 | `prepare-receptor` | 通过 Meeko/Open Babel/MGLTools 准备受体 PDBQT |
 | `prepare-ligands` | RDKit 标准化、3D 构象生成并输出 PDBQT |
 | `dock` | AutoDock Vina 并行对接，按配体写入结果，支持断点续跑 |
@@ -648,6 +648,12 @@ GSE165816 和 TCGA PanCancer Atlas 仅用于真实数据验证。
 MIT License. See `LICENSE` for details.
 
 ## 9. 更新日志
+
+### v0.7.0
+
+- 扩大证据数据库覆盖范围：虚拟筛选证据收集新增 STRING 互作网络、Open Targets 靶点关联、Reactome 通路、PharmGKB 药物基因组、AlphaFold 结构和 KEGG 通路来源。
+- 证据报告升级为数据库覆盖表，逐项展示每个数据库的状态与记录数；`check-cadd` 自动检查新增 skill 脚本。
+- 更新 `VIRTUAL_SCREENING_REQUIREMENTS.md` 环境清单和网页端证据收集文案。
 
 ### v0.6.1
 
