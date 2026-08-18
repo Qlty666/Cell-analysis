@@ -1,6 +1,6 @@
 # Liver Cancer Bioinformatics Workflow
 
-> 当前版本：0.7.0
+> 当前版本：0.7.1
 
 面向肝癌研究的本地生信自动化工作流，整合三条可实际运行的流水线：
 
@@ -23,7 +23,7 @@
 
 ### 2.1 单细胞分析流水线
 
-- 输入 GSE 编号，自动下载 GEO 数据并识别常见格式（10x MTX、CSV、Series Matrix）。
+- 输入 GSE 编号，自动下载 GEO 数据并识别常见格式（10x MTX、CSV、h5ad、loom、Series Matrix）。
 - 内置 GSE125449 适配；支持 `--species hs/mm/auto`。
 - QC、双细胞检测（`scDblFinder`）、PCA/UMAP 聚类和细胞注释。
 - 差异表达（DESeq2 pseudobulk 或 Seurat Wilcoxon 回退）与 GO/KEGG/GSEA 富集分析。
@@ -648,6 +648,12 @@ GSE165816 和 TCGA PanCancer Atlas 仅用于真实数据验证。
 MIT License. See `LICENSE` for details.
 
 ## 9. 更新日志
+
+### v0.7.1
+
+- 修复 GEO 下载器未识别 `.h5ad`/`.loom` 单细胞补充文件的问题，h5ad 数据集（如 GSE315928）可自动转换为 10x MTX 后进入流水线。
+- 下载器增加已有文件跳过下载、已解压归档跳过重复解压逻辑，断点续跑不会重复下载大文件。
+- 修复 h5ad/loom 转换结果丢失 `_extracted/` 子目录的问题，manifest 现在引用实际生成的矩阵文件。
 
 ### v0.7.0
 
