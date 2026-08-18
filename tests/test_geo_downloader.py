@@ -18,6 +18,7 @@ if str(APP_ROOT / "src") not in sys.path:
 
 from data.geo_downloader import (  # noqa: E402
     BULK_COUNT_TABLE_RE,
+    _convert_downloaded,
     _download,
     _expand_archive_files,
     _refresh_manifest_mode,
@@ -90,6 +91,15 @@ class TestSelectFiles(unittest.TestCase):
 
     def test_rds_count_matrix_not_bulk(self):
         names = ["GSM9037276_counts.rds"]
+        selected = _select_files(names)
+        self.assertEqual(selected["matrix"], names)
+        self.assertFalse(selected["bulk"])
+
+    def test_recognizes_h5ad_and_loom_as_single_cell_matrices(self):
+        names = [
+            "_extracted/GSM9440169_E12_B.h5ad",
+            "_extracted/GSM9440170_E12_F1.loom",
+        ]
         selected = _select_files(names)
         self.assertEqual(selected["matrix"], names)
         self.assertFalse(selected["bulk"])
@@ -188,6 +198,59 @@ class TestExpandArchiveFiles(unittest.TestCase):
 
 
 class TestDownloadRetry(unittest.TestCase):
+    def test_h5ad_conversion_preserves_extracted_path(self):
+        with tempfile.TemporaryDirectory() as tmp:
+            raw = Path(tmp)
+            (raw / "_extracted").mkdir()
+            (raw / "_extracted" / "GSM9440169_E12_B.h5ad").write_bytes(b"x")
+            converted = {
+                "matrix": "GSM9440169_E12_B.matrix.mtx.gz",
+                "barcodes": "GSM9440169_E12_B.barcodes.tsv.gz",
+                "genes": "GSM9440169_E12_B.genes.tsv.gz",
+            }
+            with mock.patch(
+                "data.h5_converter.convert_h5ad",
+                return_value=converted,
+            ):
+                downloaded = _convert_downloaded(
+                    {
+                        "matrix": ["_extracted/GSM9440169_E12_B.h5ad"],
+                        "barcodes": [],
+                        "genes": [],
+                        "metadata": [],
+                    },
+                    raw,
+                )
+            self.assertEqual(
+                downloaded["matrix"],
+                ["_extracted/GSM9440169_E12_B.matrix.mtx.gz"],
+            )
+            self.assertEqual(
+                downloaded["barcodes"],
+                ["_extracted/GSM9440169_E12_B.barcodes.tsv.gz"],
+            )
+            self.assertEqual(
+                downloaded["genes"],
+                ["_extracted/GSM9440169_E12_B.genes.tsv.gz"],
+            )
+
+    def test_skips_existing_nonempty_file(self):
+        with tempfile.TemporaryDirectory() as tmp:
+            out = Path(tmp) / "GSE123456_RAW.tar"
+            out.write_bytes(b"complete")
+            log_lines = []
+            with mock.patch(
+                "data.geo_downloader.subprocess.run",
+                side_effect=AssertionError("download should be skipped"),
+            ):
+                _download(
+                    "https://example.test/GSE123456_RAW.tar",
+                    out,
+                    log_lines.append,
+                )
+            self.assertEqual(out.read_bytes(), b"complete")
+            self.assertTrue(any("already exists" in line for line in log_lines))
+
     def test_retries_transient_curl_failures(self):
         with tempfile.TemporaryDirectory() as tmp:
             out = Path(tmp) / "GSE123456_RAW.tar"
