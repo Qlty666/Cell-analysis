@@ -250,6 +250,10 @@ for (d in c(res_dir, fig_dir, data_dir, stage_dir, ckpt_dir)) {
   dir.create(d, recursive = TRUE, showWarnings = FALSE)
 }
 
+ckpt_path <- function(name) {
+  file.path(ckpt_dir, name)
+}
+
 force <- "--force" %in% args
 start_stage <- "01"
 for (arg in args) {
@@ -266,10 +270,6 @@ if (file.exists(dataset_mode_path)) {
 
 stage_allowed <- function(code) {
   as.integer(code) >= as.integer(start_stage)
-}
-
-ckpt_path <- function(name) {
-  file.path(ckpt_dir, name)
 }
 
 log_msg <- function(...) {

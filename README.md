@@ -1,6 +1,6 @@
 # Liver Cancer Bioinformatics Workflow
 
-> 当前版本：0.8.0
+> 当前版本：0.8.1
 
 面向肝癌研究的本地生信自动化工作流，整合三条可实际运行的流水线：
 
@@ -648,6 +648,10 @@ GSE165816 和 TCGA PanCancer Atlas 仅用于真实数据验证。
 MIT License. See `LICENSE` for details.
 
 ## 9. 更新日志
+
+### v0.8.1
+
+- 修复 R 表达流水线在读取 `dataset_mode.txt` 时调用尚未定义的 `ckpt_path()` 导致启动即报错的问题：将 `ckpt_path()` 定义提前到读取数据集模式之前，单细胞与样本级数据均可正常启动流水线。
 
 ### v0.8.0
 
