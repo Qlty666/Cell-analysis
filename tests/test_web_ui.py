@@ -503,7 +503,7 @@ class TestFullStatus(unittest.TestCase):
             ):
                 status = _full_status(info)
             self.assertTrue(status["paused"])
-            self.assertEqual(status["stage"], "单细胞分析")
+            self.assertEqual(status["stage"], "表达分析")
 
     def test_failed_full_job_reports_in_progress_stage_not_last_done(self):
         with tempfile.TemporaryDirectory() as tmp:
@@ -911,7 +911,7 @@ class TestTemplatePolish(unittest.TestCase):
         self.assertIn("filterEndDate", html)
         self.assertIn("filterPlatform", html)
         self.assertIn("filterType", html)
-        self.assertIn("仅支持 single-cell", html)
+        self.assertIn("非单细胞数据按样本级分析运行", html)
 
     def test_tasks_page_has_stat_cards(self):
         html = self._read("tasks_template.html")

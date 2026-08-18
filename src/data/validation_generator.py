@@ -176,7 +176,7 @@ def write_gene_csv(
 def write_manifest(data_dir: Path, accession: str, files: dict) -> None:
     manifest = {
         "accession": accession,
-        "mode": "generic",
+        "mode": "single_cell",
         "files": files,
     }
     (data_dir / f"{accession}_manifest.json").write_text(

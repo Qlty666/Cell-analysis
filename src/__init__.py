@@ -1,1 +1,1 @@
-"""Liver cancer single-cell pipeline package."""
+"""Liver cancer expression analysis pipeline package."""

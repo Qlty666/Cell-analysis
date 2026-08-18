@@ -53,6 +53,74 @@ def _files_look_bulk(files: dict) -> bool:
     )
 
 
+def _files_look_single_cell(files: dict) -> bool:
+    matrices = files.get("matrix") or []
+    if any(
+        name.lower().endswith((".rds", ".h5", ".h5ad", ".loom"))
+        for name in matrices
+    ):
+        return True
+    if files.get("barcodes") or files.get("genes"):
+        return True
+    return any(
+        SINGLE_CELL_MATRIX_RE.search(name) for name in matrices
+    )
+
+
+_CELL_BARCODE_RE = re.compile(r"^[ACGTN]{8,}(?:-[0-9]+)?$", re.IGNORECASE)
+
+
+def _matrix_header_looks_single_cell(path: Path) -> bool:
+    try:
+        opener = gzip.open if str(path).lower().endswith(".gz") else open
+        with opener(path, "rt", encoding="utf-8", errors="replace") as fh:
+            first_line = fh.readline()
+        if not first_line:
+            return False
+        fields = [
+            field.strip('"').strip()
+            for field in re.split(r"[,\t]", first_line.rstrip("\r\n"))
+            if field.strip('"').strip()
+        ]
+        if not fields:
+            return False
+        return bool(
+            _CELL_BARCODE_RE.match(fields[0])
+            or (len(fields) >= 2 and _CELL_BARCODE_RE.match(fields[1]))
+        )
+    except Exception:
+        return False
+
+
+def _series_matrix_says_single_cell(path: Path) -> bool:
+    try:
+        opener = gzip.open if str(path).lower().endswith(".gz") else open
+        with opener(path, "rt", encoding="utf-8", errors="replace") as fh:
+            text = fh.read(50000)
+        low = text.lower()
+        return any(
+            token in low
+            for token in (
+                "single-cell",
+                "single cell",
+                "singlecell",
+                "scrna",
+                "10x genomics",
+                "cell ranger",
+                "smart-seq",
+            )
+        )
+    except Exception:
+        return False
+
+
+def _matrix_files_look_single_cell(files: dict, base_dir: Path) -> bool:
+    for rel in files.get("matrix") or []:
+        if _matrix_header_looks_single_cell(base_dir / rel):
+            return True
+    return False
+
+
 def _is_archive(name: str) -> bool:
     return name.lower().endswith(ARCHIVE_SUFFIXES)
 
@@ -237,10 +305,28 @@ def _expand_archive_files(files: dict, base_dir: Path, log) -> dict:
     return expanded
 
 
-def _refresh_manifest_mode(manifest: dict) -> dict:
+def _refresh_manifest_mode(manifest: dict, base_dir: Path | None = None) -> dict:
     files = manifest.get("files")
     if isinstance(files, dict):
-        manifest["mode"] = "bulk" if _files_look_bulk(files) else "generic"
+        if manifest.get("single_cell_hint"):
+            manifest["mode"] = "single_cell"
+        elif _files_look_bulk(files):
+            looks_single_cell = (
+                base_dir is not None
+                and _matrix_files_look_single_cell(
+                    files,
+                    base_dir,
+                )
+            )
+            if looks_single_cell:
+                manifest["single_cell_hint"] = True
+                manifest["mode"] = "single_cell"
+            else:
+                manifest["mode"] = "bulk"
+        elif _files_look_single_cell(files):
+            manifest["mode"] = "single_cell"
+        else:
+            manifest["mode"] = "generic"
     return manifest
 
 
@@ -370,7 +456,7 @@ def ensure_geo_dataset(accession: str, root: Path, log) -> dict:
             cache_dir,
             log,
         )
-        cached = _refresh_manifest_mode(cached)
+        cached = _refresh_manifest_mode(cached, cache_dir)
         all_files = []
         for group in ["matrix", "barcodes", "genes", "metadata", "series_matrices"]:
             all_files.extend(cached.get("files", {}).get(group, []))
@@ -400,7 +486,7 @@ def ensure_geo_dataset(accession: str, root: Path, log) -> dict:
             raw_dir,
             log,
         )
-        manifest = _refresh_manifest_mode(manifest)
+        manifest = _refresh_manifest_mode(manifest, raw_dir)
         all_files = []
         for group in ["matrix", "barcodes", "genes", "metadata", "series_matrices"]:
             all_files.extend(manifest.get("files", {}).get(group, []))
@@ -500,6 +586,13 @@ def ensure_geo_dataset(accession: str, root: Path, log) -> dict:
         except Exception:
             continue
 
+    single_cell_hint = any(
+        _series_matrix_says_single_cell(raw_dir / name)
+        for name in series_paths
+    )
+    if not single_cell_hint:
+        single_cell_hint = _matrix_files_look_single_cell(downloaded, raw_dir)
+
     if not downloaded["matrix"]:
         raise RuntimeError(
             f"No count matrix files found for {acc}; "
@@ -509,6 +602,7 @@ def ensure_geo_dataset(accession: str, root: Path, log) -> dict:
     manifest = {
         "accession": acc,
         "mode": "generic",
+        "single_cell_hint": bool(single_cell_hint),
         "organism": organism,
         "files": {
             "matrix": downloaded["matrix"],
@@ -518,7 +612,7 @@ def ensure_geo_dataset(accession: str, root: Path, log) -> dict:
             "series_matrices": series_paths,
         },
     }
-    manifest = _refresh_manifest_mode(manifest)
+    manifest = _refresh_manifest_mode(manifest, raw_dir)
     manifest_path.write_text(
         json.dumps(manifest, indent=2, ensure_ascii=False),
         encoding="utf-8",
@@ -541,11 +635,4 @@ def ensure_geo_dataset(accession: str, root: Path, log) -> dict:
         encoding="utf-8",
     )
     log(f"manifest written: {manifest_path}")
-    if manifest["mode"] == "bulk":
-        raise RuntimeError(
-            f"{acc} is a bulk RNA-seq dataset, not single-cell; "
-            "the current full pipeline only supports single-cell datasets. "
-            "The raw per-sample count files and manifest are still cached "
-            f"under {raw_dir} / {cache_dir} for manual bulk analysis."
-        )
     return manifest

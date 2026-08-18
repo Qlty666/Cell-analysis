@@ -75,7 +75,7 @@ VALIDATION_JOB = {"proc": None, "log": None, "handle": None, "started": None}
 NAV_HTML = (
     '<div class="topnav">'
     '<a href="/full">全自动流水线</a>'
-    '<a href="/">单细胞分析</a>'
+    '<a href="/">表达分析</a>'
     '<a href="/datasets">数据集搜索</a>'
     '<a href="/dock">虚拟筛选</a>'
     '<a href="/results">结果清单</a>'
@@ -563,7 +563,7 @@ PAGE_TEMPLATE = """<!DOCTYPE html>
 <head>
 <meta charset="utf-8">
 <meta name="viewport" content="width=device-width, initial-scale=1">
-<title>单细胞分析流水线</title>
+<title>表达分析流水线</title>
 <style>
 body { font-family: "Segoe UI", Arial, sans-serif; background: #f5f7fa; margin: 0; color: #1f2933; }
 .wrap { max-width: 1100px; margin: 0 auto; padding: 28px; }
@@ -621,7 +621,7 @@ pre { background: #0f172a; color: #dbeafe; padding: 14px; border-radius: 8px; he
 </head>
 <body>
 <div class="wrap">
-<h1>单细胞分析流水线</h1>
+<h1>表达分析流水线</h1>
 <div class="card">
   <form id="form">
     <label for="acc">GSE 数据集编号</label>
@@ -764,7 +764,7 @@ async function pollLog() {
       if (status.ok) {
         msg.className = 'ok';
         msg.textContent = '流水线已完成';
-        if (!jobAlerted) showJobToast('ok', '任务已完成', '单细胞分析任务已全部完成。');
+        if (!jobAlerted) showJobToast('ok', '任务已完成', '表达分析任务已全部完成。');
       } else {
         msg.className = 'error';
         msg.textContent = '流水线运行失败，请查看日志';
@@ -1417,7 +1417,7 @@ def _dock_status(info: dict) -> dict:
 def start_full_job(data: dict) -> dict:
     output_value = _first(data, "output", "").strip()
     if not output_value:
-        raise ValueError("单细胞结果目录不能为空，请输入结果保存地址")
+        raise ValueError("表达分析结果目录不能为空，请输入结果保存地址")
     workdir_value = _first(data, "workdir", "").strip()
     if not workdir_value:
         raise ValueError("\u5de5\u4f5c\u76ee\u5f55\u4e0d\u80fd\u4e3a\u7a7a\uff0c\u8bf7\u624b\u52a8\u8f93\u5165")
@@ -1670,8 +1670,8 @@ def _single_status(info: dict) -> dict:
         _notify_finished(
             info,
             "single",
-            "单细胞分析",
-            f"{info.get('accession', 'GSE')} 单细胞分析",
+            "表达分析",
+            f"{info.get('accession', 'GSE')} 表达分析",
             status,
             stage,
             error,
@@ -1710,7 +1710,7 @@ DOCK_STAGE_LABELS = {
 }
 
 FULL_STAGE_LABELS = {
-    "01": "单细胞分析",
+    "01": "表达分析",
     "02": "关键基因",
     "03": "证据富集",
     "04": "敲除输入",
@@ -1785,7 +1785,7 @@ def _full_stage_from_log(
     )
     if single_matches:
         single_label = single_labels.get(single_matches[-1], "")
-        return "单细胞分析" if single_label else "单细胞分析"
+        return "表达分析" if single_label else "表达分析"
     return ""
 
 
@@ -1844,7 +1844,7 @@ def _finished_info(
         if not stage:
             stage = _stage_from_log(log_text, single_cell_labels)
             if stage:
-                stage = "单细胞分析"
+                stage = "表达分析"
     else:
         stage = _stage_from_log(log_text, labels)
     stage = stage or _current_stage(marker_dir, labels) or "未知"
@@ -1962,12 +1962,12 @@ def running_tasks_data() -> dict:
         tasks.append(
             {
                 "page": "single",
-                "page_label": "单细胞分析",
+                "page_label": "表达分析",
                 "job": job_id,
                 "url": f"/?job={job_id}",
                 "title": (
                     f"{info.get('accession', 'GSE')} · "
-                    f"{info.get('species', '')} 单细胞分析"
+                    f"{info.get('species', '')} 表达分析"
                 ),
                 "detail": str(info["out"]),
                 "status": state,

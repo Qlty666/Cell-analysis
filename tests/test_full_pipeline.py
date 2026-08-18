@@ -21,9 +21,11 @@ if str(APP_ROOT / "src") not in sys.path:
 from pipeline.integration import (  # noqa: E402
     STAGES,
     _clear_downstream_markers,
+    _dataset_mode_from_root,
     _download_pdb,
     _extract_cocrystal_ligands,
     _invalidate_markers_for_changed_root,
+    _stage_cell_feedback,
     _stage_outdated,
     _stage_output_paths,
     _stage_outputs_ready,
@@ -430,7 +432,7 @@ class TestFullPipelineMarkers(unittest.TestCase):
 
 
 class TestFullPipeline(unittest.TestCase):
-    def test_bulk_manifest_rejected_by_single_cell_pipeline(self):
+    def test_bulk_manifest_is_supported_by_pipeline(self):
         with tempfile.TemporaryDirectory() as tmp:
             root = Path(tmp) / "single_cell"
             (root / "data").mkdir(parents=True)
@@ -451,7 +453,16 @@ class TestFullPipeline(unittest.TestCase):
                 ),
                 encoding="utf-8",
             )
-            with self.assertRaises(RuntimeError) as ctx:
+            with (
+                mock.patch.object(
+                    orchestrator,
+                    "run_r_pipeline",
+                    return_value=(0, Path(tmp) / "pipeline_r.log"),
+                ) as mock_r,
+                mock.patch.object(orchestrator, "verify_outputs"),
+                mock.patch.object(orchestrator, "run_ml_analysis"),
+                mock.patch.object(orchestrator, "generate_report"),
+            ):
                 orchestrator.run_pipeline(
                     force=False,
                     skip_download=True,
@@ -460,7 +471,38 @@ class TestFullPipeline(unittest.TestCase):
                     output_root=str(root),
                     species="auto",
                 )
-            self.assertIn("bulk RNA-seq", str(ctx.exception))
+            self.assertEqual(
+                mock_r.call_count,
+                1,
+            )
+
+    def test_dataset_mode_from_bulk_summary(self):
+        with tempfile.TemporaryDirectory() as tmp:
+            root = Path(tmp) / "single_cell"
+            (root / "results").mkdir(parents=True)
+            (root / "results" / "summary.json").write_text(
+                json.dumps({"dataset_mode": "sample_level"}),
+                encoding="utf-8",
+            )
+            self.assertEqual(_dataset_mode_from_root(root), "sample_level")
+
+    def test_bulk_stage_cell_feedback_skipped(self):
+        with tempfile.TemporaryDirectory() as tmp:
+            workdir = Path(tmp) / "work"
+            root = Path(tmp) / "single_cell"
+            args = argparse.Namespace(skip_cell_feedback=False)
+            ctx = {"single_cell_root": root, "dataset_mode": "sample_level"}
+            _stage_cell_feedback(args, workdir, ctx)
+            summary_path = (
+                workdir
+                / "outputs"
+                / "integration"
+                / "cell_feedback"
+                / "cell_feedback_summary.json"
+            )
+            summary = json.loads(summary_path.read_text(encoding="utf-8"))
+            self.assertEqual(summary["status"], "skipped")
+            self.assertIn("sample-level", summary["reason"])
 
     def test_invalid_accession_rejected(self):
         with tempfile.TemporaryDirectory() as tmp:
