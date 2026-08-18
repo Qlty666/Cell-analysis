@@ -1,6 +1,6 @@
 # Liver Cancer Bioinformatics Workflow
 
-> 当前版本：0.7.1
+> 当前版本：0.7.2
 
 面向肝癌研究的本地生信自动化工作流，整合三条可实际运行的流水线：
 
@@ -648,6 +648,12 @@ GSE165816 和 TCGA PanCancer Atlas 仅用于真实数据验证。
 MIT License. See `LICENSE` for details.
 
 ## 9. 更新日志
+
+### v0.7.2
+
+- 彻底修复 h5ad/loom 转换：正确解码 h5ad 中 bytes 类型的 obs/var 索引，避免 barcodes 为空或基因名变成 `b'...'`。
+- obs/var 缺少索引时自动生成 `Cell1...CellN` / `Gene1...GeneN`，不会生成空 barcodes 文件。
+- R 流水线增加防御性回退：barcodes/genes 文件为空或损坏时自动补位，不再因单个空文件导致整个 stage 01 反复失败。
 
 ### v0.7.1
 

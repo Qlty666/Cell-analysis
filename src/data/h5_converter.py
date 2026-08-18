@@ -21,8 +21,37 @@ def _write_mtx(path: Path, matrix: sp.spmatrix, genes, cells) -> None:
         fh.write("\n".join(genes) + "\n")
 
 
+def _decode_value(value) -> str:
+    if isinstance(value, bytes):
+        return value.decode("utf-8", "replace")
+    if isinstance(value, np.bytes_):
+        return bytes(value).decode("utf-8", "replace")
+    return str(value)
+
+
 def _read_text(ds) -> list[str]:
-    return [str(x) for x in np.asarray(ds).reshape(-1)]
+    if ds is None:
+        return []
+    return [
+        text
+        for value in np.asarray(ds).reshape(-1)
+        if value is not None and (text := _decode_value(value))
+    ]
+
+
+def _find_dataset(group, keys: list[str]):
+    if not isinstance(group, h5py.Group):
+        return None
+    for key in keys:
+        if key in group:
+            item = group[key]
+            if isinstance(item, h5py.Dataset):
+                return item
+    return None
+
+
+def _fallback_names(prefix: str, count: int) -> list[str]:
+    return [f"{prefix}{i + 1}" for i in range(count)]
 
 
 def convert_h5ad(path: Path) -> dict:
@@ -37,13 +66,24 @@ def convert_h5ad(path: Path) -> dict:
         else:
             matrix = sp.csr_matrix(np.asarray(x))
 
-        obs = f["obs"]
-        var = f["var"]
-        cells = _read_text(obs["_index"]) if "_index" in obs else []
-        if var and "_index" in var:
-            genes = _read_text(var["_index"])
-        else:
-            genes = [f"Gene{i}" for i in range(matrix.shape[0])]
+        obs = f.get("obs")
+        var = f.get("var")
+        cells = _read_text(
+            _find_dataset(
+                obs,
+                ["_index", "index", "cell_id", "barcode", "cell_names", "obs_names"],
+            )
+        )
+        if not cells:
+            cells = _fallback_names("Cell", matrix.shape[1])
+        genes = _read_text(
+            _find_dataset(
+                var,
+                ["_index", "index", "gene_names", "gene_ids", "feature_name", "name", "genes"],
+            )
+        )
+        if not genes:
+            genes = _fallback_names("Gene", matrix.shape[0])
 
     prefix = path.with_name(path.stem + ".matrix.mtx.gz")
     _write_mtx(prefix, matrix, genes, cells)
@@ -57,10 +97,14 @@ def convert_h5ad(path: Path) -> dict:
 def convert_loom(path: Path) -> dict:
     with h5py.File(path, "r") as f:
         matrix = sp.csr_matrix(np.asarray(f["matrix"][:]))
-        row = f["row_attrs"]
-        col = f["col_attrs"]
-        genes = _read_text(row["Gene"]) if "Gene" in row else _read_text(row["gene_names"])
-        cells = _read_text(col["CellID"]) if "CellID" in col else _read_text(col["cell_names"])
+        row = f.get("row_attrs")
+        col = f.get("col_attrs")
+        genes = _read_text(_find_dataset(row, ["Gene", "gene_names"]))
+        cells = _read_text(_find_dataset(col, ["CellID", "cell_names"]))
+        if not genes:
+            genes = _fallback_names("Gene", matrix.shape[0])
+        if not cells:
+            cells = _fallback_names("Cell", matrix.shape[1])
 
     prefix = path.with_name(path.stem + ".matrix.mtx.gz")
     _write_mtx(prefix, matrix, genes, cells)
