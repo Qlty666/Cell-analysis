@@ -5,6 +5,7 @@ import csv
 import json
 import subprocess
 import sys
+import time
 from pathlib import Path
 
 SKILLS = Path.home() / ".codex" / "skills"
@@ -36,7 +37,7 @@ TARGETS = [
 ]
 
 
-def call_skill(skill: str, payload: dict, timeout: int = 60) -> dict:
+def call_skill(skill: str, payload: dict, timeout: int = 180) -> dict:
     script = SKILLS / SKILL_NAMES[skill] / "scripts" / "rest_request.py"
     try:
         proc = subprocess.run(
@@ -58,6 +59,29 @@ def call_skill(skill: str, payload: dict, timeout: int = 60) -> dict:
         return {"ok": False, "error": {"message": proc.stderr or proc.stdout}}
 
 
+def fetch_bindingdb(pdb_id: str) -> dict:
+    payload = {
+        "base_url": "https://bindingdb.org",
+        "path": "rest/getLigandsByPDBs",
+        "params": {
+            "pdb": pdb_id,
+            "cutoff": 100,
+            "identity": 92,
+            "response": "application/json",
+        },
+        "record_path": "getLindsByPDBsResponse.affinities",
+        "max_items": 10,
+        "max_depth": 3,
+    }
+    for attempt in range(3):
+        result = call_skill("bindingdb", payload)
+        if result.get("ok"):
+            return result
+        if attempt < 2:
+            time.sleep(3 * (attempt + 1))
+    return result
+
+
 def main() -> int:
     OUT_DIR.mkdir(parents=True, exist_ok=True)
     rows: list[dict] = []
@@ -71,22 +95,7 @@ def main() -> int:
                 "path": f"core/entry/{pdb}",
             },
         )
-        bdb = call_skill(
-            "bindingdb",
-            {
-                "base_url": "https://bindingdb.org",
-                "path": "rest/getLigandsByPDBs",
-                "params": {
-                    "pdb": pdb,
-                    "cutoff": 100,
-                    "identity": 92,
-                    "response": "application/json",
-                },
-                "record_path": "getLindsByPDBsResponse.affinities",
-                "max_items": 10,
-                "max_depth": 3,
-            },
-        )
+        bdb = fetch_bindingdb(pdb)
         records = bdb.get("records") or []
         for record in records:
             if not isinstance(record, dict):

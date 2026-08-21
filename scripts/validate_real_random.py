@@ -6,6 +6,7 @@ import json
 import random
 import subprocess
 import sys
+import time
 import urllib.request
 from pathlib import Path
 
@@ -50,7 +51,7 @@ POOL = [
 ]
 
 
-def call_skill(skill: str, payload: dict, timeout: int = 60) -> dict:
+def call_skill(skill: str, payload: dict, timeout: int = 180) -> dict:
     script = SKILLS / SKILL_NAMES[skill] / "scripts" / "rest_request.py"
     try:
         proc = subprocess.run(
@@ -70,6 +71,29 @@ def call_skill(skill: str, payload: dict, timeout: int = 60) -> dict:
         return json.loads(proc.stdout)
     except Exception:
         return {"ok": False, "error": {"message": proc.stderr or "parse error"}}
+
+
+def fetch_bindingdb(pdb_id: str) -> dict:
+    payload = {
+        "base_url": "https://bindingdb.org",
+        "path": "rest/getLigandsByPDBs",
+        "params": {
+            "pdb": pdb_id,
+            "cutoff": 100,
+            "identity": 92,
+            "response": "application/json",
+        },
+        "record_path": "getLindsByPDBsResponse.affinities",
+        "max_items": 5,
+        "max_depth": 3,
+    }
+    for attempt in range(3):
+        result = call_skill("bindingdb", payload)
+        if result.get("ok"):
+            return result
+        if attempt < 2:
+            time.sleep(3 * (attempt + 1))
+    return result
 
 
 def download_pdb(pdb_id: str, dest: Path) -> None:
@@ -97,22 +121,7 @@ def main() -> int:
                 "path": f"core/entry/{pdb_id}",
             },
         )
-        bdb = call_skill(
-            "bindingdb",
-            {
-                "base_url": "https://bindingdb.org",
-                "path": "rest/getLigandsByPDBs",
-                "params": {
-                    "pdb": pdb_id,
-                    "cutoff": 100,
-                    "identity": 92,
-                    "response": "application/json",
-                },
-                "record_path": "getLindsByPDBsResponse.affinities",
-                "max_items": 5,
-                "max_depth": 3,
-            },
-        )
+        bdb = fetch_bindingdb(pdb_id)
         ligand_count = len(bdb.get("records") or [])
         box: dict = {"center": None, "size": None, "mode": "failed", "error": ""}
         try:
