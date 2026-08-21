@@ -269,7 +269,7 @@ def run_one(
             "--evidence-workers",
             "4",
             "--evidence-timeout",
-            "90",
+            "180",
         ]
         if args.skip_evidence_fetch:
             cmd.append("--skip-evidence-fetch")
