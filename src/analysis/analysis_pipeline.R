@@ -67,6 +67,10 @@ wrap_labels <- function(x, width = 20) {
   )
 }
 
+sample_short_label <- function(x) {
+  sub(":.*$", "", trimws(as.character(x)))
+}
+
 add_plot_margin <- function(plot, plot_margin) {
   if (inherits(plot, "patchwork")) {
     plot & theme(plot.margin = plot_margin)
@@ -2655,26 +2659,26 @@ if (stage_allowed("08")) run_stage("08_publication_analyses", {
 
   if (length(unique(seurat$sample)) > 1) {
     sample_levels <- unique(as.character(seurat$sample))
-    sample_labels <- wrap_labels(sample_levels, width = 22)
-  seurat$sample_label <- unname(factor(
-    sample_labels[match(as.character(seurat$sample), sample_levels)],
-    levels = sample_labels
-  ))
-    legend_cols <- if (length(sample_levels) > 80) {
-      3
-    } else if (length(sample_levels) > 30) {
-      2
-    } else {
-      1
-    }
-    p_sample <- DimPlot(seurat, group.by = "sample_label", label = FALSE) +
-      labs(color = "Sample") +
+    sample_labels <- sample_short_label(sample_levels)
+    seurat$sample_label <- unname(factor(
+      sample_labels[match(as.character(seurat$sample), sample_levels)],
+      levels = sample_labels
+    ))
+    p_sample <- DimPlot(
+      seurat,
+      group.by = "condition",
+      label = FALSE,
+      cols = c("#E64B35", "#4DBBD5")
+    ) +
+      labs(color = "Condition") +
       ggtitle("UMAP by sample") +
-      guides(color = guide_legend(ncol = legend_cols)) +
+      guides(color = guide_legend(override.aes = list(size = 4))) +
       theme(
-        legend.text = element_text(size = 6.5),
-        legend.key.size = grid::unit(0.45, "cm"),
-        legend.spacing.y = grid::unit(0.03, "cm")
+        legend.text = element_text(size = 10),
+        legend.title = element_text(size = 9, face = "bold"),
+        legend.key.size = grid::unit(0.55, "cm"),
+        legend.key.height = grid::unit(0.55, "cm"),
+        legend.spacing.y = grid::unit(0.05, "cm")
       )
     save_fig(
       file.path(fig_dir, "fig_28_umap_sample.png"),
@@ -2702,6 +2706,7 @@ if (stage_allowed("08")) run_stage("08_publication_analyses", {
           .groups = "drop"
         )
       dbl_rate$condition <- dbl$condition[match(dbl_rate$sample, dbl$sample)]
+      dbl_rate$sample_short <- sample_short_label(dbl_rate$sample)
       write.csv(
         dbl_rate,
         stage_data_file("fig_29_doublet_rate_by_sample.csv"),
@@ -2709,17 +2714,27 @@ if (stage_allowed("08")) run_stage("08_publication_analyses", {
       )
       p_dbl_rate <- ggplot(
         dbl_rate,
-        aes(x = sample, y = doublet_rate, fill = condition)
+        aes(x = sample_short, y = doublet_rate, fill = condition)
       ) +
-        geom_col() +
+        geom_col(width = 0.72) +
         geom_text(
           aes(label = sprintf("%.1f%%", 100 * doublet_rate)),
-          vjust = -0.4,
-          size = 3
+          angle = 90,
+          hjust = -0.12,
+          vjust = 0.5,
+          size = 2.6
+        ) +
+        scale_y_continuous(
+          labels = scales::percent,
+          expand = ggplot2::expansion(mult = c(0, 0.15))
         ) +
         theme_minimal() +
-        theme(axis.text.x = element_text(angle = 45, hjust = 1)) +
-        scale_x_discrete(labels = function(x) wrap_labels(x, 18)) +
+        theme(
+          axis.text.x = element_text(angle = 90, hjust = 1, vjust = 0.5, size = 8),
+          axis.text.y = element_text(size = 9),
+          legend.position = "top",
+          legend.title = element_text(size = 9, face = "bold")
+        ) +
         labs(
           x = "Sample",
           y = "Doublet rate",
@@ -2729,8 +2744,8 @@ if (stage_allowed("08")) run_stage("08_publication_analyses", {
       save_fig(
         file.path(fig_dir, "fig_29_doublet_rate_sample.png"),
         p_dbl_rate,
-        width = 8,
-        height = 5,
+        width = 12,
+        height = 6.5,
         dpi = 150
       )
     }
@@ -2738,17 +2753,21 @@ if (stage_allowed("08")) run_stage("08_publication_analyses", {
 
   prop_sample <- as.data.frame(table(
     CellType = seurat$celltype_annot,
-    Sample = seurat$sample
+    Sample = sample_short_label(seurat$sample)
   ))
   p_prop_sample <- ggplot(
     prop_sample,
     aes(x = Sample, y = Freq, fill = CellType)
   ) +
-    geom_col(position = "fill") +
+    geom_col(position = "fill", width = 0.72) +
     scale_y_continuous(labels = scales::percent) +
     theme_minimal() +
-    theme(axis.text.x = element_text(angle = 45, hjust = 1)) +
-    scale_x_discrete(labels = function(x) wrap_labels(x, 18)) +
+    theme(
+      axis.text.x = element_text(angle = 90, hjust = 1, vjust = 0.5, size = 8),
+      axis.text.y = element_text(size = 9),
+      legend.title = element_text(size = 9, face = "bold"),
+      legend.text = element_text(size = 8)
+    ) +
     labs(
       x = "Sample",
       y = "Proportion",
@@ -2758,8 +2777,8 @@ if (stage_allowed("08")) run_stage("08_publication_analyses", {
   save_fig(
     file.path(fig_dir, "fig_30_sample_proportion.png"),
     p_prop_sample,
-    width = 10,
-    height = 6,
+    width = 12,
+    height = 6.5,
     dpi = 150
   )
 
@@ -3074,6 +3093,9 @@ if (stage_allowed("08")) run_stage("08_publication_analyses", {
             "_w",
             seq_along(starts)
           )
+          col_step <- max(1L, ceiling(ncol(win_scores) / 25L))
+          col_labels <- colnames(win_scores)
+          col_labels[(seq_along(col_labels) - 1L) %% col_step != 0L] <- ""
           rownames(win_scores) <- colnames(expr_sub)
           cnv_df <- data.frame(
             cell = rownames(win_scores),
@@ -3111,17 +3133,21 @@ if (stage_allowed("08")) run_stage("08_publication_analyses", {
                 annotation_colors = ann_colors,
                 show_rownames = FALSE,
                 show_colnames = TRUE,
+                labels_col = col_labels,
+                angle_col = 90,
                 cluster_rows = TRUE,
                 cluster_cols = FALSE,
                 color = colorRampPalette(
                   c("#3B4CC0", "#FFFFFF", "#B40426")
                 )(100),
-                fontsize_col = 6,
+                fontsize = 10,
+                fontsize_col = 8,
+                border_color = NA,
                 main = "Inferred CNV profile (sliding window)"
               )
             },
-            width = 1200,
-            height = 900
+            width = 2200,
+            height = 1100
           )
           log_msg("CNV heatmap generated")
         }
