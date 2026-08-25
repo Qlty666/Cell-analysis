@@ -8,7 +8,8 @@
       "content": "过滤前 nFeature_RNA、nCount_RNA、percent.mt 按条件展示的原始分布。",
       "type": "小提琴图（多面板）",
       "use": "判断原始数据质量，识别低质量细胞尾部、条件间差异和异常样本。",
-      "optional": false
+      "optional": false,
+      "legend": "坐标轴：横轴为条件（condition），纵轴为 QC 指标数值。三个并列面板依次为 nFeature_RNA（检测基因数）、nCount_RNA（总分子数）、percent.mt（线粒体基因百分比）。\n颜色/图例：小提琴按条件分组填充，图中 NoLegend 移除图例，分组由横轴标签区分。\n读取：对比条件间分布主体与长尾；nFeature/nCount 过低提示低质量或空液滴，percent.mt 过高提示细胞状态差。\n数据来源：data/01_qc/fig_01_qc_metrics.csv 与 seurat_raw.rds。"
     },
     {
       "file": "figures/01_qc/fig_01_qc_filtered_violin.png",
@@ -17,7 +18,8 @@
       "content": "过滤后保留细胞的 nFeature_RNA、nCount_RNA、percent.mt 分布。",
       "type": "小提琴图（多面板）",
       "use": "确认过滤阈值是否合理，验证低质量尾部被去除且主要细胞群保留。",
-      "optional": false
+      "optional": false,
+      "legend": "坐标轴：横轴为条件（condition），纵轴为过滤后 nFeature_RNA、nCount_RNA、percent.mt 数值，三个面板同原始图。\n颜色/图例：小提琴按条件分组，图例被移除。\n阈值：默认由 LIVER_QC_MIN_FEATURES/MAX_FEATURES/MIN_COUNTS/MAX_COUNTS/MAX_MT 决定，未设置时按数据分位数自动计算。\n读取：确认低质量尾部被去除且主要细胞群保留。\n数据来源：fig_01_qc_metrics.csv 的过滤后子集。"
     },
     {
       "file": "figures/01_qc/fig_48_qc_pvalue_comparison.png",
@@ -26,7 +28,8 @@
       "content": "过滤前后各 QC 指标在条件间的 Wilcoxon 检验 -log10 P 值对比，标注 P=0.05 参考线。",
       "type": "分组条形图（按原始/过滤后面板分面）",
       "use": "量化过滤是否改变条件间质量差异，辅助判断 QC 是否引入偏倚。",
-      "optional": false
+      "optional": false,
+      "legend": "坐标轴：横轴为 QC 指标（nFeature_RNA、nCount_RNA、percent.mt、percent.ribo），纵轴为 -log10(P value)。\n颜色/图例：条形填充色表示条件两两比较（comparison）；灰色虚线为 P=0.05（约 1.301）；柱顶文字为原始 P 值。\n面板：按 raw/filtered 分面，纵轴自由缩放。\n统计：Wilcoxon 秩和检验，padj 使用 BH FDR。\n回退：条件少于 2 组时显示 At least two conditions are required。\n数据来源：data/01_qc/fig_48_qc_pvalue_comparison.csv。"
     },
     {
       "file": "figures/02_doublets/fig_02_doublet_scores.png",
@@ -35,7 +38,8 @@
       "content": "scDblFinder 双细胞得分按 singlet/doublet 分类的分布。",
       "type": "小提琴图叠加箱线图",
       "use": "判断双细胞检测的区分度与过滤边界，识别异常高得分的双细胞候选。",
-      "optional": false
+      "optional": false,
+      "legend": "坐标轴：横轴为双细胞判定（singlet/doublet），纵轴为 scDblFinder score（双细胞得分）。\n颜色：singlet 浅蓝 #4DBBD5，doublet 红 #E64B35。\n图形：小提琴叠加窄箱线图（outlier.shape=NA）。\n读取：doublet 得分应整体高于 singlet；得分完全重叠时需复核 scDblFinder 是否成功。\n回退：scDblFinder 失败时全部标记为 singlet、得分 0，该图不能作为真实双细胞结果。\n数据来源：data/02_doublets/fig_02_doublet_results.csv。"
     },
     {
       "file": "figures/03_cluster/fig_03_umap_clusters.png",
@@ -44,7 +48,8 @@
       "content": "Seurat 聚类结果在 UMAP 上的分布。",
       "type": "UMAP 散点图",
       "use": "检查聚类结构、聚类边界和过度/欠聚类。",
-      "optional": false
+      "optional": false,
+      "legend": "坐标轴：横轴 UMAP_1，纵轴 UMAP_2（该次运行 UMAP 降维坐标）。\n颜色/图例：每个聚类一种颜色，图例为“聚类号 - 主要细胞类型”，图中标注主要细胞类型标签。\n读取：检查聚类边界、过度聚类与欠聚类，聚类数应与 summary.json 的 n_clusters 一致。\n回退：UMAP 失败时使用随机占位嵌入。\n数据来源：data/03_cluster/fig_03_04_05_umap_coordinates.csv。"
     },
     {
       "file": "figures/03_cluster/fig_04_umap_condition.png",
@@ -53,7 +58,8 @@
       "content": "UMAP 按条件着色。",
       "type": "UMAP 散点图",
       "use": "评估条件间分布、批次效应和分组混杂。",
-      "optional": false
+      "optional": false,
+      "legend": "坐标轴：UMAP_1/UMAP_2。\n颜色/图例：点颜色表示条件（condition），标题为条件比较。\n读取：评估条件分离、批次效应和分组混杂；单条件图不能支持条件差异结论。\n数据来源：同一 UMAP 坐标表。"
     },
     {
       "file": "figures/04_annotation/fig_05_umap_annotation.png",
@@ -62,7 +68,8 @@
       "content": "marker 注释与发表注释并排 UMAP。",
       "type": "UMAP 散点图（双面板）",
       "use": "比较两种注释的细胞类型分布是否一致。",
-      "optional": false
+      "optional": false,
+      "legend": "坐标轴：UMAP_1/UMAP_2，左右双面板并排。\n颜色/图例：左面板 marker 注释（celltype_annot），右面板发布注释（published_type）。\n读取：比较两种注释是否在 UMAP 上形成连贯一致的区域；差异大的类型回到 marker 图与混淆矩阵复核。\n数据来源：data/04_annotation/fig_05_16_17_cell_annotations.csv。"
     },
     {
       "file": "figures/04_annotation/fig_06_dotplot_markers.png",
@@ -71,7 +78,8 @@
       "content": "marker 基因在各细胞类型中的表达比例和平均表达量。",
       "type": "点图（DotPlot）",
       "use": "验证细胞类型注释的 marker 特异性。",
-      "optional": false
+      "optional": false,
+      "legend": "坐标轴：横轴为 marker 基因，纵轴为细胞类型（celltype_annot）。\n颜色/图例：点颜色表示平均表达量（越深越高），点大小表示表达该基因的细胞比例（pct.exp），为 Seurat DotPlot 双图例。\n读取：预期 marker 在对应细胞类型高表达高比例；所有点无差异或空白时不能验证注释。"
     },
     {
       "file": "figures/04_annotation/fig_07_annotation_confusion_heatmap.png",
@@ -80,7 +88,8 @@
       "content": "marker 注释与发表注释的混淆矩阵。",
       "type": "热图（带计数）",
       "use": "评估注释一致性和主要对应关系。",
-      "optional": false
+      "optional": false,
+      "legend": "坐标轴：横轴为发布细胞类型，纵轴为 marker 注释细胞类型。\n颜色/图例：pheatmap 默认蓝-白渐变，颜色越深计数越高，格内数字为细胞计数。\n读取：对角线应为主要对应关系；非对角线高计数提示注释差异。\n回退：无发布注释时显示 No published annotations。\n数据来源：data/04_annotation/fig_07_annotation_confusion.csv。"
     },
     {
       "file": "figures/05_deg/fig_08_volcano.png",
@@ -89,7 +98,8 @@
       "content": "差异基因的 log2FC 与 -log10 校正 P 值。",
       "type": "火山图（可回退为 MA 图）",
       "use": "查看差异表达基因数量、方向和显著性。",
-      "optional": false
+      "optional": false,
+      "legend": "坐标轴：横轴 avg_log2FC（平均 log2 差异倍数，标题标注比较组），纵轴 -log10(p_val_adj)（BH 校正 P 值负对数）。\n颜色：显著上调红 #E64B35，显著下调蓝 #4DBBD5，其余灰 grey75。\n参考线：灰色竖虚线 log2FC=±0.25，横虚线 P=0.05；Top15 基因标注名称。\n回退：LIVER_FIGURE_STYLES 可切换为 MA 图；无显著 DEG 时仍生成图，只能说明未检出。\n数据来源：data/05_deg/fig_08_deg_all.csv。"
     },
     {
       "file": "figures/05_deg/fig_09_deg_heatmap.png",
@@ -98,7 +108,8 @@
       "content": "Top DEG 在条件/样本中的表达热图。",
       "type": "热图",
       "use": "查看显著基因的整体表达模式。",
-      "optional": false
+      "optional": false,
+      "legend": "坐标轴：横轴为 Top DEG 基因，纵轴为样本/细胞，按条件分组。\n颜色：viridis 色阶，深紫到黄表示 ScaleData 后表达低到高。\n输入：Top30 基因（按 P 值排序）；无显著 DEG 时可能来自全部基因排序，需结合 fig_09_deg_significant.csv。"
     },
     {
       "file": "figures/05_deg/fig_09_deg_horizontal_violin.png",
@@ -107,7 +118,8 @@
       "content": "按校正 P 值排序的 Top DEG 表达分布并标注 P 值。",
       "type": "横向小提琴图",
       "use": "优先查看差异最显著基因的表达差异。",
-      "optional": false
+      "optional": false,
+      "legend": "坐标轴：横轴为归一化表达量，纵轴为基因（按校正 P 值升序，标签为基因名+P 值）。\n颜色：小提琴填充色表示条件，来自 hcl.colors(palette=\"Set 2\")；顶部图例。\n图形：小提琴+窄箱线+抖动散点，每条件最多 1000 细胞（LIVER_DE_VIOLIN_MAX_CELLS）。\n回退：无显著 DEG 时可能回退到非显著基因，不能称为显著差异基因。"
     },
     {
       "file": "figures/06_enrichment/fig_10_go_up.png",
@@ -116,7 +128,8 @@
       "content": "上调基因 GO BP 富集结果。",
       "type": "富集气泡图/点图",
       "use": "查看上调基因富集的生物学过程。",
-      "optional": false
+      "optional": false,
+      "legend": "clusterProfiler 富集图（默认 barplot，最多 10 条）。\n坐标轴：barplot 时横轴为 Count，纵轴为富集条目；dotplot 时横轴为 GeneRatio。\n颜色：默认 p.adjust，颜色越深越显著。\n输入：上调显著 DEG 的 GO BP 富集（enrichGO，BH，pvalueCutoff=0.1）。\n回退：无显著条目显示 No significant enrichment terms。\n数据来源：fig_10_enrichment_up_go.csv。"
     },
     {
       "file": "figures/06_enrichment/fig_11_go_down.png",
@@ -125,7 +138,8 @@
       "content": "下调基因 GO BP 富集结果。",
       "type": "富集气泡图/点图",
       "use": "查看下调基因富集的生物学过程。",
-      "optional": false
+      "optional": false,
+      "legend": "clusterProfiler 富集图（默认 barplot，最多 10 条）。\n坐标轴：barplot 时横轴为 Count，纵轴为富集条目；dotplot 时横轴为 GeneRatio。\n颜色：默认 p.adjust，颜色越深越显著。\n输入：下调显著 DEG 的 GO BP 富集。\n回退：无显著条目显示 No significant enrichment terms。\n数据来源：fig_11_enrichment_down_go.csv。"
     },
     {
       "file": "figures/06_enrichment/fig_12_kegg_up.png",
@@ -134,7 +148,8 @@
       "content": "上调基因 KEGG 富集结果。",
       "type": "富集气泡图/点图",
       "use": "查看上调基因相关 KEGG 通路。",
-      "optional": false
+      "optional": false,
+      "legend": "clusterProfiler 富集图（默认 barplot，最多 10 条）。\n坐标轴：barplot 时横轴为 Count，纵轴为富集条目；dotplot 时横轴为 GeneRatio。\n颜色：默认 p.adjust，颜色越深越显著。\n输入：上调显著 DEG 的 KEGG 富集（enrichKEGG）。\n回退：无显著条目时只能说明未检出。\n数据来源：fig_12_enrichment_up_kegg.csv。"
     },
     {
       "file": "figures/06_enrichment/fig_13_kegg_down.png",
@@ -143,7 +158,8 @@
       "content": "下调基因 KEGG 富集结果。",
       "type": "富集气泡图/点图",
       "use": "查看下调基因相关 KEGG 通路。",
-      "optional": false
+      "optional": false,
+      "legend": "clusterProfiler 富集图（默认 barplot，最多 10 条）。\n坐标轴：barplot 时横轴为 Count，纵轴为富集条目；dotplot 时横轴为 GeneRatio。\n颜色：默认 p.adjust，颜色越深越显著。\n输入：下调显著 DEG 的 KEGG 富集。\n回退：无显著条目时只能说明未检出。\n数据来源：fig_13_enrichment_down_kegg.csv。"
     },
     {
       "file": "figures/03_cluster/fig_14_pca.png",
@@ -152,7 +168,8 @@
       "content": "主成分空间中细胞按条件着色。",
       "type": "PCA 散点图",
       "use": "查看主要变异来源、条件/批次分离和离群细胞。",
-      "optional": false
+      "optional": false,
+      "legend": "坐标轴：横轴 PC_1，纵轴 PC_2（主成分空间）。\n颜色/图例：点颜色表示条件（condition）。\n读取：查看条件/样本分离、批次混杂和离群点；主成分无独立生物学单位。\n回退：样本级模式使用随机占位嵌入，只能作描述性展示。"
     },
     {
       "file": "figures/03_cluster/fig_15_elbow.png",
@@ -161,7 +178,8 @@
       "content": "各主成分标准差。",
       "type": "折线图（碎石图）",
       "use": "辅助确定下游使用的 PCA 维度数。",
-      "optional": false
+      "optional": false,
+      "legend": "坐标轴：横轴为主成分序号（PC 1..N），纵轴为主成分标准差。\n图形：单条折线。\n读取：寻找拐点选择 PCA 维度；无拐点不代表损坏，但需说明维度选择依据。\n回退：样本级模式生成水平线。"
     },
     {
       "file": "figures/04_annotation/fig_16_featureplot_markers.png",
@@ -170,7 +188,8 @@
       "content": "marker 基因在 UMAP 上的表达位置。",
       "type": "UMAP 特征图（FeaturePlot）",
       "use": "检查 marker 表达是否集中在预期细胞类型区域。",
-      "optional": true
+      "optional": true,
+      "legend": "坐标轴：UMAP_1/UMAP_2，每个 marker 基因一个面板（最多 6 个）。\n颜色：点颜色表示 marker 表达量，浅灰到深红渐变（FeaturePlot 默认配色）。\n读取：表达信号应集中在预期细胞类型区域；全图均匀灰色时不可用。"
     },
     {
       "file": "figures/04_annotation/fig_17_marker_violin.png",
@@ -179,7 +198,8 @@
       "content": "marker 基因在各细胞类型中的表达分布。",
       "type": "小提琴图（多面板）",
       "use": "验证 marker 在对应细胞类型中表达更高。",
-      "optional": true
+      "optional": true,
+      "legend": "坐标轴：横轴为细胞类型，纵轴为表达量。\n图形：小提琴按细胞类型分组，每个 marker 一个面板。\n读取：预期细胞类型表达明显更高；分布完全一致时不能作为注释支持。"
     },
     {
       "file": "figures/04_annotation/fig_18_celltype_proportion.png",
@@ -188,7 +208,8 @@
       "content": "各细胞类型在条件中的比例堆叠。",
       "type": "堆叠条形图",
       "use": "比较条件间细胞类型构成差异。",
-      "optional": false
+      "optional": false,
+      "legend": "坐标轴：横轴为细胞类型，纵轴为比例（0-100%，position=\"fill\"）。\n颜色/图例：填充颜色表示条件（condition）。\n读取：柱高合计为 1，比较条件间细胞类型构成；某些类型细胞数过少时比例不可靠。"
     },
     {
       "file": "figures/04_annotation/fig_19_condition_proportion.png",
@@ -197,7 +218,8 @@
       "content": "每个细胞类型中条件构成比例。",
       "type": "堆叠条形图（横向）",
       "use": "观察每个细胞类型内部的条件组成。",
-      "optional": false
+      "optional": false,
+      "legend": "坐标轴：横向堆叠条形图，横轴为比例（0-100%），纵轴为条件（coord_flip 后）。\n颜色/图例：填充颜色表示细胞类型。\n读取：查看每个细胞类型内部的条件构成。"
     },
     {
       "file": "figures/06_enrichment/fig_20_gsea_go.png",
@@ -206,7 +228,8 @@
       "content": "GO BP GSEA 富集结果。",
       "type": "GSEA 富集图（折线/条带组合）",
       "use": "查看 GO 通路整体富集方向和显著性。",
-      "optional": false
+      "optional": false,
+      "legend": "坐标轴：默认 ridgeplot 时横轴为按 log2FC 降序排列的基因排序位置，纵轴为富集分数分布；gseaplot2 时显示富集曲线。\n颜色/图例：ridgeplot 按通路着色；gseaplot2 含 NES/p.adjust 标签。\n回退：LIVER_SKIP_GSEA=yes 或映射失败时跳过；无条目显示 No significant GSEA terms。"
     },
     {
       "file": "figures/06_enrichment/fig_21_gsea_kegg.png",
@@ -215,7 +238,8 @@
       "content": "KEGG GSEA 富集结果。",
       "type": "GSEA 富集图（折线/条带组合）",
       "use": "查看 KEGG 通路整体富集方向和显著性。",
-      "optional": false
+      "optional": false,
+      "legend": "坐标轴：默认 ridgeplot 时横轴为按 log2FC 降序排列的基因排序位置，纵轴为富集分数分布；gseaplot2 时显示富集曲线。\n颜色/图例：ridgeplot 按通路着色；gseaplot2 含 NES/p.adjust 标签。\n回退：无条目显示 No significant GSEA terms。"
     },
     {
       "file": "figures/06_enrichment/fig_22_go_network.png",
@@ -224,7 +248,8 @@
       "content": "上调 GO 通路经校正 P 值筛选后的 Top5 通路-基因网络。",
       "type": "网络图（cnetplot）",
       "use": "查看通路与基因的关联结构。",
-      "optional": false
+      "optional": false,
+      "legend": "坐标轴：无笛卡尔坐标，为通路-基因网络布局（cnetplot）。\n颜色/图例：基因节点颜色默认按 avg_log2FC 渐变，通路节点按类别着色。\n输入：p.adjust<=0.05 筛选后 Top5 通路。\n回退：无显著通路显示 No significant pathway network。"
     },
     {
       "file": "figures/06_enrichment/fig_23_kegg_network.png",
@@ -233,7 +258,8 @@
       "content": "上调 KEGG 通路筛选后的 Top5 通路-基因网络。",
       "type": "网络图（cnetplot）",
       "use": "查看 KEGG 通路与基因的关联结构。",
-      "optional": false
+      "optional": false,
+      "legend": "坐标轴：无笛卡尔坐标，为通路-基因网络布局（cnetplot）。\n颜色/图例：基因节点颜色默认按 avg_log2FC 渐变，通路节点按类别着色。\n输入：p.adjust<=0.05 筛选后 Top5 通路。\n回退：无显著通路显示 No significant pathway network。"
     },
     {
       "file": "figures/06_enrichment/fig_46_go_top5.png",
@@ -242,7 +268,8 @@
       "content": "GO BP 筛选后 Top5 通路富集。",
       "type": "气泡图",
       "use": "快速查看最显著的上调 GO 通路。",
-      "optional": false
+      "optional": false,
+      "legend": "坐标轴：纵轴为 Top5 富集条目，横轴为 GeneRatio（富集基因占输入基因比例）。\n颜色/图例：气泡颜色表示 p.adjust（越显著越深/越红），气泡大小表示 Count（富集基因数）。\n回退：无筛选后通路显示 No significant pathway after filtering。"
     },
     {
       "file": "figures/06_enrichment/fig_47_kegg_top5.png",
@@ -251,7 +278,8 @@
       "content": "KEGG 筛选后 Top5 通路富集。",
       "type": "气泡图",
       "use": "快速查看最显著的上调 KEGG 通路。",
-      "optional": false
+      "optional": false,
+      "legend": "坐标轴：纵轴为 Top5 富集条目，横轴为 GeneRatio。\n颜色/图例：气泡颜色表示 p.adjust，气泡大小表示 Count。\n回退：无筛选后通路显示 No significant pathway after filtering。"
     },
     {
       "file": "figures/07_ml/fig_24_ml_feature_importance.png",
@@ -260,7 +288,8 @@
       "content": "单细胞 ML 分类模型的特征重要性。",
       "type": "条形图（横向排序）",
       "use": "筛选影响样本分类的关键特征。",
-      "optional": false
+      "optional": false,
+      "legend": "坐标轴：横轴为特征重要性数值，纵轴为特征名。\n颜色：条形统一蓝色 #4C72B0，仅展示 Top15。\n输入：单细胞 ML 模型特征重要性或系数绝对值；特征为样本级 QC 均值与细胞类型比例。\n可用性：ml_model_summary.json 状态为 completed 才可用。"
     },
     {
       "file": "figures/07_ml/fig_25_ml_shap.png",
@@ -269,7 +298,8 @@
       "content": "SHAP 值对预测方向和贡献的解释。",
       "type": "SHAP 蜂群图",
       "use": "解释特征如何影响模型预测。",
-      "optional": false
+      "optional": false,
+      "legend": "坐标轴：横轴为 SHAP 值（对预测的影响，正负为方向），纵轴为特征名。\n颜色/图例：点颜色表示特征值大小（SHAP 默认红高蓝低），右侧为特征值色条。\n输入：TreeExplainer（树模型）或 KernelExplainer（其他模型），最多 15 个特征。\n回退：计算失败时 ml_shap_status.txt 写 SHAP plot skipped，该图不可用。"
     },
     {
       "file": "figures/08_publication/fig_26_cellcycle_umap.png",
@@ -278,7 +308,8 @@
       "content": "细胞周期阶段在 UMAP 上的分布。",
       "type": "UMAP 散点图",
       "use": "检查细胞周期是否干扰聚类结构。",
-      "optional": true
+      "optional": true,
+      "legend": "坐标轴：UMAP_1/UMAP_2。\n颜色/图例：点颜色表示细胞周期阶段（Seurat Phase：G1/S/G2M 默认离散配色）。\n开关：LIVER_RUN_CELLCYCLE=yes，且需足够 S/G2M 基因。\n读取：phase 强分群时需评估细胞周期回归。"
     },
     {
       "file": "figures/08_publication/fig_27_cellcycle_proportion.png",
@@ -287,7 +318,8 @@
       "content": "细胞周期阶段按分组/细胞类型的比例。",
       "type": "堆叠条形图",
       "use": "比较细胞周期构成差异。",
-      "optional": true
+      "optional": true,
+      "legend": "坐标轴：横轴为条件，纵轴为比例（0-100%）。\n颜色/图例：填充颜色表示细胞周期阶段。\n读取：比较组间周期构成。"
     },
     {
       "file": "figures/08_publication/fig_28_umap_sample.png",
@@ -296,7 +328,8 @@
       "content": "UMAP 按样本着色。",
       "type": "UMAP 散点图",
       "use": "检查多样本混合和批次效应。",
-      "optional": true
+      "optional": true,
+      "legend": "坐标轴：UMAP_1/UMAP_2。\n颜色/图例：点颜色表示条件，固定红 #E64B35 与蓝 #4DBBD5。\n读取：评估样本混合和批次效应；仅样本数>1 时生成，单样本缺失正常。"
     },
     {
       "file": "figures/08_publication/fig_29_doublet_rate_sample.png",
@@ -305,7 +338,8 @@
       "content": "每个样本的双细胞率。",
       "type": "条形图",
       "use": "识别双细胞率异常偏高的样本。",
-      "optional": false
+      "optional": false,
+      "legend": "坐标轴：横轴为样本短标签，纵轴为双细胞率（百分比）。\n颜色/图例：条形填充颜色表示条件，柱顶标注百分比。\n读取：识别双细胞率异常偏高的样本，应与 fig_29_doublet_rate_by_sample.csv 一致。"
     },
     {
       "file": "figures/08_publication/fig_30_sample_proportion.png",
@@ -314,7 +348,8 @@
       "content": "每样本各细胞类型比例。",
       "type": "堆叠条形图",
       "use": "比较样本间细胞类型构成和异质性。",
-      "optional": false
+      "optional": false,
+      "legend": "坐标轴：横轴为样本短标签，纵轴为比例（0-100%）。\n颜色/图例：填充颜色表示细胞类型。\n读取：检查样本间细胞类型构成和异质性。"
     },
     {
       "file": "figures/08_publication/fig_31_cluster_marker_heatmap.png",
@@ -323,7 +358,8 @@
       "content": "各聚类 marker 基因平均表达热图。",
       "type": "热图",
       "use": "查看聚类 marker 表达模式，辅助定义聚类标签。",
-      "optional": true
+      "optional": true,
+      "legend": "坐标轴：横轴为聚类 marker 基因，纵轴为聚类（seurat_clusters）。\n颜色：viridis 色阶（深紫到黄，值越大表达越高）。\n输入：FindAllMarkers（only.pos=TRUE，min.pct=0.25，logfc.threshold=0.5），每聚类 Top3。\n读取：查看每聚类 marker 表达块，辅助定义聚类标签。"
     },
     {
       "file": "figures/08_publication/fig_32_cluster_marker_dotplot.png",
@@ -332,7 +368,8 @@
       "content": "各聚类 marker 基因表达比例与水平。",
       "type": "点图（DotPlot）",
       "use": "检查 marker 是否具有聚类特异性。",
-      "optional": true
+      "optional": true,
+      "legend": "坐标轴：横轴为 marker 基因，纵轴为聚类。\n颜色/图例：点颜色表示平均表达量，点大小表示表达比例。\n读取：marker 应在对应聚类高表达高比例。"
     },
     {
       "file": "figures/08_publication/fig_33_signature_scores_umap.png",
@@ -341,7 +378,8 @@
       "content": "增殖、EMT、缺氧等功能签名得分在 UMAP 上的分布。",
       "type": "UMAP 特征图（多面板）",
       "use": "查看功能签名是否集中在特定细胞群。",
-      "optional": true
+      "optional": true,
+      "legend": "坐标轴：UMAP_1/UMAP_2，每个签名一个面板。\n颜色：点颜色表示功能签名得分，浅灰 grey90 到深红 #B31B1B。\n输入：AddModuleScore 计算的增殖/EMT/缺氧/免疫检查点等签名，签名基因不足 3 个时跳过。\n读取：签名集中特定细胞群才有解释意义。"
     },
     {
       "file": "figures/08_publication/fig_34_signature_scores_boxplot.png",
@@ -350,7 +388,8 @@
       "content": "功能签名得分按条件/细胞类型分布。",
       "type": "箱线图或小提琴图",
       "use": "比较条件间签名活性差异。",
-      "optional": true
+      "optional": true,
+      "legend": "坐标轴：横轴为条件，纵轴为签名得分。\n颜色/图例：小提琴/箱线按条件填充（图例隐藏），每个签名一个分面面板。\n读取：比较条件间签名活性；无差异不代表损坏。"
     },
     {
       "file": "figures/08_publication/fig_35_celltype_abundance_effect.png",
@@ -359,7 +398,8 @@
       "content": "细胞类型丰度变化的 log2OR 与 -log10 校正 P 值。",
       "type": "散点图（类火山图）",
       "use": "判断哪些细胞类型在条件间显著增多或减少。",
-      "optional": false
+      "optional": false,
+      "legend": "坐标轴：横轴为 log2 odds ratio，纵轴为 -log10 adjusted p value。\n颜色/图例：点颜色表示细胞类型，点旁标注细胞类型名；灰色虚线为 x=0。\n输入：Fisher 精确检验 OddsRatio 与 BH 校正 Padj（fig_18_19_celltype_proportion_stats.csv）。"
     },
     {
       "file": "figures/08_publication/fig_36_cnv_heatmap.png",
@@ -368,7 +408,8 @@
       "content": "基于染色体滑动窗口均值的推断 CNV 模式。",
       "type": "热图",
       "use": "查看细胞亚群的染色体拷贝数变化和肿瘤异质性。",
-      "optional": true
+      "optional": true,
+      "legend": "坐标轴：横轴为染色体滑动窗口（按染色体顺序），纵轴为细胞（聚类后）。\n颜色：蓝 #3B4CC0-白-红 #B40426，蓝为相对低表达（推断拷贝缺失），红为相对高表达（推断拷贝增益）。\n注释：顶部 Condition 红/蓝/绿、CellType 彩虹色。\n输入：每条件最多 750 细胞，滑动窗口推断；全白或窗口过少不可用。"
     },
     {
       "file": "figures/08_publication/fig_37_singler_umap.png",
@@ -377,7 +418,8 @@
       "content": "SingleR 参考注释在 UMAP 上的分布。",
       "type": "UMAP 散点图",
       "use": "查看参考注释与现有注释的空间一致性。",
-      "optional": true
+      "optional": true,
+      "legend": "坐标轴：UMAP_1/UMAP_2。\n颜色/图例：点颜色表示 SingleR 参考注释（singleR_label）。\n输入：celldex 参考（HPCA/MouseRNAseq），最多 20000 细胞。\n回退：参考数据不可用时不生成，缺失正常。"
     },
     {
       "file": "figures/08_publication/fig_38_singler_confusion_heatmap.png",
@@ -386,7 +428,8 @@
       "content": "SingleR 注释与现有注释的混淆矩阵。",
       "type": "热图",
       "use": "定量评估注释一致性。",
-      "optional": true
+      "optional": true,
+      "legend": "坐标轴：横轴为 SingleR 注释，纵轴为 marker 注释。\n颜色/图例：pheatmap 默认蓝-白渐变，格内数字为细胞计数。\n读取：查看两种注释的一致性。"
     },
     {
       "file": "figures/08_publication/fig_39_trajectory_umap.png",
@@ -395,7 +438,8 @@
       "content": "slingshot 拟时序轨迹及细胞 UMAP 分布。",
       "type": "UMAP 轨迹图",
       "use": "查看分化轨迹、伪时序梯度和谱系结构。",
-      "optional": true
+      "optional": true,
+      "legend": "坐标轴：UMAP_1/UMAP_2，左右双面板。\n颜色/图例：左面板伪时序（viridis），右面板聚类着色、黑色线为 slingshot 谱系。\n开关：LIVER_RUN_TRAJECTORY=no 时不生成；轨迹无结构时不能作分化结论。"
     },
     {
       "file": "figures/09_cellchat/fig_40_cellchat_network.png",
@@ -404,7 +448,8 @@
       "content": "细胞类型间的通讯数量网络。",
       "type": "网络图",
       "use": "查看细胞间通讯关系和强度。",
-      "optional": true
+      "optional": true,
+      "legend": "坐标轴：无笛卡尔坐标，环形网络布局。\n颜色/图例：节点颜色/大小表示细胞类型与细胞数；边粗细表示通讯数量，弧上标签为通讯数。\n输入：CellChat 标准流程，LIVER_RUN_CELLCHAT=yes 且 R 环境可用。\n回退：未运行/未安装/无通讯时不生成。"
     },
     {
       "file": "figures/09_cellchat/fig_41_cellchat_heatmap.png",
@@ -413,7 +458,8 @@
       "content": "细胞类型对间的通讯强度。",
       "type": "热图",
       "use": "比较不同细胞类型对之间的通讯强度。",
-      "optional": true
+      "optional": true,
+      "legend": "坐标轴：横轴为目标细胞类型，纵轴为来源细胞类型。\n颜色/图例：CellChat 默认红蓝渐变，颜色越红通讯强度越高。\n读取：全部为零或空白时不能作为通讯证据。"
     },
     {
       "file": "figures/09_cellchat/fig_42_cellchat_bubble.png",
@@ -422,7 +468,8 @@
       "content": "配体受体对在细胞类型对中的通讯证据。",
       "type": "气泡图",
       "use": "筛选候选配体受体互作。",
-      "optional": true
+      "optional": true,
+      "legend": "坐标轴：横轴为配体受体/信号通路，纵轴为细胞类型对（来源→目标）。\n颜色/图例：点颜色表示通讯概率，点大小表示贡献/显著性。\n读取：无显著对时只能说明未检出。"
     },
     {
       "file": "figures/07_ml/fig_43_ml_confusion_matrix.png",
@@ -431,7 +478,8 @@
       "content": "交叉验证分类混淆矩阵。",
       "type": "热图/混淆矩阵图",
       "use": "查看模型错分模式和分类准确度。",
-      "optional": false
+      "optional": false,
+      "legend": "坐标轴：横轴为预测类别，纵轴为真实类别。\n颜色/图例：Blues 色阶，颜色越深计数越高；格内数字自动黑/白。\n读取：对角线为正确分类；样本量小或状态失败时谨慎解释。"
     },
     {
       "file": "figures/07_ml/fig_44_ml_roc_pr.png",
@@ -440,7 +488,8 @@
       "content": "二分类或多分类 ROC 与 PR 曲线。",
       "type": "折线图（双面板）",
       "use": "评估模型区分能力和类别性能。",
-      "optional": false
+      "optional": false,
+      "legend": "坐标轴：左图 FPR/TPR，右图 Recall/Precision。\n颜色/图例：二分类一条曲线标注 AUC/AP，多分类每类一条；ROC 灰色虚线为随机基线。\n读取：AUC/AP 越接近 1 越好；AUC≈0.5 时不能用于强结论。"
     },
     {
       "file": "figures/07_ml/fig_45_ml_cv_scores.png",
@@ -449,7 +498,8 @@
       "content": "交叉验证准确率分布。",
       "type": "箱线图叠加散点图",
       "use": "评估模型稳定性。",
-      "optional": false
+      "optional": false,
+      "legend": "坐标轴：横轴为 CV accuracy 类别，纵轴为交叉验证准确率。\n图形：箱线图叠加蓝色 #4C72B0 散点（每折一个点）。\n读取：查看均值与离散程度，标题 n 为折数。"
     },
     {
       "file": "figures/07_ml/fig_45_ml_calibration_curve.png",
@@ -458,7 +508,8 @@
       "content": "二分类模型预测概率与观测频率的校准曲线。",
       "type": "折线图（带完美校准参考线）",
       "use": "检查预测概率是否校准，辅助判断概率阈值可靠性。",
-      "optional": true
+      "optional": true,
+      "legend": "坐标轴：横轴为平均预测概率，纵轴为观测频率。\n颜色/图例：蓝色校准折线，灰色虚线为完美校准。\n读取：越接近对角线表示概率越可靠；仅二分类生成。"
     },
     {
       "file": "data/07_ml/fig_24_ml_selected_features.csv",
@@ -800,7 +851,8 @@
       "content": "Top N 候选基因的 knockout_score。",
       "type": "条形图",
       "use": "快速查看高优先级候选基因。",
-      "optional": false
+      "optional": false,
+      "legend": "坐标轴：横轴为敲除优先级得分（固定 0-1），纵轴为基因名。\n颜色：条形绿色 #1d6f42。\n输入：多维评分加权 knockout_score；分数是统计优先级，不等同于真实敲除表型。"
     },
     {
       "file": "04_knockout/figures/fig_53_knockout_score_distribution.png",
@@ -809,7 +861,8 @@
       "content": "全部基因 knockout_score 分布。",
       "type": "直方图",
       "use": "判断评分是否有区分度和分层能力。",
-      "optional": false
+      "optional": false,
+      "legend": "坐标轴：横轴为敲除优先级得分（0-1），纵轴为基因数量。\n颜色：直方图蓝色 #4c7bb8。\n读取：评分全部相同或基因数过少时不能用于靶点分层。"
     },
     {
       "file": "04_knockout/data/fig_52_53_ranked_knockout.csv",
@@ -863,7 +916,8 @@
       "content": "全部成功对接配体的亲和力分布及命中阈值线。",
       "type": "直方图/密度图",
       "use": "查看整体对接分数、命中分布和阈值合理性。",
-      "optional": false
+      "optional": false,
+      "legend": "坐标轴：横轴为亲和力（kcal/mol，越负结合越强），纵轴为配体数量。\n颜色：直方图蓝色 #4c7bb8；红色虚线为命中阈值（默认 -7.0 kcal/mol），左侧为命中。\n数据来源：fig_46_47_ranked_results.csv；应与 summary.json 的 hits/best_affinity 一致。"
     },
     {
       "file": "results/01_analysis/figures/fig_47_top_hits.png",
@@ -872,7 +926,8 @@
       "content": "排序后的 Top 命中或候选配体亲和力。",
       "type": "条形图",
       "use": "快速选择排名靠前的候选配体。",
-      "optional": false
+      "optional": false,
+      "legend": "坐标轴：横轴为亲和力（kcal/mol），纵轴为配体 ID。\n颜色：条形绿色 #2e7d32，仅展示 Top20。\n注意：hits=0 时只是 Top 排序而非 Top 命中，不能写成命中结果。"
     },
     {
       "file": "results/01_analysis/figures/fig_48_diverse_hits.png",
@@ -881,7 +936,8 @@
       "content": "Tanimoto 多样性选择后的命中候选。",
       "type": "条形图",
       "use": "减少同一化学骨架重复，提高候选多样性。",
-      "optional": false
+      "optional": false,
+      "legend": "坐标轴：横轴为亲和力（kcal/mol），纵轴为配体 ID。\n颜色：条形紫色 #8e44ad。\n输入：Tanimoto 多样性选择（Morgan 指纹）；RDKit 不可用或分子<2 时可能不生成。"
     },
     {
       "file": "results/01_analysis/data/fig_46_47_ranked_results.csv",
@@ -926,7 +982,8 @@
       "content": "初始亲和力与重对接亲和力比较及变化量分布。",
       "type": "散点图 + 直方图（双面板）",
       "use": "检查初筛排序和亲和力的稳定性。",
-      "optional": true
+      "optional": true,
+      "legend": "坐标轴：左图初始亲和力（x）与重对接亲和力（y）；右图亲和力变化量（x）与配体数量（y）。\n颜色/图例：左绿色散点+黑色 y=x 虚线；右蓝色直方图+红色 0 虚线。\n读取：点接近对角线、变化围绕 0 表示重对接稳定。"
     },
     {
       "file": "results/02_redock/data/fig_49_redock_results.csv",
@@ -953,7 +1010,8 @@
       "content": "对接 ML 重打分模型的特征重要性。",
       "type": "条形图",
       "use": "解释哪些分子特征影响重打分结果。",
-      "optional": true
+      "optional": true,
+      "legend": "坐标轴：横轴为特征重要性，纵轴为特征名。\n颜色：条形蓝色 #1665c0。\n可用性：ml-train 阶段且模型有 feature_importances_/coef_ 时生成；MLP/torch 无原生重要性时不生成。"
     },
     {
       "file": "results/03_ml/figures/fig_51_ml_roc.png",
@@ -962,7 +1020,8 @@
       "content": "对接 ML 分类模型的 ROC 曲线。",
       "type": "折线图",
       "use": "评估分类模型排序能力。",
-      "optional": true
+      "optional": true,
+      "legend": "坐标轴：横轴为假阳性率，纵轴为真阳性率。\n颜色/图例：蓝色 ROC 曲线，灰色虚线为随机基线，图例显示 AUC。\n可用性：仅分类任务；AUC≈0.5 时模型不能用于优先排序。"
     },
     {
       "file": "results/03_ml/data/fig_50_ml_feature_importance.csv",
@@ -998,7 +1057,8 @@
       "content": "筛选靶点模块得分在 UMAP 上的分布。",
       "type": "UMAP 特征图",
       "use": "查看候选靶点模块是否集中在特定细胞群。",
-      "optional": false
+      "optional": false,
+      "legend": "坐标轴：UMAP_1/UMAP_2。\n颜色：点颜色表示筛选靶点模块得分，浅灰 grey90 到深红 #B31B1B。\n可用性：cell_feedback_summary.json 状态为 completed 且存在模块得分列。"
     },
     {
       "file": "figures/fig_55_feedback_target_expression_umap.png",
@@ -1007,7 +1067,8 @@
       "content": "候选靶基因在 UMAP 上的表达。",
       "type": "UMAP 特征图（多面板）",
       "use": "查看单个候选基因的细胞类型表达位置。",
-      "optional": false
+      "optional": false,
+      "legend": "坐标轴：UMAP_1/UMAP_2，每个候选靶基因一个面板（最多 max_features 个）。\n颜色：点颜色表示表达量，浅灰 grey90 到蓝 #2E86AB。\n读取：表达全为 0 时不可用。"
     },
     {
       "file": "figures/fig_56_feedback_celltype_dotplot.png",
@@ -1016,7 +1077,8 @@
       "content": "候选靶基因在细胞类型中的表达比例和水平。",
       "type": "点图（DotPlot）",
       "use": "比较候选基因的细胞类型特异性。",
-      "optional": false
+      "optional": false,
+      "legend": "坐标轴：横轴为候选靶基因，纵轴为细胞类型。\n颜色/图例：点颜色表示平均表达量，点大小表示表达比例。\n读取：所有基因在所有细胞类型均为 0 时不可用。"
     },
     {
       "file": "figures/fig_57_feedback_celltype_boxplot.png",
@@ -1025,7 +1087,8 @@
       "content": "模块得分按细胞类型和条件分布。",
       "type": "箱线图/小提琴图",
       "use": "查看模块活性的细胞类型和条件差异。",
-      "optional": false
+      "optional": false,
+      "legend": "坐标轴：横轴为细胞类型，纵轴为反馈模块得分。\n颜色/图例：小提琴/箱线按条件填充。\n可用性：细胞类型<2 时不生成；分布无差异只能说明特异性弱。"
     },
     {
       "file": "figures/fig_58_feedback_celltype_heatmap.png",
@@ -1034,7 +1097,8 @@
       "content": "候选基因平均表达按细胞类型聚类。",
       "type": "热图",
       "use": "查看候选基因表达谱的细胞类型模式。",
-      "optional": false
+      "optional": false,
+      "legend": "坐标轴：横轴为细胞类型，纵轴为候选靶基因。\n颜色：白-浅蓝-蓝-深红渐变（#f7fbff→#d6e7ff→#2E86AB→#7B241C），颜色越深平均表达越高。\n读取：行和列均聚类；全图同色时不可用。"
     },
     {
       "file": "figures/fig_59_feedback_targets_volcano.png",
@@ -1043,7 +1107,8 @@
       "content": "反馈靶基因在条件间的差异表达火山图。",
       "type": "火山图",
       "use": "查看反馈靶点中显著上调/下调基因及其幅度。",
-      "optional": false
+      "optional": false,
+      "legend": "坐标轴：横轴为 avg_log2FC，纵轴为 -log10(p_val_adj)。\n颜色：显著上调红 #C0392B，显著下调蓝 #2E86C1，其余灰 grey65。\n参考线：P=0.05 与 log2FC=±0.25 灰色虚线；显著基因标注基因名。\n数据来源：data/feedback_deg.csv。"
     },
     {
       "file": "figures/fig_60_feedback_condition_violin.png",
@@ -1052,7 +1117,8 @@
       "content": "反馈靶基因按条件分组的表达分布。",
       "type": "小提琴图",
       "use": "查看反馈靶点在病例/对照间的表达差异。",
-      "optional": false
+      "optional": false,
+      "legend": "坐标轴：横轴为条件，纵轴为归一化表达量。\n图形：小提琴按条件分组（图例被移除），每个候选靶基因一个面板。\n可用性：条件数>=2 时生成。"
     },
     {
       "file": "figures/fig_61_feedback_go_network.png",
@@ -1061,7 +1127,8 @@
       "content": "反馈靶基因 GO BP 富集 Top5 通路-基因网络。",
       "type": "cnetplot 通路-基因网络图",
       "use": "直接查看 Top5 GO 通路与反馈靶基因的关联强度。",
-      "optional": false
+      "optional": false,
+      "legend": "坐标轴：无笛卡尔坐标，为通路-基因网络布局。\n颜色/图例：基因节点按表达/差异方向着色，通路节点按类别着色。\n输入：反馈靶基因 GO BP 富集 p.adjust<=0.05 后 Top5。\n回退：无显著通路显示 No significant pathway network。"
     },
     {
       "file": "figures/fig_62_feedback_kegg_network.png",
@@ -1070,7 +1137,8 @@
       "content": "反馈靶基因 KEGG 富集 Top5 通路-基因网络。",
       "type": "cnetplot 通路-基因网络图",
       "use": "直接查看 Top5 KEGG 通路与反馈靶基因的关联强度。",
-      "optional": false
+      "optional": false,
+      "legend": "坐标轴：无笛卡尔坐标，为通路-基因网络布局。\n颜色/图例：基因节点按表达/差异方向着色，通路节点按类别着色。\n输入：反馈靶基因 KEGG 富集 p.adjust<=0.05 后 Top5。\n回退：无显著通路显示 No significant pathway network。"
     },
     {
       "file": "data/feedback_targets.csv",
@@ -1196,7 +1264,8 @@
       "content": "化合物靶点与疾病基因的交集。",
       "type": "Venn 图",
       "use": "查看交集规模及来源，确定核心分析基因集。",
-      "optional": false
+      "optional": false,
+      "legend": "坐标轴：无笛卡尔坐标，为集合圆形布局。\n颜色/图例：集合圆轮廓蓝 #4C72B0、橙 #DD8452、绿 #55A868，区域数字为基因计数。\n输入：化合物靶点与疾病基因集；交集 0 时只能说明无重叠。"
     },
     {
       "file": "faers/data/faers_signals.csv",
