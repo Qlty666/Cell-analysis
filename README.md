@@ -29,11 +29,11 @@
 - 差异表达（DESeq2 pseudobulk 或 Seurat Wilcoxon 回退）与 GO/KEGG/GSEA 富集分析。
 - 按校正后 P 值排序输出差异最显著基因的横向小提琴图，并在图中标注 P 值。
 - QC 阶段对原始/过滤后 `nFeature_RNA`、`nCount_RNA`、`percent.mt`、`percent.ribo` 按条件做 Wilcoxon 秩和检验并输出 P 值图，用于量化过滤对条件间质量差异的影响。
-- 报告生成器会对每个结果图和结果数据文件生成逐文件分析，并汇总为一份总报告。
+- 报告生成器会对每个实际输出的结果图自动匹配同编号结果数据，生成“图 + 数据联合分析”，并输出独立 Markdown/JSON 分析报告（`result_analysis_report.md` / `result_analysis.json`）。
 - 可选 CellChat 细胞通讯分析（设置 `LIVER_RUN_CELLCHAT=yes`）。
 - ML 疾病分类（XGBoost 或 RandomForest）、特征重要性和 SHAP 解释。
 - 发表级分析：细胞周期打分与回归校正、聚类 marker 发现、功能签名打分、推断 CNV、SingleR 自动注释，以及可选 slingshot 拟时序。
-- 输出 48 张分析图、HTML 报告，支持断点续跑、暂停/继续、停滞自动重启。
+- 输出 48 张分析图、HTML 总报告和“结果图 + 结果数据”联合分析报告，支持断点续跑、暂停/继续、停滞自动重启。
 - GO/KEGG 通路网络图按校正 P 值筛选后展示 Top5，并新增对应的 Top5 富集气泡图。
 
 新增分析可通过环境变量控制：
@@ -512,6 +512,7 @@ python scripts\validate_dataset_search.py \
 - `results/data/05_deg/fig_09_deg_horizontal_violin.csv`：该图对应的基因与 P 值数据。
 - `results/checkpoints/`：Seurat 断点对象。
 - `results/result_report.html`：最终 HTML 报告。
+- `results/result_analysis_report.md` / `results/result_analysis.json`：基于实际输出的结果图及其对应结果数据生成的联合分析报告（Markdown 可读版与 JSON 结构化版）。
 
 ### 5.2 虚拟筛选
 
