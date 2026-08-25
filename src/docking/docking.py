@@ -65,6 +65,8 @@ def run_docking(cfg: ResolvedConfig, log):
     ]
     if not tasks:
         raise DockingError("no prepared PDBQT ligands found in the manifest")
+    if not cfg.get("docking", "resume", True) and results_path.exists():
+        results_path.unlink()
 
     done: set[str] = set()
     if cfg.get("docking", "resume", True) and results_path.exists():

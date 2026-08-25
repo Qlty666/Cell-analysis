@@ -283,18 +283,51 @@ def run_one(
         env["LIVER_RUN_SIGNATURES"] = "no"
         env["LIVER_RUN_CNV"] = "no"
         env["LIVER_RUN_SINGLER"] = "no"
-        with log_path.open("w", encoding="utf-8") as fh:
-            proc = subprocess.run(
-                cmd,
-                cwd=ROOT,
-                stdout=fh,
-                stderr=subprocess.STDOUT,
-                text=True,
-                encoding="utf-8",
-                errors="replace",
-                timeout=args.timeout,
-                env=env,
+        try:
+            with log_path.open("w", encoding="utf-8") as fh:
+                proc = subprocess.run(
+                    cmd,
+                    cwd=ROOT,
+                    stdout=fh,
+                    stderr=subprocess.STDOUT,
+                    text=True,
+                    encoding="utf-8",
+                    errors="replace",
+                    timeout=args.timeout,
+                    env=env,
+                )
+        except subprocess.TimeoutExpired:
+            attempts.append(
+                {
+                    "attempt": attempt,
+                    "returncode": None,
+                    "passed_verification": False,
+                    "missing": ["timeout"],
+                    "log": str(log_path),
+                }
             )
+            log_text = ""
+            try:
+                log_text = log_path.read_text(encoding="utf-8", errors="replace")
+            except Exception:
+                pass
+            if attempt < args.max_attempts:
+                actions = diagnose(
+                    log_text[-40000:],
+                    accession,
+                    single_cell_root,
+                    workdir,
+                )
+                for action in actions:
+                    result = apply_action(
+                        action,
+                        accession,
+                        single_cell_root,
+                        workdir,
+                    )
+                    actions_used.append(f"attempt{attempt}:{result}")
+                    log(f"{accession} auto-repair: {result}")
+            continue
         ok, missing = verify_passed(single_cell_root, workdir, args.skip_docking)
         attempt_data = {
             "attempt": attempt,

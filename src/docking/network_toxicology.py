@@ -15,7 +15,6 @@ base outputs; networkx is used when available for betweenness/clustering.
 
 from __future__ import annotations
 
-import json
 import math
 from pathlib import Path
 
@@ -24,21 +23,32 @@ import pandas as pd
 
 from .utils import DockingError, write_json
 
-_GENE_COLS = {
+_GENE_COLS = (
     "gene",
     "symbol",
     "hgnc",
     "gene_symbol",
     "hugo",
-    "node1",
+    "hugo_symbol",
+    "gene_name",
+    "geneid",
+    "entrez",
+    "entrezgene",
+    "target",
     "node2",
+    "gene2",
+    "string_id2",
+    "to",
+    "target_node",
+    "source",
+    "node1",
+    "gene1",
+    "string_id1",
+    "from",
+    "source_node",
     "protein1",
     "protein2",
-    "source",
-    "target",
-    "string_id1",
-    "string_id2",
-}
+)
 _SOURCE_COLS = {
     "source",
     "database",
@@ -46,6 +56,43 @@ _SOURCE_COLS = {
     "target_source",
     "origin",
 }
+_EDGE_COL1_ALIASES = (
+    "protein1",
+    "node1",
+    "source",
+    "gene1",
+    "string_id1",
+    "from",
+    "source_node",
+)
+_EDGE_COL2_ALIASES = (
+    "protein2",
+    "node2",
+    "target",
+    "gene2",
+    "string_id2",
+    "to",
+    "target_node",
+)
+
+
+def _edge_columns(edges: pd.DataFrame) -> tuple[str | None, str | None]:
+    """Return the two node columns in an edge table when recognizable."""
+    lower = {str(c).lower(): c for c in edges.columns}
+    col1 = next(
+        (lower[c] for c in _EDGE_COL1_ALIASES if c in lower),
+        None,
+    )
+    col2 = next(
+        (lower[c] for c in _EDGE_COL2_ALIASES if c in lower),
+        None,
+    )
+    return col1, col2
+
+
+def _pick_gene_column(df: pd.DataFrame) -> str | None:
+    lower = {str(c).strip().lower(): c for c in df.columns}
+    return next((lower[c] for c in _GENE_COLS if c in lower), None)
 
 
 def read_gene_list(
@@ -62,10 +109,7 @@ def read_gene_list(
         return set()
     column = gene_column
     if column is None:
-        column = next(
-            (c for c in df.columns if c.strip().lower() in _GENE_COLS),
-            df.columns[0],
-        )
+        column = _pick_gene_column(df) or df.columns[0]
     if column not in df.columns:
         raise DockingError(
             f"gene column '{column}' not found in {p.name}: {list(df.columns)}"
@@ -89,10 +133,7 @@ def read_target_table(
         raise DockingError(f"compound target file is empty: {p}")
     column = gene_column
     if column is None:
-        column = next(
-            (c for c in df.columns if c.strip().lower() in _GENE_COLS),
-            df.columns[0],
-        )
+        column = _pick_gene_column(df) or df.columns[0]
     if column not in df.columns:
         raise DockingError(
             f"gene column '{column}' not found in {p.name}: {list(df.columns)}"
@@ -214,39 +255,7 @@ def ppi_hub_scores(
     edges = pd.read_csv(p, sep=sep, dtype=str)
     if edges.empty:
         raise DockingError(f"PPI edge table is empty: {p}")
-    lower = {str(c).lower(): c for c in edges.columns}
-    col1 = next(
-        (
-            lower[c]
-            for c in (
-                "protein1",
-                "node1",
-                "source",
-                "gene1",
-                "string_id1",
-                "from",
-                "source_node",
-            )
-            if c in lower
-        ),
-        None,
-    )
-    col2 = next(
-        (
-            lower[c]
-            for c in (
-                "protein2",
-                "node2",
-                "target",
-                "gene2",
-                "string_id2",
-                "to",
-                "target_node",
-            )
-            if c in lower
-        ),
-        None,
-    )
+    col1, col2 = _edge_columns(edges)
     if col1 is None or col2 is None:
         raise DockingError(
             "PPI edge table must contain two node columns, e.g. "
@@ -476,8 +485,9 @@ def write_ctpd_network(
         )
     if ppi_edges is not None and not ppi_edges.empty:
         overlap_genes = set(overlap["gene"])
-        col1 = ppi_edges.columns[0]
-        col2 = ppi_edges.columns[1]
+        col1, col2 = _edge_columns(ppi_edges)
+        if col1 is None or col2 is None:
+            col1, col2 = ppi_edges.columns[0], ppi_edges.columns[1]
         for _, row in ppi_edges.iterrows():
             a = str(row[col1]).upper()
             b = str(row[col2]).upper()

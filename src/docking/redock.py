@@ -3,7 +3,6 @@
 
 from __future__ import annotations
 
-import time
 from concurrent.futures import ThreadPoolExecutor, as_completed
 from pathlib import Path
 
@@ -41,6 +40,8 @@ def run_redock(cfg: ResolvedConfig, log) -> dict:
     redock_data = redock_dir / "data"
     redock_data.mkdir(parents=True, exist_ok=True)
     results_path = redock_data / "fig_49_redock_results.csv"
+    if not cfg.get("redock", "resume", True) and results_path.exists():
+        results_path.unlink()
 
     done: set[str] = set()
     if cfg.get("redock", "resume", True) and results_path.exists():
