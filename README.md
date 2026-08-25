@@ -1,6 +1,6 @@
 # Liver Cancer Bioinformatics Workflow
 
-> 当前版本：0.8.2
+> 当前版本：0.9.0
 
 面向肝癌研究的本地生信自动化工作流，整合三条可实际运行的流水线：
 
@@ -23,7 +23,7 @@
 
 ### 2.1 表达分析流水线（单细胞 / bulk RNA-seq / microarray 等）
 
-- 输入 GSE 编号，自动下载 GEO 数据并识别常见格式（10x MTX、CSV、h5ad、loom、Series Matrix、逐样本 bulk 计数表）。
+- 输入数据集编号（GEO `GSE125449`、ArrayExpress `E-MTAB-1234`、Expression Atlas 等），自动下载数据并识别常见格式（10x MTX、CSV、h5ad、loom、Series Matrix、逐样本 bulk 计数表）。
 - 内置 GSE125449 适配；支持 `--species hs/mm/auto`。
 - 单细胞数据执行 QC、双细胞检测（`scDblFinder`）、PCA/UMAP 聚类和细胞注释；bulk RNA-seq、microarray 等非单细胞数据按样本级表达矩阵运行，跳过双细胞与细胞级反馈。
 - 差异表达（DESeq2 pseudobulk 或 Seurat Wilcoxon 回退）与 GO/KEGG/GSEA 富集分析。
@@ -126,7 +126,7 @@
 - 结果清单：`/results`
 - 任务进度：`/tasks`
 
-网页端支持任务启动、实时日志、暂停/继续、结果表和文件下载、环境检查与自动补全。任务完成或中断时会弹窗提醒，中断提示会显示运行到的阶段和原因；“任务进度”页集中显示流水线页面启动的排队、运行和暂停任务，保存已完成任务的历史记录并支持一键清空，同时可直接跳转到对应页面继续查看。切换顶部导航或刷新网页不会清除正在运行的任务记录，返回原页面后会自动恢复日志轮询；未关闭标签页或未修改任务参数时无需清空记录，关闭标签页后由浏览器自动清除会话记录。表达分析页的 GEO 数据集编号需手动输入，不再预填示例；全自动流水线页支持直接填写工作目录加载已有结果，工作目录需填到 `outputs` 的上一层目录，未找到结果时会明确提示。数据集搜索页支持疾病、研究方向或原始查询搜索 GEO 数据集，可选 ML/DL 模型重排序、CSV/JSON 结果下载与批量下载；搜索结果可直接带入全自动流水线页，全自动流水线页也可内嵌搜索并选择数据集自动填入 GSE 编号，启动后自动执行 GEO 数据下载；表达分析完成后可在结果报告区直接打开包含逐文件分析的 `result_report.html`。
+网页端支持任务启动、实时日志、暂停/继续、结果表和文件下载、环境检查与自动补全。任务完成或中断时会弹窗提醒，中断提示会显示运行到的阶段和原因；“任务进度”页集中显示流水线页面启动的排队、运行和暂停任务，保存已完成任务的历史记录并支持一键清空，同时可直接跳转到对应页面继续查看。切换顶部导航或刷新网页不会清除正在运行的任务记录，返回原页面后会自动恢复日志轮询；未关闭标签页或未修改任务参数时无需清空记录，关闭标签页后由浏览器自动清除会话记录。表达分析页的数据集编号需手动输入，不再预填示例；全自动流水线页支持直接填写工作目录加载已有结果，工作目录需填到 `outputs` 的上一层目录，未找到结果时会明确提示。数据集搜索页支持疾病、研究方向或原始查询搜索 NCBI GEO、ArrayExpress/BioStudies 和 Expression Atlas 数据集，可选 ML/DL 模型重排序、CSV/JSON 结果下载与批量下载；搜索结果可直接带入全自动流水线页，全自动流水线页也可内嵌搜索并选择数据集自动填入编号，启动后自动执行对应数据库的数据下载；表达分析完成后可在结果报告区直接打开包含逐文件分析的 `result_report.html`。
 全自动流水线页新增细胞反馈阶段的基因数、展示基因数和跳过选项，并在流程结果中显示 `feedback_targets.csv` 的细胞支持度排序表。
 全自动流水线页同步新增 QC 门控与差异丰度检验开关、`dry-run` 仅预演选项；流程结果区新增 QC 门控表和细胞类型差异丰度表，结果清单页补充 `qc_metrics.json` 与 `differential_abundance.csv` 的说明。
 网页版整体布局优化：各页面统一页头与快捷入口、表单按“基础/分析/运行”分组折叠、全自动流水线与表达分析表单支持设置保存/恢复/重置、结果区增加统计卡片、任务页增加数量统计、结果清单页支持按文件名/用途筛选。
@@ -363,7 +363,7 @@ launchers\run_web_ui.bat --page results
 launchers\run_web_ui.bat --page tasks
 ```
 
-全自动流水线页的“表达分析结果目录”和“工作目录”均为必填项，须手动填写；工作目录需填到包含 `outputs` 的上一层目录，目录中没有结果时页面会显示错误提示。表达分析页需要手动填写 GEO 数据集编号和结果保存地址。“结果清单”页展示 `scripts/run_full_pipeline.py` 成功且完整运行后应输出的图片、数据、报告、断点和溯源文件清单；“任务进度”页支持查看任务进度并跳转到对应任务页面。
+全自动流水线页的“表达分析结果目录”和“工作目录”均为必填项，须手动填写；工作目录需填到包含 `outputs` 的上一层目录，目录中没有结果时页面会显示错误提示。表达分析页需要手动填写数据集编号和结果保存地址。“结果清单”页展示 `scripts/run_full_pipeline.py` 成功且完整运行后应输出的图片、数据、报告、断点和溯源文件清单；“任务进度”页支持查看任务进度并跳转到对应任务页面。
 
 关闭所有网页标签后，本地网页服务会在数秒内自动退出并释放端口；正常退出时启动窗口也会自动关闭。再次启动时，如果检测到旧网页服务仍占用端口，会自动关闭旧实例后再启动；若端口被其他非网页程序占用，窗口会保留错误信息等待确认后关闭。
 
@@ -384,17 +384,26 @@ python -m unittest discover -s tests -p "test_*.py" -v
 | `scripts/validate_real_random.py` | 随机真实数据验证证据收集和对接盒检测 |
 | `scripts/validate_new_features.py` | 用 20 个 TCGA PanCancer 队列 + GSE165816 验证靶点评分 |
 | `scripts/validate_random_real_full_pipeline.py` | 随机真实 GSE 数据集跑通全自动流水线 |
-| `scripts/validate_dataset_search.py` | 用 50 轮随机疾病+研究方向组合验证 GEO 数据集搜索召回 |
+| `scripts/validate_dataset_search.py` | 用 50 轮随机疾病+研究方向组合验证多数据库数据集搜索召回 |
 
 ### 4.6 自动搜索数据集
 
-`scripts/search_datasets.py` 通过 NCBI E-utilities 自动搜索 GEO 数据集，并可按需下载命中的 GSE 系列：
+`scripts/search_datasets.py` 自动搜索多个公共表达数据库，默认覆盖 NCBI GEO、EBI ArrayExpress/BioStudies 和 EBI Expression Atlas，并可按需下载可直接运行的数据集：
 
 ```bash
 python scripts\search_datasets.py \
   --query "hepatocellular carcinoma single cell" \
   --max-results 20 \
   --organism "Homo sapiens"
+```
+
+可以用 `--databases` 指定检索范围（`geo` / `biostudies` / `atlas`，默认全部）：
+
+```bash
+python scripts\search_datasets.py \
+  --disease "liver cancer" \
+  --research-direction "single cell RNA-seq" \
+  --databases geo,biostudies,atlas
 ```
 
 也可以直接指定疾病和研究方向，脚本会自动组合成搜索词：
@@ -422,7 +431,7 @@ python scripts\search_datasets.py \
   --dataset-type "high throughput sequencing"
 ```
 
-搜索结束后会在 `data_cache/dataset_search/` 写出 `dataset_search_results.csv` 和 `dataset_search_results.json`，每行包含 `data_type` 字段（`single-cell` / `bulk` / `other`），网页端也会显示数据类型徽标。需要下载时追加下载参数：
+搜索结束后会在 `data_cache/dataset_search/` 写出 `dataset_search_results.csv` 和 `dataset_search_results.json`，每行包含来源数据库（`database`）、数据类型（`data_type`）、质量分（`quality_score`）和是否可自动运行（`run_supported`）等字段，网页端也会显示数据库与数据类型徽标。需要下载时追加下载参数：
 
 ```bash
 python scripts\search_datasets.py \
@@ -432,13 +441,15 @@ python scripts\search_datasets.py \
   --download-root ../liver_cancer
 ```
 
+ArrayExpress/BioStudies 数据集同样可直接下载，例如 `--download E-MTAB-1234`；`E-GEOD-xxxxx` 会自动映射到对应的 GEO `GSExxxxx` 再下载。
+
 也可以用 `--download-top N` 下载搜索结果的前 N 个数据集；下载状态写入 `data_cache/dataset_search/download_results.json`。
 
-网页端搜索结果每行提供“全自动流水线”入口，点击后自动带入 GSE 编号；全自动流水线页也可直接搜索并选择数据集，填入后启动即可复用流水线的自动下载流程。全自动流水线支持 `single-cell`、`bulk`、`microarray` 和其他表达矩阵数据集：单细胞数据走细胞级分析，非单细胞数据按样本级表达矩阵运行差异表达与下游靶点评分。
+网页端搜索结果每行提供“全自动流水线”入口，只有 `run_supported` 的数据集会显示该入口；点击后自动带入数据集编号，全自动流水线页也可直接搜索并选择数据集，填入后启动即可复用对应数据库的自动下载流程。全自动流水线支持 `single-cell`、`bulk`、`microarray` 和其他表达矩阵数据集：单细胞数据走细胞级分析，非单细胞数据按样本级表达矩阵运行差异表达与下游靶点评分。
 
-GEO 下载器会把 RAW tar 中的逐样本 bulk 计数表（如 `GSMxxxx_GCxxxx.txt.gz`）识别为 bulk 数据集，也会把其他样本级表达矩阵归入通用表达类型：数据文件与 manifest 会缓存到 `data_cache/<GSE>`，这些数据集可直接进入表达分析与全自动流水线，按样本级分析运行。
+GEO 下载器会把 RAW tar 中的逐样本 bulk 计数表（如 `GSMxxxx_GCxxxx.txt.gz`）识别为 bulk 数据集，也会把其他样本级表达矩阵归入通用表达类型；BioStudies 下载器会选取 ArrayExpress/Expression Atlas 的 processed 表达文件并生成同一套 manifest。数据文件与 manifest 会缓存到 `data_cache/<编号>`，这些数据集可直接进入表达分析与全自动流水线，按样本级分析运行。
 
-网页版已同步支持：数据集搜索页提供数据类型过滤（`single-cell` / `bulk` / `other`）并显示数据类型徽标，同时支持物种、关键词、样本数范围、日期范围、平台和数据集类型过滤；所有类型的表达数据集都可选择进入全自动流水线；表达分析页说明非单细胞数据按样本级分析运行。
+网页版已同步支持：数据集搜索页可选择检索数据库，提供数据库、数据类型过滤（`single-cell` / `bulk` / `other`）并显示数据库/数据类型徽标，同时支持物种、关键词、样本数范围、日期范围、平台和数据集类型过滤；`run_supported` 的表达数据集可选择进入全自动流水线；表达分析页说明非单细胞数据按样本级分析运行。
 
 批量随机验证搜索是否命中“疾病+研究方向”数据集：
 
@@ -486,7 +497,7 @@ python scripts\validate_dataset_search.py \
 
 输入：
 
-- GSE 编号，例如 `GSE125449`。
+- 数据集编号，例如 `GSE125449`、`E-MTAB-1234`。
 - 输出目录，例如 `../liver_cancer`。
 - 物种：`hs` / `mm` / `auto`。
 
@@ -540,7 +551,7 @@ python scripts\validate_dataset_search.py \
 
 输入：
 
-- GSE 编号（默认 `GSE125449`）。
+- 数据集编号（默认 `GSE125449`；也支持 `E-MTAB-1234`、`S-BSST123`）。
 - 表达分析输出目录（必填，例如 `y2`）。
 - 工作目录（必填，例如 `y3`）。
 - 可选配体库、病例/正常标签、DepMap CSV。
@@ -564,7 +575,7 @@ python scripts\validate_dataset_search.py \
 | `scripts/run_pipeline.py` | 表达分析 CLI 入口 |
 | `scripts/run_docking.py` | 虚拟筛选 CLI 入口 |
 | `scripts/run_full_pipeline.py` | 全自动集成流水线 CLI 入口 |
-| `scripts/search_datasets.py` | GEO 数据集搜索与下载 |
+| `scripts/search_datasets.py` | 多数据库数据集搜索与下载（GEO / ArrayExpress-BioStudies / Expression Atlas） |
 | `scripts/dataset_search_ml.py` | 数据集搜索 ML/DL 相关性重排序 |
 | `scripts/validate_pipeline.py` | 合成数据表达流水线验证 |
 | `scripts/validate_dock_pipeline.py` | 假 Vina 对接流水线验证 |
@@ -573,7 +584,7 @@ python scripts\validate_dataset_search.py \
 | `scripts/validate_real_random.py` | 随机真实数据验证 |
 | `scripts/validate_new_features.py` | 真实数据靶点评分/验证方案验证 |
 | `scripts/validate_random_real_full_pipeline.py` | 随机真实 GSE 全流程验证 |
-| `scripts/validate_dataset_search.py` | GEO 数据集搜索随机验证 |
+| `scripts/validate_dataset_search.py` | 多数据库数据集搜索随机验证（默认 GEO） |
 | `launchers/check_*.bat/.py` | 环境检查 |
 | `launchers/install_*.bat/.py` | 环境自动补全 |
 | `launchers/run_web_ui.bat` | 启动网页端 |
@@ -646,16 +657,28 @@ GSE125449: Tumor cell biodiversity drives microenvironmental reprogramming in li
 
 GSE165816 和 TCGA PanCancer Atlas 仅用于真实数据验证。
 
+数据集搜索使用 NCBI E-utilities（GEO DataSets）与 EBI 公开 API（BioStudies/ArrayExpress、Expression Atlas），仅检索公开数据集；下载遵循各数据库的数据使用条款。
+
 MIT License. See `LICENSE` for details.
 
 ## 9. 更新日志
 
+### v0.9.0
+
+- 数据集搜索从单一 NCBI GEO 扩展为多数据库检索：新增 EBI ArrayExpress/BioStudies 与 Expression Atlas，支持按数据库选择范围，并给每条结果增加来源数据库、质量分和 `run_supported` 标记。
+- 新增 `src/data/biostudies_downloader.py`：自动选择 BioStudies/Expression Atlas 的 processed 表达文件，生成与 GEO 相同的 manifest，可直接进入表达分析与全自动流水线；`E-GEOD-xxxxx` 自动映射到 GEO `GSExxxxx`。
+- 流水线入口、网页端和 CLI 支持 `GSE125449`、`E-MTAB-1234`、`S-BSST123` 等数据集编号；搜索页和全自动流水线页文案同步更新。
+- 新增/更新数据集搜索、BioStudies 下载、网页参数和 accession 校验测试。
+- 修复 ArrayExpress 等样本级数据集缺少 condition 元数据时无法自动推断分组的问题：R 流水线会按样本名 token 自动推断条件组，非单细胞数据可继续跑差异表达。
+- 修复富集为空时 stage 09 汇总读取 `go_up` 占位表导致 `undefined columns selected` 的问题，样本级数据集可正常生成 `summary.json` 并完成流水线。
+- 细胞反馈阶段新增反馈靶基因差异表达：把虚拟敲除/虚拟筛选得到的反馈基因放回 Seurat 对象，输出 `feedback_deg.csv`、`fig_59_feedback_targets_volcano.png` 和 `fig_60_feedback_condition_violin.png`。
+- 细胞反馈阶段新增 GO/KEGG 富集分析：对反馈靶基因运行 `enrichGO` / `enrichKEGG`，输出 `feedback_enrichment_go.csv` / `feedback_enrichment_kegg.csv`，富集 Top5 使用与 `fig_22_go_network.png` 相同的 `cnetplot` 通路-基因网络图（`fig_61_feedback_go_network.png` / `fig_62_feedback_kegg_network.png`），不再使用气泡图。
+- KEGG 富集在线注释超时放宽到 180 秒，并用 `setReadable` 把 KEGG 网络和结果表中的基因 ID 转换为基因符号，便于直接查看 Top5 通路关联基因。
+- 集成报告、网页全自动流水线结果区和结果图指南同步展示反馈差异表达与 GO/KEGG 富集结果；独立 `cell-feedback` 命令新增 `--feedback-species hs/mm`。
+
 ### v0.8.2
 
 - 修复 stage 08 发表分析阶段给 Seurat 对象写入 `sample_label` 时携带样本名而非细胞条形码名，导致 `AddMetaData` 报 `No cell overlap between new meta data and Seurat object` 的问题：写入前移除向量 names，多样本数据集可正常完成发表分析。
-- 细胞反馈阶段新增反馈靶基因差异表达：把虚拟敲除/虚拟筛选得到的反馈基因放回 Seurat 对象，输出 `feedback_deg.csv`、`fig_59_feedback_targets_volcano.png` 和 `fig_60_feedback_condition_violin.png`。
-- 细胞反馈阶段新增 GO/KEGG 富集分析：对反馈靶基因运行 `enrichGO` / `enrichKEGG`，输出 `feedback_enrichment_go.csv` / `feedback_enrichment_kegg.csv`，富集 Top5 使用与 `fig_22_go_network.png` 相同的 `cnetplot` 通路-基因网络图（`fig_61_feedback_go_network.png` / `fig_62_feedback_kegg_network.png`），不再使用气泡图。
-- 集成报告、网页全自动流水线结果区和结果图指南同步展示反馈差异表达与 GO/KEGG 富集结果；独立 `cell-feedback` 命令新增 `--feedback-species hs/mm`。
 
 ### v0.8.1
 

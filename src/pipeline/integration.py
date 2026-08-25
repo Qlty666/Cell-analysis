@@ -46,13 +46,14 @@ from docking.knockout import run_knockout  # noqa: E402
 from docking.provenance import write_run_manifest  # noqa: E402
 from docking.utils import DockingError, ToolNotFoundError, safe_name, write_json  # noqa: E402
 from docking.validation import export_validation  # noqa: E402
+from data.geo_downloader import canonical_accession  # noqa: E402
 
 from . import cell_feedback, orchestrator  # noqa: E402
 
 log = logging.getLogger("full_pipeline")
 
 STAGES = [
-    ("01", "single_cell", "GEO single-cell analysis (download, QC, annotation, DEG)"),
+    ("01", "single_cell", "expression analysis (download, QC, annotation, DEG)"),
     ("02", "key_targets", "extract and rank key genes/proteins from DEGs"),
     ("03", "evidence", "enrich genes with UniProt/PDB/ChEMBL/STRING/Reactome/Open Targets/KEGG evidence"),
     ("04", "knockout_inputs", "build pseudobulk expression and knockout inputs"),
@@ -2760,9 +2761,17 @@ def _apply_defaults(args, config: dict) -> None:
         raise IntegrationError(
             "workdir is required; provide --workdir or set workdir in config"
         )
-    args.accession = str(args.accession or "").strip().upper()
-    if not re.fullmatch(r"GSE\d+", args.accession):
-        raise IntegrationError("GSE accession must look like GSE125449")
+    args.accession = canonical_accession(
+        str(args.accession or "").strip().upper()
+    )
+    if not re.fullmatch(
+        r"(?:GSE\d+|E-[A-Z0-9]+-\d+|S-BSST\d+)",
+        args.accession,
+    ):
+        raise IntegrationError(
+            "dataset accession must look like GSE125449, E-MTAB-1234, "
+            "or S-BSST123"
+        )
     if args.workdir:
         args.workdir = str(_resolve_path(args.workdir, APP_ROOT))
     if args.output:
@@ -2787,7 +2796,13 @@ def build_parser() -> argparse.ArgumentParser:
         default=str(APP_ROOT / "config" / "full_pipeline_config.json"),
         help="full pipeline config JSON",
     )
-    parser.add_argument("--accession", help="GEO accession (default from config)")
+    parser.add_argument(
+        "--accession",
+        help=(
+            "dataset accession: GSE125449, E-MTAB-1234 or S-BSST123 "
+            "(default from config)"
+        ),
+    )
     parser.add_argument("--output", help="single-cell output root")
     parser.add_argument("--workdir", help="docking/integration work root")
     parser.add_argument(

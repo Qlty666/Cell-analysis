@@ -496,6 +496,88 @@ class TestFullPipeline(unittest.TestCase):
                 1,
             )
 
+    def test_biostudies_accession_is_accepted_by_pipeline(self):
+        with tempfile.TemporaryDirectory() as tmp:
+            root = Path(tmp) / "single_cell"
+            (root / "data").mkdir(parents=True)
+            (root / "data" / "E-MTAB-1234_manifest.json").write_text(
+                json.dumps(
+                    {
+                        "accession": "E-MTAB-1234",
+                        "mode": "bulk",
+                        "organism": "hs",
+                        "files": {
+                            "matrix": ["counts.txt"],
+                            "barcodes": [],
+                            "genes": [],
+                            "metadata": [],
+                            "series_matrices": [],
+                        },
+                    }
+                ),
+                encoding="utf-8",
+            )
+            with (
+                mock.patch.object(
+                    orchestrator,
+                    "run_r_pipeline",
+                    return_value=(0, Path(tmp) / "pipeline_r.log"),
+                ) as mock_r,
+                mock.patch.object(orchestrator, "verify_outputs"),
+                mock.patch.object(orchestrator, "run_ml_analysis"),
+                mock.patch.object(orchestrator, "generate_report"),
+            ):
+                orchestrator.run_pipeline(
+                    force=False,
+                    skip_download=True,
+                    skip_deps=True,
+                    accession="E-MTAB-1234",
+                    output_root=str(root),
+                    species="auto",
+                )
+            self.assertEqual(mock_r.call_args.args[0], "E-MTAB-1234")
+
+    def test_egood_accession_is_canonicalized_to_gse(self):
+        with tempfile.TemporaryDirectory() as tmp:
+            root = Path(tmp) / "single_cell"
+            (root / "data").mkdir(parents=True)
+            (root / "data" / "GSE1_manifest.json").write_text(
+                json.dumps(
+                    {
+                        "accession": "GSE1",
+                        "mode": "bulk",
+                        "organism": "hs",
+                        "files": {
+                            "matrix": ["counts.txt"],
+                            "barcodes": [],
+                            "genes": [],
+                            "metadata": [],
+                            "series_matrices": [],
+                        },
+                    }
+                ),
+                encoding="utf-8",
+            )
+            with (
+                mock.patch.object(
+                    orchestrator,
+                    "run_r_pipeline",
+                    return_value=(0, Path(tmp) / "pipeline_r.log"),
+                ) as mock_r,
+                mock.patch.object(orchestrator, "verify_outputs"),
+                mock.patch.object(orchestrator, "run_ml_analysis"),
+                mock.patch.object(orchestrator, "generate_report"),
+            ):
+                orchestrator.run_pipeline(
+                    force=False,
+                    skip_download=True,
+                    skip_deps=True,
+                    accession="E-GEOD-1",
+                    output_root=str(root),
+                    species="auto",
+                )
+            self.assertEqual(mock_r.call_args.args[0], "GSE1")
+
     def test_dataset_mode_from_bulk_summary(self):
         with tempfile.TemporaryDirectory() as tmp:
             root = Path(tmp) / "single_cell"

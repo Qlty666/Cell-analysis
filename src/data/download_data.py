@@ -1,13 +1,14 @@
 """Data acquisition for the GSE125449 liver cancer single-cell dataset."""
 
+import re
 from pathlib import Path
 import shutil
 import subprocess
 
 try:
-    from .geo_downloader import ensure_geo_dataset
+    from .geo_downloader import canonical_accession, ensure_geo_dataset
 except ImportError:
-    from geo_downloader import ensure_geo_dataset
+    from geo_downloader import canonical_accession, ensure_geo_dataset
 
 
 def find_curl() -> str:
@@ -50,7 +51,19 @@ def ensure_data(cfg: dict, root: Path, log) -> None:
 
 
 def ensure_data_for_accession(accession: str, cfg: dict, root: Path, log) -> None:
-    if accession.upper() == cfg.get("dataset", "").upper():
+    acc = canonical_accession(accession)
+    if acc == cfg.get("dataset", "").upper():
         ensure_data(cfg, root, log)
+    elif re.fullmatch(r"GSE\d+", acc):
+        ensure_geo_dataset(acc, root, log)
+    elif re.fullmatch(r"(?:E-[A-Z0-9]+-\d+|S-BSST\d+)", acc):
+        try:
+            from .biostudies_downloader import ensure_biostudies_dataset
+        except ImportError:
+            from biostudies_downloader import ensure_biostudies_dataset
+        ensure_biostudies_dataset(acc, root, log)
     else:
-        ensure_geo_dataset(accession, root, log)
+        raise RuntimeError(
+            "dataset accession must look like GSE125449, E-MTAB-1234, "
+            "or S-BSST123"
+        )
