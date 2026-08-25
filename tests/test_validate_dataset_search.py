@@ -91,7 +91,13 @@ class TestValidateDatasetSearch(unittest.TestCase):
         ]
         calls = {"count": 0}
 
-        def fake_search(query, max_results, disease, research_direction):
+        def fake_search(
+            query,
+            max_results,
+            disease,
+            research_direction,
+            databases=None,
+        ):
             calls["count"] += 1
             if calls["count"] == 1:
                 return irrelevant
