@@ -25,6 +25,7 @@ from pipeline.integration import (  # noqa: E402
     _download_pdb,
     _extract_cocrystal_ligands,
     _invalidate_markers_for_changed_root,
+    _resolve_feedback_species,
     _stage_cell_feedback,
     _stage_outdated,
     _stage_output_paths,
@@ -364,6 +365,25 @@ class TestCellFeedbackManifest(unittest.TestCase):
                     / "cell_feedback_summary.json"
                 ).exists()
             )
+
+    def test_feedback_species_resolves_from_dataset_manifest(self):
+        with tempfile.TemporaryDirectory() as tmp:
+            root = Path(tmp) / "single_cell"
+            data_dir = root / "data"
+            data_dir.mkdir(parents=True)
+            (data_dir / "GSE123456_manifest.json").write_text(
+                json.dumps({"organism": "mm"}),
+                encoding="utf-8",
+            )
+            ctx = {"single_cell_root": root}
+            args = argparse.Namespace(
+                species="auto",
+                accession="GSE123456",
+            )
+            self.assertEqual(_resolve_feedback_species(args, ctx), "mm")
+
+            args.species = "hs"
+            self.assertEqual(_resolve_feedback_species(args, ctx), "hs")
 
 
 class TestFullPipelineMarkers(unittest.TestCase):

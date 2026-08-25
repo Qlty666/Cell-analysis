@@ -1950,6 +1950,28 @@ def generate_integrated_report(
         if (out_dir / "cell_feedback" / "data" / "celltype_enrichment.csv").exists()
         else pd.DataFrame()
     )
+    feedback_deg = (
+        pd.read_csv(out_dir / "cell_feedback" / "data" / "feedback_deg.csv")
+        if (out_dir / "cell_feedback" / "data" / "feedback_deg.csv").exists()
+        else pd.DataFrame()
+    )
+    feedback_go = (
+        pd.read_csv(out_dir / "cell_feedback" / "data" / "feedback_enrichment_go.csv")
+        if (out_dir / "cell_feedback" / "data" / "feedback_enrichment_go.csv").exists()
+        else pd.DataFrame()
+    )
+    feedback_kegg = (
+        pd.read_csv(
+            out_dir / "cell_feedback" / "data" / "feedback_enrichment_kegg.csv"
+        )
+        if (
+            out_dir
+            / "cell_feedback"
+            / "data"
+            / "feedback_enrichment_kegg.csv"
+        ).exists()
+        else pd.DataFrame()
+    )
     qc_metrics = _read_json(out_dir / "qc_metrics.json")
     differential_abundance = (
         pd.read_csv(out_dir / "differential_abundance.csv")
@@ -2042,6 +2064,51 @@ def generate_integrated_report(
         for c in ["celltype", "n_cells", "module_mean", "module_diff", "p_adjust"]
         if c in feedback_enrichment.columns
     ]
+    feedback_deg_cols = [
+        c
+        for c in [
+            "gene",
+            "avg_log2FC",
+            "pct.1",
+            "pct.2",
+            "p_val_adj",
+            "direction",
+            "significant",
+        ]
+        if c in feedback_deg.columns
+    ]
+    feedback_go_cols = [
+        c
+        for c in [
+            "ID",
+            "Description",
+            "GeneRatio",
+            "BgRatio",
+            "pvalue",
+            "p.adjust",
+            "Count",
+            "geneID",
+        ]
+        if c in feedback_go.columns
+    ]
+    if not feedback_go_cols and "note" in feedback_go.columns:
+        feedback_go_cols = ["note"]
+    feedback_kegg_cols = [
+        c
+        for c in [
+            "ID",
+            "Description",
+            "GeneRatio",
+            "BgRatio",
+            "pvalue",
+            "p.adjust",
+            "Count",
+            "geneID",
+        ]
+        if c in feedback_kegg.columns
+    ]
+    if not feedback_kegg_cols and "note" in feedback_kegg.columns:
+        feedback_kegg_cols = ["note"]
     differential_abundance_cols = [
         c
         for c in [
@@ -2121,6 +2188,18 @@ a {{ color: #1d4ed8; }}
   {_render_table(feedback_enrichment, feedback_enrichment_cols)}
 </div>
 <div class="card">
+  <h2>Cell feedback differential expression</h2>
+  {_render_table(feedback_deg, feedback_deg_cols)}
+</div>
+<div class="card">
+  <h2>Cell feedback GO enrichment (top 5 network)</h2>
+  {_render_table(feedback_go, feedback_go_cols)}
+</div>
+<div class="card">
+  <h2>Cell feedback KEGG enrichment (top 5 network)</h2>
+  {_render_table(feedback_kegg, feedback_kegg_cols)}
+</div>
+<div class="card">
   <h2>Gene evidence</h2>
   {_render_table(evidence, ev_cols)}
 </div>
@@ -2133,7 +2212,14 @@ a {{ color: #1d4ed8; }}
     <li><a href="{rel(ko_ranked) if ko_ranked.exists() else '#'}">fig_52_53_ranked_knockout.csv</a></li>
     <li><a href="{rel(out_dir / 'docking_targets.csv') if (out_dir / 'docking_targets.csv').exists() else '#'}">docking_targets.csv</a></li>
     <li><a href="{rel(out_dir / 'cell_feedback' / 'data' / 'feedback_targets.csv') if (out_dir / 'cell_feedback' / 'data' / 'feedback_targets.csv').exists() else '#'}">cell_feedback_targets.csv</a></li>
+    <li><a href="{rel(out_dir / 'cell_feedback' / 'data' / 'feedback_deg.csv') if (out_dir / 'cell_feedback' / 'data' / 'feedback_deg.csv').exists() else '#'}">feedback_deg.csv</a></li>
+    <li><a href="{rel(out_dir / 'cell_feedback' / 'data' / 'feedback_enrichment_go.csv') if (out_dir / 'cell_feedback' / 'data' / 'feedback_enrichment_go.csv').exists() else '#'}">feedback_enrichment_go.csv</a></li>
+    <li><a href="{rel(out_dir / 'cell_feedback' / 'data' / 'feedback_enrichment_kegg.csv') if (out_dir / 'cell_feedback' / 'data' / 'feedback_enrichment_kegg.csv').exists() else '#'}">feedback_enrichment_kegg.csv</a></li>
     <li><a href="{rel(out_dir / 'cell_feedback' / 'figures' / 'fig_54_feedback_module_umap.png') if (out_dir / 'cell_feedback' / 'figures' / 'fig_54_feedback_module_umap.png').exists() else '#'}">fig_54_feedback_module_umap.png</a></li>
+    <li><a href="{rel(out_dir / 'cell_feedback' / 'figures' / 'fig_59_feedback_targets_volcano.png') if (out_dir / 'cell_feedback' / 'figures' / 'fig_59_feedback_targets_volcano.png').exists() else '#'}">fig_59_feedback_targets_volcano.png</a></li>
+    <li><a href="{rel(out_dir / 'cell_feedback' / 'figures' / 'fig_60_feedback_condition_violin.png') if (out_dir / 'cell_feedback' / 'figures' / 'fig_60_feedback_condition_violin.png').exists() else '#'}">fig_60_feedback_condition_violin.png</a></li>
+    <li><a href="{rel(out_dir / 'cell_feedback' / 'figures' / 'fig_61_feedback_go_network.png') if (out_dir / 'cell_feedback' / 'figures' / 'fig_61_feedback_go_network.png').exists() else '#'}">fig_61_feedback_go_network.png</a></li>
+    <li><a href="{rel(out_dir / 'cell_feedback' / 'figures' / 'fig_62_feedback_kegg_network.png') if (out_dir / 'cell_feedback' / 'figures' / 'fig_62_feedback_kegg_network.png').exists() else '#'}">fig_62_feedback_kegg_network.png</a></li>
   </ul>
 </div>
 </body>
@@ -2155,6 +2241,19 @@ a {{ color: #1d4ed8; }}
         "cell_feedback": {
             "status": feedback_summary.get("status", "skipped"),
             "genes_matched": feedback_summary.get("genes_matched", 0),
+            "deg_genes": len(feedback_deg),
+            "go_terms": len(feedback_go) if "ID" in feedback_go.columns else 0,
+            "kegg_terms": len(feedback_kegg) if "ID" in feedback_kegg.columns else 0,
+            "go_top5": (
+                feedback_go["Description"].head(5).tolist()
+                if "Description" in feedback_go.columns
+                else []
+            ),
+            "kegg_top5": (
+                feedback_kegg["Description"].head(5).tolist()
+                if "Description" in feedback_kegg.columns
+                else []
+            ),
             "n_celltypes": feedback_summary.get("n_celltypes", 0),
             "top_celltypes": feedback_summary.get("top_celltypes", []),
             "figures": feedback_summary.get("figures", []),
@@ -2382,7 +2481,32 @@ def _stage_cell_feedback(args, workdir: Path, ctx: dict) -> None:
         top_n=args.feedback_top_n,
         max_features=args.feedback_max_features,
         timeout_seconds=args.feedback_timeout,
+        species=_resolve_feedback_species(args, ctx),
     )
+
+
+def _resolve_feedback_species(args, ctx: dict) -> str:
+    species = str(getattr(args, "species", "auto") or "auto").strip().lower()
+    if species in ("hs", "mm"):
+        return species
+    root = Path(ctx["single_cell_root"])
+    accession = str(getattr(args, "accession", "") or "").strip().upper()
+    if accession:
+        manifest_path = root / "data" / f"{accession}_manifest.json"
+        if manifest_path.exists():
+            try:
+                organism = str(
+                    json.loads(
+                        manifest_path.read_text(encoding="utf-8")
+                    ).get("organism", "")
+                ).lower()
+            except (OSError, ValueError):
+                organism = ""
+            if organism in ("hs", "mm"):
+                return organism
+            if "mus musculus" in organism or "mouse" in organism:
+                return "mm"
+    return "hs"
 
 
 def _stage_report(args, workdir: Path, ctx: dict) -> None:

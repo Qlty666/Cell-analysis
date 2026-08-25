@@ -588,6 +588,21 @@ class TestResultDirectoryQueries(unittest.TestCase):
             "EGFR,knockout|docking,0.9,0.92,Hepatocyte\n",
             encoding="utf-8",
         )
+        (feedback_data / "feedback_deg.csv").write_text(
+            "gene,avg_log2FC,p_val_adj,direction,significant\n"
+            "EGFR,1.2,0.001,Up,true\n",
+            encoding="utf-8",
+        )
+        (feedback_data / "feedback_enrichment_go.csv").write_text(
+            "ID,Description,p.adjust,Count,geneID\n"
+            "GO:0000001,mitochondrion inheritance,0.01,1,EGFR\n",
+            encoding="utf-8",
+        )
+        (feedback_data / "feedback_enrichment_kegg.csv").write_text(
+            "ID,Description,p.adjust,Count,geneID\n"
+            "hsa05200,Pathways in cancer,0.01,1,EGFR\n",
+            encoding="utf-8",
+        )
 
         ko_data = (
             workdir
@@ -679,6 +694,20 @@ class TestResultDirectoryQueries(unittest.TestCase):
                     any(name.endswith(excluded) for name in files),
                     excluded,
                 )
+
+    def test_full_results_includes_feedback_deg_and_enrichment(self):
+        with tempfile.TemporaryDirectory() as tmp:
+            workdir = self._make_full_workdir(Path(tmp))
+            data = full_results(workdir)
+            self.assertEqual(data["cell_feedback_deg"][0]["gene"], "EGFR")
+            self.assertEqual(
+                data["cell_feedback_enrichment_go"][0]["ID"],
+                "GO:0000001",
+            )
+            self.assertEqual(
+                data["cell_feedback_enrichment_kegg"][0]["ID"],
+                "hsa05200",
+            )
 
     def test_full_file_path_allows_result_files_only(self):
         with tempfile.TemporaryDirectory() as tmp:

@@ -99,7 +99,7 @@
 
 虚拟筛选阶段增加对接盒有效性校验：中心/尺寸非有限值或尺寸非正数时跳过该靶点并写明原因；PDB 下载失败会自动重试 3 次，避免单次网络抖动直接丢弃有结构靶点。
 
-细胞反馈阶段会把虚拟敲除评分和虚拟筛选命中合并成反馈清单，重新读取单细胞 Seurat 对象，为每个候选基因写入细胞级表达、计算筛选靶点模块评分，并输出细胞类型表达汇总、模块富集检验、条件×细胞类型汇总和 UMAP/DotPlot/热图等结果；同时生成 `feedback_targets.csv`，把筛选优先级与细胞表达特异性合并为 `cell_support_score`，用于下一轮靶点收敛。bulk RNA-seq、microarray 等样本级数据集没有细胞级对象，此阶段自动跳过并在 `cell_feedback_summary.json` 中注明原因。
+细胞反馈阶段会把虚拟敲除评分和虚拟筛选命中合并成反馈清单，重新读取单细胞 Seurat 对象，为每个候选基因写入细胞级表达、计算筛选靶点模块评分，并输出细胞类型表达汇总、模块富集检验、条件×细胞类型汇总和 UMAP/DotPlot/热图等结果；同时把反馈靶基因放回 Seurat 对象做条件差异表达（火山图、条件小提琴图），并对其做 GO/KEGG 富集分析。富集 Top5 使用与 `fig_22_go_network.png` 相同的 `cnetplot` 通路-基因网络图，不再使用气泡图，可直接查看 Top5 通路与哪些反馈靶基因关联更强；同时生成 `feedback_targets.csv`，把筛选优先级与细胞表达特异性合并为 `cell_support_score`，用于下一轮靶点收敛。bulk RNA-seq、microarray 等样本级数据集没有细胞级对象，此阶段自动跳过并在 `cell_feedback_summary.json` 中注明原因。
 
 ### 2.4 虚拟敲除与多维靶点评分
 
@@ -292,7 +292,8 @@ python scripts\run_docking.py cell-feedback \
   --workdir y3 \
   --single-cell-root ../liver_cancer \
   --feedback-top-n 12 \
-  --feedback-max-features 8
+  --feedback-max-features 8 \
+  --feedback-species hs
 ```
 
 环境检查：
@@ -550,7 +551,7 @@ python scripts\validate_dataset_search.py \
 - `gene_evidence.csv`：每个基因的 UniProt、PDB、ChEMBL、STRING、Reactome、PharmGKB、AlphaFold、Open Targets、KEGG 证据与来源覆盖。
 - `knockout_summary.json`：虚拟敲除与验证方案汇总。
 - `docking_targets.csv`：每个靶点的对接状态、命中数和最佳亲和力。
-- `cell_feedback/`：细胞反馈阶段输出，包括 `data/cell_scores.csv`、`data/feedback_targets.csv`、`data/celltype_summary.csv`、`data/celltype_enrichment.csv`、`data/condition_summary.csv`，以及 `fig_54` 至 `fig_58` 的结果图。
+- `cell_feedback/`：细胞反馈阶段输出，包括 `data/cell_scores.csv`、`data/feedback_targets.csv`、`data/celltype_summary.csv`、`data/celltype_enrichment.csv`、`data/condition_summary.csv`、`data/feedback_deg.csv`、`data/feedback_enrichment_go.csv`、`data/feedback_enrichment_kegg.csv`，以及 `fig_54` 至 `fig_62` 的结果图；其中 `fig_61/fig_62` 为反馈靶基因 GO/KEGG 富集 Top5 的通路-基因网络图。
 - `integration_report.html`：全流程集成报告。
 - `integration_summary.json` / `run_manifest.json`：本次运行的汇总和溯源信息。
 
@@ -652,6 +653,9 @@ MIT License. See `LICENSE` for details.
 ### v0.8.2
 
 - 修复 stage 08 发表分析阶段给 Seurat 对象写入 `sample_label` 时携带样本名而非细胞条形码名，导致 `AddMetaData` 报 `No cell overlap between new meta data and Seurat object` 的问题：写入前移除向量 names，多样本数据集可正常完成发表分析。
+- 细胞反馈阶段新增反馈靶基因差异表达：把虚拟敲除/虚拟筛选得到的反馈基因放回 Seurat 对象，输出 `feedback_deg.csv`、`fig_59_feedback_targets_volcano.png` 和 `fig_60_feedback_condition_violin.png`。
+- 细胞反馈阶段新增 GO/KEGG 富集分析：对反馈靶基因运行 `enrichGO` / `enrichKEGG`，输出 `feedback_enrichment_go.csv` / `feedback_enrichment_kegg.csv`，富集 Top5 使用与 `fig_22_go_network.png` 相同的 `cnetplot` 通路-基因网络图（`fig_61_feedback_go_network.png` / `fig_62_feedback_kegg_network.png`），不再使用气泡图。
+- 集成报告、网页全自动流水线结果区和结果图指南同步展示反馈差异表达与 GO/KEGG 富集结果；独立 `cell-feedback` 命令新增 `--feedback-species hs/mm`。
 
 ### v0.8.1
 
