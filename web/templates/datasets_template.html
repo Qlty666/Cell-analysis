@@ -4,7 +4,7 @@
 <meta charset="utf-8">
 <meta name="viewport" content="width=device-width, initial-scale=1">
 <link rel="stylesheet" href="/static/app.css">
-<title>GEO 数据集搜索</title>
+<title>多数据库数据集搜索</title>
 <style>
 body {
   font-family: "Segoe UI", Arial, sans-serif;
@@ -96,6 +96,10 @@ button:disabled { background: #9aa5b1; cursor: not-allowed; }
 .badge.single-cell { background: #dcfce7; color: #166534; }
 .badge.bulk { background: #fef3c7; color: #92400e; }
 .badge.other { background: #e5e7eb; color: #374151; }
+.badge.db { background: #e0f2fe; color: #075985; }
+.db-checks { display: flex; gap: 12px; flex-wrap: wrap; font-weight: 400; margin-top: 4px; }
+.db-checks label { display: flex; align-items: center; gap: 4px; margin: 0; font-weight: 400; }
+input[type="checkbox"] { width: auto; }
 #topN { width: 72px; display: inline-block; margin: 0 6px; padding: 6px; }
 table { width: 100%; border-collapse: collapse; background: #fff; font-size: 12px; }
 th, td {
@@ -148,8 +152,8 @@ a { color: #1665c0; text-decoration: none; }
 <div class="wrap">
 <div class="page-head">
   <div class="page-title">
-    <h1>GEO 数据集搜索</h1>
-    <p class="page-sub">按疾病、研究方向或原始查询搜索 GEO 数据集，可批量下载并直接带入全自动流水线。</p>
+    <h1>多数据库数据集搜索</h1>
+    <p class="page-sub">按疾病、研究方向或原始查询搜索 NCBI GEO、ArrayExpress/BioStudies 和 Expression Atlas 数据集，支持直接下载并带入全自动流水线。</p>
   </div>
   <div class="page-actions">
     <a class="link-button" href="/full">全自动流水线</a>
@@ -166,6 +170,13 @@ a { color: #1665c0; text-decoration: none; }
         <label>研究方向 <input name="research_direction" placeholder="single cell RNA-seq"></label>
         <label>原始查询 <input name="query" placeholder="可选"></label>
         <label>最大结果数 <input type="number" name="max_results" value="20" min="1" max="100"></label>
+        <label>检索数据库
+          <span class="db-checks">
+            <label><input type="checkbox" name="databases" value="geo" checked> NCBI GEO</label>
+            <label><input type="checkbox" name="databases" value="biostudies" checked> ArrayExpress/BioStudies</label>
+            <label><input type="checkbox" name="databases" value="atlas" checked> Expression Atlas</label>
+          </span>
+        </label>
       </div>
     </details>
     <details class="form-section">
@@ -204,6 +215,14 @@ a { color: #1665c0; text-decoration: none; }
 <div class="card">
   <h2>搜索结果</h2>
   <div class="grid" style="margin-bottom: 8px;">
+    <label>数据库过滤
+      <select id="filterDatabase" onchange="applyFilters()">
+        <option value="all">全部</option>
+        <option value="GEO">NCBI GEO</option>
+        <option value="ArrayExpress/BioStudies">ArrayExpress/BioStudies</option>
+        <option value="Expression Atlas">Expression Atlas</option>
+      </select>
+    </label>
     <label>数据类型过滤
       <select id="filterDataType" onchange="applyFilters()">
         <option value="all">全部</option>
@@ -237,11 +256,11 @@ a { color: #1665c0; text-decoration: none; }
     <table>
       <thead>
         <tr>
-          <th>#</th><th>编号</th><th>标题</th><th>摘要</th><th>物种</th>
+          <th>#</th><th>编号</th><th>数据库</th><th>质量</th><th>标题</th><th>摘要</th><th>物种</th>
           <th>样本</th><th>平台</th><th>日期</th><th>类型</th><th>数据类型</th><th>相关度</th><th>操作</th>
         </tr>
       </thead>
-      <tbody id="resultBody"><tr><td colspan="12" class="muted">暂无结果</td></tr></tbody>
+      <tbody id="resultBody"><tr><td colspan="14" class="muted">暂无结果</td></tr></tbody>
     </table>
   </div>
 </div>
@@ -281,7 +300,7 @@ async function searchDatasets() {
   } catch (e) {
     msg.className = 'error';
     msg.textContent = String(e.message || e);
-    document.getElementById('resultBody').innerHTML = '<tr><td colspan="12" class="muted">暂无结果</td></tr>';
+    document.getElementById('resultBody').innerHTML = '<tr><td colspan="14" class="muted">暂无结果</td></tr>';
     document.getElementById('resultMeta').textContent = '';
   } finally {
     btn.disabled = false;
@@ -320,6 +339,7 @@ function dateLessEqual(a, b) {
 }
 
 function filteredResults() {
+  const db = filterInput('filterDatabase');
   const type = filterInput('filterDataType');
   const minSamples = parseInt(filterInput('filterMinSamples'), 10);
   const maxSamples = parseInt(filterInput('filterMaxSamples'), 10);
@@ -328,6 +348,7 @@ function filteredResults() {
   const platform = filterInput('filterPlatform').toLowerCase();
   const datasetType = filterInput('filterType').toLowerCase();
   return lastResults.filter(row => {
+    if (db !== 'all' && db !== '' && String(row.database || '') !== db) return false;
     if (type !== 'all' && type !== '' && (row.data_type || 'other') !== type) return false;
     const samples = parseInt(row.samples, 10);
     if (!isNaN(minSamples) && (isNaN(samples) || samples < minSamples)) return false;
@@ -360,15 +381,22 @@ function renderResults() {
   const body = document.getElementById('resultBody');
   const rows = filteredResults();
   if (!rows.length) {
-    body.innerHTML = '<tr><td colspan="12" class="muted">未找到匹配数据集</td></tr>';
+    body.innerHTML = '<tr><td colspan="14" class="muted">未找到匹配数据集</td></tr>';
     return;
   }
   body.innerHTML = rows.map((row, index) => {
     const score = row.relevance_score == null ? '' : Number(row.relevance_score).toFixed(3);
+    const quality = row.quality_score == null ? '' : Number(row.quality_score).toFixed(2);
     const type = row.data_type || 'other';
     const badge = '<span class="badge ' + esc(type) + '">' + esc(type) + '</span>';
+    const dbBadge = '<span class="badge db">' + esc(row.database || 'GEO') + '</span>';
+    const pipelineLink = row.full_pipeline_url
+      ? '<a class="link-button" href="' + esc(row.full_pipeline_url) + '">全自动流水线</a>'
+      : '<span class="muted">无矩阵/需手动</span>';
     return '<tr><td>' + (index + 1) + '</td>' +
       '<td><a href="' + esc(row.url) + '" target="_blank" rel="noopener">' + esc(row.accession) + '</a></td>' +
+      '<td>' + dbBadge + '</td>' +
+      '<td>' + esc(quality) + '</td>' +
       '<td>' + esc(row.title) + '</td>' +
       '<td class="summary">' + esc(row.summary) + '</td>' +
       '<td>' + esc(row.organism) + '</td>' +
@@ -379,7 +407,7 @@ function renderResults() {
       '<td>' + badge + '</td>' +
       '<td>' + score + '</td>' +
       '<td><button class="secondary" type="button" onclick="startDownload(\'' + esc(row.accession) + '\')">下载</button>' +
-      '<a class="link-button" href="' + esc(row.full_pipeline_url || ('/full?accession=' + encodeURIComponent(row.accession))) + '">全自动流水线</a>' + '</td></tr>';
+      pipelineLink + '</td></tr>';
   }).join('');
 }
 

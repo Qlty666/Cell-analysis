@@ -63,6 +63,7 @@ RESULT_DETAILS_PATH = STATIC_DIR / "result_details.json"
 TASKS_TEMPLATE_PATH = TEMPLATE_DIR / "tasks_template.html"
 DATASET_TEMPLATE_PATH = TEMPLATE_DIR / "datasets_template.html"
 DATASET_SEARCH_DIR = APP_ROOT / "data_cache" / "dataset_search"
+DATASET_DATABASES = ("geo", "biostudies", "atlas")
 DATASET_DOWNLOAD_JOBS = {}
 DATASET_DOWNLOAD_LOCK = threading.Lock()
 FULL_JOBS = {}
@@ -332,8 +333,16 @@ SOFTWARE = [
 
 def validate_accession(accession: str) -> str:
     acc = accession.strip().upper()
-    if not re.fullmatch(r"GSE\d+", acc):
-        raise ValueError("GSE accession must look like GSE125449")
+    match = re.fullmatch(r"E-GEOD-(\d+)", acc)
+    if match:
+        acc = "GSE" + match.group(1)
+    if not re.fullmatch(
+        r"(?:GSE\d+|E-[A-Z0-9]+-\d+|S-BSST\d+)",
+        acc,
+    ):
+        raise ValueError(
+            "数据集编号格式不正确，支持 GSE125449、E-MTAB-1234、S-BSST123"
+        )
     return acc
 
 
@@ -1046,6 +1055,16 @@ def dataset_search_request(data: dict) -> dict:
     end_date = _first(data, "end_date", "").strip() or None
     platform = _first(data, "platform", "").strip() or None
     dataset_type = _first(data, "dataset_type", "").strip() or None
+    raw_databases = data.get("databases") or []
+    if isinstance(raw_databases, str):
+        raw_databases = [raw_databases]
+    databases = [
+        str(item).strip().lower()
+        for item in raw_databases
+        if str(item).strip()
+    ]
+    if not databases:
+        databases = None
     model_value = _first(data, "model", "").strip()
 
     import search_datasets as sd
@@ -1065,6 +1084,7 @@ def dataset_search_request(data: dict) -> dict:
         dataset_type=dataset_type,
         disease=disease,
         research_direction=research_direction,
+        databases=databases,
     )
     model_applied = False
     model_path = ""
@@ -1105,6 +1125,11 @@ def dataset_search_request(data: dict) -> dict:
             "end_date": end_date or "",
             "platform": platform or "",
             "dataset_type": dataset_type or "",
+                "databases": (
+                    databases
+                    if databases
+                    else list(DATASET_DATABASES)
+                ),
         },
         "count": len(rows),
         "results": result_rows,
@@ -1230,6 +1255,8 @@ def dataset_file_path(name: str) -> Path | None:
 
 def dataset_full_pipeline_url(row: dict) -> str:
     """Build the full-pipeline page URL prefilled with a searched dataset."""
+    if row.get("run_supported") is False:
+        return ""
     accession = validate_accession(str(row.get("accession") or ""))
     params = {"accession": accession}
     title = str(row.get("title") or "").strip()

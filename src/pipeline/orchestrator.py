@@ -59,6 +59,11 @@ except ImportError:
     from data.download_data import ensure_data_for_accession
 
 try:
+    from data.geo_downloader import canonical_accession
+except ImportError:
+    from data.geo_downloader import canonical_accession
+
+try:
     sys.stdout.reconfigure(encoding="utf-8", errors="replace")
     sys.stderr.reconfigure(encoding="utf-8", errors="replace")
 except Exception:
@@ -401,9 +406,15 @@ def run_pipeline(
     ml_model: str = "xgb",
 ) -> int:
     global OUTPUT_ROOT
-    accession = accession.strip().upper()
-    if not re.fullmatch(r"GSE\d+", accession):
-        raise RuntimeError("GSE accession must look like GSE125449")
+    accession = canonical_accession(accession.strip().upper())
+    if not re.fullmatch(
+        r"(?:GSE\d+|E-[A-Z0-9]+-\d+|S-BSST\d+)",
+        accession,
+    ):
+        raise RuntimeError(
+            "dataset accession must look like GSE125449, E-MTAB-1234, "
+            "or S-BSST123"
+        )
     if output_root:
         OUTPUT_ROOT = Path(output_root).resolve()
         OUTPUT_ROOT.mkdir(parents=True, exist_ok=True)
@@ -496,7 +507,9 @@ def main() -> int:
     parser = argparse.ArgumentParser(description="Liver cancer expression analysis pipeline")
     parser.add_argument(
         "accession",
-        help="GEO dataset accession (e.g. GSE125449)",
+        help=(
+            "dataset accession: GSE125449, E-MTAB-1234 or S-BSST123"
+        ),
     )
     parser.add_argument(
         "--output",
