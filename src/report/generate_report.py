@@ -144,6 +144,221 @@ DATA_GUIDE = {
     "liver_cancer_seurat.rds": ("Seurat 对象", "完整单细胞 Seurat 对象，可用于下游重分析和复现。"),
 }
 
+FIGURE_DATA_MAP = {
+    "fig_01_qc_raw_violin.png": ["fig_01_qc_metrics.csv", "qc_metrics.csv"],
+    "fig_01_qc_filtered_violin.png": ["fig_01_qc_metrics.csv", "qc_metrics.csv"],
+    "fig_48_qc_pvalue_comparison.png": ["fig_48_qc_pvalue_comparison.csv"],
+    "fig_02_doublet_scores.png": [
+        "fig_02_doublet_results.csv",
+        "doublet_results.csv",
+        "fig_29_doublet_rate_by_sample.csv",
+        "doublet_rate_by_sample.csv",
+    ],
+    "fig_03_umap_clusters.png": [
+        "fig_03_04_05_umap_coordinates.csv",
+        "umap_coordinates.csv",
+    ],
+    "fig_04_umap_condition.png": [
+        "fig_03_04_05_umap_coordinates.csv",
+        "umap_coordinates.csv",
+    ],
+    "fig_05_umap_annotation.png": [
+        "fig_03_04_05_umap_coordinates.csv",
+        "umap_coordinates.csv",
+        "fig_05_16_17_cell_annotations.csv",
+        "cell_annotations.csv",
+        "fig_07_annotation_confusion.csv",
+        "annotation_confusion.csv",
+    ],
+    "fig_06_dotplot_markers.png": [
+        "fig_05_16_17_cell_annotations.csv",
+        "cell_annotations.csv",
+        "fig_16_17_31_32_cluster_markers.csv",
+        "cluster_markers.csv",
+    ],
+    "fig_07_annotation_confusion_heatmap.png": [
+        "fig_07_annotation_confusion.csv",
+        "annotation_confusion.csv",
+        "fig_38_singleR_confusion.csv",
+        "singleR_confusion.csv",
+    ],
+    "fig_08_volcano.png": [
+        "fig_08_deg_all.csv",
+        "deg_all.csv",
+        "fig_09_deg_significant.csv",
+        "deg_significant.csv",
+    ],
+    "fig_09_deg_heatmap.png": [
+        "fig_09_deg_significant.csv",
+        "deg_significant.csv",
+        "fig_09_deg_horizontal_violin.csv",
+    ],
+    "fig_09_deg_horizontal_violin.png": [
+        "fig_09_deg_horizontal_violin.csv",
+        "fig_09_deg_significant.csv",
+        "deg_significant.csv",
+    ],
+    "fig_10_go_up.png": ["fig_10_enrichment_up_go.csv", "enrichment_up_go.csv"],
+    "fig_11_go_down.png": [
+        "fig_11_enrichment_down_go.csv",
+        "enrichment_down_go.csv",
+    ],
+    "fig_12_kegg_up.png": ["fig_12_enrichment_up_kegg.csv", "enrichment_up_kegg.csv"],
+    "fig_13_kegg_down.png": [
+        "fig_13_enrichment_down_kegg.csv",
+        "enrichment_down_kegg.csv",
+    ],
+    "fig_14_pca.png": [
+        "fig_03_04_05_umap_coordinates.csv",
+        "umap_coordinates.csv",
+        "sample_annotations.csv",
+    ],
+    "fig_15_elbow.png": ["sample_annotations.csv"],
+    "fig_16_featureplot_markers.png": [
+        "fig_05_16_17_cell_annotations.csv",
+        "cell_annotations.csv",
+        "fig_16_17_31_32_cluster_markers.csv",
+        "cluster_markers.csv",
+    ],
+    "fig_17_marker_violin.png": [
+        "fig_05_16_17_cell_annotations.csv",
+        "cell_annotations.csv",
+        "fig_16_17_31_32_cluster_markers.csv",
+        "cluster_markers.csv",
+    ],
+    "fig_18_celltype_proportion.png": [
+        "fig_18_19_celltype_proportion_stats.csv",
+        "fig_18_19_30_cluster_composition.csv",
+        "cluster_composition.csv",
+        "fig_05_16_17_cell_annotations.csv",
+        "cell_annotations.csv",
+    ],
+    "fig_19_condition_proportion.png": [
+        "fig_18_19_celltype_proportion_stats.csv",
+        "fig_18_19_30_cluster_composition.csv",
+        "cluster_composition.csv",
+    ],
+    "fig_20_gsea_go.png": [
+        "fig_20_gsea_go.csv",
+        "gsea_go.csv",
+        "fig_08_deg_all.csv",
+        "deg_all.csv",
+    ],
+    "fig_21_gsea_kegg.png": [
+        "fig_21_gsea_kegg.csv",
+        "gsea_kegg.csv",
+        "fig_08_deg_all.csv",
+        "deg_all.csv",
+    ],
+    "fig_22_go_network.png": [
+        "fig_10_enrichment_up_go.csv",
+        "enrichment_up_go.csv",
+    ],
+    "fig_23_kegg_network.png": [
+        "fig_12_enrichment_up_kegg.csv",
+        "enrichment_up_kegg.csv",
+    ],
+    "fig_24_ml_feature_importance.png": [
+        "fig_24_ml_feature_importance.csv",
+        "ml_feature_importance.csv",
+        "ml_model_summary.json",
+    ],
+    "fig_25_ml_shap.png": [
+        "ml_model_summary.json",
+        "fig_43_44_45_ml_classification_results.csv",
+        "ml_classification_results.csv",
+    ],
+    "fig_26_cellcycle_umap.png": [
+        "fig_26_27_cell_cycle_scores.csv",
+        "cell_cycle_scores.csv",
+    ],
+    "fig_27_cellcycle_proportion.png": [
+        "fig_26_27_cell_cycle_scores.csv",
+        "cell_cycle_scores.csv",
+    ],
+    "fig_28_umap_sample.png": [
+        "fig_03_04_05_umap_coordinates.csv",
+        "umap_coordinates.csv",
+        "sample_annotations.csv",
+    ],
+    "fig_29_doublet_rate_sample.png": [
+        "fig_29_doublet_rate_by_sample.csv",
+        "doublet_rate_by_sample.csv",
+    ],
+    "fig_30_sample_proportion.png": [
+        "fig_18_19_30_cluster_composition.csv",
+        "cluster_composition.csv",
+        "sample_annotations.csv",
+    ],
+    "fig_31_cluster_marker_heatmap.png": [
+        "fig_16_17_31_32_cluster_markers.csv",
+        "cluster_markers.csv",
+    ],
+    "fig_32_cluster_marker_dotplot.png": [
+        "fig_16_17_31_32_cluster_markers.csv",
+        "cluster_markers.csv",
+    ],
+    "fig_33_signature_scores_umap.png": [
+        "fig_33_34_35_signature_scores.csv",
+        "signature_scores.csv",
+    ],
+    "fig_34_signature_scores_boxplot.png": [
+        "fig_33_34_35_signature_scores.csv",
+        "signature_scores.csv",
+    ],
+    "fig_35_celltype_abundance_effect.png": [
+        "differential_abundance.csv",
+        "fig_33_34_35_signature_scores.csv",
+        "signature_scores.csv",
+    ],
+    "fig_36_cnv_heatmap.png": ["fig_36_cnv_heatmap.csv", "cnv_heatmap.csv"],
+    "fig_37_singler_umap.png": [
+        "fig_37_singleR_annotations.csv",
+        "singleR_annotations.csv",
+    ],
+    "fig_38_singler_confusion_heatmap.png": [
+        "fig_38_singleR_confusion.csv",
+        "singleR_confusion.csv",
+    ],
+    "fig_39_trajectory_umap.png": ["fig_39_trajectory_pseudotime.csv"],
+    "fig_40_cellchat_network.png": [
+        "fig_40_cellchat_communication.csv",
+        "fig_40_cellchat_communication_weight.csv",
+    ],
+    "fig_41_cellchat_heatmap.png": [
+        "fig_40_cellchat_communication.csv",
+        "fig_40_cellchat_communication_weight.csv",
+    ],
+    "fig_42_cellchat_bubble.png": ["fig_42_cellchat_pathways.csv"],
+    "fig_43_ml_confusion_matrix.png": [
+        "fig_43_44_45_ml_classification_report.csv",
+        "ml_classification_report.csv",
+        "fig_43_44_45_ml_classification_results.csv",
+        "ml_classification_results.csv",
+        "ml_model_summary.json",
+    ],
+    "fig_44_ml_roc_pr.png": [
+        "fig_43_44_45_ml_classification_report.csv",
+        "ml_classification_report.csv",
+        "fig_43_44_45_ml_classification_results.csv",
+        "ml_classification_results.csv",
+        "ml_model_summary.json",
+    ],
+    "fig_45_ml_cv_scores.png": [
+        "fig_43_44_45_ml_classification_report.csv",
+        "ml_classification_report.csv",
+        "fig_43_44_45_ml_classification_results.csv",
+        "ml_classification_results.csv",
+        "ml_model_summary.json",
+    ],
+    "fig_45_ml_calibration_curve.png": [
+        "fig_43_44_45_ml_classification_report.csv",
+        "ml_classification_report.csv",
+    ],
+    "fig_46_go_top5.png": ["fig_10_enrichment_up_go.csv", "enrichment_up_go.csv"],
+    "fig_47_kegg_top5.png": ["fig_12_enrichment_up_kegg.csv", "enrichment_up_kegg.csv"],
+}
+
 
 def esc(value) -> str:
     return html.escape(str(value))
@@ -234,7 +449,9 @@ def iter_result_files():
 def stage_label(rel: str) -> str:
     parts = Path(rel).parts
     if len(parts) >= 2 and parts[0] in ("figures", "data"):
-        return STAGE_LABELS.get(parts[1], "其他")
+        stage = STAGE_LABELS.get(parts[1])
+        if stage:
+            return stage
     match = re.match(r"^fig_(\d+)", Path(rel).name)
     if match:
         num = int(match.group(1))
@@ -527,6 +744,309 @@ def analyze_figure(path: Path, rel: str) -> dict:
     }
 
 
+def companion_data_analyses(fig_name: str, analyses: list[dict]) -> list[dict]:
+    aliases = FIGURE_DATA_MAP.get(fig_name, [])
+    by_basename = {}
+    for analysis in analyses:
+        if analysis["kind"] == "data":
+            by_basename.setdefault(Path(analysis["rel"]).name, analysis)
+    matched = []
+    seen = set()
+    for alias in aliases:
+        analysis = by_basename.get(alias)
+        if analysis is not None and analysis["rel"] not in seen:
+            matched.append(analysis)
+            seen.add(analysis["rel"])
+    return matched
+
+
+def data_findings_brief(analysis: dict, limit: int = 6) -> list[str]:
+    findings = list(analysis.get("findings", []))
+    guide = DATA_GUIDE.get(Path(analysis["rel"]).name)
+    if guide and findings and findings[0] == guide[1]:
+        findings = findings[1:]
+    return findings[:limit]
+
+
+def num_str(value) -> str:
+    try:
+        return fmt_num(float(value))
+    except (TypeError, ValueError):
+        return str(value or "")
+
+
+def top_table_summary(name: str, n: int = 3) -> str:
+    rows = read_named_table(name)
+    if not rows:
+        alt = re.sub(r"^fig_\d+_", "", name)
+        if alt != name:
+            rows = read_named_table(alt)
+    if not rows:
+        return ""
+    first = rows[0]
+    label_col = next(
+        (c for c in ("Description", "ID", "pathway", "gene") if c in first),
+        None,
+    )
+    p_col = next((c for c in ("p.adjust", "qvalue", "pvalue") if c in first), None)
+    if not label_col:
+        return ""
+    ranked = rows
+    if p_col:
+        try:
+            ranked = sorted(rows, key=lambda r: float(r.get(p_col, 1)))[:n]
+        except (TypeError, ValueError):
+            ranked = rows[:n]
+    parts = []
+    for row in ranked:
+        label = row.get(label_col, "")
+        p = num_str(row.get(p_col, "")) if p_col else ""
+        if p_col and p:
+            parts.append(f"{label}（{p_col}={p}）")
+        else:
+            parts.append(str(label))
+    return "；".join(parts)
+
+
+def ml_metrics_line() -> str:
+    rows = read_named_table("fig_43_44_45_ml_classification_report.csv")
+    if not rows:
+        rows = read_named_table("ml_classification_report.csv")
+    if not rows:
+        return ""
+    parts = []
+    for row in rows[:8]:
+        label = str(
+            row.get("label") or row.get("class") or row.get("") or ""
+        )
+        metrics = []
+        for key in ("precision", "recall", "f1-score", "f1", "accuracy", "support"):
+            if key in row:
+                try:
+                    value = fmt_num(float(row.get(key)))
+                except (TypeError, ValueError):
+                    value = str(row.get(key))
+                metrics.append(f"{key}={value}")
+        if metrics:
+            parts.append(f"{label or '指标'}: " + "，".join(metrics))
+    return "；".join(parts[:4])
+
+
+def top_deg_line(summary: dict) -> str:
+    top = summary.get("top_degs", [])
+    if isinstance(top, dict):
+        top = [top]
+    if not top:
+        return ""
+    parts = []
+    for item in top[:3]:
+        gene = item.get("gene", "")
+        fc = num_str(item.get("avg_log2FC", ""))
+        p = num_str(item.get("p_val_adj", ""))
+        parts.append(f"{gene}（log2FC={fc}, padj={p}）")
+    return "Top 差异基因：" + "；".join(parts)
+
+
+def joint_conclusions(
+    fig_name: str,
+    companions: list[dict],
+    summary: dict,
+) -> list[str]:
+    items = []
+    if fig_name in ("fig_01_qc_raw_violin.png", "fig_01_qc_filtered_violin.png"):
+        raw = summary.get("n_cells_raw")
+        qc = summary.get("n_cells_after_qc")
+        if isinstance(raw, (int, float)) and isinstance(qc, (int, float)) and raw:
+            items.append(
+                f"与 QC 汇总一致：原始 {raw} 细胞，QC 后保留 {qc} 细胞"
+                f"（{qc / raw * 100:.1f}%）。"
+            )
+    if fig_name == "fig_02_doublet_scores.png":
+        qc = summary.get("n_cells_after_qc")
+        dbl = summary.get("n_cells_after_doublet_removal")
+        if isinstance(qc, (int, float)) and isinstance(dbl, (int, float)) and qc:
+            items.append(
+                f"去双细胞后保留 {dbl} / {qc} 细胞（{dbl / qc * 100:.1f}%）。"
+            )
+    if fig_name == "fig_08_volcano.png" and summary.get("deg_total") is not None:
+        items.append(
+            f"差异表达汇总：共 {summary.get('deg_total')} 个，"
+            f"上调 {summary.get('deg_up', 0)} 个，下调 {summary.get('deg_down', 0)} 个。"
+        )
+    if fig_name in (
+        "fig_08_volcano.png",
+        "fig_09_deg_heatmap.png",
+        "fig_09_deg_horizontal_violin.png",
+    ):
+        line = top_deg_line(summary)
+        if line:
+            items.append(line)
+    enrichment_names = {
+        "fig_10_go_up.png": "fig_10_enrichment_up_go.csv",
+        "fig_11_go_down.png": "fig_11_enrichment_down_go.csv",
+        "fig_12_kegg_up.png": "fig_12_enrichment_up_kegg.csv",
+        "fig_13_kegg_down.png": "fig_13_enrichment_down_kegg.csv",
+        "fig_20_gsea_go.png": "fig_20_gsea_go.csv",
+        "fig_21_gsea_kegg.png": "fig_21_gsea_kegg.csv",
+        "fig_22_go_network.png": "fig_10_enrichment_up_go.csv",
+        "fig_23_kegg_network.png": "fig_12_enrichment_up_kegg.csv",
+        "fig_46_go_top5.png": "fig_10_enrichment_up_go.csv",
+        "fig_47_kegg_top5.png": "fig_12_enrichment_up_kegg.csv",
+    }
+    if fig_name in enrichment_names:
+        terms = top_table_summary(enrichment_names[fig_name], 3)
+        if terms:
+            items.append(f"对应富集数据 Top 通路：{terms}。")
+    if fig_name.startswith(("fig_24", "fig_25", "fig_43", "fig_44", "fig_45")):
+        metrics = ml_metrics_line()
+        if metrics:
+            items.append(f"分类指标：{metrics}。")
+    if companions:
+        names = "、".join(Path(a["rel"]).name for a in companions[:5])
+        more = " 等" if len(companions) > 5 else ""
+        items.append(
+            f"已联合 {len(companions)} 个结果数据文件：{names}{more}。"
+        )
+    else:
+        items.append("未在结果数据目录中找到该图的对应数据文件，当前仅能做图面检查。")
+    return items
+
+
+def render_joint_analysis_block(
+    fig_analysis: dict,
+    companions: list[dict],
+    summary: dict,
+) -> str:
+    rel = fig_analysis["rel"]
+    title = fig_analysis.get("title", "")
+    figure_points = "".join(
+        f"<li>{esc(item)}</li>" for item in fig_analysis.get("findings", [])[:4]
+    )
+    data_blocks = ""
+    for companion in companions:
+        brief = data_findings_brief(companion, 6)
+        findings = "".join(f"<li>{esc(item)}</li>" for item in brief)
+        data_blocks += (
+            "<div class='companion-data'>"
+            f"<p class='companion-title'><a href='{esc(companion['rel'])}'>"
+            f"{esc(Path(companion['rel']).name)}</a>"
+            f"<span class='file-size'>{esc(companion.get('size', ''))}</span></p>"
+            f"<ul class='findings'>{findings}</ul></div>"
+        )
+    conclusion_html = "".join(
+        f"<li>{esc(item)}</li>"
+        for item in joint_conclusions(Path(rel).name, companions, summary)
+    )
+    data_html = data_blocks or "<p class='muted'>未找到对应数据文件。</p>"
+    return (
+        "<div class='joint-analysis'>"
+        f"<h3>{esc(title)}</h3>"
+        f"<p class='file-head'><span class='badge-fig'>结果图</span>"
+        f"<code>{esc(rel)}</code>"
+        f"<span class='file-size'>{esc(fig_analysis.get('size', ''))}</span></p>"
+        f"<figure class='analysis-thumb'><img src='{esc(rel)}' alt='{esc(title)}'>"
+        f"<figcaption>{esc(title)}</figcaption></figure>"
+        f"<h4>图面要点</h4><ul class='findings'>{figure_points}</ul>"
+        f"<h4>对应结果数据</h4>{data_html}"
+        f"<h4>联合结论</h4><ul class='findings'>{conclusion_html}</ul>"
+        "</div>"
+    )
+
+
+def render_joint_section(analyses: list[dict], summary: dict) -> str:
+    blocks = []
+    for analysis in analyses:
+        if analysis["kind"] != "figure":
+            continue
+        companions = companion_data_analyses(Path(analysis["rel"]).name, analyses)
+        blocks.append(render_joint_analysis_block(analysis, companions, summary))
+    if not blocks:
+        return "<p class='muted'>未发现结果图，无法生成联合分析。</p>"
+    return "".join(blocks)
+
+
+def render_markdown_joint(analyses: list[dict], summary: dict) -> str:
+    figure_analyses = [a for a in analyses if a["kind"] == "figure"]
+    lines = [
+        "# 结果图与结果数据联合分析报告",
+        "",
+        f"- 数据集：{summary.get('dataset', '')}",
+        f"- 标题：{summary.get('title', '')}",
+        f"- 完成时间：{summary.get('finished_at', '')}",
+        "",
+    ]
+    if not figure_analyses:
+        lines.append("未发现结果图，无法生成联合分析。")
+        return "\n".join(lines)
+    lines.append(
+        f"本次共分析 {len(figure_analyses)} 张实际输出的结果图，"
+        "并逐图匹配对应结果数据。"
+    )
+    lines.append("")
+    for analysis in figure_analyses:
+        rel = analysis["rel"]
+        title = analysis.get("title", Path(rel).stem)
+        lines.append(f"## {title}")
+        lines.append("")
+        lines.append(f"![{title}]({rel})")
+        lines.append("")
+        lines.append(f"- 结果图：`{rel}`，大小 {analysis.get('size', '')}。")
+        for item in analysis.get("findings", [])[:4]:
+            lines.append(f"- {item}")
+        companions = companion_data_analyses(Path(rel).name, analyses)
+        if companions:
+            lines.append("")
+            lines.append("### 对应结果数据")
+            lines.append("")
+            for companion in companions:
+                lines.append(
+                    f"- **{Path(companion['rel']).name}**"
+                    f"（{companion.get('size', '')}）："
+                )
+                for item in data_findings_brief(companion, 4):
+                    lines.append(f"  - {item}")
+        lines.append("")
+        lines.append("### 联合结论")
+        lines.append("")
+        for item in joint_conclusions(Path(rel).name, companions, summary):
+            lines.append(f"- {item}")
+        lines.append("")
+    lines.append("---")
+    lines.append(
+        "说明：联合结论中的数值来自 results/data 下的实际数据文件；"
+        "图面要点仅描述图像内容与检查重点，最终结论请以原始数据为准。"
+    )
+    return "\n".join(lines)
+
+
+def build_analysis_json(analyses: list[dict], summary: dict) -> dict:
+    figures = []
+    for analysis in analyses:
+        if analysis["kind"] != "figure":
+            continue
+        companions = companion_data_analyses(Path(analysis["rel"]).name, analyses)
+        figures.append(
+            {
+                "file": analysis["rel"],
+                "title": analysis.get("title", ""),
+                "size": analysis.get("size", ""),
+                "findings": analysis.get("findings", []),
+                "companion_data": [
+                    {
+                        "file": companion["rel"],
+                        "title": companion.get("title", ""),
+                        "findings": data_findings_brief(companion, 10),
+                    }
+                    for companion in companions
+                ],
+                "conclusions": joint_conclusions(
+                    Path(analysis["rel"]).name, companions, summary
+                ),
+            }
+        )
+    return {"summary": summary, "figures": figures}
+
+
 def render_file_analysis_block(analysis: dict) -> str:
     rel = analysis["rel"]
     kind = analysis["kind"]
@@ -609,6 +1129,16 @@ def render_overall_conclusion(
 
 
 def main() -> int:
+    if len(sys.argv) > 1:
+        target = Path(sys.argv[1]).expanduser().resolve()
+        if target.is_dir():
+            if (target / "results").is_dir():
+                target = target / "results"
+            global RES, FIG, DATA
+            RES = target
+            FIG = RES / "figures"
+            DATA = RES / "data"
+
     summary_path = RES / "summary.json"
     if not summary_path.exists():
         (RES / "result_report.html").write_text(
@@ -695,6 +1225,9 @@ def main() -> int:
     analysis_blocks = "".join(
         render_file_analysis_block(analysis) for analysis in analyses
     )
+    joint_section = render_joint_section(analyses, summary)
+    markdown_report = render_markdown_joint(analyses, summary)
+    json_report = build_analysis_json(analyses, summary)
     conclusion_html = render_overall_conclusion(
         summary, analyses, go_up, go_down, kegg_up, kegg_down
     )
@@ -737,6 +1270,12 @@ footer {{ margin-top: 40px; color: #7b8794; font-size: 12px; }}
 .badge-fig, .badge-data {{ display: inline-block; border-radius: 12px; padding: 3px 9px; font-size: 12px; color: #fff; }}
 .badge-fig {{ background: #1665c0; }}
 .badge-data {{ background: #0e9f6e; }}
+.joint-analysis {{ background: #fff; border: 1px solid #d9e2ec; border-left: 4px solid #1665c0; border-radius: 8px; padding: 16px 18px; margin: 16px 0; }}
+.joint-analysis h3 {{ margin-top: 0; }}
+.joint-analysis h4 {{ margin: 14px 0 6px; color: #334155; }}
+.companion-data {{ background: #f7fafc; border: 1px solid #e4e7eb; border-radius: 6px; padding: 10px 12px; margin: 8px 0; }}
+.companion-title {{ margin: 0 0 4px; font-weight: 600; }}
+.analysis-thumb img {{ max-width: 640px; }}
 details {{ margin-top: 8px; }}
 summary {{ cursor: pointer; color: #1665c0; font-size: 13px; }}
 </style>
@@ -834,7 +1373,10 @@ summary {{ cursor: pointer; color: #1665c0; font-size: 13px; }}
 <h2>10. 数据文件</h2>
 <ul>{links}</ul>
 
-<h2>11. 逐文件分析报告</h2>
+<h2>11. 结果图与结果数据联合分析</h2>
+{joint_section}
+
+<h2>12. 逐文件分析报告</h2>
 <h3>文件总览</h3>
 {analysis_overview}
 <h3>总体结论</h3>
@@ -848,7 +1390,13 @@ summary {{ cursor: pointer; color: #1665c0; font-size: 13px; }}
 """
 
     (RES / "result_report.html").write_text(html_doc, encoding="utf-8")
+    (RES / "result_analysis_report.md").write_text(markdown_report, encoding="utf-8")
+    (RES / "result_analysis.json").write_text(
+        json.dumps(json_report, ensure_ascii=False, indent=2),
+        encoding="utf-8",
+    )
     print("HTML report written:", RES / "result_report.html")
+    print("Joint analysis report written:", RES / "result_analysis_report.md")
     return 0
 
 
