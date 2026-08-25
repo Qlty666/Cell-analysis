@@ -118,7 +118,6 @@ def run_round(
     hits = relevant_rows(combined, disease, direction)
     samples = _labeled_samples(combined, disease, direction)
     expanded = False
-    rows_for_report = combined
     if not hits and expand:
         fallback_queries = [
             ("disease", search_datasets.build_expanded_query(disease, "")),
@@ -155,7 +154,6 @@ def run_round(
             fallback_hits = relevant_rows(fallback_rows, disease, direction)
             if fallback_hits:
                 expanded = True
-                rows_for_report = fallback_rows
                 hits = fallback_hits
 
     first = hits[0] if hits else {}

@@ -3,10 +3,12 @@
 
 from __future__ import annotations
 
+import csv
 import logging
 import sys
 import tempfile
 import unittest
+from unittest import mock
 from pathlib import Path
 
 APP_ROOT = Path(__file__).resolve().parent.parent
@@ -16,6 +18,7 @@ if str(APP_ROOT / "src") not in sys.path:
 from docking.analysis import analyze_results  # noqa: E402
 from docking.config import load_config, save_config  # noqa: E402
 from docking.docking import build_vina_command, run_docking  # noqa: E402
+from docking import ml as docking_ml  # noqa: E402
 from docking.receptor import _sanitize_receptor_models  # noqa: E402
 from docking.utils import parse_vina_affinities, safe_name  # noqa: E402
 
@@ -163,6 +166,71 @@ class TestEndToEndDockAndAnalyze(unittest.TestCase):
             hits = cfg.analysis_dir() / "data" / "fig_47_top_hits.csv"
             self.assertTrue(hits.exists())
             self.assertTrue((cfg.analysis_dir() / "summary.json").exists())
+
+
+class TestDockResumeFresh(unittest.TestCase):
+    def test_resume_false_does_not_accumulate_old_rows(self):
+        with tempfile.TemporaryDirectory() as tmp:
+            tmp_path = Path(tmp)
+            workdir = tmp_path / "work"
+            (workdir / "data" / "receptors").mkdir(parents=True)
+            (workdir / "data" / "ligands" / "prepared").mkdir(parents=True)
+            receptor = workdir / "data" / "receptors" / "receptor.pdbqt"
+            receptor.write_text(
+                "ATOM      1  N   ALA A   1       0.000   0.000   0.000\n"
+                "TER\n",
+                encoding="utf-8",
+            )
+            lig_pdbqt = workdir / "data" / "ligands" / "prepared" / "L1.pdbqt"
+            lig_pdbqt.write_text(
+                "ATOM      1  C   LIG L   1       0.000   0.000   0.000\n",
+                encoding="utf-8",
+            )
+            manifest = workdir / "data" / "ligands" / "prepared" / "manifest.csv"
+            manifest.write_text(
+                "id,smiles,heavy_atoms,rotatable_bonds,pdbqt,status,error\n"
+                f"L1,CCO,3,0,{lig_pdbqt},ok,\n",
+                encoding="utf-8",
+            )
+            fake_vina = tmp_path / "fake_vina.py"
+            fake_vina.write_text(_FAKE_VINA, encoding="utf-8")
+            cfg = load_config(
+                DEFAULT_CONFIG,
+                {
+                    "workdir": str(workdir),
+                    "outdir": "outputs/run_001",
+                    "receptor": "data/receptors/receptor.pdbqt",
+                    "ligand": "data/ligands/library.sdf",
+                    "executable": str(fake_vina),
+                    "max_workers": 1,
+                    "scoring": "",
+                    "resume": False,
+                },
+            )
+            run_docking(cfg, LOG)
+            run_docking(cfg, LOG)
+            rows = list(csv.DictReader(cfg.results_path().open("r", newline="")))
+            self.assertEqual(len(rows), 1)
+            self.assertEqual(rows[0]["id"], "L1")
+
+
+class TestMLTorchFallback(unittest.TestCase):
+    def test_torch_fallback_returns_sklearn_mlp(self):
+        from sklearn.neural_network import MLPClassifier
+
+        class _FailingTorch:
+            def __init__(self, *args, **kwargs):
+                raise RuntimeError("torch unavailable")
+
+        with mock.patch.object(docking_ml, "_TorchMLP", _FailingTorch):
+            model = docking_ml._build_model(
+                "torch",
+                "classification",
+                hidden=16,
+                epochs=5,
+                random_state=42,
+            )
+        self.assertIsInstance(model, MLPClassifier)
 
 
 _FAKE_VINA = r"""

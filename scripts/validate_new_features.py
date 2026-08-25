@@ -17,12 +17,9 @@ knockout run with `run_manifest.json`, and its own validation plan.
 from __future__ import annotations
 
 import argparse
-import csv
 import gzip
-import io
 import json
 import logging
-import math
 import re
 import sys
 import time
@@ -400,7 +397,6 @@ def median_split_cox_hr(
     d = frame["status"].to_numpy(dtype=float)
     x = frame["x"].to_numpy(dtype=float)
     order = np.argsort(t)[::-1]
-    t_sorted = t[order]
     d_sorted = d[order]
     x_sorted = x[order]
 
@@ -598,7 +594,11 @@ def build_gse165816_dataset() -> dict:
                 break
     files = sorted(
         (cache_dir / "_extracted").glob("GSM*c*.csv.gz"),
-        key=lambda p: int(re.search(r"GSM(\d+)", p.name).group(1)),
+        key=lambda p: (
+            int(match.group(1))
+            if (match := re.search(r"GSM(\d+)", p.name))
+            else 0
+        ),
     )
     disease_by_sample: dict[str, str] = {}
     tissue_by_sample: dict[str, str] = {}
@@ -726,7 +726,7 @@ def run_dataset(dataset: dict, gene_evidence: pd.DataFrame) -> dict:
     ko_summary = run_knockout(cfg, LOG)
     ko_time = time.time() - started
     started = time.time()
-    val_summary = export_validation(cfg, LOG)
+    export_validation(cfg, LOG)
     val_time = time.time() - started
     ko_dir = cfg.knockout_dir()
     val_dir = cfg.validation_dir()
@@ -865,7 +865,7 @@ def main() -> int:
         "",
         f"- Datasets attempted: {len(results)}",
         f"- Successful runs: {ok_count}",
-        f"- Requirement: >= 20 real datasets",
+        "- Requirement: >= 20 real datasets",
         f"- Result: {'PASS' if ok_count >= 20 else 'FAIL'}",
         "",
         "## Per-dataset summary",
