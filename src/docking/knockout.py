@@ -441,6 +441,7 @@ def _load_expression(path: Path, ko: dict) -> tuple[pd.DataFrame, pd.DataFrame |
     matrix = matrix.dropna(how="all").fillna(0.0)
     matrix.columns = matrix.columns.astype(str)
     matrix.index = matrix.index.astype(str)
+    matrix = matrix[~matrix.index.duplicated(keep="first")]
     return matrix, long_meta
 
 

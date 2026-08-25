@@ -50,7 +50,6 @@ def build_cells(
     n_samples: int,
     seed: int,
 ) -> list[dict]:
-    rng = random.Random(seed)
     samples = []
     for i in range(n_samples):
         samples.append({

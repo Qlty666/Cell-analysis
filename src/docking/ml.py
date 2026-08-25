@@ -156,7 +156,10 @@ def train_ml(
     reports = cfg.ml_dir()
     (reports / "data").mkdir(parents=True, exist_ok=True)
     (reports / "figures").mkdir(parents=True, exist_ok=True)
-    is_torch = model_type == "torch"
+    is_torch = model_type == "torch" and isinstance(model, _TorchMLP)
+    effective_model_type = "torch" if is_torch else model_type
+    if model_type == "torch" and not is_torch:
+        effective_model_type = "mlp"
     model_file = reports / "data" / (
         "ml_model.pt" if is_torch else "ml_model.joblib"
     )
@@ -169,7 +172,8 @@ def train_ml(
 
     metrics = _evaluate(model, X_test, y_test, task, encoder if task == "classification" else None)
     info = {
-        "model_type": original_model_type,
+        "model_type": effective_model_type,
+        "requested_model_type": original_model_type,
         "selected_features": X_train.shape[1],
         "task": task,
         "model_file": str(model_file),
@@ -191,7 +195,7 @@ def train_ml(
 
     log.info(
         "ML training complete: %s/%s, %s",
-        model_type,
+        effective_model_type,
         task,
         metrics,
     )
@@ -329,7 +333,6 @@ def _build_model(model_type, task, hidden, epochs, random_state):
 class _TorchMLP:
     def __init__(self, hidden=128, task="classification", epochs=80, random_state=42):
         import torch
-        from torch import nn
 
         self.torch = torch
         self.task = task

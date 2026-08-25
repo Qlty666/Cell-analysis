@@ -38,7 +38,6 @@ from web_ui import (  # noqa: E402
     dock_results,
     full_results,
     register_heartbeat,
-    result_details_data,
     run_faers_request,
     run_network_request,
     start_dock_job,

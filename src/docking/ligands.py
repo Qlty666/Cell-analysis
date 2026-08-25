@@ -4,14 +4,12 @@
 from __future__ import annotations
 
 import csv
-import sys
 import tempfile
 from pathlib import Path
 
 from .config import ResolvedConfig
 from .utils import (
     DockingError,
-    ToolNotFoundError,
     find_script,
     find_tool,
     run_command,

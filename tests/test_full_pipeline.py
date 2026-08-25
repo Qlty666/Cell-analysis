@@ -42,7 +42,6 @@ from pipeline.integration import (  # noqa: E402
     run_differential_abundance,
     write_qc_metrics,
 )
-from pipeline.integration import IntegrationError  # noqa: E402
 from pipeline.cell_feedback import (  # noqa: E402
     build_feedback_manifest,
     run_cell_feedback,
