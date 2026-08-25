@@ -19,6 +19,7 @@ if str(APP_ROOT / "src") not in sys.path:
 
 from data.geo_downloader import (  # noqa: E402
     BULK_COUNT_TABLE_RE,
+    canonical_accession,
     _convert_downloaded,
     _download,
     _expand_archive_files,
@@ -26,6 +27,15 @@ from data.geo_downloader import (  # noqa: E402
     _refresh_manifest_mode,
     _select_files,
 )
+
+
+class TestCanonicalAccession(unittest.TestCase):
+    def test_egood_maps_to_gse(self):
+        self.assertEqual(canonical_accession("E-GEOD-23991"), "GSE23991")
+
+    def test_other_accessions_unchanged(self):
+        self.assertEqual(canonical_accession("E-MTAB-1234"), "E-MTAB-1234")
+        self.assertEqual(canonical_accession("GSE1"), "GSE1")
 
 
 class TestSelectFiles(unittest.TestCase):

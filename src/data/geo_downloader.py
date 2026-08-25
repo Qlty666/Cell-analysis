@@ -205,6 +205,14 @@ def series_prefix(accession: str) -> str:
     return "GSE" + digits[: len(digits) - 3] + "nnn"
 
 
+def canonical_accession(accession: str) -> str:
+    acc = str(accession or "").strip().upper()
+    match = re.fullmatch(r"E-GEOD-(\d+)", acc)
+    if match:
+        return "GSE" + match.group(1)
+    return acc
+
+
 def normalize_accession(accession: str) -> str:
     acc = accession.strip().upper()
     if not re.fullmatch(r"GSE\d+", acc):

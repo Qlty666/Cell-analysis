@@ -42,6 +42,9 @@ class TestDatasetSearch(unittest.TestCase):
         self.assertEqual(row["organism"], "Homo sapiens")
         self.assertEqual(row["samples"], "8")
         self.assertEqual(row["data_type"], "single-cell")
+        self.assertEqual(row["database"], "GEO")
+        self.assertTrue(row["run_supported"])
+        self.assertGreaterEqual(row["quality_score"], 0.0)
         self.assertIn("GSE125449", row["url"])
 
     def test_to_row_supports_lowercase_esummary_fields(self):
@@ -275,6 +278,7 @@ class TestDatasetSearch(unittest.TestCase):
                 organism="homo",
                 disease="liver cancer",
                 research_direction="single cell",
+                databases=["geo"],
             )
         self.assertEqual(len(rows), 1)
         self.assertEqual(rows[0]["accession"], "GSE100001")
@@ -321,6 +325,182 @@ class TestDatasetSearch(unittest.TestCase):
             text = csv_path.read_text(encoding="utf-8")
             self.assertIn("relevance_score", text)
             self.assertIn("0.912", text)
+
+    def test_search_biostudies_parses_hits(self):
+        hits = {
+            "hits": [
+                {
+                    "accession": "E-MTAB-16408",
+                    "title": "Single-cell RNA-seq of PBMCs from HCC patients",
+                    "content": (
+                        "E-MTAB-16408 Single-cell RNA-seq of PBMCs from HCC "
+                        "patients transcription profiling by high throughput "
+                        "sequencing EFO_0002768 Homo sapiens processed data"
+                    ),
+                    "files": 3,
+                    "release_date": "2024-01-15",
+                }
+            ]
+        }
+        with patch.object(
+            search_datasets,
+            "_http_get_json",
+            return_value=hits,
+        ):
+            rows = search_datasets.search_biostudies(
+                "liver cancer single cell",
+                max_results=1,
+                disease="liver cancer",
+                research_direction="single cell",
+            )
+        self.assertEqual(rows[0]["accession"], "E-MTAB-16408")
+        self.assertEqual(rows[0]["database"], "ArrayExpress/BioStudies")
+        self.assertEqual(rows[0]["organism"], "Homo sapiens")
+        self.assertEqual(rows[0]["data_type"], "single-cell")
+        self.assertTrue(rows[0]["run_supported"])
+        self.assertIn("biostudies/studies/E-MTAB-16408", rows[0]["url"])
+
+    def test_search_atlas_filters_locally(self):
+        experiments = [
+            {
+                "experimentAccession": "E-GEOD-12345",
+                "experimentDescription": (
+                    "Hepatocellular carcinoma single cell RNA-seq human liver"
+                ),
+                "species": "Homo sapiens",
+                "numberOfAssays": 42,
+                "lastUpdate": "2024-02-01",
+                "experimentType": "Baseline",
+                "technologyType": ["RNA-Seq mRNA"],
+            },
+            {
+                "experimentAccession": "E-MTAB-99999",
+                "experimentDescription": "Soybean seed development",
+                "species": "Glycine max",
+                "numberOfAssays": 12,
+                "lastUpdate": "2023-01-01",
+                "experimentType": "Baseline",
+                "technologyType": ["RNA-Seq mRNA"],
+            },
+        ]
+        with patch.object(
+            search_datasets,
+            "_load_atlas_index",
+            return_value=experiments,
+        ):
+            rows = search_datasets.search_atlas(
+                "liver cancer single cell",
+                max_results=10,
+                disease="liver cancer",
+                research_direction="single cell",
+            )
+        self.assertEqual(len(rows), 1)
+        self.assertEqual(rows[0]["accession"], "E-GEOD-12345")
+        self.assertEqual(rows[0]["database"], "Expression Atlas")
+        self.assertEqual(rows[0]["organism"], "Homo sapiens")
+
+    def test_merge_rows_prefers_geo_for_egood(self):
+        geo_row = {
+            "accession": "GSE12345",
+            "database": "GEO",
+            "title": "GEO copy",
+            "summary": "summary",
+            "data_type": "bulk",
+            "organism": "Homo sapiens",
+            "samples": "8",
+            "platform": "",
+            "date": "2024/01/01",
+            "type": "Expression profiling",
+            "url": "https://example.com/GSE12345",
+            "run_supported": True,
+        }
+        atlas_row = dict(geo_row)
+        atlas_row["accession"] = "E-GEOD-12345"
+        atlas_row["database"] = "Expression Atlas"
+        merged = search_datasets.merge_rows([atlas_row, geo_row])
+        self.assertEqual(len(merged), 1)
+        self.assertEqual(merged[0]["accession"], "GSE12345")
+        self.assertEqual(merged[0]["database"], "GEO")
+
+    def test_quality_score_ranks_curated(self):
+        human = {
+            "database": "Expression Atlas",
+            "data_type": "single-cell",
+            "organism": "Homo sapiens",
+            "samples": "100",
+            "type": "Expression profiling by high throughput sequencing",
+            "run_supported": True,
+        }
+        low = {
+            "database": "GEO",
+            "data_type": "other",
+            "organism": "",
+            "samples": "0",
+            "type": "",
+            "run_supported": False,
+        }
+        self.assertGreater(
+            search_datasets.quality_score(human),
+            search_datasets.quality_score(low),
+        )
+
+    def test_search_datasets_merges_sources(self):
+        geo_row = {
+            "accession": "GSE100001",
+            "database": "GEO",
+            "title": "HCC tumor",
+            "summary": "human liver single cell",
+            "data_type": "single-cell",
+            "organism": "Homo sapiens",
+            "samples": "4",
+            "platform": "GPL24676",
+            "date": "2024/01/01",
+            "type": "Expression profiling",
+            "url": "https://example.com/GSE100001",
+            "run_supported": True,
+        }
+        bio_row = {
+            "accession": "E-MTAB-2000",
+            "database": "ArrayExpress/BioStudies",
+            "title": "HCC single cell",
+            "summary": "human",
+            "data_type": "single-cell",
+            "organism": "Homo sapiens",
+            "samples": "12",
+            "platform": "",
+            "date": "2024/02/01",
+            "type": "transcription profiling by high throughput sequencing",
+            "url": "https://example.com/E-MTAB-2000",
+            "run_supported": True,
+        }
+        with (
+            patch.object(
+                search_datasets,
+                "search_geo",
+                return_value=[geo_row],
+            ),
+            patch.object(
+                search_datasets,
+                "search_biostudies",
+                return_value=[bio_row],
+            ),
+            patch.object(
+                search_datasets,
+                "search_atlas",
+                return_value=[],
+            ),
+        ):
+            rows = search_datasets.search_datasets(
+                "liver cancer single cell",
+                max_results=10,
+                disease="liver cancer",
+                research_direction="single cell",
+            )
+        self.assertEqual(len(rows), 2)
+        self.assertEqual(
+            {row["accession"] for row in rows},
+            {"GSE100001", "E-MTAB-2000"},
+        )
 
 
 if __name__ == "__main__":
