@@ -842,6 +842,53 @@ parse_series_generic <- function(manifest) {
   do.call(rbind, out)
 }
 
+infer_condition_from_sample_names <- function(samples) {
+  samples <- as.character(samples)
+  if (length(samples) < 4) return(NULL)
+  tokenize <- function(s) {
+    parts <- unlist(strsplit(s, "[_.-]", perl = TRUE))
+    parts <- trimws(parts)
+    parts <- parts[nzchar(parts)]
+    norm <- tolower(parts)
+    norm <- sub("[0-9]+$", "", norm)
+    norm <- sub("^[0-9]+", "", norm)
+    parts[norm != ""]
+  }
+  tokens <- lapply(samples, tokenize)
+  max_pos <- max(lengths(tokens))
+  if (max_pos < 1) return(NULL)
+  best_groups <- 0L
+  best_pos <- 0L
+  for (pos in seq_len(max_pos)) {
+    vals <- vapply(tokens, function(t) {
+      if (length(t) >= pos) {
+        v <- tolower(t[[pos]])
+        sub("[0-9]+$", "", sub("^[0-9]+", "", trimws(v)))
+      } else {
+        NA_character_
+      }
+    }, character(1))
+    vals <- vals[!is.na(vals) & nzchar(vals)]
+    tt <- table(vals)
+    tt <- tt[tt >= 2]
+    if (length(tt) >= 2 &&
+        sum(tt) >= length(samples) * 0.6 &&
+        length(tt) >= best_groups) {
+      best_groups <- length(tt)
+      best_pos <- pos
+    }
+  }
+  if (best_pos == 0L) return(NULL)
+  vapply(tokens, function(t) {
+    if (length(t) >= best_pos) {
+      v <- tolower(t[[best_pos]])
+      sub("[0-9]+$", "", sub("^[0-9]+", "", trimws(v)))
+    } else {
+      NA_character_
+    }
+  }, character(1))
+}
+
 infer_condition <- function(meta, sample_ann) {
   candidates <- c(
     "condition", "group", "disease", "disease_status", "health_status",
@@ -1002,6 +1049,13 @@ read_generic_dataset <- function(manifest) {
   if (is.null(cond) && any(nzchar(loaded$cell_group))) {
     meta$condition <- loaded$cell_group
     cond <- infer_condition(meta, ann)
+  }
+  if (is.null(cond)) {
+    cond <- infer_condition_from_sample_names(as.character(meta$sample))
+    if (!is.null(cond)) {
+      log_msg("inferred condition from sample name tokens")
+      meta$condition <- cond
+    }
   }
   if (is.null(cond)) {
     stop(
@@ -3393,7 +3447,14 @@ if (stage_allowed("09")) run_stage("09_summary_outputs", {
       na.rm = TRUE
     ),
     top_degs = head(deg[, c("gene", "avg_log2FC", "p_val_adj")], 20),
-    go_up_top = if (nrow(go_up) > 0) head(go_up[, c("ID", "Description", "pvalue", "p.adjust")], 10) else data.frame()
+    go_up_top = if (
+      nrow(go_up) > 0 &&
+      all(c("ID", "Description", "pvalue", "p.adjust") %in% colnames(go_up))
+    ) {
+      head(go_up[, c("ID", "Description", "pvalue", "p.adjust")], 10)
+    } else {
+      data.frame()
+    }
   )
   write_json(summary_list, file.path(res_dir, "summary.json"), auto_unbox = TRUE, pretty = TRUE)
 

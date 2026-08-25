@@ -668,6 +668,8 @@ MIT License. See `LICENSE` for details.
 - 新增 `src/data/biostudies_downloader.py`：自动选择 BioStudies/Expression Atlas 的 processed 表达文件，生成与 GEO 相同的 manifest，可直接进入表达分析与全自动流水线；`E-GEOD-xxxxx` 自动映射到 GEO `GSExxxxx`。
 - 流水线入口、网页端和 CLI 支持 `GSE125449`、`E-MTAB-1234`、`S-BSST123` 等数据集编号；搜索页和全自动流水线页文案同步更新。
 - 新增/更新数据集搜索、BioStudies 下载、网页参数和 accession 校验测试。
+- 修复 ArrayExpress 等样本级数据集缺少 condition 元数据时无法自动推断分组的问题：R 流水线会按样本名 token 自动推断条件组，非单细胞数据可继续跑差异表达。
+- 修复富集为空时 stage 09 汇总读取 `go_up` 占位表导致 `undefined columns selected` 的问题，样本级数据集可正常生成 `summary.json` 并完成流水线。
 
 ### v0.8.2
 
