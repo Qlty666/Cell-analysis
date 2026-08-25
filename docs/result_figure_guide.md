@@ -10,6 +10,526 @@
 
 说明：README 中“48 张”是历史常见口径。按当前代码逐点核对，单细胞流程的图片保存点共有 50 个文件名，其中部分图片由环境变量、数据条件或可选阶段决定是否生成。判断时应以本清单、实际输出目录、阶段状态文件和对应数据文件为准。
 
+## 结果图坐标、颜色与图例图解
+
+本节的坐标轴、颜色和图例说明直接对照本仓库绘图代码中实际使用的 `labs()`、`scale_*()`、`color`/`fill` 和 `palette` 定义，属于当前版本结果的官方图解。若后续代码修改轴标签、配色或阈值，应同步更新本节。单细胞图默认均以 `Seurat` 对象中的元数据作图，`UMAP_1`/`UMAP_2` 为该次运行 UMAP 降维后的两个坐标轴，本身无独立生物学单位。
+
+### 质控与双细胞
+
+| 文件 | 横轴 | 纵轴 | 颜色/图例 | 关键符号 |
+| --- | --- | --- | --- | --- |
+| `fig_01_qc_raw_violin.png` | 条件（`condition`） | `nFeature_RNA`、`nCount_RNA`、`percent.mt` 的数值 | 小提琴主体默认按条件分组，图例被移除 | 三个并列面板分别对应三个指标，用于查看过滤前分布 |
+| `fig_01_qc_filtered_violin.png` | 条件（`condition`） | 过滤后 `nFeature_RNA`、`nCount_RNA`、`percent.mt` 的数值 | 同上 | 三个并列面板，用于查看过滤后分布 |
+| `fig_48_qc_pvalue_comparison.png` | QC 指标（`nFeature_RNA`、`nCount_RNA`、`percent.mt`、`percent.ribo`） | `-log10(P value)` | 条形填充色表示不同的条件两两比较（`comparison`） | 灰色虚线为 `P = 0.05`（即 `-log10(0.05)`）；柱顶文字为原始 `P` 值；按 raw/filtered 两个面板分面 |
+| `fig_02_doublet_scores.png` | 双细胞判定（`singlet`/`doublet`） | `scDblFinder score`（双细胞得分） | `singlet` 为浅蓝 `#4DBBD5`，`doublet` 为红 `#E64B35` | 小提琴叠加窄箱线图；得分越高越可能为双细胞 |
+
+### 聚类、降维与注释
+
+| 文件 | 横轴 | 纵轴 | 颜色/图例 | 关键符号 |
+| --- | --- | --- | --- | --- |
+| `fig_03_umap_clusters.png` | `UMAP_1` | `UMAP_2` | 每个聚类一种颜色，图例为“聚类号 - 主要细胞类型” | 图中直接标注主要细胞类型标签；用于检查聚类边界 |
+| `fig_04_umap_condition.png` | `UMAP_1` | `UMAP_2` | 点颜色表示条件（`condition`） | 图例在右侧；用于检查条件分离与批次效应 |
+| `fig_05_umap_annotation.png` | `UMAP_1` | `UMAP_2` | 左面板颜色表示 marker 注释，右面板表示发布注释 | 左右双面板并排，均带细胞类型图例 |
+| `fig_06_dotplot_markers.png` | marker 基因 | 细胞类型（`celltype_annot`） | 点颜色表示平均表达量（颜色越深表达越高）；点大小表示表达该基因的细胞比例（`pct.exp`） | 为标准 Seurat `DotPlot` 双图例；用于验证注释特异性 |
+| `fig_07_annotation_confusion_heatmap.png` | 发布细胞类型 | marker 注释细胞类型 | 热图默认蓝-白渐变，颜色越深计数越高 | 格内数字为细胞计数；用于查看注释对应关系 |
+| `fig_14_pca.png` | `PC_1` | `PC_2` | 点颜色表示条件（`condition`） | 主成分散点，用于查看主要变异来源 |
+| `fig_15_elbow.png` | 主成分序号（PC 1..N） | 主成分标准差 | 单条折线 | 拐点处建议保留的维度数 |
+| `fig_16_featureplot_markers.png` | `UMAP_1` | `UMAP_2` | 点颜色表示 marker 基因表达量（浅灰到深红渐变，默认 `FeaturePlot` 配色） | 每个基因一个面板，最多展示 6 个 marker |
+| `fig_17_marker_violin.png` | 细胞类型（`celltype_annot`） | 表达量 | 小提琴按细胞类型分组 | 每个 marker 一个面板 |
+| `fig_18_celltype_proportion.png` | 细胞类型 | 比例（0-100%，`position="fill"`） | 填充颜色表示条件（`condition`） | 柱高合计为 1，用于比较条件间细胞类型构成 |
+| `fig_19_condition_proportion.png` | 条件（`coord_flip` 后显示为纵轴） | 比例（0-100%） | 填充颜色表示细胞类型 | 横向堆叠条形图，用于查看每个细胞类型内部的条件构成 |
+| `fig_28_umap_sample.png` | `UMAP_1` | `UMAP_2` | 点颜色表示条件（`condition`），固定为红 `#E64B35` 与蓝 `#4DBBD5` | 标题为 “UMAP by sample”，用于评估样本混合和批次效应 |
+| `fig_29_doublet_rate_sample.png` | 样本（短标签） | 双细胞率（百分比） | 条形填充颜色表示条件 | 柱顶标注百分比数字；用于识别异常样本 |
+| `fig_30_sample_proportion.png` | 样本 | 比例（0-100%） | 填充颜色表示细胞类型 | 堆叠条形图，用于检查样本间异质性 |
+| `fig_31_cluster_marker_heatmap.png` | 基因 | 聚类（`seurat_clusters`） | `viridis` 色阶（深紫到黄，值越大表达越高） | 每聚类 Top marker 表达块，用于辅助定义聚类标签 |
+| `fig_32_cluster_marker_dotplot.png` | marker 基因 | 聚类（`seurat_clusters`） | 点颜色表示平均表达量；点大小表示表达比例 | 标准 Seurat `DotPlot` |
+| `fig_37_singler_umap.png` | `UMAP_1` | `UMAP_2` | 点颜色表示 SingleR 参考注释 | 图例在右侧，用于查看参考注释与 UMAP 结构的一致性 |
+| `fig_38_singler_confusion_heatmap.png` | SingleR 注释 | marker 注释 | 热图默认蓝-白渐变 | 格内数字为细胞计数；用于比较两种注释 |
+
+### 差异表达
+
+| 文件 | 横轴 | 纵轴 | 颜色/图例 | 关键符号 |
+| --- | --- | --- | --- | --- |
+| `fig_08_volcano.png` | `avg_log2FC`（平均 log2 差异倍数，标题中标注比较组，如 HCC vs iCCA） | `-log10(p_val_adj)`（校正 P 值的负对数） | 显著上调为红 `#E64B35`，显著下调为蓝 `#4DBBD5`，其余为灰 `grey75` | 灰色竖虚线为 `log2FC = ±0.25`，灰色横虚线为 `P = 0.05`；离群点旁标注基因名 |
+| `fig_09_deg_heatmap.png` | 基因（Top DEG） | 样本/细胞（按条件分组） | `viridis` 色阶，深紫到黄表示表达量低到高 | 热图列按条件排列，用于查看差异基因整体表达模式 |
+| `fig_09_deg_horizontal_violin.png` | 归一化表达量（`Normalized expression`） | 基因（按校正 P 值排序，标签含 `P = ...`） | 小提琴填充颜色表示条件（`condition`），颜色来自 `hcl.colors("Set 2")` | 基因按校正 P 值升序从上到下排列，用于对比最显著基因 |
+
+### 富集分析
+
+| 文件 | 横轴 | 纵轴 | 颜色/图例 | 关键符号 |
+| --- | --- | --- | --- | --- |
+| `fig_10_go_up.png`/`fig_11_go_down.png`/`fig_12_kegg_up.png`/`fig_13_kegg_down.png` | 按条目排序的通路（默认 `barplot`，最多 10 条） | 计数或 P 值指标（由 clusterProfiler 默认绘图函数决定） | 条形/点颜色默认表示 `p.adjust`（颜色越深越显著） | 实际绘图样式可用 `LIVER_FIGURE_STYLES` 切换为 dotplot/cnetplot；无显著条目时显示占位文字 |
+| `fig_20_gsea_go.png`/`fig_21_gsea_kegg.png` | 按 log2FC 降序排列的基因排序位置 | 富集分数（GSEA 运行富集得分） | 默认 `ridgeplot` 时按通路着色；`gseaplot2` 时显示富集曲线与基因条带 | NES、p.adjust 等信息见图中标签；无显著条目时显示占位文字 |
+| `fig_22_go_network.png`/`fig_23_kegg_network.png` | 无笛卡尔坐标，为网络布局 | 无 | cnetplot：基因节点颜色默认按 `log2FC` 渐变，通路节点按类别着色；emapplot：节点颜色表示 `p.adjust` | 圆形节点为通路，散点节点为基因；默认筛选 `p.adjust <= 0.05` 后取 Top5 |
+| `fig_46_go_top5.png`/`fig_47_kegg_top5.png` | 富集条目（Top5） | 富集条目（按 `GeneRatio` 排序） | 气泡颜色表示 `p.adjust`（越显著越红/越深）；气泡大小表示 `Count`（富集基因数） | 默认 `dotplot`，可切换 barplot/cnetplot/emapplot |
+
+### 机器学习（单细胞）
+
+| 文件 | 横轴 | 纵轴 | 颜色/图例 | 关键符号 |
+| --- | --- | --- | --- | --- |
+| `fig_24_ml_feature_importance.png` | 特征重要性（数值） | 特征名 | 统一蓝色 `#4C72B0` | 横向条形图，仅展示重要性 Top15；特征为样本级 QC 均值与细胞类型比例 |
+| `fig_25_ml_shap.png` | SHAP 值（对预测的影响） | 特征名 | 点颜色表示该样本/细胞该特征值的大小（红高蓝低，SHAP 默认配色） | SHAP 蜂群图，右侧为特征值颜色条 |
+| `fig_43_ml_confusion_matrix.png` | 预测类别（`Predicted`） | 真实类别（`True`） | `Blues` 色阶，颜色越深计数越高；格内数字用白/黑文字对比显示 | 对角线为正确分类；数字为交叉验证预测计数 |
+| `fig_44_ml_roc_pr.png` | 左：假阳性率（FPR）；右：召回率（Recall） | 左：真阳性率（TPR）；右：精确率（Precision） | 左/右各一条或多条折线，图例标注类别与 `AUC`/`AP`；灰色虚线为随机基线（ROC） | 二分类时图例显示 `AUC=...`/`AP=...`，多分类时每个类别一条线 |
+| `fig_45_ml_cv_scores.png` | 单一类别 `CV accuracy` | 交叉验证准确率（Accuracy） | 箱线图主体默认样式，散点为蓝色 `#4C72B0` | 箱线叠加各折得分点；标题显示折数 `n=...` |
+| `fig_45_ml_calibration_curve.png` | 平均预测概率（`Mean predicted probability`） | 观测频率（`Observed frequency`） | 蓝色校准折线与灰色完美校准虚线 | 越接近对角线表示概率校准越好 |
+
+### 高级分析与细胞通讯
+
+| 文件 | 横轴 | 纵轴 | 颜色/图例 | 关键符号 |
+| --- | --- | --- | --- | --- |
+| `fig_26_cellcycle_umap.png` | `UMAP_1` | `UMAP_2` | 点颜色表示细胞周期阶段（Seurat `Phase`：G1/S/G2M，默认离散配色） | 用于检查细胞周期是否干扰聚类 |
+| `fig_27_cellcycle_proportion.png` | 条件 | 比例（0-100%） | 填充颜色表示细胞周期阶段 | 堆叠条形图，比较组间周期构成 |
+| `fig_33_signature_scores_umap.png` | `UMAP_1` | `UMAP_2` | 点颜色表示功能签名得分，浅灰到深红 `grey90`→`#B31B1B` | 每个签名一个面板；签名为增殖、EMT、缺氧、免疫检查点等 |
+| `fig_34_signature_scores_boxplot.png` | 条件 | 签名得分（`Signature score`） | 小提琴/箱线按条件填充 | 每个签名一个分面面板 |
+| `fig_35_celltype_abundance_effect.png` | `log2 odds ratio`（细胞类型丰度 log2 OR） | `-log10 adjusted p value` | 点颜色表示细胞类型 | 灰色虚线为 `x = 0`；用于查看细胞类型在组间显著增多/减少 |
+| `fig_36_cnv_heatmap.png` | 染色体滑动窗口（按染色体顺序） | 细胞（聚类后按相似性排列） | 蓝 `#3B4CC0`-白-红 `#B40426`：蓝为相对低表达（推断拷贝缺失），红为相对高表达（推断拷贝增益） | 顶部注释条：`Condition` 使用红/蓝/绿，`CellType` 使用彩虹色；仅展示每条件最多 750 个细胞 |
+| `fig_39_trajectory_umap.png` | `UMAP_1` | `UMAP_2` | 左面板为伪时序（`pseudotime`），颜色使用 `viridis`；右面板点颜色表示聚类，轨迹线为黑色 | 左右双面板：左为拟时序 FeaturePlot，右为聚类 UMAP 叠加 slingshot 谱系曲线 |
+| `fig_40_cellchat_network.png` | 无笛卡尔坐标，为环形网络布局 | 无 | 节点颜色/大小表示细胞类型及细胞数；边粗细表示通讯数量 | 弧上标签为通讯数量；用于查看细胞间通讯强度 |
+| `fig_41_cellchat_heatmap.png` | 目标细胞类型 | 来源细胞类型 | 红蓝渐变，颜色越红通讯数量/强度越高 | CellChat 默认热图，用于比较细胞类型对之间通讯 |
+| `fig_42_cellchat_bubble.png` | 配体受体/信号通路 | 细胞类型对（来源→目标） | 点颜色表示通讯概率（`p` 值相关颜色，默认红蓝渐变）；点大小表示贡献/显著性 | 用于查看关键配体受体对 |
+
+### 虚拟筛选与敲除
+
+| 文件 | 横轴 | 纵轴 | 颜色/图例 | 关键符号 |
+| --- | --- | --- | --- | --- |
+| `fig_46_affinity_distribution.png` | 亲和力（`Affinity (kcal/mol)`，越负结合越强） | 配体数量（`Ligand count`） | 直方图统一蓝色 `#4c7bb8`；红色虚线为命中阈值 `cutoff`（默认 `-7.0 kcal/mol`） | 阈值线左侧为命中配体 |
+| `fig_47_top_hits.png` | 亲和力（`Affinity (kcal/mol)`） | 配体 ID | 条形统一绿色 `#2e7d32` | 仅展示 Top20；若 `hits=0` 则为按亲和力排序的候选而非“命中” |
+| `fig_48_diverse_hits.png` | 亲和力（`Affinity (kcal/mol)`） | 配体 ID | 条形统一紫色 `#8e44ad` | Tanimoto 多样性选择结果，用于减少同一骨架重复 |
+| `fig_49_redock_comparison.png` | 左：初始亲和力；右：亲和力变化量 | 左：重对接亲和力；右：配体数量 | 左散点统一绿色 `#2e7d32`，黑色虚线为 `y=x` 对角线；右直方图蓝色 `#4c7bb8`，红色虚线为 0 | 右图围绕 0 分布表示重对接稳定 |
+| `fig_50_ml_feature_importance.png` | 特征重要性 | 特征名 | 条形统一蓝色 `#1665c0` | 模型提供 `feature_importances_`/`coef_` 时生成；MLP/torch 无原生重要性时不生成 |
+| `fig_51_ml_roc.png` | 假阳性率（`False positive rate`） | 真阳性率（`True positive rate`） | 蓝色 ROC 曲线，灰色虚线为随机基线 | 图例显示 `AUC=...`；用于评估分类模型排序能力 |
+| `fig_52_knockout_top_candidates.png` | 敲除优先级得分（`Knockout priority score`，0-1） | 基因名 | 条形统一绿色 `#1d6f42` | 横轴固定为 0-1；分数是统计优先级，不等同于真实敲除表型 |
+| `fig_53_knockout_score_distribution.png` | 敲除优先级得分（0-1） | 基因数量（`Gene count`） | 直方图统一蓝色 `#4c7bb8` | 用于判断评分是否有区分度 |
+| `compound_disease_venn.png` | 无笛卡尔坐标，为集合圆形布局 | 无 | 各集合圆轮廓分别为蓝 `#4C72B0`、橙 `#DD8452`、绿 `#55A868`，区域数字为基因计数 | 数字表示各交集/独有区域基因数；用于查看化合物靶点与疾病基因交集 |
+
+### 细胞反馈
+
+| 文件 | 横轴 | 纵轴 | 颜色/图例 | 关键符号 |
+| --- | --- | --- | --- | --- |
+| `fig_54_feedback_module_umap.png` | `UMAP_1` | `UMAP_2` | 点颜色表示筛选靶点模块得分，浅灰 `grey90` 到深红 `#B31B1B` | 用于查看模块是否集中在特定细胞群 |
+| `fig_55_feedback_target_expression_umap.png` | `UMAP_1` | `UMAP_2` | 点颜色表示候选靶基因表达量，浅灰 `grey90` 到蓝 `#2E86AB` | 每个基因一个面板 |
+| `fig_56_feedback_celltype_dotplot.png` | 候选靶基因 | 细胞类型 | 点颜色表示平均表达量；点大小表示表达比例 | 标准 Seurat `DotPlot` |
+| `fig_57_feedback_celltype_boxplot.png` | 细胞类型 | 反馈模块得分（`Feedback module score`） | 小提琴/箱线按条件（`condition`）填充 | 用于比较细胞类型与条件间的模块活性 |
+| `fig_58_feedback_celltype_heatmap.png` | 细胞类型 | 候选靶基因 | 白-浅蓝-蓝-深红渐变（`#f7fbff`→`#d6e7ff`→`#2E86AB`→`#7B241C`），颜色越深平均表达越高 | 行和列均聚类，基因按列和均值排序 |
+| `fig_59_feedback_targets_volcano.png` | `avg_log2FC` | `-log10(p_val_adj)` | 显著上调为红 `#C0392B`，显著下调为蓝 `#2E86C1`，其余为灰 `grey65` | 灰色虚线为 `P = 0.05` 和 `log2FC = ±0.25`；显著基因标注基因名 |
+| `fig_60_feedback_condition_violin.png` | 条件（`condition`） | 归一化表达量 | 小提琴按条件分组（图例被移除） | 每个候选靶基因一个面板 |
+| `fig_61_feedback_go_network.png`/`fig_62_feedback_kegg_network.png` | 无笛卡尔坐标，为通路-基因网络布局 | 无 | 基因节点按表达/差异方向着色，通路节点按类别着色（cnetplot 默认配色） | 默认筛选 `p.adjust <= 0.05` 后取 Top5 通路 |
+
+### 逐图详细图解
+
+本节对结果清单中的每一张图给出完整注解：坐标轴定义与单位、颜色/大小/线型编码、阈值与参考线、面板布局、数据来源、读取方法，以及可能出现的回退或占位情况。数据来源列中的“状态文件”指 `results/.stages`、`summary.json`、`pipeline_complete.json`、`ml_model_summary.json`、`cellchat_status.txt` 等过程文件；只有状态、数据、参数和视觉检查都通过，才可作为结论材料。
+
+#### `fig_01_qc_raw_violin.png`
+
+- 坐标轴：横轴为样本条件（Seurat 元数据 `condition`）；纵轴为 QC 指标数值，三个并列面板依次为 `nFeature_RNA`（检测到的基因数）、`nCount_RNA`（总 UMI/总分子数）、`percent.mt`（线粒体基因百分比）。
+- 颜色/图例：小提琴按条件分组填充，代码使用 `NoLegend()` 移除图例，因此图中不显示图例；分组由横轴标签区分。
+- 读取方法：比较每个条件下小提琴主体位置、宽度和长尾。`nFeature_RNA`/`nCount_RNA` 过低代表低质量或空液滴，`percent.mt` 过高代表细胞状态差或细胞破裂；单条件时只能描述质量分布，不能用于“条件间差异”结论。
+- 数据来源：`data/01_qc/fig_01_qc_metrics.csv`（含 raw 前原始指标）与 `results/checkpoints/seurat_raw.rds`。
+- 回退/占位：无。若图像空白或全部为 0，应检查输入矩阵与 QC 计算是否成功。
+
+#### `fig_01_qc_filtered_violin.png`
+
+- 坐标轴：横轴为条件；纵轴为过滤后 `nFeature_RNA`、`nCount_RNA`、`percent.mt` 的数值；三个面板同上。
+- 颜色/图例：同 `fig_01_qc_raw_violin.png`，图例被移除。
+- 读取方法：确认低质量尾部被去除、主要细胞群保留，并检查两个条件是否仍可比较。默认过滤阈值见环境变量 `LIVER_QC_MIN_FEATURES`、`LIVER_QC_MAX_FEATURES`、`LIVER_QC_MIN_COUNTS`、`LIVER_QC_MAX_COUNTS`、`LIVER_QC_MAX_MT`；未设置时由数据分位数自动计算。
+- 数据来源：`fig_01_qc_metrics.csv` 的过滤后子集。
+- 回退/占位：无。过滤后细胞数过少或分布被过度压缩时，该图不能作为质量合格证据。
+
+#### `fig_48_qc_pvalue_comparison.png`
+
+- 坐标轴：横轴为 QC 指标（`nFeature_RNA`、`nCount_RNA`、`percent.mt`、`percent.ribo`）；纵轴为 `-log10(P value)`，数值越大表示条件间差异越显著。
+- 颜色/图例：条形填充颜色表示条件两两比较（`comparison`，格式为“组1 vs 组2”）；图例在底部。
+- 阈值与参考线：灰色虚线为 `P = 0.05`（对应 `-log10(0.05) ≈ 1.301`）；柱顶文字直接标注原始 `P` 值。
+- 面板布局：按 `raw`/`filtered` 两个阶段分面，纵轴可各自缩放（`scales="free_y"`）。
+- 统计方法：Wilcoxon 秩和检验（`wilcox.test`），`padj` 使用 BH FDR 校正，图中显示原始 P 值。
+- 读取方法：比较同一指标在过滤前后的 P 值变化，判断 QC 是否改变条件间差异；过滤后 P 值显著变化不代表过滤有误，需结合分布图解释。
+- 数据来源：`data/01_qc/fig_48_qc_pvalue_comparison.csv`。
+- 回退/占位：条件少于 2 组时显示 “At least two conditions are required”，此时该图不能用于条件差异判断。
+
+#### `fig_02_doublet_scores.png`
+
+- 坐标轴：横轴为双细胞判定（`doublet_call`：`singlet`/`doublet`）；纵轴为 `scDblFinder score`（scDblFinder 双细胞得分）。
+- 颜色/图例：`singlet` 为浅蓝 `#4DBBD5`，`doublet` 为红 `#E64B35`；图例为类别本身。
+- 图形编码：小提琴（`geom_violin`）叠加窄箱线图（`geom_boxplot`，`outlier.shape=NA`），箱线不显示离群点。
+- 读取方法：正常结果中 doublet 得分应整体高于 singlet；若两个类别得分完全重叠或全部为 singlet，需检查 `scDblFinder` 是否成功运行。
+- 数据来源：`data/02_doublets/fig_02_doublet_results.csv`（每细胞得分与判定）。
+- 回退/占位：`scDblFinder` 失败时代码会把所有细胞标记为 `singlet`、得分设为 0，此时该图不能作为真实双细胞检测结果。
+
+#### `fig_14_pca.png`
+
+- 坐标轴：横轴 `PC_1`，纵轴 `PC_2`，为主成分空间前两个主成分。
+- 颜色/图例：点颜色表示条件（`condition`），图例在右侧。
+- 读取方法：查看条件/样本在主成分空间中的分离程度、批次混杂和离群点；主成分本身无独立生物学单位。
+- 数据来源：Seurat 对象的 `pca` 降维结果；坐标与 `fig_03_04_05_umap_coordinates.csv` 不同，PCA 坐标未单独导出。
+- 回退/占位：样本级模式下使用随机占位嵌入（`sample-level`），只能作描述性展示。
+
+#### `fig_15_elbow.png`
+
+- 坐标轴：横轴为主成分序号（PC 1..N，`ndims` 为 `min(30, 细胞数-1)`）；纵轴为主成分标准差。
+- 颜色/图例：单条折线，无分类图例。
+- 读取方法：找到曲线由陡变缓的“拐点”，结合下游分析所需的可解释方差选择 PCA 维度数；无清晰拐点不代表图片损坏，但应说明维度选择依据。
+- 数据来源：Seurat `ElbowPlot` 的标准差向量；样本级模式下为恒定值 1。
+- 回退/占位：样本级模式生成水平线，不能用于真实 PCA 维度选择。
+
+#### `fig_03_umap_clusters.png`
+
+- 坐标轴：横轴 `UMAP_1`，纵轴 `UMAP_2`，为该次运行 UMAP 降维后的坐标。
+- 颜色/图例：每个 Seurat 聚类一种颜色，图例文本为“聚类号 - 该聚类主要细胞类型”（如 `0 - Hepatocyte`）；图中还直接标注主要细胞类型标签。
+- 读取方法：检查聚类边界是否清晰、是否过度聚类（大量碎片）或欠聚类（全部混成一片），并核对图例聚类数与 `summary.json` 的 `n_clusters` 一致。
+- 数据来源：`data/03_cluster/fig_03_04_05_umap_coordinates.csv`（UMAP 坐标、聚类、条件、样本）。
+- 回退/占位：UMAP 计算失败时使用随机占位嵌入，此时聚类结构无意义。
+
+#### `fig_04_umap_condition.png`
+
+- 坐标轴：`UMAP_1`/`UMAP_2`。
+- 颜色/图例：点颜色表示条件，图例在右侧；标题为条件比较（如 `HCC vs iCCA`）。
+- 读取方法：评估条件间分布偏移、批次效应和分组混杂。单条件图不能支持条件差异；条件完全分离时需确认是否来自批次而不是真实生物学差异。
+- 数据来源：同一 UMAP 坐标表。
+- 回退/占位：UMAP 失败时同上。
+
+#### `fig_05_umap_annotation.png`
+
+- 坐标轴：`UMAP_1`/`UMAP_2`；左右双面板并排。
+- 颜色/图例：左面板为 marker 注释（`celltype_annot`），右面板为发布注释（`published_type`），各带细胞类型图例。
+- 读取方法：比较两种注释在 UMAP 上是否形成连贯且一致的区域；差异大的细胞类型应回到 marker 图与混淆矩阵复核。
+- 数据来源：`data/04_annotation/fig_05_16_17_cell_annotations.csv`。
+- 回退/占位：无发布注释时右面板可能为空或缺失；占位说明见 `fig_07`。
+
+#### `fig_06_dotplot_markers.png`
+
+- 坐标轴：横轴为 marker 基因，纵轴为细胞类型（`celltype_annot`）。
+- 颜色/图例：点颜色表示平均表达量（颜色越深表达越高）；点大小表示表达该基因的细胞比例（`pct.exp`），为 Seurat `DotPlot` 双图例。
+- 读取方法：预期 marker 在其对应细胞类型中高表达且高比例，其他类型低表达；若所有点大小/颜色无差异或图像空白，不能验证注释。
+- 数据来源：`data/04_annotation/fig_05_16_17_cell_annotations.csv` 与 Seurat 表达矩阵。
+- 回退/占位：marker 基因全部未命中时跳过生成。
+
+#### `fig_07_annotation_confusion_heatmap.png`
+
+- 坐标轴：横轴为发布细胞类型，纵轴为 marker 注释细胞类型。
+- 颜色/图例：`pheatmap` 默认蓝-白渐变，颜色越深计数越高；格内数字为细胞计数。
+- 读取方法：查看对角线是否为高计数主对应关系；出现大片非对角线高计数时说明两种注释存在系统差异。
+- 数据来源：`data/04_annotation/fig_07_annotation_confusion.csv`。
+- 回退/占位：无发布注释或矩阵过小时显示 “No published annotations”，只能说明缺少发布注释，不能用于一致性判断。
+
+#### `fig_08_volcano.png`
+
+- 坐标轴：横轴 `avg_log2FC`（平均 log2 差异倍数，标题中标注比较组，如 `HCC vs iCCA`）；纵轴 `-log10(p_val_adj)`（BH 校正 P 值的负对数）。
+- 颜色/图例：显著上调为红 `#E64B35`，显著下调为蓝 `#4DBBD5`，其余为灰 `grey75`；图例显示 Up/Down/NS。
+- 阈值与参考线：灰色竖虚线为 `log2FC = ±0.25`，灰色横虚线为 `P = 0.05`；实际显著性判定使用 `p_val_adj < de_padj` 且 `abs(avg_log2FC) > de_logfc`，默认 `0.05` 与 `0.25`，可用环境变量修改。
+- 读取方法：查看显著上/下调基因数量、分布对称性和离群点；Top15 基因（按 P 值排序）标注基因名。
+- 回退/占位：可通过 `LIVER_FIGURE_STYLES=fig_08_volcano.png=maplot` 切换为 MA 图（横轴为平均归一化表达，纵轴为 `avg_log2FC`）；无显著 DEG 时仍会生成图，只能说明未检出。
+
+#### `fig_09_deg_heatmap.png`
+
+- 坐标轴：横轴为 Top DEG 基因，纵轴为样本/细胞，按条件分组；列标签旋转 45 度。
+- 颜色/图例：`viridis` 色阶（深紫到黄），表示 `ScaleData` 后的表达水平，值越大颜色越黄。
+- 读取方法：查看显著基因在条件间的表达块是否清晰；Top30 来自 `deg$gene[seq_len(min(30, nrow(deg)))]`。
+- 回退/占位：无显著 DEG 时 Top30 可能来自全部基因排序，需结合 `fig_09_deg_significant.csv` 判断；无基因可绘图时跳过。
+
+#### `fig_09_deg_horizontal_violin.png`
+
+- 坐标轴：横轴为归一化表达量；纵轴为基因，按校正 P 值升序排列，标签为“基因名 + `P = ...`”（P < 0.001 用科学计数法）。
+- 颜色/图例：小提琴填充颜色表示条件，颜色来自 `hcl.colors(length(conds), palette="Set 2")`；图例在顶部。
+- 图形编码：小提琴叠加窄箱线图和抖动散点（每条件最多 `deg_violin_max_cells` 个细胞，默认 1000，种子固定）。
+- 读取方法：对比两组表达分布与 P 值标签，优先看差异最显著的基因；基因数由 `LIVER_DE_VIOLIN_TOP_N` 控制（默认 12）。
+- 回退/占位：无显著 DEG 时可能回退到“有限 P 值的全部基因”，不能把这些基因称为显著差异基因。
+
+#### `fig_10_go_up.png`/`fig_11_go_down.png`/`fig_12_kegg_up.png`/`fig_13_kegg_down.png`
+
+- 坐标轴：默认 `barplot` 时横轴为富集基因计数（Count），纵轴为富集条目（Description/ID）；若用 `LIVER_FIGURE_STYLES` 切换为 `dotplot`，横轴为 `GeneRatio`，纵轴为条目。
+- 颜色/图例：条形/点颜色默认表示 `p.adjust`（颜色越深越显著），图例为 P 值色条。
+- 输入：上调/下调显著 DEG（`p_val_adj < 0.05` 且 `|log2FC| > 0.25`，少于 10 个时放宽为 `p_val_adj < 0.1` 且 `|log2FC| > 0.1`）；GO 使用 `enrichGO(ont="BP", BH, pvalueCutoff=0.1, qvalueCutoff=0.2)`，KEGG 使用 `enrichKEGG`。
+- 读取方法：查看显著通路的富集方向、基因数与 P 值；最多展示 10 条。
+- 数据来源：`fig_10_enrichment_up_go.csv`、`fig_11_enrichment_down_go.csv`、`fig_12_enrichment_up_kegg.csv`、`fig_13_enrichment_down_kegg.csv`。
+- 回退/占位：无显著条目时显示 “No significant enrichment terms”，不能作为阳性富集证据。
+
+#### `fig_20_gsea_go.png`/`fig_21_gsea_kegg.png`
+
+- 坐标轴：默认 `ridgeplot` 时横轴为按 `avg_log2FC` 降序排列的基因排序位置，纵轴为富集分数分布；`gseaplot2` 时横轴为排名位置，纵轴为富集分数（Running Enrichment Score）。
+- 颜色/图例：`ridgeplot` 按通路着色；`gseaplot2` 显示富集曲线、基因条带和 NES/p.adjust 标签。
+- 输入：全部 DEG 的 `avg_log2FC` 排序向量，经 `bitr` 映射 Entrez ID；`LIVER_SKIP_GSEA=yes` 或映射失败时跳过。
+- 读取方法：查看通路整体上调/下调方向（NES 正/负）与显著性；无显著 GSEA 条目时显示 “No significant GSEA terms”。
+
+#### `fig_22_go_network.png`/`fig_23_kegg_network.png`
+
+- 坐标轴：无笛卡尔坐标，为网络布局（cnetplot 默认）。
+- 颜色/图例：cnetplot 中基因节点颜色默认按 `avg_log2FC` 渐变，通路节点按类别着色；emapplot 中节点颜色表示 `p.adjust`。
+- 输入：上调基因富集结果经 `p.adjust <= 0.05` 筛选后取前 5 个通路；`showCategory=5`。
+- 读取方法：圆形节点为通路，散点节点为基因，查看通路-基因关联结构；无显著通路时显示 “No significant pathway network”。
+
+#### `fig_46_go_top5.png`/`fig_47_kegg_top5.png`
+
+- 坐标轴：纵轴为 Top5 富集条目，横轴为 `GeneRatio`（富集基因占输入基因的比例）。
+- 颜色/图例：气泡颜色表示 `p.adjust`（越显著越红/越深），气泡大小表示 `Count`（富集基因数）。
+- 输入：同 `fig_22/23` 的筛选条件。
+- 读取方法：快速查看最显著的上调 GO/KEGG 通路；无筛选后通路时显示 “No significant pathway after filtering”。
+
+#### `fig_24_ml_feature_importance.png`
+
+- 坐标轴：横轴为特征重要性数值，纵轴为特征名。
+- 颜色/图例：条形统一蓝色 `#4C72B0`，无分类图例。
+- 输入：单细胞 ML 分类模型的 `feature_importances_`/`coef_` 绝对值均值；特征为样本级 QC 均值（`nFeature_RNA`、`nCount_RNA`、`percent.mt`、`percent.ribo`）与细胞类型比例。
+- 读取方法：查看影响样本分类的关键特征；仅展示 Top15。
+- 数据来源：`data/07_ml/fig_24_ml_feature_importance.csv`、`ml_model_summary.json`（状态为 completed 才可用）。
+
+#### `fig_25_ml_shap.png`
+
+- 坐标轴：横轴为 SHAP 值（特征对预测的贡献，正/负表示方向）；纵轴为特征名。
+- 颜色/图例：点颜色表示该样本/细胞该特征值的大小（SHAP 默认红高蓝低），右侧为特征值色条。
+- 输入：XGBoost/RF/GBM 使用 `TreeExplainer`，其余使用 `KernelExplainer`；最多展示 15 个特征。
+- 回退/占位：SHAP 计算失败时写 `ml_shap_status.txt`（内容为 “SHAP plot skipped”），此时该图不可用。
+
+#### `fig_43_ml_confusion_matrix.png`
+
+- 坐标轴：横轴为预测类别，纵轴为真实类别。
+- 颜色/图例：`Blues` 色阶，颜色越深计数越高；格内数字颜色按计数是否超过最大值一半自动选择白/黑。
+- 读取方法：查看对角线正确分类与非对角线错分模式；样本量很小或模型状态失败时只能谨慎解释。
+- 数据来源：`fig_43_44_45_ml_classification_results.csv` 与 `ml_model_summary.json`。
+
+#### `fig_44_ml_roc_pr.png`
+
+- 坐标轴：左图横轴为假阳性率（FPR），纵轴为真阳性率（TPR）；右图横轴为召回率（Recall），纵轴为精确率（Precision）。
+- 颜色/图例：二分类一条曲线，图例标注 `AUC=...`/`AP=...`；多分类每个类别一条曲线，图例标注类别与对应值；ROC 灰色虚线为随机基线。
+- 读取方法：AUC/AP 越接近 1 越好；AUC 接近 0.5、样本极少或类别不平衡时不能用于强结论。
+
+#### `fig_45_ml_cv_scores.png`
+
+- 坐标轴：横轴为单一类别 `CV accuracy`，纵轴为交叉验证准确率。
+- 颜色/图例：箱线图主体默认样式，散点为蓝色 `#4C72B0`，每个点代表一折。
+- 读取方法：查看均值与离散程度；折数 `n=...` 由类别最小样本数决定（最多 5 折）。
+- 回退/占位：状态为 `skipped`/`failed` 时不生成或不可用。
+
+#### `fig_45_ml_calibration_curve.png`
+
+- 坐标轴：横轴为平均预测概率（`Mean predicted probability`），纵轴为观测频率（`Observed frequency`）。
+- 颜色/图例：蓝色校准折线，灰色虚线为完美校准对角线（标签 Perfect）。
+- 读取方法：越接近对角线表示预测概率越可靠；仅二分类且概率可用时生成，样本极少时需谨慎。
+
+#### `fig_26_cellcycle_umap.png`
+
+- 坐标轴：`UMAP_1`/`UMAP_2`。
+- 颜色/图例：点颜色表示细胞周期阶段（Seurat `Phase`：G1/S/G2M，默认离散配色）。
+- 读取方法：若 phase 形成强分群，说明需要评估细胞周期回归；图本身不一定损坏。
+- 开关：`LIVER_RUN_CELLCYCLE`（默认 `yes`），需至少 5 个 S 期与 5 个 G2M 期基因。
+
+#### `fig_27_cellcycle_proportion.png`
+
+- 坐标轴：横轴为条件，纵轴为比例（0-100%，`position="fill"`）。
+- 颜色/图例：填充颜色表示细胞周期阶段。
+- 读取方法：比较组间细胞周期构成；比例信息过少时需谨慎。
+
+#### `fig_28_umap_sample.png`
+
+- 坐标轴：`UMAP_1`/`UMAP_2`。
+- 颜色/图例：点颜色表示条件，固定为红 `#E64B35` 与蓝 `#4DBBD5`，图例标题为 `Condition`。
+- 读取方法：评估样本混合和批次效应；仅当样本数 > 1 时生成。
+- 回退/占位：单样本时不生成，缺失正常。
+
+#### `fig_29_doublet_rate_sample.png`
+
+- 坐标轴：横轴为样本短标签（去掉冒号后缀），纵轴为双细胞率（百分比）。
+- 颜色/图例：条形填充颜色表示条件；柱顶标注 `%.1f%%` 的百分比。
+- 读取方法：识别双细胞率异常偏高的样本；需与 `fig_29_doublet_rate_by_sample.csv` 一致。
+
+#### `fig_30_sample_proportion.png`
+
+- 坐标轴：横轴为样本短标签，纵轴为比例（0-100%）。
+- 颜色/图例：填充颜色表示细胞类型。
+- 读取方法：检查样本间细胞类型构成与异质性；样本过少或比例全为 0 时不可用。
+
+#### `fig_31_cluster_marker_heatmap.png`
+
+- 坐标轴：横轴为聚类 marker 基因，纵轴为聚类（`seurat_clusters`）。
+- 颜色/图例：`viridis` 色阶，深紫到黄表示表达量低到高。
+- 输入：`FindAllMarkers`（only.pos=TRUE，`min.pct=0.25`，`logfc.threshold=0.5`），每聚类 Top3 marker。
+- 读取方法：查看每聚类 marker 表达块，辅助定义聚类标签；无 marker 时不生成。
+
+#### `fig_32_cluster_marker_dotplot.png`
+
+- 坐标轴：横轴为 marker 基因，纵轴为聚类。
+- 颜色/图例：点颜色表示平均表达量，点大小表示表达比例。
+- 读取方法：marker 应在对应聚类中高表达且高比例；无 marker 或全 0 时不可用。
+
+#### `fig_33_signature_scores_umap.png`
+
+- 坐标轴：`UMAP_1`/`UMAP_2`，每个签名一个面板。
+- 颜色/图例：点颜色表示功能签名得分，浅灰 `grey90` 到深红 `#B31B1B`。
+- 输入：`AddModuleScore` 计算的签名（默认展示增殖、EMT、缺氧、免疫检查点；可用 `LIVER_RUN_SIGNATURES=yes` 开启），签名基因不足 3 个时跳过。
+- 读取方法：查看签名是否集中在特定细胞群；得分全图均匀时不能解释。
+
+#### `fig_34_signature_scores_boxplot.png`
+
+- 坐标轴：横轴为条件，纵轴为签名得分。
+- 颜色/图例：小提琴/箱线按条件填充（图例隐藏），每个签名一个分面面板，纵轴自由缩放。
+- 读取方法：比较条件间签名活性；无差异不代表损坏，但不能当作“有差异”结论。
+
+#### `fig_35_celltype_abundance_effect.png`
+
+- 坐标轴：横轴为 `log2 odds ratio`（细胞类型丰度 log2 OR），纵轴为 `-log10 adjusted p value`。
+- 颜色/图例：点颜色表示细胞类型，点旁标注细胞类型名；灰色虚线为 `x = 0`。
+- 输入：`fig_18_19_celltype_proportion_stats.csv` 中 Fisher 精确检验的 `OddsRatio` 与 BH 校正 `Padj`。
+- 读取方法：查看哪些细胞类型在条件间显著增多/减少；细胞数过少、OR 不有限或 P 值缺失时需谨慎。
+
+#### `fig_36_cnv_heatmap.png`
+
+- 坐标轴：横轴为染色体滑动窗口（按染色体顺序，标签如 `chr1_w1`），纵轴为细胞（聚类后按相似性排列）。
+- 颜色/图例：蓝 `#3B4CC0`-白-红 `#B40426`，蓝为相对低表达（推断拷贝缺失），红为相对高表达（推断拷贝增益），白色为接近中位。
+- 注释：顶部注释条 `Condition` 使用红/蓝/绿，`CellType` 使用彩虹色。
+- 输入：每条件最多 750 个细胞，基于染色体滑动窗口均值推断；仅展示 `CHRLOC` 注释充足的基因（>500）。
+- 读取方法：查看细胞亚群的染色体拷贝数变化和肿瘤异质性；全图白色或窗口过少时不可用。
+
+#### `fig_37_singler_umap.png`
+
+- 坐标轴：`UMAP_1`/`UMAP_2`。
+- 颜色/图例：点颜色表示 SingleR 参考注释（`singleR_label`），图例在右侧。
+- 输入：`celldex` 参考（人类 `HumanPrimaryCellAtlasData`、小鼠 `MouseRNAseqData`），最多 20000 个细胞，按聚类填充标签。
+- 回退/占位：参考数据不可用或预测失败时不生成，缺失正常。
+
+#### `fig_38_singler_confusion_heatmap.png`
+
+- 坐标轴：横轴为 SingleR 注释，纵轴为 marker 注释。
+- 颜色/图例：`pheatmap` 默认蓝-白渐变，格内数字为细胞计数。
+- 读取方法：查看对角线一致性；无 SingleR 预测时不生成。
+
+#### `fig_39_trajectory_umap.png`
+
+- 坐标轴：`UMAP_1`/`UMAP_2`；左右双面板。
+- 颜色/图例：左面板点颜色为伪时序（`pseudotime`，`viridis`），右面板点颜色为聚类，黑色线为 slingshot 谱系曲线。
+- 输入：`slingshot` 以聚类为起点推断谱系，取第一条谱系伪时序写入 `fig_39_trajectory_pseudotime.csv`。
+- 开关：`LIVER_RUN_TRAJECTORY`（默认 `no`），未开启时不生成，缺失正常；轨迹无结构时不能作分化结论。
+
+#### `fig_40_cellchat_network.png`
+
+- 坐标轴：无笛卡尔坐标，为环形网络布局。
+- 颜色/图例：节点颜色/大小表示细胞类型及该类型细胞数；边粗细表示通讯数量（`cellchat@net$count`，`weight.scale=TRUE`），弧上标签为通讯数。
+- 输入：CellChat 标准流程（`computeCommunProb` → `filterCommunication` → `aggregateNet`），`LIVER_RUN_CELLCHAT=yes` 且 R 环境可用时生成。
+- 回退/占位：未运行、未安装或无通讯时不生成，缺失正常。
+
+#### `fig_41_cellchat_heatmap.png`
+
+- 坐标轴：横轴为目标细胞类型，纵轴为来源细胞类型。
+- 颜色/图例：CellChat 默认热图（红蓝渐变），颜色越红通讯数量/强度越高。
+- 读取方法：比较细胞类型对之间的通讯强度；全部为零或空白时不能作为通讯证据。
+
+#### `fig_42_cellchat_bubble.png`
+
+- 坐标轴：横轴为配体受体/信号通路，纵轴为细胞类型对（来源→目标）。
+- 颜色/图例：点颜色表示通讯概率（p 值相关颜色，默认红蓝渐变），点大小表示贡献/显著性；`remove.isolate=TRUE` 移除孤立对。
+- 读取方法：筛选候选配体受体互作；无显著对时只能说明未检出。
+
+#### `fig_46_affinity_distribution.png`
+
+- 坐标轴：横轴为亲和力（`Affinity (kcal/mol)`，越负结合越强），纵轴为配体数量（`Ligand count`）。
+- 颜色/图例：直方图统一蓝色 `#4c7bb8`，白色描边；红色虚线为命中阈值（`cutoff`，默认 `-7.0 kcal/mol`），阈值线左侧为命中。
+- 数据来源：`data/01_analysis/fig_46_47_ranked_results.csv`（仅状态为 ok 且有亲和力的配体）。
+- 读取方法：查看整体打分分布与命中数量；`summary.json` 中 `total_docked`、`hits`、`best_affinity` 应与图一致。
+
+#### `fig_47_top_hits.png`
+
+- 坐标轴：横轴为亲和力（`Affinity (kcal/mol)`），纵轴为配体 ID。
+- 颜色/图例：条形统一绿色 `#2e7d32`，无分类图例。
+- 输入：Top20（`hits` 非空时取命中前 20，否则取排序前 20）。
+- 读取方法：查看排名靠前配体；若 `hits=0`，图中只是“Top 排序”而不是“Top 命中”，不能写成命中结果。
+
+#### `fig_48_diverse_hits.png`
+
+- 坐标轴：横轴为亲和力，纵轴为配体 ID。
+- 颜色/图例：条形统一紫色 `#8e44ad`。
+- 输入：Tanimoto 多样性选择（Morgan 指纹半径 2、2048 位，阈值 0.7 用于减少同一骨架重复）。
+- 回退/占位：RDKit 不可用或有效分子少于 2 个时可能不生成；只有一个骨架时不能称为多样。
+
+#### `fig_49_redock_comparison.png`
+
+- 坐标轴：左图横轴为初始亲和力（`Initial affinity`），纵轴为重对接亲和力（`Redock affinity`），单位 kcal/mol；右图横轴为亲和力变化量（`Affinity change`），纵轴为配体数量。
+- 颜色/图例：左散点统一绿色 `#2e7d32`，黑色虚线为 `y=x` 对角线；右直方图蓝色 `#4c7bb8`，红色虚线为 0。
+- 读取方法：点接近对角线表示排序稳定；右图围绕 0 分布表示无系统性漂移；只有 1 个可比较配体时可能不生成。
+
+#### `fig_50_ml_feature_importance.png`
+
+- 坐标轴：横轴为特征重要性，纵轴为特征名。
+- 颜色/图例：条形统一蓝色 `#1665c0`。
+- 输入：对接 ML 重打分模型的特征重要性（RF/GBM 的 `feature_importances_`）或系数绝对值（线性模型）；仅 `ml-train` 阶段且模型有重要性时生成。
+- 回退/占位：MLP/torch 等无原生重要性时不生成，缺失不等于流程错误。
+
+#### `fig_51_ml_roc.png`
+
+- 坐标轴：横轴为假阳性率（`False positive rate`），纵轴为真阳性率（`True positive rate`）。
+- 颜色/图例：蓝色 ROC 曲线，灰色虚线为随机基线，图例显示 `AUC=...`。
+- 输入：分类任务测试集预测概率；回归任务不生成。
+- 读取方法：AUC 接近 0.5 时模型不能用于优先排序。
+
+#### `fig_52_knockout_top_candidates.png`
+
+- 坐标轴：横轴为敲除优先级得分（`Knockout priority score`，固定 0-1），纵轴为基因名。
+- 颜色/图例：条形统一绿色 `#1d6f42`。
+- 输入：`fig_52_53_ranked_knockout.csv` 中多维评分（表达差异、增殖共表达、网络 hub、可选 DepMap 等）的加权 `knockout_score`。
+- 读取方法：查看高优先级候选；分数是统计优先级，不等同于真实敲除表型。
+
+#### `fig_53_knockout_score_distribution.png`
+
+- 坐标轴：横轴为敲除优先级得分（0-1），纵轴为基因数量（`Gene count`）。
+- 颜色/图例：直方图统一蓝色 `#4c7bb8`。
+- 读取方法：判断评分是否有区分度和分层能力；评分全部相同或基因数过少时不能用于靶点分层。
+
+#### `compound_disease_venn.png`
+
+- 坐标轴：无笛卡尔坐标，为集合圆形布局。
+- 颜色/图例：集合圆轮廓分别为蓝 `#4C72B0`、橙 `#DD8452`、绿 `#55A868`，标签为集合名称，区域数字为基因计数。
+- 输入：化合物靶点来源与疾病基因集；交集数与 `compound_disease_overlap.csv` 一致。
+- 读取方法：查看交集规模与来源分布；交集为 0 时只能说明无重叠，不能作为阳性证据。
+
+#### `fig_54_feedback_module_umap.png`
+
+- 坐标轴：`UMAP_1`/`UMAP_2`。
+- 颜色/图例：点颜色表示筛选靶点模块得分，浅灰 `grey90` 到深红 `#B31B1B`。
+- 输入：`cell_feedback_summary.json` 状态为 completed 且存在模块得分列。
+- 读取方法：查看模块是否集中在特定细胞群；全图均匀时不能说明细胞特异性。
+
+#### `fig_55_feedback_target_expression_umap.png`
+
+- 坐标轴：`UMAP_1`/`UMAP_2`，每个候选靶基因一个面板（最多 `max_features` 个，默认 8）。
+- 颜色/图例：点颜色表示表达量，浅灰 `grey90` 到蓝 `#2E86AB`。
+- 读取方法：查看单个候选基因的细胞类型表达位置；表达全为 0 时不可用。
+
+#### `fig_56_feedback_celltype_dotplot.png`
+
+- 坐标轴：横轴为候选靶基因，纵轴为细胞类型。
+- 颜色/图例：点颜色表示平均表达量，点大小表示表达比例。
+- 读取方法：比较候选基因的细胞类型特异性；所有基因在所有细胞类型中均为 0 时不可用。
+
+#### `fig_57_feedback_celltype_boxplot.png`
+
+- 坐标轴：横轴为细胞类型，纵轴为反馈模块得分（`Feedback module score`）。
+- 颜色/图例：小提琴/箱线按条件（`condition`）填充，图例在右侧。
+- 读取方法：比较细胞类型与条件间的模块活性；只有 1 个细胞类型时不生成，分布无差异时只能说明特异性弱。
+
+#### `fig_58_feedback_celltype_heatmap.png`
+
+- 坐标轴：横轴为细胞类型，纵轴为候选靶基因。
+- 颜色/图例：白-浅蓝-蓝-深红渐变（`#f7fbff`→`#d6e7ff`→`#2E86AB`→`#7B241C`），颜色越深平均表达越高；行和列均聚类。
+- 读取方法：查看候选基因表达谱的细胞类型模式；只有 1 个基因或 `pheatmap` 不可用时不生成，全图同色时不可用。
+
+#### `fig_59_feedback_targets_volcano.png`
+
+- 坐标轴：横轴为 `avg_log2FC`，纵轴为 `-log10(p_val_adj)`。
+- 颜色/图例：显著上调为红 `#C0392B`，显著下调为蓝 `#2E86C1`，其余为灰 `grey65`；显著基因标注基因名。
+- 阈值与参考线：灰色虚线为 `P = 0.05` 和 `log2FC = ±0.25`。
+- 输入：反馈靶基因在条件间的差异表达表 `data/feedback_deg.csv`。
+
+#### `fig_60_feedback_condition_violin.png`
+
+- 坐标轴：横轴为条件，纵轴为归一化表达量。
+- 颜色/图例：小提琴按条件分组（图例被移除），每个候选靶基因一个面板。
+- 读取方法：查看反馈靶点在病例/对照间的表达差异；仅当条件数 >= 2 时生成。
+
+#### `fig_61_feedback_go_network.png`/`fig_62_feedback_kegg_network.png`
+
+- 坐标轴：无笛卡尔坐标，为通路-基因网络布局。
+- 颜色/图例：基因节点按表达/差异方向着色，通路节点按类别着色（cnetplot 默认配色）。
+- 输入：反馈靶基因 GO BP/KEGG 富集结果经 `p.adjust <= 0.05` 筛选后取 Top5 通路。
+- 回退/占位：无显著通路时显示 “No significant pathway network”。
+
 ## 1. 快速判断流程
 
 任何一张结果图都不要只看图片本身。建议按以下顺序判断：
