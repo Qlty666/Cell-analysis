@@ -91,6 +91,7 @@ def run_round(
     model: dict | None = None,
     top_size: int | None = None,
     fetch_size: int | None = None,
+    databases: list[str] | None = None,
 ) -> dict:
     started = time.time()
     top_size = top_size or max_results
@@ -101,6 +102,7 @@ def run_round(
         max_results=fetch_size,
         disease=disease,
         research_direction=direction,
+        databases=databases,
     )
     if model is not None:
         from dataset_search_ml import rerank
@@ -134,6 +136,7 @@ def run_round(
                 max_results=max(fallback_max_results, fetch_size),
                 disease=disease,
                 research_direction=direction,
+                databases=databases,
             )
             if model is not None:
                 from dataset_search_ml import rerank
@@ -254,6 +257,14 @@ def main() -> int:
         default=str(APP_ROOT / "data_cache" / "dataset_search"),
     )
     parser.add_argument(
+        "--databases",
+        default="geo",
+        help=(
+            "comma-separated dataset sources: geo, biostudies, atlas "
+            "(default: geo for GEO-only validation)"
+        ),
+    )
+    parser.add_argument(
         "--no-expand",
         action="store_true",
         help="disable disease-only/direction-only fallback search",
@@ -264,6 +275,11 @@ def main() -> int:
         from dataset_search_ml import load_model
 
         model = load_model(Path(args.model))
+    databases = [
+        item.strip().lower()
+        for item in args.databases.split(",")
+        if item.strip()
+    ]
 
     rng = random.Random(args.seed)
     pairs = [
@@ -292,6 +308,7 @@ def main() -> int:
                 if model is not None
                 else args.max_results
             ),
+            databases=databases,
         )
         all_samples.extend(record.pop("samples", []))
         records.append(record)

@@ -1,5 +1,10 @@
 #!/usr/bin/env python3
-"""Search GEO datasets and optionally download matching series."""
+"""Search public expression datasets and optionally download matching series.
+
+Currently searches NCBI GEO, EBI ArrayExpress/BioStudies and EBI Expression
+Atlas. Only datasets with runnable processed expression files are marked as
+pipeline-ready.
+"""
 
 from __future__ import annotations
 
@@ -19,10 +24,22 @@ if str(APP_ROOT / "src") not in sys.path:
     sys.path.insert(0, str(APP_ROOT / "src"))
 
 EUTILS = "https://eutils.ncbi.nlm.nih.gov/entrez/eutils"
+BIOSTUDIES_API = "https://www.ebi.ac.uk/biostudies/api/v1"
+ATLAS_API = "https://www.ebi.ac.uk/gxa/json/experiments"
+ATLAS_CACHE = APP_ROOT / "data_cache" / "dataset_search" / "expression_atlas_index.json"
+ATLAS_CACHE_TTL_SECONDS = 7 * 24 * 3600
 USER_AGENT = "Mozilla/5.0 (liver-cancer-pipeline; dataset-search)"
+
+SUPPORTED_DATABASES = ("geo", "biostudies", "atlas")
+DATABASE_LABELS = {
+    "geo": "GEO",
+    "biostudies": "ArrayExpress/BioStudies",
+    "atlas": "Expression Atlas",
+}
 
 CSV_COLUMNS = [
     "accession",
+    "database",
     "disease",
     "research_direction",
     "title",
@@ -34,6 +51,8 @@ CSV_COLUMNS = [
     "date",
     "type",
     "url",
+    "quality_score",
+    "run_supported",
     "relevance_score",
 ]
 
@@ -181,6 +200,143 @@ def _http_get(url: str, timeout: int = 90, retries: int = 3) -> str:
     raise RuntimeError(f"failed to fetch: {url}")
 
 
+def _http_get_json(url: str, timeout: int = 90, retries: int = 3) -> dict:
+    return json.loads(_http_get(url, timeout=timeout, retries=retries))
+
+
+SPECIES_TERMS = [
+    "Homo sapiens",
+    "Mus musculus",
+    "Rattus norvegicus",
+    "Danio rerio",
+    "Drosophila melanogaster",
+    "Saccharomyces cerevisiae",
+    "Caenorhabditis elegans",
+    "Macaca mulatta",
+    "Sus scrofa",
+    "Canis lupus familiaris",
+]
+
+
+def _detect_organism(text: str) -> str:
+    low = text.lower()
+    for term in SPECIES_TERMS:
+        if term.lower() in low:
+            return term
+    return ""
+
+
+def _detect_study_type(text: str) -> str:
+    patterns = [
+        r"spatial transcriptomics[^.;\n]*",
+        r"transcription profiling by [^.;\n]*",
+        r"transcriptomics by [^.;\n]*",
+        r"genome binding/occupancy profiling[^.;\n]*",
+        r"methylation profiling[^.;\n]*",
+        r"protein expression profiling[^.;\n]*",
+        r"expression profiling by [^.;\n]*",
+        r"proteomics[^.;\n]*",
+    ]
+    for pattern in patterns:
+        match = re.search(pattern, text, re.IGNORECASE)
+        if match:
+            return match.group(0).strip()
+    return ""
+
+
+def infer_data_type(text: str) -> str:
+    haystack = text.lower()
+    single_cell_terms = (
+        "single cell",
+        "single-cell",
+        "scrna",
+        "scrna-seq",
+        "10x genomics",
+        "cell ranger",
+        "smart-seq",
+        "spatial transcriptomic",
+        "spatial transcriptomics",
+    )
+    if any(token in haystack for token in single_cell_terms):
+        return "single-cell"
+    if any(
+        token in haystack
+        for token in ("bulk rna", "bulk-rna", "rna-seq", "rnaseq", "bulk")
+    ):
+        return "bulk"
+    return "other"
+
+
+def _samples_int(row: dict) -> int:
+    try:
+        return int(float(str(row.get("samples") or 0)))
+    except (TypeError, ValueError):
+        return 0
+
+
+def quality_score(row: dict) -> float:
+    score = 0.0
+    database = str(row.get("database", ""))
+    if database == "Expression Atlas":
+        score += 0.25
+    elif database == "ArrayExpress/BioStudies":
+        score += 0.10
+    organism = str(row.get("organism", "")).lower()
+    if organism in ("homo sapiens", "human", "mus musculus", "mouse"):
+        score += 0.10
+    if row.get("data_type") == "single-cell":
+        score += 0.25
+    elif row.get("data_type") == "bulk":
+        score += 0.15
+    samples = _samples_int(row)
+    if samples >= 10:
+        score += 0.15
+    elif samples >= 3:
+        score += 0.05
+    type_text = str(row.get("type", "")).lower()
+    if re.search(
+        r"expression profiling|transcription profiling|rna-seq|rnaseq|transcriptomics",
+        type_text,
+    ):
+        score += 0.15
+    if row.get("run_supported"):
+        score += 0.10
+    return round(min(score, 1.0), 4)
+
+
+def canonical_row_accession(accession: str) -> str:
+    acc = str(accession or "").strip().upper()
+    match = re.fullmatch(r"E-GEOD-(\d+)", acc)
+    if match:
+        return "GSE" + match.group(1)
+    return acc
+
+
+def _normalize_row(row: dict) -> dict:
+    normalized = dict(row)
+    normalized.setdefault("accession", "")
+    normalized.setdefault("database", "GEO")
+    normalized.setdefault("disease", "")
+    normalized.setdefault("research_direction", "")
+    normalized.setdefault("title", "")
+    normalized.setdefault("summary", "")
+    if not normalized.get("data_type"):
+        normalized["data_type"] = infer_data_type(
+            str(normalized.get("title", ""))
+            + "\n"
+            + str(normalized.get("summary", ""))
+        )
+    normalized.setdefault("organism", "")
+    normalized.setdefault("samples", "")
+    normalized.setdefault("platform", "")
+    normalized.setdefault("date", "")
+    normalized.setdefault("type", "")
+    normalized.setdefault("url", "")
+    normalized.setdefault("quality_score", 0.0)
+    normalized.setdefault("run_supported", False)
+    return normalized
+
+
 def esearch(query: str, max_results: int = 20) -> list[str]:
     params = urllib.parse.urlencode(
         {
@@ -248,33 +404,20 @@ def to_row(
     raw: dict,
     disease: str = "",
     research_direction: str = "",
+    database: str = "GEO",
+    run_supported: bool | None = None,
 ) -> dict:
     accession = str(raw.get("Accession", ""))
     match = re.search(r"(GSE\d+)", accession)
     gse = match.group(1) if match else accession
     title = str(raw.get("Title") or raw.get("title") or "")
     summary = str(raw.get("Summary") or raw.get("summary") or "")
-    haystack = f"{title}\n{summary}".lower()
-    single_cell_terms = (
-        "single cell",
-        "single-cell",
-        "scrna",
-        "scrna-seq",
-        "10x genomics",
-        "cell ranger",
-        "smart-seq",
-    )
-    if any(token in haystack for token in single_cell_terms):
-        data_type = "single-cell"
-    elif any(
-        token in haystack
-        for token in ("bulk rna", "bulk-rna", "rna-seq", "rnaseq", "bulk")
-    ):
-        data_type = "bulk"
-    else:
-        data_type = "other"
-    return {
+    data_type = infer_data_type(f"{title}\n{summary}")
+    if run_supported is None:
+        run_supported = bool(re.fullmatch(r"GSE\d+", canonical_row_accession(gse)))
+    row = {
         "accession": gse,
+        "database": database,
         "disease": disease,
         "research_direction": research_direction,
         "title": title,
@@ -295,7 +438,11 @@ def to_row(
             or ""
         ),
         "url": f"https://www.ncbi.nlm.nih.gov/geo/query/acc.cgi?acc={gse}",
+        "quality_score": 0.0,
+        "run_supported": bool(run_supported),
     }
+    row["quality_score"] = quality_score(row)
+    return row
 
 
 def filter_rows(
@@ -355,18 +502,9 @@ def filter_rows(
     return [row for row in rows if matches(row)]
 
 
-def search_datasets(
+def search_geo(
     query: str,
     max_results: int = 20,
-    organism: str | None = None,
-    keyword: str | None = None,
-    data_type: str | None = None,
-    min_samples: int | None = None,
-    max_samples: int | None = None,
-    start_date: str | None = None,
-    end_date: str | None = None,
-    platform: str | None = None,
-    dataset_type: str | None = None,
     disease: str = "",
     research_direction: str = "",
 ) -> list[dict]:
@@ -383,10 +521,213 @@ def search_datasets(
                 summaries.get(uid, {}),
                 disease=disease,
                 research_direction=research_direction,
+                database="GEO",
             )
         )
     time.sleep(0.34)
-    return filter_rows(
+    return rows
+
+
+def search_biostudies(
+    query: str,
+    max_results: int = 20,
+    disease: str = "",
+    research_direction: str = "",
+) -> list[dict]:
+    params = urllib.parse.urlencode(
+        {
+            "query": query,
+            "collection": "ArrayExpress",
+            "pageSize": max(max_results, 1),
+        }
+    )
+    data = _http_get_json(f"{BIOSTUDIES_API}/search?{params}")
+    rows: list[dict] = []
+    for hit in data.get("hits") or []:
+        accession = str(hit.get("accession") or "").strip().upper()
+        if not accession:
+            continue
+        title = str(hit.get("title") or "")
+        content = str(hit.get("content") or "")
+        summary = content
+        if title and title.lower() in summary.lower():
+            idx = summary.lower().index(title.lower())
+            summary = (summary[:idx] + summary[idx + len(title):]).strip()
+        summary = re.sub(rf"^{re.escape(accession)}\s*", "", summary).strip()
+        try:
+            files = int(hit.get("files") or 0)
+        except (TypeError, ValueError):
+            files = 0
+        row = _normalize_row(
+            {
+                "accession": accession,
+                "database": "ArrayExpress/BioStudies",
+                "disease": disease,
+                "research_direction": research_direction,
+                "title": title,
+                "summary": summary,
+                "data_type": infer_data_type(f"{title}\n{content}"),
+                "organism": _detect_organism(content),
+                "samples": "",
+                "platform": "",
+                "date": str(hit.get("release_date") or ""),
+                "type": _detect_study_type(content),
+                "url": f"https://www.ebi.ac.uk/biostudies/studies/{accession}",
+                "run_supported": files > 0,
+            }
+        )
+        row["quality_score"] = quality_score(row)
+        rows.append(row)
+    return rows
+
+
+def _load_atlas_index(force_refresh: bool = False) -> list[dict]:
+    if not force_refresh and ATLAS_CACHE.exists():
+        try:
+            cached = json.loads(ATLAS_CACHE.read_text(encoding="utf-8"))
+            fetched_at = float(cached.get("fetched_at") or 0)
+            if time.time() - fetched_at < ATLAS_CACHE_TTL_SECONDS:
+                return cached.get("experiments") or []
+        except (OSError, ValueError, TypeError):
+            pass
+    data = _http_get_json(ATLAS_API)
+    experiments = data.get("experiments") or []
+    ATLAS_CACHE.parent.mkdir(parents=True, exist_ok=True)
+    ATLAS_CACHE.write_text(
+        json.dumps(
+            {"fetched_at": time.time(), "experiments": experiments},
+            ensure_ascii=False,
+        ),
+        encoding="utf-8",
+    )
+    return experiments
+
+
+def search_atlas(
+    query: str,
+    max_results: int = 20,
+    disease: str = "",
+    research_direction: str = "",
+) -> list[dict]:
+    disease_terms = [term.lower() for term in ([disease] + _mapping_values(DISEASE_SYNONYMS, disease)) if term]
+    direction_terms = [
+        term.lower()
+        for term in (
+            [research_direction]
+            + _mapping_values(DIRECTION_SYNONYMS, research_direction)
+        )
+        if term
+    ]
+    rows: list[dict] = []
+    for experiment in _load_atlas_index():
+        accession = str(experiment.get("experimentAccession") or "").strip().upper()
+        description = str(experiment.get("experimentDescription") or "")
+        if not accession:
+            continue
+        text = f"{accession} {description}".lower()
+        disease_hit = not disease_terms or any(term in text for term in disease_terms)
+        direction_hit = not direction_terms or any(term in text for term in direction_terms)
+        if not (disease_hit and direction_hit):
+            continue
+        technology = experiment.get("technologyType") or []
+        if isinstance(technology, str):
+            technology = [technology]
+        row = _normalize_row(
+            {
+                "accession": accession,
+                "database": "Expression Atlas",
+                "disease": disease,
+                "research_direction": research_direction,
+                "title": description,
+                "summary": description,
+                "data_type": infer_data_type(description),
+                "organism": str(experiment.get("species") or ""),
+                "samples": str(experiment.get("numberOfAssays") or ""),
+                "platform": "",
+                "date": str(experiment.get("lastUpdate") or experiment.get("loadDate") or ""),
+                "type": " | ".join(
+                    part
+                    for part in [
+                        str(experiment.get("experimentType") or ""),
+                        " | ".join(str(item) for item in technology),
+                    ]
+                    if part
+                ),
+                "url": f"https://www.ebi.ac.uk/gxa/experiments/{accession}",
+                "run_supported": True,
+            }
+        )
+        row["quality_score"] = quality_score(row)
+        rows.append(row)
+    return rows
+
+
+def _prefer_row(new: dict, existing: dict) -> bool:
+    new_db = str(new.get("database", ""))
+    existing_db = str(existing.get("database", ""))
+    if new_db == "GEO" and existing_db != "GEO":
+        return True
+    if existing_db == "GEO" and new_db != "GEO":
+        return False
+    for field in ("organism", "samples", "summary"):
+        if str(new.get(field, "")) and not str(existing.get(field, "")):
+            return True
+        if str(existing.get(field, "")) and not str(new.get(field, "")):
+            return False
+    return bool(new.get("run_supported")) and not bool(existing.get("run_supported"))
+
+
+def merge_rows(rows: list[dict]) -> list[dict]:
+    merged: dict[str, dict] = {}
+    for row in rows:
+        accession = canonical_row_accession(row.get("accession", ""))
+        if not accession:
+            continue
+        key = accession.upper()
+        existing = merged.get(key)
+        if existing is None or _prefer_row(row, existing):
+            merged[key] = dict(_normalize_row(row), accession=accession)
+    result = list(merged.values())
+    result.sort(
+        key=lambda item: (
+            -float(item.get("quality_score") or 0.0),
+            -_samples_int(item),
+            str(item.get("date", "")),
+        )
+    )
+    return result
+
+
+def search_datasets(
+    query: str,
+    max_results: int = 20,
+    organism: str | None = None,
+    keyword: str | None = None,
+    data_type: str | None = None,
+    min_samples: int | None = None,
+    max_samples: int | None = None,
+    start_date: str | None = None,
+    end_date: str | None = None,
+    platform: str | None = None,
+    dataset_type: str | None = None,
+    disease: str = "",
+    research_direction: str = "",
+    databases: list[str] | None = None,
+) -> list[dict]:
+    if databases is None:
+        databases = list(SUPPORTED_DATABASES)
+    selected = [str(item).strip().lower() for item in databases if str(item).strip()]
+    unknown = [item for item in selected if item not in SUPPORTED_DATABASES]
+    if unknown:
+        raise ValueError(f"unknown databases: {', '.join(unknown)}")
+    rows: list[dict] = []
+    if "geo" in selected:
+        rows.extend(search_geo(query, max_results, disease, research_direction))
+    if "biostudies" in selected:
+        rows.extend(search_biostudies(query, max_results, disease, research_direction))
+    if "atlas" in selected:
+        rows.extend(search_atlas(query, max_results, disease, research_direction))
+    rows = filter_rows(
         rows,
         organism=organism,
         keyword=keyword,
@@ -398,6 +739,8 @@ def search_datasets(
         platform=platform,
         dataset_type=dataset_type,
     )
+    rows = merge_rows(rows)
+    return rows[:max_results]
 
 
 def build_query(
@@ -431,12 +774,22 @@ def download_accessions(
     root: Path,
     log=print,
 ) -> dict[str, str]:
-    from data.geo_downloader import ensure_geo_dataset
+    from data.geo_downloader import canonical_accession, ensure_geo_dataset
+    from data.biostudies_downloader import ensure_biostudies_dataset
 
     results: dict[str, str] = {}
     for accession in accessions:
         try:
-            ensure_geo_dataset(accession, root, log)
+            acc = canonical_accession(accession)
+            if re.fullmatch(r"GSE\d+", acc):
+                ensure_geo_dataset(acc, root, log)
+            elif re.fullmatch(r"(?:E-[A-Z0-9]+-\d+|S-BSST\d+)", acc):
+                ensure_biostudies_dataset(acc, root, log)
+            else:
+                raise ValueError(
+                    "dataset accession must look like GSE125449, "
+                    "E-MTAB-1234, or S-BSST123"
+                )
             results[accession] = "ok"
         except Exception as exc:  # noqa: BLE001
             results[accession] = f"error: {exc}"
@@ -456,11 +809,20 @@ def main() -> int:
         sys.stderr.reconfigure(encoding="utf-8", errors="replace")
     parser = argparse.ArgumentParser(
         description=(
-            "Search GEO datasets via NCBI E-utilities and optionally "
-            "download matching GSE series."
+            "Search expression datasets via NCBI GEO, EBI ArrayExpress/"
+            "BioStudies and Expression Atlas, then optionally download "
+            "matching runnable series."
         )
     )
-    parser.add_argument("--query", help="raw GEO search term")
+    parser.add_argument(
+        "--databases",
+        default=",".join(SUPPORTED_DATABASES),
+        help=(
+            "comma-separated sources: geo, biostudies, atlas "
+            f"(default: {', '.join(SUPPORTED_DATABASES)})"
+        ),
+    )
+    parser.add_argument("--query", help="raw search term across selected databases")
     parser.add_argument(
         "--disease",
         help="disease name, e.g. 'liver cancer'",
@@ -537,6 +899,11 @@ def main() -> int:
     args = parser.parse_args()
     if not args.query and not args.disease:
         parser.error("provide --query or --disease")
+    databases = [
+        item.strip().lower()
+        for item in args.databases.split(",")
+        if item.strip()
+    ]
     query = build_query(
         args.disease or "",
         args.research_direction or "",
@@ -557,6 +924,7 @@ def main() -> int:
         dataset_type=args.dataset_type,
         disease=args.disease or "",
         research_direction=args.research_direction or "",
+        databases=databases,
     )
     if args.model:
         from dataset_search_ml import load_model, rerank
@@ -575,6 +943,7 @@ def main() -> int:
 
     csv_path, json_path = write_outputs(rows, Path(args.output))
     print(f"Search query: {query}")
+    print(f"Databases: {', '.join(DATABASE_LABELS.get(item, item) for item in databases)}")
     print(f"Matched {len(rows)} datasets.")
     print(f"CSV: {csv_path}")
     print(f"JSON: {json_path}")
