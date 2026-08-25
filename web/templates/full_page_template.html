@@ -362,6 +362,9 @@ a.file-link { color: #1665c0; text-decoration: none; margin-right: 12px; }
   <div class="tablebox"><table id="koTable"><caption>虚拟敲除 Top</caption></table></div>
   <div class="tablebox"><table id="dockTable"><caption>虚拟筛选</caption></table></div>
   <div class="tablebox"><table id="feedbackTable"><caption>细胞反馈靶点</caption></table></div>
+  <div class="tablebox"><table id="feedbackDegTable"><caption>细胞反馈差异表达</caption></table></div>
+  <div class="tablebox"><table id="feedbackGoTable"><caption>细胞反馈 GO 富集 Top5（通路-基因网络）</caption></table></div>
+  <div class="tablebox"><table id="feedbackKeggTable"><caption>细胞反馈 KEGG 富集 Top5（通路-基因网络）</caption></table></div>
 </div>
 </div>
 
@@ -747,6 +750,10 @@ function renderStats(data) {
       value: fb.genes_matched !== undefined ? fb.genes_matched : 0,
     },
     {
+      label: '反馈差异基因',
+      value: fb.deg_genes !== undefined ? fb.deg_genes : (data.cell_feedback_deg || []).length,
+    },
+    {
       label: 'QC 门控',
       value: qc.status || 'skipped',
       cls: qc.status === 'pass' ? 'ok' : (qc.status === 'fail' ? 'fail' : 'warn'),
@@ -806,6 +813,9 @@ function renderResults(data) {
   renderTable('koTable', data.knockout, ['rank', 'gene', 'target_class', 'target_score', 'knockout_score', 'ppi_hub_score']);
   renderTable('dockTable', data.docking, ['gene', 'status', 'pdb_id', 'ligand_count', 'hits', 'best_affinity']);
   renderTable('feedbackTable', data.cell_feedback, ['gene', 'source', 'feedback_score', 'knockout_score', 'docking_hits', 'cell_detection_rate', 'celltype_specificity', 'cell_support_score', 'top_celltype']);
+  renderTable('feedbackDegTable', data.cell_feedback_deg, ['gene', 'avg_log2FC', 'p_val_adj', 'direction', 'significant']);
+  renderTable('feedbackGoTable', data.cell_feedback_enrichment_go, ['ID', 'Description', 'p.adjust', 'Count', 'geneID']);
+  renderTable('feedbackKeggTable', data.cell_feedback_enrichment_kegg, ['ID', 'Description', 'p.adjust', 'Count', 'geneID']);
 }
 
 async function pauseFullJob() {

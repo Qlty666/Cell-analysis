@@ -2167,6 +2167,9 @@ def full_results(workdir: Path) -> dict:
         "knockout": [],
         "docking": [],
         "cell_feedback": [],
+        "cell_feedback_deg": [],
+        "cell_feedback_enrichment_go": [],
+        "cell_feedback_enrichment_kegg": [],
         "evidence": [],
     }
     if not out.exists():
@@ -2208,6 +2211,30 @@ def full_results(workdir: Path) -> dict:
         )
     except Exception:
         result["cell_feedback"] = []
+    try:
+        result["cell_feedback_deg"] = json.loads(
+            pd_read_csv(
+                out / "cell_feedback" / "data" / "feedback_deg.csv"
+            ).to_json(orient="records")
+        )
+    except Exception:
+        result["cell_feedback_deg"] = []
+    try:
+        result["cell_feedback_enrichment_go"] = json.loads(
+            pd_read_csv(
+                out / "cell_feedback" / "data" / "feedback_enrichment_go.csv"
+            ).to_json(orient="records")
+        )
+    except Exception:
+        result["cell_feedback_enrichment_go"] = []
+    try:
+        result["cell_feedback_enrichment_kegg"] = json.loads(
+            pd_read_csv(
+                out / "cell_feedback" / "data" / "feedback_enrichment_kegg.csv"
+            ).to_json(orient="records")
+        )
+    except Exception:
+        result["cell_feedback_enrichment_kegg"] = []
     try:
         result["evidence"] = json.loads(
             pd_read_csv(out / "gene_evidence.csv").to_json(orient="records")

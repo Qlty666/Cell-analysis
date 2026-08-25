@@ -344,16 +344,36 @@
 类型: 热图。
 用途: 查看候选基因表达谱的细胞类型模式。
 
+65_fig_59_feedback_targets_volcano.png
+内容: 反馈靶基因在条件间的差异表达。
+类型: 火山图。
+用途: 查看反馈靶点中显著上调/下调基因及其幅度。
+
+66_fig_60_feedback_condition_violin.png
+内容: 反馈靶基因按条件分组的表达分布。
+类型: 小提琴图。
+用途: 查看反馈靶点在病例/对照间的表达差异。
+
+67_fig_61_feedback_go_network.png
+内容: 反馈靶基因 GO BP 富集 Top5 通路-基因网络。
+类型: cnetplot 通路-基因网络图。
+用途: 直接查看 Top5 GO 通路与反馈靶基因的关联强度。
+
+68_fig_62_feedback_kegg_network.png
+内容: 反馈靶基因 KEGG 富集 Top5 通路-基因网络。
+类型: cnetplot 通路-基因网络图。
+用途: 直接查看 Top5 KEGG 通路与反馈靶基因的关联强度。
+
 ## 四、网络毒理学结果图
 
 对应目录：`<workdir>/outputs/run_001/network_toxicology/`。
 
-65_compound_disease_venn.png
+69_compound_disease_venn.png
 内容: 化合物靶点与疾病基因的交集。
 类型: Venn 图。
 用途: 查看交集规模及来源，确定核心分析基因集。
 
-66_ctpd_network.html
+70_ctpd_network.html
 内容: 化合物-靶点-通路-疾病网络可视化。
 类型: 交互式网络图（HTML）。
 用途: 查看化合物到疾病的多层关联路径。

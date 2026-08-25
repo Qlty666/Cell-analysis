@@ -265,11 +265,18 @@
       fig_56_feedback_celltype_dotplot.png
       fig_57_feedback_celltype_boxplot.png
       fig_58_feedback_celltype_heatmap.png
+      fig_59_feedback_targets_volcano.png
+      fig_60_feedback_condition_violin.png
+      fig_61_feedback_go_network.png
+      fig_62_feedback_kegg_network.png
     data/
       feedback_targets.csv
       celltype_summary.csv
       celltype_enrichment.csv
       condition_summary.csv
+      feedback_deg.csv
+      feedback_enrichment_go.csv
+      feedback_enrichment_kegg.csv
   integration_report.html
   integration_summary.json
   run_manifest.json
@@ -295,6 +302,12 @@
 | `fig_56_feedback_celltype_dotplot.png` | 候选靶基因在细胞类型中的表达比例和表达量 | 基因和细胞类型可读，存在非零表达模式 | 所有基因在所有细胞类型中均为 0 时不可用 |
 | `fig_57_feedback_celltype_boxplot.png` | 模块得分按细胞类型和条件分布，用于查看细胞类型特异性 | 至少 2 个细胞类型，箱线/小提琴分布可见 | 只有 1 个细胞类型时不生成；分布无差异时只能说明特异性弱 |
 | `fig_58_feedback_celltype_heatmap.png` | 候选基因平均表达按细胞类型聚类热图 | 至少 2 个基因，热图有颜色结构，行/列聚类可见 | 只有 1 个基因或 `pheatmap` 不可用时不生成；全图同色时不可用 |
+| `fig_59_feedback_targets_volcano.png` | 反馈靶基因在病例/对照条件间的差异表达火山图 | 至少 2 个条件且每组有足够细胞，基因名/方向/P 值阈值可读 | 条件不足时不生成；无显著基因时只能说明反馈靶点在该数据集中没有显著差异 |
+| `fig_60_feedback_condition_violin.png` | 反馈靶基因按条件分组的小提琴图 | 基因与条件可读，存在非零表达模式 | 条件不足时不生成；全为 0 时不可用 |
+| `fig_61_feedback_go_network.png` | 反馈靶基因 GO BP 富集经 `p.adjust <= 0.05` 筛选后的 Top5 通路-基因网络图 | 节点和基因连接可读，能看出 Top5 通路关联基因 | “No significant pathway network” 时只能说明无显著通路 |
+| `fig_62_feedback_kegg_network.png` | 反馈靶基因 KEGG 富集经 `p.adjust <= 0.05` 筛选后的 Top5 通路-基因网络图 | 同上 | 同上 |
+
+细胞反馈阶段的富集 Top5 图使用与 `fig_22_go_network.png` 相同的 `cnetplot` 通路-基因网络类型，不再输出气泡图；对应富集明细表仍保留在 `feedback_enrichment_go.csv` / `feedback_enrichment_kegg.csv` 中。
 
 ### 6.3 网络毒理学与 FAERS 信号
 

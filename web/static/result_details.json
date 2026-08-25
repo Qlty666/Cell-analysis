@@ -1037,6 +1037,42 @@
       "optional": false
     },
     {
+      "file": "figures/fig_59_feedback_targets_volcano.png",
+      "name": "fig_59_feedback_targets_volcano.png",
+      "kind": "fig",
+      "content": "反馈靶基因在条件间的差异表达火山图。",
+      "type": "火山图",
+      "use": "查看反馈靶点中显著上调/下调基因及其幅度。",
+      "optional": false
+    },
+    {
+      "file": "figures/fig_60_feedback_condition_violin.png",
+      "name": "fig_60_feedback_condition_violin.png",
+      "kind": "fig",
+      "content": "反馈靶基因按条件分组的表达分布。",
+      "type": "小提琴图",
+      "use": "查看反馈靶点在病例/对照间的表达差异。",
+      "optional": false
+    },
+    {
+      "file": "figures/fig_61_feedback_go_network.png",
+      "name": "fig_61_feedback_go_network.png",
+      "kind": "fig",
+      "content": "反馈靶基因 GO BP 富集 Top5 通路-基因网络。",
+      "type": "cnetplot 通路-基因网络图",
+      "use": "直接查看 Top5 GO 通路与反馈靶基因的关联强度。",
+      "optional": false
+    },
+    {
+      "file": "figures/fig_62_feedback_kegg_network.png",
+      "name": "fig_62_feedback_kegg_network.png",
+      "kind": "fig",
+      "content": "反馈靶基因 KEGG 富集 Top5 通路-基因网络。",
+      "type": "cnetplot 通路-基因网络图",
+      "use": "直接查看 Top5 KEGG 通路与反馈靶基因的关联强度。",
+      "optional": false
+    },
+    {
       "file": "data/feedback_targets.csv",
       "name": "feedback_targets.csv",
       "kind": "data",
@@ -1079,6 +1115,33 @@
       "content": "条件×细胞类型表达汇总",
       "type": "CSV 数据表",
       "use": "查看分组间细胞类型靶点活性；该表用于复现对应图表、复核统计结果，并作为下游筛选或报告汇总的输入。",
+      "optional": false
+    },
+    {
+      "file": "data/feedback_deg.csv",
+      "name": "feedback_deg.csv",
+      "kind": "data",
+      "content": "反馈靶基因条件差异表达表",
+      "type": "CSV 数据表",
+      "use": "反馈基因在条件间的 P 值、log2FC 和显著性；该表用于复现对应图表、复核统计结果，并作为下游筛选或报告汇总的输入。",
+      "optional": false
+    },
+    {
+      "file": "data/feedback_enrichment_go.csv",
+      "name": "feedback_enrichment_go.csv",
+      "kind": "data",
+      "content": "反馈靶基因 GO BP 富集表",
+      "type": "CSV 数据表",
+      "use": "GO 富集统计与 geneID 关联明细；该表用于复现对应图表、复核统计结果，并作为下游筛选或报告汇总的输入。",
+      "optional": false
+    },
+    {
+      "file": "data/feedback_enrichment_kegg.csv",
+      "name": "feedback_enrichment_kegg.csv",
+      "kind": "data",
+      "content": "反馈靶基因 KEGG 富集表",
+      "type": "CSV 数据表",
+      "use": "KEGG 富集统计与 geneID 关联明细；该表用于复现对应图表、复核统计结果，并作为下游筛选或报告汇总的输入。",
       "optional": false
     },
     {

@@ -186,6 +186,7 @@ def main(argv: list[str] | None = None) -> int:
             top_n=args.feedback_top_n or 12,
             max_features=args.feedback_max_features or 8,
             timeout_seconds=args.feedback_timeout or 3600,
+            species=getattr(args, "feedback_species", "hs") or "hs",
         )
         log.info(
             "cell feedback %s: %s matched genes",
@@ -310,6 +311,12 @@ def _add_common(sub: argparse.ArgumentParser) -> None:
         "--feedback-timeout",
         type=int,
         help="cell feedback R analysis timeout in seconds",
+    )
+    sub.add_argument(
+        "--feedback-species",
+        choices=["hs", "mm"],
+        default="hs",
+        help="species used by cell feedback enrichment (default: hs)",
     )
     sub.add_argument("--force", action="store_true", help="rerun stages from scratch")
     sub.add_argument("--start-stage", default=None, help="stage code to start from")

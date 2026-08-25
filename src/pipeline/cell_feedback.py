@@ -276,6 +276,7 @@ def run_cell_feedback(
     top_n: int = 12,
     max_features: int = 8,
     timeout_seconds: int = 3600,
+    species: str = "hs",
 ) -> dict:
     """Write the feedback manifest and run the Seurat-level R analysis."""
     workdir = Path(workdir).resolve()
@@ -308,7 +309,7 @@ def run_cell_feedback(
     )
     proc = _run_rscript(
         script,
-        [single_cell_root, out_dir, top_n, max_features],
+        [single_cell_root, out_dir, top_n, max_features, species],
         timeout_seconds,
         APP_ROOT,
     )
