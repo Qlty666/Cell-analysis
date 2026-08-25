@@ -168,6 +168,44 @@ class TestRunKnockout(unittest.TestCase):
             self.assertFalse(summary["depmap_included"])
             self.assertIn("log2fc", frame.columns)
 
+    def test_wide_matrix_deduplicates_duplicate_gene_rows(self):
+        with tempfile.TemporaryDirectory() as tmp:
+            workdir = Path(tmp) / "work"
+            workdir.mkdir()
+            data_dir = workdir / "data" / "knockout"
+            data_dir.mkdir(parents=True)
+            genes = ["ALB", "ALB", "GPC3", "AFP", "CDK1", "TOP2A", "MKI67"]
+            pd.DataFrame(
+                {
+                    "gene": genes,
+                    "S1": [1.0, 2.0, 1.5, 2.0, 1.2, 3.0, 2.5],
+                    "S2": [1.1, 2.2, 1.6, 2.1, 1.3, 3.1, 2.6],
+                    "N1": [0.8, 0.9, 0.7, 0.9, 0.8, 1.0, 1.1],
+                    "N2": [0.9, 1.0, 0.8, 1.0, 0.9, 1.1, 1.2],
+                }
+            ).to_csv(data_dir / "expression.csv", index=False)
+            pd.DataFrame(
+                {
+                    "sample": ["S1", "S2", "N1", "N2"],
+                    "condition": ["Tumor", "Tumor", "Normal", "Normal"],
+                }
+            ).to_csv(data_dir / "metadata.csv", index=False)
+            cfg = load_config(
+                DEFAULT_CONFIG,
+                {
+                    "workdir": str(workdir),
+                    "expression_csv": "data/knockout/expression.csv",
+                    "metadata_csv": "data/knockout/metadata.csv",
+                    "case_label": "Tumor",
+                    "normal_label": "Normal",
+                },
+            )
+            run_knockout(cfg, LOG)
+            ranked = cfg.knockout_dir() / "data" / "fig_52_53_ranked_knockout.csv"
+            frame = pd.read_csv(ranked)
+            self.assertEqual(len(frame), 6)
+            self.assertFalse(frame["gene"].duplicated().any())
+
 
 if __name__ == "__main__":
     unittest.main()

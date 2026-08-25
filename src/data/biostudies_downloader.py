@@ -48,7 +48,14 @@ def _http_get_json(url: str, timeout: int = 120, retries: int = 3) -> dict:
 
 def _safe_rel(path: str) -> str:
     rel = str(path or "").replace("\\", "/").lstrip("/")
-    if not rel or ".." in Path(rel).parts:
+    rel_path = Path(rel)
+    if (
+        not rel
+        or rel_path.is_absolute()
+        or rel_path.drive
+        or (len(rel) > 1 and rel[1] == ":" and rel[:1].isalpha())
+        or ".." in rel_path.parts
+    ):
         raise RuntimeError(f"unsafe BioStudies file path: {rel}")
     return rel
 
@@ -119,7 +126,6 @@ def _select_processed_files(items: list[dict]) -> dict:
     for item in items:
         path = _safe_rel(str(item.get("path") or ""))
         low = path.lower()
-        name = Path(path).name.lower()
         section = str(item.get("Section") or "").lower()
         if re.search(
             r"\.(fastq|fq|bam|cram|bcf|vcf|vcf\.gz|tif|tiff|png|jpe?g|pdf|"

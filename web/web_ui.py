@@ -1453,6 +1453,10 @@ def start_full_job(data: dict) -> dict:
         accession = validate_accession(accession)
     workdir = Path(workdir_value).expanduser().resolve()
     workdir.mkdir(parents=True, exist_ok=True)
+    output = Path(output_value).expanduser()
+    if not output.is_absolute():
+        output = APP_ROOT / output
+    output = output.resolve()
     job_id = uuid.uuid4().hex[:8]
     log_path = workdir / "logs" / f"web_full_{job_id}.log"
     log_path.parent.mkdir(parents=True, exist_ok=True)
@@ -1468,9 +1472,7 @@ def start_full_job(data: dict) -> dict:
     cmd += ["--workdir", str(workdir)]
     if accession:
         cmd += ["--accession", accession]
-    output = _first(data, "output", "").strip()
-    if output:
-        cmd += ["--output", output]
+    cmd += ["--output", str(output)]
     species = _first(data, "species", "").strip()
     if species:
         cmd += ["--species", species]
@@ -1537,7 +1539,7 @@ def start_full_job(data: dict) -> dict:
         "started": time.time(),
         "workdir": workdir,
         "accession": accession,
-        "output": output,
+        "output": str(output),
         "cmd": cmd,
         "env": env,
         "queued": True,
@@ -2050,7 +2052,7 @@ def running_tasks_data() -> dict:
             else "running"
         )
         marker_dir = info["workdir"] / "outputs" / "integration" / ".stages"
-        progress = 0 if state == "queued" else _marker_progress(marker_dir, 7)
+        progress = 0 if state == "queued" else _marker_progress(marker_dir, 8)
         stage_label = (
             "排队中" if state == "queued"
             else "已暂停" if state == "paused"

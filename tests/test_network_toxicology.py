@@ -20,6 +20,7 @@ from docking.knockout import run_knockout  # noqa: E402
 from docking.network_toxicology import (  # noqa: E402
     overlap_analysis,
     ppi_hub_scores,
+    read_target_table,
     run_network_toxicology,
 )
 
@@ -101,6 +102,35 @@ class TestNetworkToxicology(unittest.TestCase):
             self.assertGreaterEqual(
                 frame.loc[frame["gene"] == "A", "ppi_hub_score"].iloc[0],
                 frame.loc[frame["gene"] == "E", "ppi_hub_score"].iloc[0],
+            )
+
+    def test_gene_column_prefers_gene_names_over_source(self):
+        with tempfile.TemporaryDirectory() as tmp:
+            path = Path(tmp) / "targets.csv"
+            pd.DataFrame(
+                {
+                    "source": ["CTD", "ChEMBL"],
+                    "target": ["ALB", "GPC3"],
+                    "action": ["inhibitor", "activator"],
+                }
+            ).to_csv(path, index=False)
+            frame = read_target_table(path)
+            self.assertEqual(sorted(frame["gene"]), ["ALB", "GPC3"])
+
+    def test_ppi_hub_scores_find_edge_columns_out_of_order(self):
+        with tempfile.TemporaryDirectory() as tmp:
+            path = Path(tmp) / "edges.csv"
+            pd.DataFrame(
+                {
+                    "score": [0.9, 0.8, 0.7],
+                    "protein1": ["A", "A", "B"],
+                    "protein2": ["B", "C", "C"],
+                }
+            ).to_csv(path, index=False)
+            frame = ppi_hub_scores(path, genes=["A", "B", "C"])
+            self.assertEqual(
+                frame.loc[frame["gene"] == "A", "ppi_degree"].iloc[0],
+                2,
             )
 
     def test_knockout_includes_ppi_hub(self):

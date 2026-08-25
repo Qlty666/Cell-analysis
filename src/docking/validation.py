@@ -8,8 +8,6 @@ candidate CSV that can be handed directly to a wet-lab team.
 
 from __future__ import annotations
 
-from pathlib import Path
-
 import pandas as pd
 
 from .config import ResolvedConfig

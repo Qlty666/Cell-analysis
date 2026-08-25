@@ -525,6 +525,12 @@ def _as_float(value) -> float | None:
         return None
 
 
+def _min_affinity_text(values) -> str:
+    """Return the numeric minimum of an affinity column as text."""
+    numeric = pd.to_numeric(values, errors="coerce").dropna()
+    return str(numeric.min()) if not numeric.empty else ""
+
+
 def collect_qc_metrics(single_cell_root: Path, workdir: Path) -> dict:
     """Aggregate single-cell and downstream metrics for the QC gate."""
     data_dir = single_cell_root / "results" / "data"
@@ -930,6 +936,7 @@ def extract_key_genes(
         ascending=[True, False],
         na_position="last",
     ).reset_index(drop=True)
+    frame = frame.drop_duplicates(subset=["gene"], keep="first").reset_index(drop=True)
     frame["deg_rank"] = np.arange(1, len(frame) + 1)
 
     total_before = len(frame)
@@ -1768,7 +1775,7 @@ def run_target_docking(
             ranked_df = pd.read_csv(ranked)
             hits = int((ranked_df["affinity"] <= float(cfg.get("analysis", "cutoff", -7.0))).sum())
             if "affinity" in ranked_df.columns:
-                best = str(ranked_df["affinity"].min())
+                best = _min_affinity_text(ranked_df["affinity"])
         except Exception:
             hits = int(summary.get("hits", 0))
             best = str(summary.get("best_affinity", ""))
@@ -1863,11 +1870,11 @@ def run_docking_stage(
         "skipped": int((frame["status"] == "skipped").sum()),
         "total_hits": int(pd.to_numeric(frame["hits"], errors="coerce").fillna(0).sum()),
         "best_affinity": (
-            str(
+            _min_affinity_text(
                 frame.loc[
                     pd.to_numeric(frame["hits"], errors="coerce").fillna(0) > 0,
                     "best_affinity",
-                ].min()
+                ]
             )
             if len(frame)
             else ""
