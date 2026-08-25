@@ -627,6 +627,10 @@ footer { color: #64748b; font-size: 12px; margin: 30px 0 8px; }
       .replace(/\*\*([^*]+)\*\*/g, '<strong>$1</strong>');
   }
 
+  function renderLegend(value) {
+    return escapeHtml(value).replace(/\n/g, '<br>');
+  }
+
   function renderTable(lines) {
     const rows = lines.map(line => {
       return line.trim().replace(/^\|/, '').replace(/\|$/, '').split('|').map(cell => inlineMarkdown(escapeHtml(cell.trim())));
@@ -796,6 +800,7 @@ footer { color: #64748b; font-size: 12px; margin: 30px 0 8px; }
       const content = entry ? entry.content : (tr.cells[1] ? tr.cells[1].textContent.trim() : '');
       const type = entry ? entry.type : (tr.cells[2] ? tr.cells[2].textContent.trim() : badgeText);
       const use = entry ? entry.use : (tr.cells[3] ? tr.cells[3].textContent.trim() : '');
+      const legend = entry ? entry.legend : '';
 
       const button = document.createElement('button');
       button.type = 'button';
@@ -817,7 +822,7 @@ footer { color: #64748b; font-size: 12px; margin: 30px 0 8px; }
       tr.dataset.transformed = '1';
       tr.dataset.file = file;
       tr.dataset.type = kind;
-      tr.dataset.search = [file, file.split('/').pop(), content, type, use].join(' ').toLowerCase();
+      tr.dataset.search = [file, file.split('/').pop(), content, type, use, legend].join(' ').toLowerCase();
 
       const detailRow = document.createElement('tr');
       detailRow.className = 'result-detail-row';
@@ -826,6 +831,7 @@ footer { color: #64748b; font-size: 12px; margin: 30px 0 8px; }
         '<span class="detail-label">内容</span><span class="detail-value">' + escapeHtml(content) + '</span>' +
         '<span class="detail-label">类型</span><span class="detail-value">' + escapeHtml(type) + '</span>' +
         '<span class="detail-label">用途</span><span class="detail-value">' + escapeHtml(use) + '</span>' +
+        (legend ? '<span class="detail-label">图解</span><span class="detail-value">' + renderLegend(legend) + '</span>' : '') +
         '</div></td>';
       tr.after(detailRow);
 
