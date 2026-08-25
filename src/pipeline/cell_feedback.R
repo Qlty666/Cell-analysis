@@ -405,7 +405,7 @@ if (length(available) >= 3 &&
 
       feedback_kegg <- tryCatch(
         {
-          options(timeout = 60)
+          options(timeout = 180)
           enrichKEGG(
             gene = unique(eg$ENTREZID),
             organism = kegg_org,
@@ -414,6 +414,16 @@ if (length(available) >= 3 &&
         },
         error = function(e) NULL
       )
+      if (!is.null(feedback_kegg)) {
+        feedback_kegg <- tryCatch(
+          setReadable(
+            feedback_kegg,
+            OrgDb = org_db,
+            keyType = "ENTREZID"
+          ),
+          error = function(e) feedback_kegg
+        )
+      }
       if (!is.null(feedback_kegg) &&
           nrow(as.data.frame(feedback_kegg)) > 0) {
         feedback_kegg_df <- as.data.frame(feedback_kegg)
