@@ -39,6 +39,7 @@ def _fake_search_module():
         dataset_type=None,
         disease="",
         research_direction="",
+        databases=None,
     ):
         return [
             {
@@ -152,6 +153,44 @@ class TestDatasetSearchRequest(unittest.TestCase):
             self.assertEqual(kwargs["end_date"], "2025-12-31")
             self.assertEqual(kwargs["platform"], "GPL24676")
             self.assertEqual(kwargs["dataset_type"], "high throughput")
+
+    def test_search_passes_selected_databases(self):
+        with tempfile.TemporaryDirectory() as tmp:
+            base = Path(tmp)
+            fake = _fake_search_module()
+            row = {
+                "accession": "E-MTAB-1",
+                "title": "title",
+                "data_type": "single-cell",
+                "organism": "Homo sapiens",
+                "samples": "8",
+                "platform": "GPL1",
+                "date": "2025/01/01",
+                "type": "GSE",
+                "run_supported": True,
+            }
+            with mock.patch.dict(
+                sys.modules,
+                {"search_datasets": fake},
+            ), mock.patch.object(
+                web_ui,
+                "DATASET_SEARCH_DIR",
+                base / "search",
+            ), mock.patch.object(
+                fake,
+                "search_datasets",
+                return_value=[row],
+            ) as search:
+                web_ui.dataset_search_request(
+                    {
+                        "disease": ["liver cancer"],
+                        "databases": ["geo", "atlas"],
+                    }
+                )
+            self.assertEqual(
+                search.call_args.kwargs["databases"],
+                ["geo", "atlas"],
+            )
 
     def test_search_maps_species_aliases_to_organism(self):
         with tempfile.TemporaryDirectory() as tmp:
@@ -367,6 +406,28 @@ class TestDatasetFileAndReport(unittest.TestCase):
         self.assertIn("species=hs", human)
         self.assertIn("species=mm", mouse)
         self.assertNotIn("species", unknown)
+
+    def test_dataset_full_pipeline_url_omits_unsupported(self):
+        self.assertEqual(
+            web_ui.dataset_full_pipeline_url(
+                {
+                    "accession": "E-MTAB-1",
+                    "title": "raw only",
+                    "run_supported": False,
+                }
+            ),
+            "",
+        )
+
+    def test_validate_accession_accepts_biostudies_and_maps_egood(self):
+        self.assertEqual(
+            web_ui.validate_accession("e-mtab-1234"),
+            "E-MTAB-1234",
+        )
+        self.assertEqual(
+            web_ui.validate_accession("e-geod-23991"),
+            "GSE23991",
+        )
 
     def test_dataset_file_path_prevents_traversal(self):
         with tempfile.TemporaryDirectory() as tmp:
