@@ -54,6 +54,14 @@ def series_prefix(accession: str) -> str:
     return "GSE" + digits[: len(digits) - 3] + "nnn"
 
 
+def normalized_only_accessions(values: list[str]) -> list[str]:
+    order = [acc.upper() for acc in values]
+    invalid = [acc for acc in order if not re.fullmatch(r"GSE\d+", acc)]
+    if invalid:
+        raise ValueError(f"invalid GEO accessions: {', '.join(invalid)}")
+    return order
+
+
 def log(message: str) -> None:
     print(f"[validation] {message}", flush=True)
 
@@ -395,7 +403,10 @@ def main() -> int:
         path.mkdir(parents=True, exist_ok=True)
 
     if args.only:
-        order = [acc.upper() for acc in args.only]
+        try:
+            order = normalized_only_accessions(args.only)
+        except ValueError as exc:
+            parser.error(str(exc))
     else:
         random.seed(args.seed)
         order = list(random.sample(POOL, min(args.count, len(POOL))))
