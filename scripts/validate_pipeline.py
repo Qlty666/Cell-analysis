@@ -131,24 +131,28 @@ def main() -> int:
             ):
                 continue
             print(f"Running pipeline for {accession} ({kind})")
-            result = subprocess.run(
-                [
-                    sys.executable,
-                    str(ROOT / "scripts" / "run_pipeline.py"),
-                    accession,
-                    "--output",
-                    str(out),
-                    "--species",
-                    "hs",
-                    "--skip-download",
-                    "--skip-deps",
-                ],
-                cwd=ROOT,
-                text=True,
-                encoding="utf-8",
-                errors="replace",
-                timeout=1800,
-            )
+            try:
+                result = subprocess.run(
+                    [
+                        sys.executable,
+                        str(ROOT / "scripts" / "run_pipeline.py"),
+                        accession,
+                        "--output",
+                        str(out),
+                        "--species",
+                        "hs",
+                        "--skip-download",
+                        "--skip-deps",
+                    ],
+                    cwd=ROOT,
+                    text=True,
+                    encoding="utf-8",
+                    errors="replace",
+                    timeout=1800,
+                )
+            except subprocess.TimeoutExpired:
+                print(f"[{accession}] pipeline timed out after 1800s")
+                return 1
             if result.returncode != 0:
                 print(f"[{accession}] pipeline failed")
                 return 1

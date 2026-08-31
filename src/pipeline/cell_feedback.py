@@ -12,14 +12,20 @@ from __future__ import annotations
 
 import json
 import logging
-import shutil
 import subprocess
+import sys
 from pathlib import Path
 
 import pandas as pd
 
 APP_ROOT = Path(__file__).resolve().parent.parent.parent
 log = logging.getLogger("cell_feedback")
+
+try:
+    from common.env import require_rscript as _require_rscript
+except ImportError:
+    sys.path.insert(0, str(Path(__file__).resolve().parent.parent))
+    from common.env import require_rscript as _require_rscript
 
 FEEDBACK_COLUMNS = [
     "feedback_rank",
@@ -39,18 +45,9 @@ FEEDBACK_COLUMNS = [
 
 
 def _find_rscript() -> str:
-    found = shutil.which("Rscript")
-    if found:
-        return found
-    for base in [
-        Path(r"C:\Program Files\R"),
-        Path(r"C:\Program Files\Microsoft\R Open"),
-    ]:
-        if base.exists():
-            candidates = sorted(base.glob("R-*/bin/Rscript.exe"), reverse=True)
-            if candidates:
-                return str(candidates[0])
-    raise RuntimeError("Rscript not found; install R 4.x before cell feedback")
+    return _require_rscript(
+        "Rscript not found; install R 4.x before cell feedback"
+    )
 
 
 def _num(value, default: float = 0.0) -> float:

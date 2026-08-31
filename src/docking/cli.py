@@ -126,8 +126,7 @@ def main(argv: list[str] | None = None) -> int:
     cfg = load_config(args.config, overrides)
 
     if args.command == "check-env":
-        _print_environment(check_environment())
-        return 0
+        return 0 if print_environment(check_environment()) else 1
     if args.command == "check-cadd":
         _print_cadd()
         return 0
@@ -352,6 +351,12 @@ def _print_environment(checks: list[dict]) -> None:
     else:
         print("Environment ready")
     print()
+
+
+def print_environment(checks: list[dict]) -> bool:
+    """Print environment checks and return whether every check passed."""
+    _print_environment(checks)
+    return all(check["ok"] for check in checks)
 
 
 def _print_cadd() -> None:
