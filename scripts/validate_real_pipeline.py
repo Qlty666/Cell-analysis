@@ -69,7 +69,22 @@ def verify_outputs(out: Path, accession: str) -> bool:
         if not (out / rel).exists():
             problems.append(rel)
     fig_dir = out / "results" / "figures"
+    ml_summary = out / "results" / "data" / "07_ml" / "ml_model_summary.json"
+    ml_skipped = False
+    if ml_summary.exists():
+        try:
+            ml_skipped = (
+                json.loads(ml_summary.read_text(encoding="utf-8")).get("status")
+                == "skipped"
+            )
+        except Exception:
+            ml_skipped = False
     for name in REQUIRED_FIGURES:
+        if ml_skipped and name in {
+            "fig_24_ml_feature_importance.png",
+            "fig_25_ml_shap.png",
+        }:
+            continue
         if not find_figure(fig_dir, name):
             problems.append(name)
     if problems:
@@ -80,22 +95,26 @@ def verify_outputs(out: Path, accession: str) -> bool:
 
 def run_one(accession: str, out: Path, species: str, timeout: int) -> bool:
     print(f"Running pipeline for {accession}")
-    result = subprocess.run(
-        [
-            sys.executable,
-            str(ROOT / "scripts" / "run_pipeline.py"),
-            accession,
-            "--output",
-            str(out),
-            "--species",
-            species,
-        ],
-        cwd=ROOT,
-        text=True,
-        encoding="utf-8",
-        errors="replace",
-        timeout=timeout,
-    )
+    try:
+        result = subprocess.run(
+            [
+                sys.executable,
+                str(ROOT / "scripts" / "run_pipeline.py"),
+                accession,
+                "--output",
+                str(out),
+                "--species",
+                species,
+            ],
+            cwd=ROOT,
+            text=True,
+            encoding="utf-8",
+            errors="replace",
+            timeout=timeout,
+        )
+    except subprocess.TimeoutExpired:
+        print(f"[{accession}] pipeline timed out after {timeout}s")
+        return False
     if result.returncode != 0:
         print(f"[{accession}] pipeline failed")
         return False

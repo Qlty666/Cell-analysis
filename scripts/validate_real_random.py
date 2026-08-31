@@ -1,6 +1,7 @@
 #!/usr/bin/env python3
 """Random real-data validation for evidence collection and detect-box."""
 
+import argparse
 import csv
 import json
 import random
@@ -53,6 +54,11 @@ POOL = [
 
 def call_skill(skill: str, payload: dict, timeout: int = 180) -> dict:
     script = SKILLS / SKILL_NAMES[skill] / "scripts" / "rest_request.py"
+    if not script.exists():
+        return {
+            "ok": False,
+            "error": {"message": f"missing skill script: {script}"},
+        }
     try:
         proc = subprocess.run(
             [sys.executable, str(script)],
@@ -63,6 +69,10 @@ def call_skill(skill: str, payload: dict, timeout: int = 180) -> dict:
             errors="replace",
             timeout=timeout,
         )
+    except FileNotFoundError as exc:
+        return {"ok": False, "error": {"message": str(exc)}}
+    except OSError as exc:
+        return {"ok": False, "error": {"message": str(exc)}}
     except subprocess.TimeoutExpired:
         return {"ok": False, "error": {"message": f"timeout after {timeout}s"}}
     if not proc.stdout.strip():
@@ -104,6 +114,14 @@ def download_pdb(pdb_id: str, dest: Path) -> None:
 
 
 def main() -> int:
+    parser = argparse.ArgumentParser(
+        description="Random real-data validation for evidence and detect-box."
+    )
+    parser.add_argument("--min-ok-targets", type=int, default=1)
+    parser.add_argument("--min-box-ok", type=int, default=1)
+    parser.add_argument("--min-ligands", type=int, default=1)
+    args = parser.parse_args()
+
     random.seed(20260807)
     sample = random.sample(POOL, 10)
     OUT_DIR.mkdir(parents=True, exist_ok=True)
@@ -172,19 +190,43 @@ def main() -> int:
         )
         writer.writeheader()
         writer.writerows(rows)
+    ok_targets = sum(1 for item in summary.values() if item["rcsb_ok"])
+    box_ok = sum(
+        1
+        for item in summary.values()
+        if item["box"].get("mode") != "failed"
+    )
+    total_ligands = sum(r["bindingdb_ligands"] for r in rows)
+    passed = (
+        ok_targets >= args.min_ok_targets
+        and box_ok >= args.min_box_ok
+        and total_ligands >= args.min_ligands
+    )
     (OUT_DIR / "summary.json").write_text(
         json.dumps(
-            {"sample": sample, "summary": summary, "total_ligands": sum(
-                r["bindingdb_ligands"] for r in rows
-            )},
+            {
+                "sample": sample,
+                "summary": summary,
+                "total_ligands": total_ligands,
+                "ok_targets": ok_targets,
+                "box_ok": box_ok,
+                "passed": passed,
+            },
             ensure_ascii=False,
             indent=2,
         ),
         encoding="utf-8",
     )
     print("OUTPUT", OUT_DIR)
-    print("TOTAL_LIGANDS", sum(r["bindingdb_ligands"] for r in rows))
-    return 0
+    print("TOTAL_LIGANDS", total_ligands)
+    print(
+        "RESULT",
+        "PASS" if passed else "FAIL",
+        f"(ok_targets={ok_targets}/{args.min_ok_targets}, "
+        f"box_ok={box_ok}/{args.min_box_ok}, "
+        f"ligands={total_ligands}/{args.min_ligands})",
+    )
+    return 0 if passed else 1
 
 
 if __name__ == "__main__":

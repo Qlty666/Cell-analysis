@@ -431,7 +431,7 @@ python scripts\search_datasets.py \
   --dataset-type "high throughput sequencing"
 ```
 
-搜索结束后会在 `data_cache/dataset_search/` 写出 `dataset_search_results.csv` 和 `dataset_search_results.json`，每行包含来源数据库（`database`）、数据类型（`data_type`）、质量分（`quality_score`）和是否可自动运行（`run_supported`）等字段，网页端也会显示数据库与数据类型徽标。需要下载时追加下载参数：
+搜索结束后会在 `data_cache/dataset_search/` 写出 `dataset_search_results.csv` 和 `dataset_search_results.json`，每行包含来源数据库（`database`）、数据类型（`data_type`）、质量分（`quality_score`）和是否为可自动运行候选（`run_supported`，实际文件可用性在下载时校验）等字段，网页端也会显示数据库与数据类型徽标。需要下载时追加下载参数：
 
 ```bash
 python scripts\search_datasets.py \
@@ -445,11 +445,11 @@ ArrayExpress/BioStudies 数据集同样可直接下载，例如 `--download E-MT
 
 也可以用 `--download-top N` 下载搜索结果的前 N 个数据集；下载状态写入 `data_cache/dataset_search/download_results.json`。
 
-网页端搜索结果每行提供“全自动流水线”入口，只有 `run_supported` 的数据集会显示该入口；点击后自动带入数据集编号，全自动流水线页也可直接搜索并选择数据集，填入后启动即可复用对应数据库的自动下载流程。全自动流水线支持 `single-cell`、`bulk`、`microarray` 和其他表达矩阵数据集：单细胞数据走细胞级分析，非单细胞数据按样本级表达矩阵运行差异表达与下游靶点评分。
+网页端搜索结果每行提供“全自动流水线”入口，只有 `run_supported` 候选数据集会显示该入口；点击后自动带入数据集编号，全自动流水线页也可直接搜索并选择数据集，填入后启动即可复用对应数据库的自动下载流程。下载时会实际校验表达文件，缺失或不支持时会在下载结果中明确报错。全自动流水线支持 `single-cell`、`bulk`、`microarray` 和其他表达矩阵数据集：单细胞数据走细胞级分析，非单细胞数据按样本级表达矩阵运行差异表达与下游靶点评分。
 
 GEO 下载器会把 RAW tar 中的逐样本 bulk 计数表（如 `GSMxxxx_GCxxxx.txt.gz`）识别为 bulk 数据集，也会把其他样本级表达矩阵归入通用表达类型；BioStudies 下载器会选取 ArrayExpress/Expression Atlas 的 processed 表达文件并生成同一套 manifest。数据文件与 manifest 会缓存到 `data_cache/<编号>`，这些数据集可直接进入表达分析与全自动流水线，按样本级分析运行。
 
-网页版已同步支持：数据集搜索页可选择检索数据库，提供数据库、数据类型过滤（`single-cell` / `bulk` / `other`）并显示数据库/数据类型徽标，同时支持物种、关键词、样本数范围、日期范围、平台和数据集类型过滤；`run_supported` 的表达数据集可选择进入全自动流水线；表达分析页说明非单细胞数据按样本级分析运行。
+网页版已同步支持：数据集搜索页可选择检索数据库，提供数据库、数据类型过滤（`single-cell` / `bulk` / `other`）并显示数据库/数据类型徽标，同时支持物种、关键词、样本数范围、日期范围、平台和数据集类型过滤；`run_supported` 候选表达数据集可选择进入全自动流水线；表达分析页说明非单细胞数据按样本级分析运行。
 
 批量随机验证搜索是否命中“疾病+研究方向”数据集：
 
@@ -458,6 +458,8 @@ python scripts\validate_dataset_search.py --rounds 50 --seed 20260812
 ```
 
 验证结果写入 `data_cache/dataset_search/validation_50_rounds.csv` 和 `validation_50_rounds.json`；未命中时会自动用疾病名或研究方向名扩大搜索范围。
+
+默认训练标签由同义词启发式生成，只适合流程冒烟测试；需要真实相关性评估时，请用 `--manual-labels` 提供人工复核 CSV（列：`accession`、`disease`、`research_direction`、`label`），并优先用 `label_source=manual` 的样本训练和评估模型。`dataset_search_ml.py --eval --allow-heuristic-eval` 仅用于冒烟，不代表真实检索质量。
 
 当前 50 轮随机验证（`--seed 20260812`）命中率 100%（50/50），其中 4 轮通过扩大搜索范围命中。
 

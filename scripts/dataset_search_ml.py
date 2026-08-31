@@ -73,6 +73,9 @@ def load_samples(path: Path) -> pd.DataFrame:
     frame["summary"] = frame["summary"].fillna("").astype(str)
     frame["accession"] = frame.get("accession", pd.Series("", index=frame.index)).fillna("").astype(str)
     frame["organism"] = frame.get("organism", pd.Series("", index=frame.index)).fillna("").astype(str)
+    if "label_source" not in frame.columns:
+        frame["label_source"] = "heuristic"
+    frame["label_source"] = frame["label_source"].fillna("heuristic").astype(str)
     return frame
 
 
@@ -124,6 +127,10 @@ def train(
     seed: int = 42,
 ) -> Path:
     frame = load_samples(samples_csv)
+    if frame["label"].nunique() < 2:
+        raise ValueError(
+            "training requires both relevant (1) and irrelevant (0) samples"
+        )
     vectorizer, model = _fit(frame, model_type, seed)
     payload = {
         "vectorizer": vectorizer,
@@ -186,6 +193,11 @@ def rerank(
     lexical = lexical_scores(rows, disease, direction)
     scores = [float(score) for score in lexical]
     if model is not None:
+        if len(model["model"].classes_) != 2 or 1 not in model["model"].classes_:
+            raise ValueError(
+                "model must be a binary classifier with classes [0, 1]; "
+                "retrain with both relevant and irrelevant samples"
+            )
         frame = pd.DataFrame(rows)
         texts = [
             _text(disease, direction, row)
@@ -193,11 +205,7 @@ def rerank(
         ]
         x = model["vectorizer"].transform(texts)
         proba = model["model"].predict_proba(x)
-        positive = (
-            1
-            if model["model"].classes_[1] == 1
-            else 0
-        )
+        positive = int(np.where(model["model"].classes_ == 1)[0][0])
         ml_scores = proba[:, positive]
         scores = [
             ml_weight * float(ml_score)
@@ -220,8 +228,22 @@ def evaluate(
     model_type: str = "mlp",
     seed: int = 42,
     cv: int = 5,
+    allow_heuristic: bool = False,
 ) -> dict:
     frame = load_samples(samples_csv)
+    manual = (
+        frame[frame["label_source"] == "manual"]
+        if "label_source" in frame.columns
+        else pd.DataFrame()
+    )
+    if len(manual) > 0:
+        frame = manual.copy()
+    elif not allow_heuristic:
+        raise ValueError(
+            "evaluation requires manually labeled samples "
+            "(label_source='manual'); heuristic labels cannot validate "
+            "model quality, pass allow_heuristic=True to override"
+        )
     if len(frame) < 4 or frame["label"].nunique() < 2:
         raise ValueError("not enough labeled samples for evaluation")
     texts = [
@@ -261,6 +283,7 @@ def evaluate(
     )
     return {
         "model_type": model_type,
+        "label_mode": "manual" if len(manual) > 0 else "heuristic",
         "cv_folds": splitter.get_n_splits(),
         "samples": len(frame),
         "positive": int((y == 1).sum()),
@@ -302,6 +325,11 @@ def main() -> int:
     parser.add_argument("--model-type", default="mlp")
     parser.add_argument("--seed", type=int, default=42)
     parser.add_argument("--cv", type=int, default=5)
+    parser.add_argument(
+        "--allow-heuristic-eval",
+        action="store_true",
+        help="evaluate on heuristic labels (smoke tests only; not real relevance evidence)",
+    )
     args = parser.parse_args()
 
     if args.train:
@@ -318,6 +346,7 @@ def main() -> int:
             model_type=args.model_type,
             seed=args.seed,
             cv=args.cv,
+            allow_heuristic=args.allow_heuristic_eval,
         )
         out = Path(args.output).with_suffix(".eval.json")
         out.write_text(
@@ -326,6 +355,11 @@ def main() -> int:
         )
         print(json.dumps(result, ensure_ascii=False, indent=2))
         print(f"Evaluation JSON: {out}")
+        if result.get("label_mode") == "heuristic":
+            print(
+                "WARNING: metrics computed on heuristic labels; "
+                "they do not validate real relevance"
+            )
     if not args.train and not args.eval:
         parser.error("provide --train or --eval")
     return 0
