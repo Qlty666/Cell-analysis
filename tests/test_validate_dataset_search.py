@@ -130,6 +130,24 @@ class TestValidateDatasetSearch(unittest.TestCase):
         self.assertEqual(samples[0]["label"], 1)
         self.assertEqual(samples[0]["label_source"], "manual")
 
+    def test_run_round_found_uses_manual_label(self):
+        rows = [_row("GSE1", "Mouse kidney", "mouse tissue")]
+        manual = {("GSE1", "liver cancer", "single cell rna-seq"): 1}
+        with patch.object(
+            validate_dataset_search.search_datasets,
+            "search_datasets",
+            return_value=rows,
+        ):
+            record = validate_dataset_search.run_round(
+                "liver cancer",
+                "single cell RNA-seq",
+                max_results=5,
+                expand=True,
+                manual_labels=manual,
+            )
+        self.assertTrue(record["found"])
+        self.assertEqual(record["found_source"], "manual")
+
 
 if __name__ == "__main__":
     unittest.main()
