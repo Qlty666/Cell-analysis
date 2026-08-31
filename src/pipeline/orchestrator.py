@@ -69,6 +69,12 @@ try:
 except Exception:
     pass
 
+try:
+    from common.env import require_rscript
+except ImportError:
+    sys.path.insert(0, str(Path(__file__).resolve().parent.parent))
+    from common.env import require_rscript
+
 
 def log(message: str) -> None:
     print(f"[pipeline] {message}", flush=True)
@@ -80,18 +86,7 @@ def load_config() -> dict:
 
 
 def find_rscript() -> str:
-    found = shutil.which("Rscript")
-    if found:
-        return found
-    for base in [
-        Path(r"C:\Program Files\R"),
-        Path(r"C:\Program Files\Microsoft\R Open"),
-    ]:
-        if base.exists():
-            candidates = sorted(base.glob("R-*/bin/Rscript.exe"), reverse=True)
-            if candidates:
-                return str(candidates[0])
-    raise RuntimeError("Rscript not found")
+    return require_rscript()
 
 
 def install_deps() -> None:

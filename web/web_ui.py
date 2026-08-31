@@ -5,7 +5,6 @@ import argparse
 import json
 import os
 import re
-import shutil
 import socket
 import subprocess
 import sys
@@ -50,6 +49,8 @@ if str(APP_ROOT) not in sys.path:
     sys.path.insert(0, str(APP_ROOT))
 if str(SCRIPTS_DIR) not in sys.path:
     sys.path.insert(0, str(SCRIPTS_DIR))
+
+from common.env import require_rscript  # noqa: E402
 
 DOCK_TEMPLATE_PATH = TEMPLATE_DIR / "dock_page_template.html"
 DOCK_JOBS = {}
@@ -347,18 +348,7 @@ def validate_accession(accession: str) -> str:
 
 
 def find_rscript() -> str:
-    found = shutil.which("Rscript")
-    if found:
-        return found
-    for base in [
-        Path(r"C:\Program Files\R"),
-        Path(r"C:\Program Files\Microsoft\R Open"),
-    ]:
-        if base.exists():
-            candidates = sorted(base.glob("R-*/bin/Rscript.exe"), reverse=True)
-            if candidates:
-                return str(candidates[0])
-    raise RuntimeError("Rscript not found")
+    return require_rscript()
 
 
 def get_versions() -> list[dict]:

@@ -379,8 +379,8 @@ def median_split_cox_hr(
     expression: pd.Series,
     os_months: pd.Series,
     os_status: pd.Series,
-) -> float:
-    """Univariate Cox HR for high-vs-low median split (real survival data)."""
+) -> tuple[float, float]:
+    """Univariate Cox HR and likelihood-ratio p for a median split."""
     frame = pd.DataFrame(
         {
             "expr": pd.to_numeric(expression, errors="coerce"),
@@ -399,6 +399,10 @@ def median_split_cox_hr(
     order = np.argsort(t)[::-1]
     d_sorted = d[order]
     x_sorted = x[order]
+    risk0 = np.cumsum(np.ones_like(x_sorted)[::-1])[::-1]
+    ll0 = float(
+        np.sum(d_sorted * -np.log(np.clip(risk0, 1e-12, None)))
+    )
 
     def neg_ll(beta: float) -> float:
         exp_bx = np.exp(beta * x_sorted)
@@ -408,13 +412,17 @@ def median_split_cox_hr(
 
     try:
         from scipy.optimize import minimize_scalar
+        from scipy.stats import chi2
 
         res = minimize_scalar(neg_ll, bounds=(-3.0, 3.0), method="bounded")
         if res.success:
-            return float(np.exp(res.x))
+            beta = float(res.x)
+            ll_full = float(-res.fun)
+            stat = 2.0 * max(0.0, ll_full - ll0)
+            return float(np.exp(beta)), float(chi2.sf(stat, df=1))
     except Exception:
         pass
-    return 1.0
+    return 1.0, 1.0
 
 
 def build_tcga_dataset(
@@ -532,12 +540,12 @@ def build_tcga_dataset(
     hr_rows = []
     for gene in matrix.index:
         expr = matrix.loc[gene]
-        hr = median_split_cox_hr(
+        hr, p = median_split_cox_hr(
             expr.reindex(merged["sample"]),
             merged["os_months"],
             merged["os_status"],
         )
-        hr_rows.append({"gene": gene, "hr": hr, "p": 1.0})
+        hr_rows.append({"gene": gene, "hr": hr, "p": p})
     pd.DataFrame(hr_rows).to_csv(data_dir / "prognosis.csv", index=False)
     gene_evidence.to_csv(data_dir / "druggability.csv", index=False)
     gene_evidence.to_csv(data_dir / "off_target.csv", index=False)
@@ -568,9 +576,16 @@ def build_tcga_dataset(
 
 
 def _gse_key(path: Path) -> str:
-    match = re.search(r"_G(\d+[A-Z]?)counts", path.name)
+    name = path.name
+    match = re.search(
+        r"(?:^|[^A-Za-z0-9])G(\d+[A-Z]?)(?=counts|\.csv|\.txt|$)",
+        name,
+        re.IGNORECASE,
+    )
     if not match:
-        raise RuntimeError(f"cannot parse GSE sample key: {path.name}")
+        match = re.search(r"GSM(\d+)", name, re.IGNORECASE)
+    if not match:
+        raise RuntimeError(f"cannot parse GSE sample key: {name}")
     return "G" + match.group(1)
 
 

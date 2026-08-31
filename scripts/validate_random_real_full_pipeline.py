@@ -23,6 +23,11 @@ from datetime import datetime
 from pathlib import Path
 
 ROOT = Path(__file__).resolve().parent.parent
+if str(ROOT / "src") not in sys.path:
+    sys.path.insert(0, str(ROOT / "src"))
+
+from common.env import find_rscript as _common_find_rscript  # noqa: E402
+
 DEFAULT_RESULT_ROOT = ROOT.parent / "y3"
 
 # Real GEO expression datasets with public count matrices small enough for
@@ -81,18 +86,10 @@ def safe_delete(path: Path) -> None:
 
 
 def find_rscript() -> str:
-    found = shutil.which("Rscript")
-    if found:
-        return found
-    for base in [
-        Path(r"C:\Program Files\R"),
-        Path(r"C:\Program Files\Microsoft\R Open"),
-    ]:
-        if base.exists():
-            candidates = sorted(base.glob("R-*/bin/Rscript.exe"), reverse=True)
-            if candidates:
-                return str(candidates[0])
-    raise RuntimeError("Rscript not found")
+    found = _common_find_rscript()
+    if found is None:
+        raise RuntimeError("Rscript not found")
+    return found
 
 
 def install_r_deps() -> bool:
@@ -352,12 +349,10 @@ def run_one(
         if attempt >= args.max_attempts:
             break
         actions = diagnose(log_text[-40000:], accession, single_cell_root, workdir)
-        repaired = False
         for action in actions:
             result = apply_action(action, accession, single_cell_root, workdir)
             actions_used.append(f"attempt{attempt}:{result}")
             log(f"{accession} auto-repair: {result}")
-            repaired = repaired or not result.endswith("failed")
 
     elapsed = round(time.time() - started, 1)
     return {

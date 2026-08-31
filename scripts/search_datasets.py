@@ -2,8 +2,8 @@
 """Search public expression datasets and optionally download matching series.
 
 Currently searches NCBI GEO, EBI ArrayExpress/BioStudies and EBI Expression
-Atlas. Only datasets with runnable processed expression files are marked as
-pipeline-ready.
+Atlas. GSE series are marked as runnable candidates; actual availability of
+processed expression files is verified during download.
 """
 
 from __future__ import annotations
@@ -414,6 +414,8 @@ def to_row(
     summary = str(raw.get("Summary") or raw.get("summary") or "")
     data_type = infer_data_type(f"{title}\n{summary}")
     if run_supported is None:
+        # Heuristic only: a GSE accession is a runnable candidate. Real file
+        # availability is checked by the downloader, not by search.
         run_supported = bool(re.fullmatch(r"GSE\d+", canonical_row_accession(gse)))
     row = {
         "accession": gse,
