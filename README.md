@@ -459,7 +459,7 @@ python scripts\validate_dataset_search.py --rounds 50 --seed 20260812
 
 验证结果写入 `data_cache/dataset_search/validation_50_rounds.csv` 和 `validation_50_rounds.json`；未命中时会自动用疾病名或研究方向名扩大搜索范围。
 
-默认训练标签由同义词启发式生成，只适合流程冒烟测试；需要真实相关性评估时，请用 `--manual-labels` 提供人工复核 CSV（列：`accession`、`disease`、`research_direction`、`label`），并优先用 `label_source=manual` 的样本训练和评估模型。`dataset_search_ml.py --eval --allow-heuristic-eval` 仅用于冒烟，不代表真实检索质量。
+默认训练标签由同义词启发式生成，只适合流程冒烟测试；需要真实相关性评估时，请用 `--manual-labels` 提供人工复核 CSV（列：`accession`、`disease`、`research_direction`、`label`），并优先用 `label_source=manual` 的样本训练和评估模型。提供人工标签后，`found`/`found_rate` 也会以人工标签为准，并在 summary 中输出 `manual_rounds` 与 `manual_found_rate`。`dataset_search_ml.py --eval --allow-heuristic-eval` 仅用于冒烟，不代表真实检索质量。
 
 当前 50 轮随机验证（`--seed 20260812`）命中率 100%（50/50），其中 4 轮通过扩大搜索范围命中。
 

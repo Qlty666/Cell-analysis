@@ -180,6 +180,14 @@ def run_round(
                 hits = fallback_hits
 
     first = hits[0] if hits else {}
+    manual_round = any(
+        sample.get("label_source") == "manual" for sample in samples
+    )
+    manual_found = any(
+        sample.get("label_source") == "manual"
+        and int(sample.get("label") or 0) == 1
+        for sample in samples
+    )
     return {
         "disease": disease,
         "research_direction": direction,
@@ -189,7 +197,8 @@ def run_round(
             relevant_rows(combined, disease, direction)
         ),
         "expanded": expanded,
-        "found": bool(hits),
+        "found": manual_found if manual_round else bool(hits),
+        "found_source": "manual" if manual_round else "heuristic",
         "first_accession": str(first.get("accession", "")),
         "first_title": str(first.get("title", "")),
         "elapsed_seconds": round(time.time() - started, 2),
@@ -209,6 +218,7 @@ def write_report(records: list[dict], summary: dict, out_dir: Path) -> None:
         "relevant_combined",
         "expanded",
         "found",
+        "found_source",
         "first_accession",
         "first_title",
         "elapsed_seconds",
@@ -379,11 +389,23 @@ def main() -> int:
         for sample in all_samples
         if sample.get("label_source") == "manual"
     )
+    manual_rounds = sum(
+        1 for record in records if record.get("found_source") == "manual"
+    )
+    manual_found = sum(
+        1
+        for record in records
+        if record.get("found_source") == "manual" and record["found"]
+    )
     summary = {
         "rounds": len(records),
         "seed": args.seed,
         "label_mode": "manual" if manual_labeled else "heuristic",
         "manual_labeled_samples": manual_labeled,
+        "manual_rounds": manual_rounds,
+        "manual_found_rate": (
+            round(manual_found / manual_rounds, 4) if manual_rounds else None
+        ),
         "found": found,
         "found_rate": round(found / len(records), 4) if records else 0.0,
         "expanded_rounds": expanded,
@@ -399,6 +421,11 @@ def main() -> int:
         Path(args.output_dir),
     )
     print(f"Training samples: {training_path} ({len(all_samples)} rows)")
+    if manual_rounds:
+        print(
+            f"Manual-labeled rounds: {manual_found}/{manual_rounds} found "
+            f"({summary['manual_found_rate']:.1%})"
+        )
     if manual_labeled == 0:
         print(
             "WARNING: training labels are heuristic synonyms; ML metrics "
