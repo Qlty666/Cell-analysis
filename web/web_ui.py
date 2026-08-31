@@ -397,6 +397,20 @@ def get_versions() -> list[dict]:
         else:
             version = "unknown"
         out.append({**item, "version": version})
+    try:
+        from docking import __version__ as project_version
+    except Exception:
+        project_version = "unknown"
+    out.insert(
+        0,
+        {
+            "name": "项目版本",
+            "version": project_version,
+            "kind": "software",
+            "url": "https://github.com/Qlty666/Cell-analysis",
+            "install": "",
+        },
+    )
     return out
 
 
@@ -1244,7 +1258,7 @@ def dataset_file_path(name: str) -> Path | None:
 
 
 def dataset_full_pipeline_url(row: dict) -> str:
-    """Build the full-pipeline page URL prefilled with a searched dataset."""
+    """Build the full-pipeline URL; run_supported is a candidate, verified on download."""
     if row.get("run_supported") is False:
         return ""
     accession = validate_accession(str(row.get("accession") or ""))
