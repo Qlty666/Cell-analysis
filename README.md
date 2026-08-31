@@ -1,6 +1,6 @@
 # Liver Cancer Bioinformatics Workflow
 
-> 当前版本：0.9.0
+> 当前版本：1.0.0
 
 面向肝癌研究的本地生信自动化工作流，整合三条可实际运行的流水线：
 
@@ -157,11 +157,23 @@ launchers\check_pipeline_environment.bat
 launchers\install_pipeline_dependencies.bat
 ```
 
+`install_pipeline_dependencies.bat` 会安装表达分析所需的 R 包；使用 pip 手动安装 Python 依赖时执行：
+
+```bash
+python -m pip install -r requirements.txt
+```
+
 检查并安装虚拟筛选 Python 依赖（RDKit、Meeko、Open Babel、AutoDockTools 等）：
 
 ```text
 launchers\check_dock_environment.bat
 launchers\install_dock_dependencies.bat
+```
+
+对应的 pip 手动安装命令为：
+
+```bash
+python -m pip install -r requirements_dock.txt
 ```
 
 也可以用 conda 直接创建虚拟筛选环境：
@@ -461,7 +473,7 @@ python scripts\validate_dataset_search.py --rounds 50 --seed 20260812
 
 默认训练标签由同义词启发式生成，只适合流程冒烟测试；需要真实相关性评估时，请用 `--manual-labels` 提供人工复核 CSV（列：`accession`、`disease`、`research_direction`、`label`），并优先用 `label_source=manual` 的样本训练和评估模型。提供人工标签后，`found`/`found_rate` 也会以人工标签为准，并在 summary 中输出 `manual_rounds` 与 `manual_found_rate`。`dataset_search_ml.py --eval --allow-heuristic-eval` 仅用于冒烟，不代表真实检索质量。
 
-当前 50 轮随机验证（`--seed 20260812`）命中率 100%（50/50），其中 4 轮通过扩大搜索范围命中。
+此前一次 50 轮随机验证（`--seed 20260812`）在默认启发式标签下命中率 100%（50/50），其中 4 轮通过扩大搜索范围命中；该结果仅代表流程可运行，不构成真实相关性结论。
 
 ### 4.7 数据集搜索 ML/DL 相关性排序
 
@@ -491,7 +503,7 @@ python scripts\validate_dataset_search.py \
   --rerank-top 5
 ```
 
-支持 `lr`、`rf`、`gbm`、`mlp` 四种模型；其中 `mlp` 为多层感知机。可用 `--eval` 对标注样本做交叉验证，例如当前 285 条样本上 MLP 的 ROC AUC 为 0.81。
+支持 `lr`、`rf`、`gbm`、`mlp` 四种模型；其中 `mlp` 为多层感知机。可用 `--eval` 对标注样本做交叉验证；此前一次 285 条启发式标签样本上 MLP 的 ROC AUC 为 0.81，该指标仅作为流程冒烟结果，不代表真实检索质量。
 
 ## 5. 输入输出示例
 
@@ -665,6 +677,21 @@ GSE165816 和 TCGA PanCancer Atlas 仅用于真实数据验证。
 MIT License. See `LICENSE` for details.
 
 ## 9. 更新日志
+
+### v1.0.0
+
+- 正式发布 1.0.0：表达分析、虚拟筛选、全自动集成流水线、网页端、数据集搜索与验证脚本形成完整可交付链路。
+- 修复验证脚本“全部失败仍报成功”的问题：`validate_real_evidence.py` / `validate_real_random.py` 新增最少成功靶点、最少配体记录和对接盒成功数阈值，未达标时返回非零退出码；技能脚本缺失时返回失败而不是崩溃。
+- 修复长时间验证脚本未捕获超时的问题：`validate_pipeline.py` / `validate_real_pipeline.py` 超时后明确报错并继续/退出，不再让单个数据集拖垮整个验证。
+- 真实数据验证兼容 ML 阶段跳过：`validate_real_pipeline.py` 与合成验证一致，ML 被跳过时不再强制要求 ML 图。
+- 数据集检索验证不再把同义词启发式标签当作真实相关性：新增 `--manual-labels` 人工标签、`label_source` 字段和 `manual_rounds` / `manual_found_rate` 汇总；提供人工标签后 `found` / `found_rate` 以人工标签为准。
+- ML/DL 相关性排序修复：训练要求同时包含相关与不相关样本，重排校验二分类模型；`--eval` 默认要求人工标签，`--allow-heuristic-eval` 仅用于冒烟。
+- 修复 `validate_random_real_full_pipeline.py --only` 未校验 GEO 编号导致的路径逃逸风险，新增 `GSE\d+` 白名单与单元测试。
+- 修复 docking 环境检查/安装假成功：AutoDockTools 源码与 zip 均缺失时安装返回失败；`check-dock-env` 与 `check_dock_environment.py` 按真实检查结果返回退出码。
+- 收敛 Rscript 探测到 `src/common/env.py`，统一 Windows PATH、Program Files 与用户目录探测，消除多处重复实现。
+- 修复真实 TCGA 生存分析 p 值固定为 1.0 的问题：改用 Cox 似然比检验输出真实 p 值；GSE165816 文件名解析增加回退规则。
+- 更新数据集搜索 `run_supported` 表述：搜索结果只标记“可自动运行候选”，实际文件可用性在下载时校验。
+- 全量测试通过：201 个测试用例 + 4 个 subtests。
 
 ### v0.9.0
 
