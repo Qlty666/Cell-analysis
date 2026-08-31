@@ -23,6 +23,7 @@ from data.geo_downloader import (  # noqa: E402
     _convert_downloaded,
     _download,
     _expand_archive_files,
+    _extract_archive,
     _matrix_header_looks_single_cell,
     _refresh_manifest_mode,
     _select_files,
@@ -248,6 +249,17 @@ class TestExpandArchiveFiles(unittest.TestCase):
             )
             self.assertTrue((base / prefix / "matrix.mtx").exists())
             self.assertEqual(logs, ["expanding archive " + archive.name])
+
+
+class TestCorruptArchive(unittest.TestCase):
+    def test_extract_archive_reports_truncated_tar(self):
+        with tempfile.TemporaryDirectory() as tmp:
+            base = Path(tmp)
+            archive = base / "broken.tar.gz"
+            archive.write_bytes(b"this is not a real tar archive")
+            with self.assertRaises(RuntimeError) as ctx:
+                _extract_archive(archive, base / "out")
+            self.assertIn("corrupted or truncated", str(ctx.exception))
 
 
 class TestDownloadRetry(unittest.TestCase):
