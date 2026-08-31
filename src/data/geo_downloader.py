@@ -161,8 +161,8 @@ def _fetch(url: str) -> str:
         return result.stdout
 
 
-def _download(url: str, out: Path, log) -> None:
-    if out.exists() and out.stat().st_size > 0:
+def _download(url: str, out: Path, log, force: bool = False) -> None:
+    if not force and out.exists() and out.stat().st_size > 0:
         log(f"{out.name} already exists; skipping download")
         return
     for attempt in range(1, 4):
@@ -422,15 +422,45 @@ def _convert_downloaded(downloaded: dict, raw_dir: Path) -> dict:
 def _extract_archive(archive: Path, dest: Path) -> None:
     dest = dest.resolve()
     dest.mkdir(parents=True, exist_ok=True)
-    with tarfile.open(archive, "r:*") as tf:
-        for member in tf.getmembers():
-            if member.issym() or member.islnk():
-                raise RuntimeError(f"unsafe tar member: {member.name}")
-            member_path = member.name.replace("\\", "/")
-            target = (dest / member_path).resolve()
-            if not target.is_relative_to(dest):
-                raise RuntimeError(f"unsafe tar member: {member.name}")
-        tf.extractall(dest)
+    try:
+        with tarfile.open(archive, "r:*") as tf:
+            for member in tf.getmembers():
+                if member.issym() or member.islnk():
+                    raise RuntimeError(f"unsafe tar member: {member.name}")
+                member_path = member.name.replace("\\", "/")
+                target = (dest / member_path).resolve()
+                if not target.is_relative_to(dest):
+                    raise RuntimeError(f"unsafe tar member: {member.name}")
+            tf.extractall(dest)
+    except (tarfile.TarError, EOFError) as exc:
+        raise RuntimeError(
+            f"archive is corrupted or truncated: {archive.name} ({exc})"
+        ) from exc
+
+
+def _extract_geo_archive(
+    archive_path: Path,
+    extract_dir: Path,
+    url: str,
+    log,
+) -> None:
+    """Extract a GEO archive, re-downloading once when it is corrupt."""
+    try:
+        with tarfile.open(archive_path, "r:*") as tf:
+            tf.getmembers()
+        valid = True
+    except (tarfile.TarError, EOFError, OSError):
+        valid = False
+    if not valid:
+        log(f"{archive_path.name} is corrupted or truncated; re-downloading")
+        shutil.rmtree(extract_dir, ignore_errors=True)
+        archive_path.unlink(missing_ok=True)
+        _download(url, archive_path, log, force=True)
+    elif extract_dir.exists() and any(extract_dir.iterdir()):
+        log(f"{archive_path.name} already extracted; skipping extraction")
+        return
+    extract_dir.mkdir(parents=True, exist_ok=True)
+    _extract_archive(archive_path, extract_dir)
 
 
 def _walk_relative(directory: Path) -> list[str]:
@@ -552,13 +582,13 @@ def ensure_geo_dataset(accession: str, root: Path, log) -> dict:
             )
         archive_name = Path(archive_names[0]).name
         archive_path = raw_dir / archive_name
-        _download(base + archive_names[0], archive_path, log)
         extract_dir = raw_dir / "_extracted"
-        extract_dir.mkdir(parents=True, exist_ok=True)
-        if any(extract_dir.iterdir()):
-            log("archive already extracted; skipping extraction")
-        else:
-            _extract_archive(archive_path, extract_dir)
+        _extract_geo_archive(
+            archive_path,
+            extract_dir,
+            base + archive_names[0],
+            log,
+        )
         inner = _select_files(_walk_relative(extract_dir))
         downloaded["matrix"] = [
             "_extracted/" + name for name in inner["matrix"]
