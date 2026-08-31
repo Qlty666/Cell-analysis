@@ -153,7 +153,7 @@ a { color: #1665c0; text-decoration: none; }
 <div class="page-head">
   <div class="page-title">
     <h1>多数据库数据集搜索</h1>
-    <p class="page-sub">按疾病、研究方向或原始查询搜索 NCBI GEO、ArrayExpress/BioStudies 和 Expression Atlas 数据集，支持直接下载并带入全自动流水线。</p>
+    <p class="page-sub">按疾病、研究方向或原始查询搜索 NCBI GEO、ArrayExpress/BioStudies 和 Expression Atlas 数据集，支持直接下载并带入全自动流水线；<code>run_supported</code> 为可自动运行候选，实际文件可用性在下载时校验。</p>
   </div>
   <div class="page-actions">
     <a class="link-button" href="/full">全自动流水线</a>
@@ -392,7 +392,7 @@ function renderResults() {
     const dbBadge = '<span class="badge db">' + esc(row.database || 'GEO') + '</span>';
     const pipelineLink = row.full_pipeline_url
       ? '<a class="link-button" href="' + esc(row.full_pipeline_url) + '">全自动流水线</a>'
-      : '<span class="muted">无矩阵/需手动</span>';
+      : '<span class="muted">非自动候选/下载时校验</span>';
     return '<tr><td>' + (index + 1) + '</td>' +
       '<td><a href="' + esc(row.url) + '" target="_blank" rel="noopener">' + esc(row.accession) + '</a></td>' +
       '<td>' + dbBadge + '</td>' +
