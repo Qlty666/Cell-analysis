@@ -118,6 +118,18 @@ class TestValidateDatasetSearch(unittest.TestCase):
         self.assertTrue(record["expanded"])
         self.assertEqual(record["first_accession"], "GSE2")
 
+    def test_manual_label_overrides_heuristic(self):
+        row = _row("GSE1", "Mouse kidney", "mouse tissue")
+        manual = {("GSE1", "liver cancer", "single cell rna-seq"): 1}
+        samples = validate_dataset_search._labeled_samples(
+            [row],
+            "liver cancer",
+            "single cell RNA-seq",
+            manual,
+        )
+        self.assertEqual(samples[0]["label"], 1)
+        self.assertEqual(samples[0]["label_source"], "manual")
+
 
 if __name__ == "__main__":
     unittest.main()

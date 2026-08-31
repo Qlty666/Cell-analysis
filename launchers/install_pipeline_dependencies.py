@@ -1,7 +1,6 @@
 #!/usr/bin/env python3
 """Install all R dependencies required by the pipeline."""
 
-import shutil
 import subprocess
 import sys
 import argparse
@@ -9,22 +8,10 @@ import os
 from pathlib import Path
 
 ROOT = Path(__file__).resolve().parent.parent
+if str(ROOT / "src") not in sys.path:
+    sys.path.insert(0, str(ROOT / "src"))
 
-
-def find_rscript() -> str | None:
-    if shutil.which("Rscript"):
-        return shutil.which("Rscript")
-    if shutil.which("Rscript.exe"):
-        return shutil.which("Rscript.exe")
-    for base in [
-        Path(r"C:\Program Files\R"),
-        Path(r"C:\Program Files\Microsoft\R Open"),
-    ]:
-        if base.exists():
-            candidates = sorted(base.glob("R-*/bin/Rscript.exe"), reverse=True)
-            if candidates:
-                return str(candidates[0])
-    return None
+from common.env import find_rscript  # noqa: E402
 
 
 def main() -> int:

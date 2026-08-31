@@ -1,6 +1,7 @@
 #!/usr/bin/env python3
 """Validate evidence collection against ten real PDB structures."""
 
+import argparse
 import csv
 import json
 import subprocess
@@ -39,6 +40,11 @@ TARGETS = [
 
 def call_skill(skill: str, payload: dict, timeout: int = 180) -> dict:
     script = SKILLS / SKILL_NAMES[skill] / "scripts" / "rest_request.py"
+    if not script.exists():
+        return {
+            "ok": False,
+            "error": {"message": f"missing skill script: {script}"},
+        }
     try:
         proc = subprocess.run(
             [sys.executable, str(script)],
@@ -49,6 +55,10 @@ def call_skill(skill: str, payload: dict, timeout: int = 180) -> dict:
             errors="replace",
             timeout=timeout,
         )
+    except FileNotFoundError as exc:
+        return {"ok": False, "error": {"message": str(exc)}}
+    except OSError as exc:
+        return {"ok": False, "error": {"message": str(exc)}}
     except subprocess.TimeoutExpired:
         return {"ok": False, "error": {"message": f"timeout after {timeout}s"}}
     if not proc.stdout.strip():
@@ -83,6 +93,13 @@ def fetch_bindingdb(pdb_id: str) -> dict:
 
 
 def main() -> int:
+    parser = argparse.ArgumentParser(
+        description="Validate evidence collection against real PDB structures."
+    )
+    parser.add_argument("--min-ok-targets", type=int, default=1)
+    parser.add_argument("--min-ligands", type=int, default=1)
+    args = parser.parse_args()
+
     OUT_DIR.mkdir(parents=True, exist_ok=True)
     rows: list[dict] = []
     summary: dict[str, dict] = {}
@@ -126,16 +143,33 @@ def main() -> int:
         )
         writer.writeheader()
         writer.writerows(rows)
+    ok_targets = sum(1 for item in summary.values() if item["rcsb_ok"])
+    total_ligands = len(rows)
+    passed = (
+        ok_targets >= args.min_ok_targets
+        and total_ligands >= args.min_ligands
+    )
     (OUT_DIR / "summary.json").write_text(
         json.dumps(
-            {"targets": summary, "total_ligands": len(rows)},
+            {
+                "targets": summary,
+                "total_ligands": total_ligands,
+                "ok_targets": ok_targets,
+                "passed": passed,
+            },
             ensure_ascii=False,
             indent=2,
         ),
         encoding="utf-8",
     )
-    print("TOTAL_LIGANDS", len(rows))
-    return 0
+    print("TOTAL_LIGANDS", total_ligands)
+    print(
+        "RESULT",
+        "PASS" if passed else "FAIL",
+        f"(ok_targets={ok_targets}/{args.min_ok_targets}, "
+        f"ligands={total_ligands}/{args.min_ligands})",
+    )
+    return 0 if passed else 1
 
 
 if __name__ == "__main__":

@@ -46,8 +46,11 @@ def _ensure_autodocktools() -> bool:
     zip_path = tools / "autodocktools_py3.zip"
     if not src.exists():
         if not zip_path.exists():
-            print("AutoDockTools_py3 source not found; prepare_receptor4 unavailable")
-            return True
+            print(
+                "AutoDockTools_py3 source and zip both missing; "
+                "prepare_receptor4 unavailable"
+            )
+            return False
         print("Extracting AutoDockTools_py3...")
         with zipfile.ZipFile(zip_path) as archive:
             tools_resolved = tools.resolve()
@@ -60,6 +63,9 @@ def _ensure_autodocktools() -> bool:
         extracted = tools / "AutoDockTools_py3-master"
         if extracted.exists() and not src.exists():
             extracted.rename(src)
+    if not src.exists():
+        print("AutoDockTools_py3 source still missing after extraction")
+        return False
     print("Installing AutoDockTools_py3 (prepare_receptor4)...")
     return _run_pip(["install", "versioneer"]) == 0 and _run_pip(
         ["install", str(src)]

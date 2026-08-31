@@ -56,27 +56,39 @@ def _labeled_samples(
     rows: list[dict],
     disease: str,
     direction: str,
+    manual_labels: dict | None = None,
 ) -> list[dict]:
     samples: list[dict] = []
     seen: set[tuple[str, str, str]] = set()
     for row in rows:
+        accession = str(row.get("accession", ""))
         key = (
-            str(row.get("accession", "")),
+            accession,
             disease.lower(),
             direction.lower(),
         )
         if key in seen:
             continue
         seen.add(key)
+        accession_upper = accession.upper()
+        manual_key = (accession_upper, disease.lower(), direction.lower())
+        manual_label = manual_labels.get(manual_key) if manual_labels else None
+        label_source = "manual" if manual_label is not None else "heuristic"
+        label = (
+            manual_label
+            if manual_label is not None
+            else (1 if is_relevant(row, disease, direction) else 0)
+        )
         samples.append(
             {
                 "disease": disease,
                 "research_direction": direction,
-                "accession": str(row.get("accession", "")),
+                "accession": accession,
                 "title": str(row.get("title", "")),
                 "summary": str(row.get("summary", "")),
                 "organism": str(row.get("organism", "")),
-                "label": 1 if is_relevant(row, disease, direction) else 0,
+                "label": label,
+                "label_source": label_source,
             }
         )
     return samples
@@ -92,6 +104,7 @@ def run_round(
     top_size: int | None = None,
     fetch_size: int | None = None,
     databases: list[str] | None = None,
+    manual_labels: dict | None = None,
 ) -> dict:
     started = time.time()
     top_size = top_size or max_results
@@ -116,7 +129,12 @@ def run_round(
     else:
         combined = combined[:top_size]
     hits = relevant_rows(combined, disease, direction)
-    samples = _labeled_samples(combined, disease, direction)
+    samples = _labeled_samples(
+        combined,
+        disease,
+        direction,
+        manual_labels,
+    )
     expanded = False
     if not hits and expand:
         fallback_queries = [
@@ -149,7 +167,12 @@ def run_round(
             else:
                 fallback_rows = fallback_rows[:top_size]
             samples.extend(
-                _labeled_samples(fallback_rows, disease, direction)
+                _labeled_samples(
+                    fallback_rows,
+                    disease,
+                    direction,
+                    manual_labels,
+                )
             )
             fallback_hits = relevant_rows(fallback_rows, disease, direction)
             if fallback_hits:
@@ -220,6 +243,7 @@ def write_training_samples(
         "summary",
         "organism",
         "label",
+        "label_source",
     ]
     with path.open("w", newline="", encoding="utf-8") as fh:
         writer = csv.DictWriter(fh, fieldnames=columns)
@@ -267,6 +291,14 @@ def main() -> int:
         action="store_true",
         help="disable disease-only/direction-only fallback search",
     )
+    parser.add_argument(
+        "--manual-labels",
+        default="",
+        help=(
+            "CSV with accession,disease,research_direction,label columns "
+            "from manual review; labels override heuristic labels"
+        ),
+    )
     args = parser.parse_args()
     model = None
     if args.model:
@@ -278,6 +310,27 @@ def main() -> int:
         for item in args.databases.split(",")
         if item.strip()
     ]
+
+    manual_labels: dict[tuple[str, str, str], int] = {}
+    if args.manual_labels:
+        manual_path = Path(args.manual_labels)
+        with manual_path.open(newline="", encoding="utf-8") as fh:
+            for row in csv.DictReader(fh):
+                accession = str(row.get("accession", "")).strip().upper()
+                disease_key = str(row.get("disease", "")).strip().lower()
+                direction_key = str(
+                    row.get("research_direction", "")
+                ).strip().lower()
+                try:
+                    label = int(float(str(row.get("label", ""))))
+                except (TypeError, ValueError):
+                    continue
+                if not accession or not disease_key or not direction_key:
+                    continue
+                manual_labels[(accession, disease_key, direction_key)] = (
+                    1 if label else 0
+                )
+        print(f"Loaded {len(manual_labels)} manual labels from {manual_path}")
 
     rng = random.Random(args.seed)
     pairs = [
@@ -307,6 +360,7 @@ def main() -> int:
                 else args.max_results
             ),
             databases=databases,
+            manual_labels=manual_labels,
         )
         all_samples.extend(record.pop("samples", []))
         records.append(record)
@@ -320,9 +374,16 @@ def main() -> int:
     found = sum(1 for record in records if record["found"])
     expanded = sum(1 for record in records if record["expanded"])
     total_results = sum(record["combined_results"] for record in records)
+    manual_labeled = sum(
+        1
+        for sample in all_samples
+        if sample.get("label_source") == "manual"
+    )
     summary = {
         "rounds": len(records),
         "seed": args.seed,
+        "label_mode": "manual" if manual_labeled else "heuristic",
+        "manual_labeled_samples": manual_labeled,
         "found": found,
         "found_rate": round(found / len(records), 4) if records else 0.0,
         "expanded_rounds": expanded,
@@ -338,6 +399,11 @@ def main() -> int:
         Path(args.output_dir),
     )
     print(f"Training samples: {training_path} ({len(all_samples)} rows)")
+    if manual_labeled == 0:
+        print(
+            "WARNING: training labels are heuristic synonyms; ML metrics "
+            "will not validate real relevance without --manual-labels"
+        )
     print(
         f"Summary: {found}/{len(records)} rounds found relevant datasets "
         f"({summary['found_rate']:.1%}); expanded {expanded} rounds"

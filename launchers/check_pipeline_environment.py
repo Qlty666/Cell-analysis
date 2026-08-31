@@ -9,6 +9,11 @@ import importlib
 from pathlib import Path
 
 ROOT = Path(__file__).resolve().parent.parent
+if str(ROOT / "src") not in sys.path:
+    sys.path.insert(0, str(ROOT / "src"))
+
+from common.env import find_rscript  # noqa: E402
+
 REQUIRED_PYTHON = (3, 10)
 REQUIRED_R = (4, 5, 0)
 
@@ -43,24 +48,6 @@ R_PACKAGES = [
     "enrichplot",
     "DESeq2",
 ]
-
-
-def find_rscript() -> str | None:
-    if shutil.which("Rscript"):
-        return shutil.which("Rscript")
-    if shutil.which("Rscript.exe"):
-        return shutil.which("Rscript.exe")
-    for base in [
-        Path(r"C:\Program Files\R"),
-        Path(r"C:\Program Files\Microsoft\R Open"),
-        Path.home() / "AppData" / "Local" / "Programs" / "R",
-    ]:
-        if not base.exists():
-            continue
-        candidates = sorted(base.glob("R-*/bin/Rscript.exe"), reverse=True)
-        if candidates:
-            return str(candidates[0])
-    return None
 
 
 def parse_version(text: str) -> tuple:

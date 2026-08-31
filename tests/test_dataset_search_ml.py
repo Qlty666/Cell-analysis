@@ -94,9 +94,37 @@ class TestDatasetSearchML(unittest.TestCase):
                 model_type="lr",
                 seed=42,
                 cv=2,
+                allow_heuristic=True,
             )
             self.assertGreaterEqual(result["accuracy"], 0.0)
             self.assertIn("roc_auc", result)
+            self.assertEqual(result["label_mode"], "heuristic")
+
+    def test_train_requires_both_classes(self):
+        with tempfile.TemporaryDirectory() as tmp:
+            tmp_path = Path(tmp)
+            samples_csv = tmp_path / "samples.csv"
+            single_class = _samples().assign(label=1)
+            single_class.to_csv(samples_csv, index=False)
+            with self.assertRaises(ValueError):
+                dataset_search_ml.train(
+                    samples_csv,
+                    tmp_path / "model.joblib",
+                    model_type="lr",
+                    seed=42,
+                )
+
+    def test_evaluate_requires_manual_labels(self):
+        with tempfile.TemporaryDirectory() as tmp:
+            samples_csv = Path(tmp) / "samples.csv"
+            _samples().to_csv(samples_csv, index=False)
+            with self.assertRaises(ValueError):
+                dataset_search_ml.evaluate(
+                    samples_csv,
+                    model_type="lr",
+                    seed=42,
+                    cv=2,
+                )
 
 
 if __name__ == "__main__":
