@@ -944,26 +944,39 @@ footer { color: #64748b; font-size: 12px; margin: 30px 0 8px; }
     const q = state.query.trim().toLowerCase();
     const matchedFiles = new Set();
     let guideHits = 0;
-    guideSections.forEach(section => {
-      if (!section.el) return;
-      const hay = (section.title + '\n' + section.text).toLowerCase();
-      const hit = textMatches(hay, q);
-      section.el.style.display = hit ? '' : 'none';
-      section.el.classList.toggle('guide-hit', Boolean(q) && hit);
-      const title = section.el.querySelector('h3');
-      if (title) title.innerHTML = highlightText(section.title, state.query);
-      if (hit) {
-        guideHits++;
-        (section.files || []).forEach(file => matchedFiles.add(file.toLowerCase()));
-      }
-    });
+    const guideCard = document.getElementById('guideCard');
+    const guideDetails = document.getElementById('guideDetails');
+    if (q) {
+      guideSections.forEach(section => {
+        if (section.el) section.el.style.display = 'none';
+      });
+      if (guideCard) guideCard.style.display = 'none';
+      if (guideDetails) guideDetails.open = false;
+    } else {
+      if (guideCard) guideCard.style.display = '';
+      guideSections.forEach(section => {
+        if (!section.el) return;
+        const hay = (section.title + '\n' + section.text).toLowerCase();
+        const hit = textMatches(hay, q);
+        section.el.style.display = hit ? '' : 'none';
+        section.el.classList.toggle('guide-hit', Boolean(q) && hit);
+        const title = section.el.querySelector('h3');
+        if (title) title.innerHTML = highlightText(section.title, state.query);
+        if (hit) {
+          guideHits++;
+          (section.files || []).forEach(file => matchedFiles.add(file.toLowerCase()));
+        }
+      });
+    }
 
     let rowHits = 0;
     const rows = Array.from(document.querySelectorAll('.card table tbody tr:not(.result-detail-row)'));
     rows.forEach(tr => {
       const queryOk = textMatches(tr.dataset.search || '', q);
       const rowNorm = normalizeSearch(tr.dataset.file || '');
-      const guideOk = Array.from(matchedFiles).some(file => rowNorm.includes(normalizeSearch(file)));
+      const guideOk = q
+        ? false
+        : Array.from(matchedFiles).some(file => rowNorm.includes(normalizeSearch(file)));
       const show =
         (state.stage === 'all' || tr.dataset.stage === state.stage) &&
         (state.type === 'all' || tr.dataset.type === state.type) &&
@@ -989,15 +1002,13 @@ footer { color: #64748b; font-size: 12px; margin: 30px 0 8px; }
     const condCount = rows.filter(tr => tr.textContent.includes('条件')).length;
     const stats = document.getElementById('searchStats');
     if (q) {
-      stats.textContent = '搜索“' + state.query + '”：结果清单命中 ' + rowHits + ' 条，指南命中 ' + guideHits + ' 个章节。';
+      stats.textContent = '搜索“' + state.query + '”：结果清单命中 ' + rowHits + ' 条。';
     } else {
       stats.textContent = '结果清单共 ' + rows.length + ' 条：' + figCount + ' 张结果图，' + dataCount + ' 份结果数据，' + condCount + ' 个条件输出；指南共 ' + guideSections.length + ' 个章节。';
     }
 
     const noMatch = document.getElementById('noMatch');
-    noMatch.style.display = filterActive && rowHits === 0 && guideHits === 0 ? 'block' : 'none';
-    const guideDetails = document.getElementById('guideDetails');
-    if (q) guideDetails.open = guideHits > 0;
+    noMatch.style.display = filterActive && rowHits === 0 && (q || guideHits === 0) ? 'block' : 'none';
     updateChips();
   }
 
