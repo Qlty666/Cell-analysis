@@ -1033,6 +1033,11 @@ class TestTemplatePolish(unittest.TestCase):
         self.assertIn("q.split(/[\\\\/]+/)", html)
         self.assertIn("qNameNorm", html)
 
+    def test_results_search_hides_guide_panel(self):
+        html = self._read("results_manifest_optimized.html")
+        self.assertIn("guideCard.style.display = 'none'", html)
+        self.assertIn("guideOk = q", html)
+
     def test_results_manifest_includes_latest_figures(self):
         html = self._read("results_manifest_optimized.html")
         for token in [
