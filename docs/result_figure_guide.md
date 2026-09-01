@@ -62,7 +62,7 @@
 | --- | --- | --- | --- | --- |
 | `fig_10_go_up.png`/`fig_11_go_down.png`/`fig_12_kegg_up.png`/`fig_13_kegg_down.png` | 按条目排序的通路（默认 `barplot`，最多 10 条） | 计数或 P 值指标（由 clusterProfiler 默认绘图函数决定） | 条形/点颜色默认表示 `p.adjust`（颜色越深越显著） | 实际绘图样式可用 `LIVER_FIGURE_STYLES` 切换为 dotplot/cnetplot；无显著条目时显示占位文字 |
 | `fig_20_gsea_go.png`/`fig_21_gsea_kegg.png` | 按 log2FC 降序排列的基因排序位置 | 富集分数（GSEA 运行富集得分） | 默认 `ridgeplot` 时按通路着色；`gseaplot2` 时显示富集曲线与基因条带 | NES、p.adjust 等信息见图中标签；无显著条目时显示占位文字 |
-| `fig_22_go_network.png`/`fig_23_kegg_network.png` | 无笛卡尔坐标，为网络布局 | 无 | cnetplot：基因节点颜色默认按 `log2FC` 渐变，通路节点按类别着色；emapplot：节点颜色表示 `p.adjust` | 圆形节点为通路，散点节点为基因；默认筛选 `p.adjust <= 0.05` 后取 Top5 |
+| `fig_22_go_network.png`/`fig_23_kegg_network.png` | 无笛卡尔坐标，为网络布局 | 无 | cnetplot：基因节点颜色默认按 `log2FC` 渐变，通路节点按类别着色；emapplot：节点颜色表示 `p.adjust` | 圆形节点为通路，散点节点为基因；默认筛选 `p.adjust <= 0.05` 后保留 Top5 核心通路，并追加最佳 5 个延伸通路 |
 | `fig_46_go_top5.png`/`fig_47_kegg_top5.png` | 富集条目（Top5） | 富集条目（按 `GeneRatio` 排序） | 气泡颜色表示 `p.adjust`（越显著越红/越深）；气泡大小表示 `Count`（富集基因数） | 默认 `dotplot`，可切换 barplot/cnetplot/emapplot |
 
 ### 机器学习（单细胞）
@@ -257,7 +257,7 @@
 
 - 坐标轴：无笛卡尔坐标，为网络布局（cnetplot 默认）。
 - 颜色/图例：cnetplot 中基因节点颜色默认按 `avg_log2FC` 渐变，通路节点按类别着色；emapplot 中节点颜色表示 `p.adjust`。
-- 输入：上调基因富集结果经 `p.adjust <= 0.05` 筛选后取前 5 个通路；`showCategory=5`。
+- 输入：上调基因富集结果经 `p.adjust <= 0.05` 筛选后保留 Top5 核心通路，并追加按 p.adjust 排序最佳的 5 个延伸通路；`showCategory=10`。
 - 读取方法：圆形节点为通路，散点节点为基因，查看通路-基因关联结构；无显著通路时显示 “No significant pathway network”。
 
 #### `fig_46_go_top5.png`/`fig_47_kegg_top5.png`
@@ -658,8 +658,8 @@
 | `fig_13_kegg_down.png` | 下调基因 KEGG 富集图 | 同上 | 同上 |
 | `fig_20_gsea_go.png` | GO BP GSEA 富集图，用于查看通路整体上调/下调方向 | 有 GSEA 条目，NES 或富集方向可读 | “No significant GSEA terms” 时不能作为显著通路证据 |
 | `fig_21_gsea_kegg.png` | KEGG GSEA 富集图 | 同上 | 同上 |
-| `fig_22_go_network.png` | 上调基因 GO 经 `p.adjust <= 0.05` 筛选后 Top5 通路网络图 | 网络节点和基因连接可读，至少一个显著通路 | “No significant pathway network” 时只能说明无显著通路 |
-| `fig_23_kegg_network.png` | 上调基因 KEGG 经 `p.adjust <= 0.05` 筛选后 Top5 通路网络图 | 同上 | 同上 |
+| `fig_22_go_network.png` | 上调基因 GO 经 `p.adjust <= 0.05` 筛选后 Top5 核心 + 最佳 5 延伸通路网络图 | 网络节点和基因连接可读，至少一个显著通路 | “No significant pathway network” 时只能说明无显著通路 |
+| `fig_23_kegg_network.png` | 上调基因 KEGG 经 `p.adjust <= 0.05` 筛选后 Top5 核心 + 最佳 5 延伸通路网络图 | 同上 | 同上 |
 | `fig_46_go_top5.png` | 上调基因 GO 经 `p.adjust <= 0.05` 筛选后的 Top5 富集气泡图 | 最多 5 条通路，P 值、GeneRatio、Count 可读 | “No significant pathway after filtering” 时不能作为阳性富集证据 |
 | `fig_47_kegg_top5.png` | 上调基因 KEGG 经 `p.adjust <= 0.05` 筛选后的 Top5 富集气泡图 | 同上 | 同上 |
 
