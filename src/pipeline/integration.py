@@ -2390,6 +2390,14 @@ def _stage_key_targets(args, workdir: Path, ctx: dict) -> None:
 
 def _stage_evidence(args, workdir: Path, ctx: dict) -> None:
     genes = pd.read_csv(ctx["key_genes_path"])["gene"].astype(str).tolist()
+    if not genes:
+        log.warning("key_genes.csv is empty; skipping evidence collection")
+        out_path = _integration_dir(workdir) / "gene_evidence.csv"
+        out_path.parent.mkdir(parents=True, exist_ok=True)
+        pd.DataFrame(columns=list(EVIDENCE_COLUMNS)).to_csv(out_path, index=False)
+        ctx["evidence"] = pd.DataFrame(columns=list(EVIDENCE_COLUMNS))
+        ctx["evidence_path"] = out_path
+        return
     frame = ensure_gene_evidence(
         genes,
         workdir,
