@@ -2967,8 +2967,12 @@ if (stage_allowed("07")) run_stage("07_enrichment", {
     clusterProfiler::slice(filtered, seq_len(min(n, nrow(df))))
   }
 
+  extend_enrichment <- function(res, core_n = 5, ext_n = 5, padj_cutoff = 0.05) {
+    top_enrichment(res, n = core_n + ext_n, padj_cutoff = padj_cutoff)
+  }
+
   plot_cnet <- function(res, file, title) {
-    filtered <- top_enrichment(res)
+    filtered <- extend_enrichment(res)
     if (is.null(filtered) || nrow(as.data.frame(filtered)) == 0) {
       p <- ggplot(data.frame(x = 0, y = 0), aes(x, y)) +
         geom_text(label = "No significant pathway network") +
@@ -2978,7 +2982,7 @@ if (stage_allowed("07")) run_stage("07_enrichment", {
       if (style == "emapplot") {
         p <- emapplot(filtered, showCategory = 10) + ggtitle(title)
       } else {
-        p <- cnetplot(filtered, showCategory = 5) +
+        p <- cnetplot(filtered, showCategory = 10) +
           ggtitle(title)
       }
       p <- tryCatch(
@@ -3016,8 +3020,8 @@ if (stage_allowed("07")) run_stage("07_enrichment", {
     save_fig(file, p, width = 10, height = 8)
   }
 
-  plot_cnet(up_res$go, file.path(fig_dir, "fig_22_go_network.png"), "GO BP network (filtered top 5)")
-  plot_cnet(up_res$kegg, file.path(fig_dir, "fig_23_kegg_network.png"), "KEGG network (filtered top 5)")
+  plot_cnet(up_res$go, file.path(fig_dir, "fig_22_go_network.png"), "GO BP network (top 5 core + best 5 extended)")
+  plot_cnet(up_res$kegg, file.path(fig_dir, "fig_23_kegg_network.png"), "KEGG network (top 5 core + best 5 extended)")
   plot_top5(up_res$go, file.path(fig_dir, "fig_46_go_top5.png"), "GO BP filtered top 5")
   plot_top5(up_res$kegg, file.path(fig_dir, "fig_47_kegg_top5.png"), "KEGG filtered top 5")
 

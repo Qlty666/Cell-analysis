@@ -245,21 +245,21 @@
       "file": "figures/06_enrichment/fig_22_go_network.png",
       "name": "fig_22_go_network.png",
       "kind": "fig",
-      "content": "上调 GO 通路经校正 P 值筛选后的 Top5 通路-基因网络。",
+      "content": "上调 GO 通路经校正 P 值筛选后的 Top5 核心 + 最佳 5 延伸通路-基因网络。",
       "type": "网络图（cnetplot）",
       "use": "查看通路与基因的关联结构。",
       "optional": false,
-      "legend": "坐标轴：无笛卡尔坐标，为通路-基因网络布局（cnetplot）。\n颜色/图例：基因节点颜色默认按 avg_log2FC 渐变，通路节点按类别着色。\n输入：p.adjust<=0.05 筛选后 Top5 通路。\n回退：无显著通路显示 No significant pathway network。"
+      "legend": "坐标轴：无笛卡尔坐标，为通路-基因网络布局（cnetplot）。\n颜色/图例：基因节点颜色默认按 avg_log2FC 渐变，通路节点按类别着色。\n输入：p.adjust<=0.05 筛选后保留 Top5 核心通路，并追加最佳 5 个延伸通路。\n回退：无显著通路显示 No significant pathway network。"
     },
     {
       "file": "figures/06_enrichment/fig_23_kegg_network.png",
       "name": "fig_23_kegg_network.png",
       "kind": "fig",
-      "content": "上调 KEGG 通路筛选后的 Top5 通路-基因网络。",
+      "content": "上调 KEGG 通路筛选后的 Top5 核心 + 最佳 5 延伸通路-基因网络。",
       "type": "网络图（cnetplot）",
       "use": "查看 KEGG 通路与基因的关联结构。",
       "optional": false,
-      "legend": "坐标轴：无笛卡尔坐标，为通路-基因网络布局（cnetplot）。\n颜色/图例：基因节点颜色默认按 avg_log2FC 渐变，通路节点按类别着色。\n输入：p.adjust<=0.05 筛选后 Top5 通路。\n回退：无显著通路显示 No significant pathway network。"
+      "legend": "坐标轴：无笛卡尔坐标，为通路-基因网络布局（cnetplot）。\n颜色/图例：基因节点颜色默认按 avg_log2FC 渐变，通路节点按类别着色。\n输入：p.adjust<=0.05 筛选后保留 Top5 核心通路，并追加最佳 5 个延伸通路。\n回退：无显著通路显示 No significant pathway network。"
     },
     {
       "file": "figures/06_enrichment/fig_46_go_top5.png",
