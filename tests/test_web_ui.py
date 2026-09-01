@@ -939,6 +939,15 @@ class TestTemplatePolish(unittest.TestCase):
         self.assertIn("filterEndDate", html)
         self.assertIn("filterPlatform", html)
         self.assertIn("filterType", html)
+
+    def test_pages_mention_multi_modal_h5_support(self):
+        for name in (
+            "web_page_template.html",
+            "full_page_template.html",
+            "datasets_template.html",
+        ):
+            html = self._read(name)
+            self.assertIn("自动选用 Gene Expression 矩阵", html)
         self.assertIn("非单细胞数据按样本级分析运行", html)
 
     def test_tasks_page_has_stat_cards(self):
