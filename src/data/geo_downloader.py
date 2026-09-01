@@ -337,20 +337,7 @@ def _expand_archive_files(files: dict, base_dir: Path, log) -> dict:
 def _refresh_manifest_mode(manifest: dict, base_dir: Path | None = None) -> dict:
     files = manifest.get("files")
     if isinstance(files, dict):
-        if _files_look_bulk(files):
-            looks_single_cell = (
-                base_dir is not None
-                and _matrix_files_look_single_cell(
-                    files,
-                    base_dir,
-                )
-            )
-            if looks_single_cell:
-                manifest["single_cell_hint"] = True
-                manifest["mode"] = "single_cell"
-            else:
-                manifest["mode"] = "bulk"
-        elif manifest.get("single_cell_hint"):
+        if manifest.get("single_cell_hint"):
             manifest["mode"] = "single_cell"
         elif _files_look_bulk(files):
             looks_single_cell = (
