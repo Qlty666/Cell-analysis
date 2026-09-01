@@ -22,6 +22,92 @@ suppressWarnings(suppressPackageStartupMessages({
 options(timeout = 600)
 options(future.globals.maxSize = 10 * 1024^3)
 
+# Robust KEGG REST access with a local disk cache and retries. clusterProfiler
+# downloads pathway annotations from rest.kegg.jp during enrichKEGG/gseKEGG,
+# which can be slow or flaky; cache the parsed tables so reruns are offline.
+kegg_cache_dir <- file.path(getwd(), "data_cache", "kegg")
+dir.create(kegg_cache_dir, recursive = TRUE, showWarnings = FALSE)
+
+kegg_fetch_text <- function(url, timeout = 600, attempts = 3) {
+  last_error <- NULL
+  for (i in seq_len(attempts)) {
+    resp <- tryCatch(
+      httr::GET(url, httr::timeout(timeout)),
+      error = function(e) {
+        last_error <<- e
+        NULL
+      }
+    )
+    if (!is.null(resp) && httr::status_code(resp) == 200) {
+      return(httr::content(resp, as = "text", encoding = "UTF-8"))
+    }
+    if (i < attempts) Sys.sleep(3 * i)
+  }
+  stop(
+    "KEGG REST request failed after ", attempts, " attempts: ",
+    if (!is.null(last_error)) conditionMessage(last_error) else "non-200 response"
+  )
+}
+
+kegg_rest_cached <- function(rest_url) {
+  cache_file <- file.path(
+    kegg_cache_dir,
+    paste0(gsub("[^A-Za-z0-9]", "_", rest_url), ".rds")
+  )
+  if (file.exists(cache_file)) {
+    return(readRDS(cache_file))
+  }
+  message("Reading KEGG annotation online: \"", rest_url, "\"...")
+  content <- kegg_fetch_text(rest_url)
+  lines <- strsplit(content, "\n", fixed = TRUE)[[1]]
+  lines <- lines[nzchar(trimws(lines))]
+  mat <- do.call(rbind, strsplit(lines, "\t", fixed = TRUE))
+  res <- data.frame(from = mat[, 1], to = mat[, 2], stringsAsFactors = FALSE)
+  saveRDS(res, cache_file)
+  res
+}
+
+suppressWarnings(
+  tryCatch(
+    utils::assignInNamespace(
+      "kegg_rest",
+      kegg_rest_cached,
+      ns = "clusterProfiler"
+    ),
+    error = function(e) {
+      message("KEGG cache patch unavailable: ", conditionMessage(e))
+    }
+  )
+)
+
+kegg_call_retry <- function(fn, attempts = 3, timeout = 600) {
+  last_error <- NULL
+  for (i in seq_len(attempts)) {
+    res <- tryCatch(
+      {
+        options(timeout = timeout)
+        R.utils::withTimeout(fn(), timeout = timeout, onTimeout = "error")
+      },
+      error = function(e) {
+        last_error <<- e
+        NULL
+      }
+    )
+    if (!is.null(res)) return(res)
+    if (i < attempts) {
+      message(
+        "KEGG attempt ", i, " failed (", conditionMessage(last_error),
+        "); retrying"
+      )
+      Sys.sleep(3 * i)
+    }
+  }
+  if (!is.null(last_error)) {
+    message("KEGG failed after ", attempts, " attempts: ", conditionMessage(last_error))
+  }
+  NULL
+}
+
 skip_figs <- strsplit(Sys.getenv("LIVER_SKIP_FIGURES", unset = ""), ",")[[1]]
 skip_figs <- trimws(skip_figs[nzchar(skip_figs)])
 
@@ -2433,22 +2519,16 @@ if (stage_allowed("07")) run_stage("07_enrichment", {
       error = function(e) NULL
     )
 
-    kegg <- tryCatch({
-      httr::set_config(httr::timeout(60))
-      options(timeout = 60)
-      R.utils::withTimeout(
-        enrichKEGG(
-          gene = eg$ENTREZID,
-          organism = kegg_org,
-          pvalueCutoff = 0.1
-        ),
-        timeout = 60,
-        onTimeout = "error"
+    kegg <- kegg_call_retry(function() {
+      enrichKEGG(
+        gene = eg$ENTREZID,
+        organism = kegg_org,
+        pvalueCutoff = 0.1
       )
-    }, error = function(e) {
-      log_msg("KEGG enrichment unavailable: ", conditionMessage(e))
-      NULL
     })
+    if (is.null(kegg)) {
+      log_msg("KEGG enrichment unavailable")
+    }
 
     list(go = go, kegg = kegg)
   }
@@ -2552,25 +2632,19 @@ if (stage_allowed("07")) run_stage("07_enrichment", {
     )
     log_msg("GSEA GO finished")
     log_msg("starting GSEA KEGG with ", length(ranked), " genes")
-    gsea_kegg <- tryCatch({
-      options(timeout = 60)
-      httr::set_config(httr::timeout(60))
-      R.utils::withTimeout(
-        gseKEGG(
-          geneList = ranked,
-          organism = kegg_org,
-          minGSSize = 10,
-          maxGSSize = 500,
-          pvalueCutoff = 0.1,
-          verbose = FALSE
-        ),
-        timeout = 60,
-        onTimeout = "error"
+    gsea_kegg <- kegg_call_retry(function() {
+      gseKEGG(
+        geneList = ranked,
+        organism = kegg_org,
+        minGSSize = 10,
+        maxGSSize = 500,
+        pvalueCutoff = 0.1,
+        verbose = FALSE
       )
-    }, error = function(e) {
-      log_msg("GSEA KEGG unavailable: ", conditionMessage(e))
-      NULL
     })
+    if (is.null(gsea_kegg)) {
+      log_msg("GSEA KEGG unavailable")
+    }
     log_msg("GSEA KEGG finished")
   }
 
