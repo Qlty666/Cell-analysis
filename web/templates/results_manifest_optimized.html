@@ -736,6 +736,24 @@ footer { color: #64748b; font-size: 12px; margin: 30px 0 8px; }
     return 'other';
   }
 
+  function normalizeSearch(value) {
+    return String(value || '').toLowerCase().replace(/[\s_.\-/\\]+/g, '');
+  }
+
+  function textMatches(rawText, query) {
+    const raw = String(rawText || '');
+    const q = String(query || '').trim().toLowerCase();
+    if (!q) return true;
+    const rawNorm = normalizeSearch(raw);
+    const qNorm = normalizeSearch(q);
+    if (rawNorm.includes(qNorm)) return true;
+    const qName = q.split(/[\\/]+/).filter(Boolean).pop() || q;
+    const qNameNorm = normalizeSearch(qName);
+    if (qNameNorm && rawNorm.includes(qNameNorm)) return true;
+    const tokens = q.split(/\s+/).filter(Boolean);
+    return tokens.length > 1 && tokens.every(token => raw.toLowerCase().includes(token));
+  }
+
   function indexRows() {
     document.querySelectorAll('.card').forEach(card => {
       const h2 = card.querySelector('h2');
@@ -751,7 +769,8 @@ footer { color: #64748b; font-size: 12px; margin: 30px 0 8px; }
         tr.dataset.stage = stage;
         tr.dataset.type = type;
         if (!tr.dataset.transformed) {
-          tr.dataset.search = (tr.textContent + ' ' + file + ' ' + type).toLowerCase();
+          const searchText = (tr.textContent + ' ' + file + ' ' + type).toLowerCase();
+          tr.dataset.search = searchText;
         }
       });
     });
@@ -797,6 +816,8 @@ footer { color: #64748b; font-size: 12px; margin: 30px 0 8px; }
       const optional = tr.querySelector('.badge.opt');
       const kind = badgeText.includes('结果图') ? 'fig' : badgeText.includes('结果数据') ? 'data' : 'other';
       const entry = resultDetailEntry(file);
+      const originalLabel = tr.cells[1] ? tr.cells[1].textContent.trim() : '';
+      const originalUse = tr.cells[3] ? tr.cells[3].textContent.trim() : '';
       const content = entry ? entry.content : (tr.cells[1] ? tr.cells[1].textContent.trim() : '');
       const type = entry ? entry.type : (tr.cells[2] ? tr.cells[2].textContent.trim() : badgeText);
       const use = entry ? entry.use : (tr.cells[3] ? tr.cells[3].textContent.trim() : '');
@@ -822,7 +843,17 @@ footer { color: #64748b; font-size: 12px; margin: 30px 0 8px; }
       tr.dataset.transformed = '1';
       tr.dataset.file = file;
       tr.dataset.type = kind;
-      tr.dataset.search = [file, file.split('/').pop(), content, type, use, legend].join(' ').toLowerCase();
+      const searchText = [
+        file,
+        file.split('/').pop(),
+        originalLabel,
+        originalUse,
+        content,
+        type,
+        use,
+        legend,
+      ].join(' ');
+      tr.dataset.search = searchText.toLowerCase();
 
       const detailRow = document.createElement('tr');
       detailRow.className = 'result-detail-row';
@@ -916,7 +947,7 @@ footer { color: #64748b; font-size: 12px; margin: 30px 0 8px; }
     guideSections.forEach(section => {
       if (!section.el) return;
       const hay = (section.title + '\n' + section.text).toLowerCase();
-      const hit = !q || hay.includes(q);
+      const hit = textMatches(hay, q);
       section.el.style.display = hit ? '' : 'none';
       section.el.classList.toggle('guide-hit', Boolean(q) && hit);
       const title = section.el.querySelector('h3');
@@ -930,8 +961,9 @@ footer { color: #64748b; font-size: 12px; margin: 30px 0 8px; }
     let rowHits = 0;
     const rows = Array.from(document.querySelectorAll('.card table tbody tr:not(.result-detail-row)'));
     rows.forEach(tr => {
-      const queryOk = !q || (tr.dataset.search || '').includes(q);
-      const guideOk = Array.from(matchedFiles).some(file => (tr.dataset.file || '').toLowerCase().includes(file));
+      const queryOk = textMatches(tr.dataset.search || '', q);
+      const rowNorm = normalizeSearch(tr.dataset.file || '');
+      const guideOk = Array.from(matchedFiles).some(file => rowNorm.includes(normalizeSearch(file)));
       const show =
         (state.stage === 'all' || tr.dataset.stage === state.stage) &&
         (state.type === 'all' || tr.dataset.type === state.type) &&
