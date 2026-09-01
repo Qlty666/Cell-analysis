@@ -64,8 +64,8 @@ FIGURE_GUIDE = {
     "fig_19_condition_proportion.png": ("分组构成比例图", "不同分组中细胞类型的比例对比。"),
     "fig_20_gsea_go.png": ("GSEA GO BP 富集图", "GO 生物过程的 GSEA 富集曲线，查看通路的整体上调/下调方向。"),
     "fig_21_gsea_kegg.png": ("GSEA KEGG 富集图", "KEGG 通路的 GSEA 富集曲线。"),
-    "fig_22_go_network.png": ("GO BP 通路网络图（筛选后 Top5）", "上调基因 GO 富集结果经 p.adjust 筛选后取前 5 个通路的基因-通路关系网络。"),
-    "fig_23_kegg_network.png": ("KEGG 通路网络图（筛选后 Top5）", "上调基因 KEGG 富集结果经 p.adjust 筛选后取前 5 个通路的基因-通路关系网络。"),
+    "fig_22_go_network.png": ("GO BP 通路网络图（Top5 核心 + 5 延伸）", "上调基因 GO 富集结果经 p.adjust 筛选后保留前 5 个核心通路，并追加最佳 5 个延伸通路的基因-通路关系网络。"),
+    "fig_23_kegg_network.png": ("KEGG 通路网络图（Top5 核心 + 5 延伸）", "上调基因 KEGG 富集结果经 p.adjust 筛选后保留前 5 个核心通路，并追加最佳 5 个延伸通路的基因-通路关系网络。"),
     "fig_46_go_top5.png": ("GO BP 筛选后 Top5 富集图", "上调基因 GO 富集结果按 p.adjust 排序的前 5 条通路气泡图。"),
     "fig_47_kegg_top5.png": ("KEGG 筛选后 Top5 富集图", "上调基因 KEGG 富集结果按 p.adjust 排序的前 5 条通路气泡图。"),
     "fig_24_ml_feature_importance.png": ("ML 特征重要性图", "分类模型中的重要基因/特征，用于筛选关键变量。"),
@@ -1334,8 +1334,8 @@ summary {{ cursor: pointer; color: #1665c0; font-size: 13px; }}
 {image_card('fig_13_kegg_down.png', '下调基因 KEGG')}
 {image_card('fig_20_gsea_go.png', 'GSEA GO BP')}
 {image_card('fig_21_gsea_kegg.png', 'GSEA KEGG')}
-{image_card('fig_22_go_network.png', 'GO BP 通路网络（筛选后 Top5）')}
-{image_card('fig_23_kegg_network.png', 'KEGG 通路网络（筛选后 Top5）')}
+{image_card('fig_22_go_network.png', 'GO BP 通路网络（Top5 核心 + 5 延伸）')}
+{image_card('fig_23_kegg_network.png', 'KEGG 通路网络（Top5 核心 + 5 延伸）')}
 {image_card('fig_46_go_top5.png', 'GO BP 筛选后 Top5')}
 {image_card('fig_47_kegg_top5.png', 'KEGG 筛选后 Top5')}
 
