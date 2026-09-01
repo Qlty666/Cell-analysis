@@ -1,6 +1,6 @@
 # Liver Cancer Bioinformatics Workflow
 
-> 当前版本：1.0.0
+> 当前版本：1.0.1
 
 面向肝癌研究的本地生信自动化工作流，整合三条可实际运行的流水线：
 
@@ -677,6 +677,18 @@ GSE165816 和 TCGA PanCancer Atlas 仅用于真实数据验证。
 MIT License. See `LICENSE` for details.
 
 ## 9. 更新日志
+
+### v1.0.1
+
+- 真实数据集全流程兼容性修复：GEO 下载器对同时包含 bulk 与单细胞文件的系列改为优先选择 bulk 计数表，避免把样本级矩阵与单细胞矩阵混载导致下游失败；新增 `.h5ad.gz` 自动解压转换。
+- 修复 10x 多文库数据合并时重复 barcode 报 `duplicate row.names` 的问题：每个文库按文件名生成唯一样本后缀，跨文库细胞名不再冲突。
+- 修复 GEO series matrix 中带引号逗号标题解析错误，并兼容不同 platform 的 series matrix 列不一致（`rbind.fill` 合并）。
+- 样本级（bulk/microarray）数据集差异表达改为直接对原始样本计数运行 DESeq2，不再先聚合成伪 bulk，解决小样本量下 DEG 全为空的问题；保留单细胞伪 bulk 逻辑。
+- 条件自动推断增强：支持按 `geo_accession` 匹配样本元数据，并把多类别条件（如 ICC/HCC、Normal/Tumor）自动归并为两组，避免无法推断分组导致流水线中断。
+- 大细胞数单细胞数据集 `FindAllMarkers` 增加 `max.cells.per.ident` 限制，避免聚类 marker 计算长时间停滞。
+- 全流程证据阶段增加空 `key_genes.csv` 保护，DEG 为空时跳过证据收集并生成空表，不再因缺列崩溃。
+- 新增 `scripts/run_web_full_new_datasets.py`：通过网页端 `/full/start` 自动提交并监控多个真实数据集的全流程任务。
+- 项目规则新增第 13 条：禁止“准备做”式中间回复，任务执行完成或遇到必须由用户处理的阻塞前不发送文字回复。
 
 ### v1.0.0
 
