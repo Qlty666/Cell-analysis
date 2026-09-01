@@ -27,12 +27,15 @@ from web_ui import (  # noqa: E402
     NOTIFY_LOCK,
     _analysis_file_path,
     _dock_file_path,
+    _fetch_site_allowed,
     _full_file_path,
     _full_status,
+    _has_active_jobs,
     _single_status,
     _cleanup_stale_web_ui,
     _heartbeat_client_ids,
     _inject_heartbeat_script,
+    _origin_allowed,
     _port_is_listening,
     _purge_stale_heartbeats,
     dock_results,
@@ -344,6 +347,69 @@ class TestHeartbeatAutoShutdown(unittest.TestCase):
         register_heartbeat("new", now=100.0)
         _purge_stale_heartbeats(now=100.0, timeout=15.0)
         self.assertEqual(_heartbeat_client_ids(), {"new"})
+
+
+class TestRequestGuardrails(unittest.TestCase):
+    def test_origin_allowed_local_only(self):
+        self.assertTrue(_origin_allowed("http://127.0.0.1:8000"))
+        self.assertTrue(_origin_allowed("http://localhost:8000"))
+        self.assertTrue(_origin_allowed(""))
+        self.assertFalse(_origin_allowed("http://evil.example"))
+        self.assertFalse(_origin_allowed("https://evil.example"))
+        self.assertFalse(_origin_allowed("file:///tmp/x"))
+
+    def test_fetch_site_blocks_cross_site(self):
+        self.assertTrue(_fetch_site_allowed("same-origin"))
+        self.assertTrue(_fetch_site_allowed("same-site"))
+        self.assertTrue(_fetch_site_allowed("none"))
+        self.assertTrue(_fetch_site_allowed(""))
+        self.assertFalse(_fetch_site_allowed("cross-site"))
+
+    def test_active_jobs_keep_ui_alive(self):
+        class _FakeProc:
+            def __init__(self, running: bool = True, returncode: int = 0) -> None:
+                self._running = running
+                self._returncode = returncode
+
+            def poll(self):
+                return None if self._running else self._returncode
+
+        try:
+            web_ui_module.JOBS["queued"] = {
+                "queued": True,
+                "paused": False,
+                "proc": None,
+            }
+            self.assertTrue(_has_active_jobs())
+            web_ui_module.JOBS.clear()
+
+            DOCK_JOBS["running"] = {
+                "queued": False,
+                "paused": False,
+                "proc": _FakeProc(True),
+            }
+            self.assertTrue(_has_active_jobs())
+            DOCK_JOBS.clear()
+
+            FULL_JOBS["paused"] = {
+                "queued": False,
+                "paused": True,
+                "proc": _FakeProc(False),
+            }
+            self.assertTrue(_has_active_jobs())
+            FULL_JOBS.clear()
+
+            FULL_JOBS["exit_paused"] = {
+                "queued": False,
+                "paused": False,
+                "proc": _FakeProc(False, returncode=98),
+            }
+            self.assertTrue(_has_active_jobs())
+        finally:
+            web_ui_module.JOBS.clear()
+            DOCK_JOBS.clear()
+            FULL_JOBS.clear()
+            web_ui_module.DATASET_DOWNLOAD_JOBS.clear()
 
 
 def _make_info(tmp: Path, returncode: int) -> dict:
