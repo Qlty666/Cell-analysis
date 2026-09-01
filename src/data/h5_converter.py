@@ -1,6 +1,8 @@
 """Convert h5ad and loom matrices to 10x MTX files."""
 
 import gzip
+import shutil
+import tempfile
 from pathlib import Path
 
 import h5py
@@ -112,6 +114,15 @@ def convert_h5ad(path: Path) -> dict:
         "barcodes": prefix.name.replace("matrix.mtx", "barcodes.tsv"),
         "genes": prefix.name.replace("matrix.mtx", "genes.tsv"),
     }
+
+
+def convert_h5ad_gz(path: Path) -> dict:
+    """Convert a gzipped .h5ad file by decompressing to a temporary file."""
+    with tempfile.TemporaryDirectory(prefix="h5ad_gz_") as tmp:
+        plain = Path(tmp) / path.stem
+        with gzip.open(path, "rb") as src, plain.open("wb") as dst:
+            shutil.copyfileobj(src, dst)
+        return convert_h5ad(plain)
 
 
 def convert_loom(path: Path) -> dict:

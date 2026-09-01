@@ -495,6 +495,9 @@ read_generic_counts <- function(manifest) {
   for (i in seq_along(matrices)) {
     mat_file <- matrices[i]
     mat_path <- file.path(raw_dir, mat_file)
+    if (exists("sample_label", inherits = FALSE)) {
+      rm(sample_label)
+    }
 
     if (grepl("\\.rds$", mat_file, ignore.case = TRUE)) {
       obj <- readRDS(mat_path)
@@ -608,43 +611,87 @@ read_generic_counts <- function(manifest) {
           stop("Matrix file does not look like a gene x cell table: ", mat_file)
         }
         g <- tab[[1]]
-        m <- as.matrix(tab[, -1, with = FALSE])
+        drop_cols <- 1
+        if (
+          ncol(tab) > 2 &&
+          tolower(trimws(as.character(colnames(tab)[2]))) %in% c(
+            "gene", "genename", "gene_name", "symbol", "genesymbol"
+          )
+        ) {
+          drop_cols <- 2
+        }
+        m <- as.matrix(tab[, -seq_len(drop_cols), with = FALSE])
         if (is.character(m)) storage.mode(m) <- "double"
         rownames(m) <- make.unique(as.character(g))
-        colnames(m) <- colnames(tab)[-1]
+        colnames(m) <- colnames(tab)[-seq_len(drop_cols)]
       }
       m <- as(m, "CsparseMatrix")
+      if (ncol(m) > 0) {
+        sample_labels <- make.unique(as.character(colnames(m)))
+      }
+      sample_label <- sample_labels[1]
     }
-    barcode_labels <- infer_cell_samples(
-      if (length(bc) >= ncol(m)) bc else colnames(m)
-    )
-    filename_sample <- "Sample1"
-    path_parts <- strsplit(mat_file, "/", fixed = TRUE)[[1]]
-    feature_dir <- which(tolower(path_parts) == "raw_feature_bc_matrix")
-    if (length(feature_dir) > 0 && feature_dir[1] > 1) {
-      filename_sample <- path_parts[feature_dir[1] - 1]
+    bulk_sample_mode <- exists("sample_label")
+    if (!bulk_sample_mode) {
+      barcode_labels <- infer_cell_samples(
+        if (length(bc) >= ncol(m)) bc else colnames(m)
+      )
+      filename_sample <- "Sample1"
+  path_parts <- strsplit(mat_file, "/", fixed = TRUE)[[1]]
+  feature_dir <- which(tolower(path_parts) == "raw_feature_bc_matrix")
+  if (length(feature_dir) > 0 && feature_dir[1] > 1) {
+    filename_sample <- path_parts[feature_dir[1] - 1]
+  } else {
+    g_match <- regmatches(mat_file, regexpr("G[0-9]+[A-Z]?", mat_file))
+    if (length(g_match) > 0) {
+      filename_sample <- g_match
     } else {
-      g_match <- regmatches(mat_file, regexpr("G[0-9]+[A-Z]?", mat_file))
-      if (length(g_match) > 0) {
-        filename_sample <- g_match
-      } else {
-        gsm_match <- regmatches(mat_file, regexpr("GSM[0-9]+", mat_file))
-        if (length(gsm_match) > 0) {
+      gsm_match <- regmatches(mat_file, regexpr("GSM[0-9]+", mat_file))
+      if (length(gsm_match) > 0) {
+        gsm_token <- regmatches(
+          mat_file,
+          regexpr(
+            "GSM[0-9]+_[A-Za-z0-9-]+(?=-matrix\\.mtx)",
+            mat_file,
+            perl = TRUE
+          )
+        )
+        if (length(gsm_token) > 0) {
+          filename_sample <- gsub("-", "_", gsm_token)
+        } else {
           filename_sample <- gsm_match
+        }
+      } else {
+        token_match <- regmatches(
+          mat_file,
+          regexpr(
+            "[A-Za-z0-9]+_[A-Za-z0-9]+(?=_[^_/]*\\.mtx)",
+            mat_file,
+            perl = TRUE
+          )
+        )
+        if (length(token_match) > 0) {
+          filename_sample <- token_match
         }
       }
     }
-    if (all(barcode_labels == "Sample1")) {
-      sample_label <- filename_sample
-      sample_labels <- rep(sample_label, length(barcode_labels))
-    } else {
-      sample_label <- barcode_labels[1]
-      sample_labels <- barcode_labels
+  }
     }
-    if (identical(sample_label, "Sample1")) {
+    if (bulk_sample_mode) {
       colnames(m) <- make.unique(colnames(m))
     } else {
-      colnames(m) <- make.unique(paste0(colnames(m), "_", sample_label))
+      if (all(barcode_labels == "Sample1")) {
+        sample_label <- filename_sample
+        sample_labels <- rep(sample_label, length(barcode_labels))
+      } else {
+        sample_label <- barcode_labels[1]
+        sample_labels <- barcode_labels
+      }
+      if (identical(sample_label, "Sample1")) {
+        colnames(m) <- make.unique(colnames(m))
+      } else {
+        colnames(m) <- make.unique(paste0(colnames(m), "_", sample_label))
+      }
     }
     count_list_all[[i]] <- m
     sample_list[[i]] <- sample_labels
@@ -911,8 +958,25 @@ parse_series_generic <- function(manifest) {
 
   parse_values <- function(line) {
     v <- sub("^![^\t]*\t", "", line)
-    v <- unlist(strsplit(v, "\t", fixed = TRUE))
-    gsub('^"|"$', "", trimws(v))
+    tmp <- tempfile()
+    on.exit(unlink(tmp), add = TRUE)
+    writeLines(v, tmp)
+    tab <- tryCatch(
+      data.table::fread(
+        tmp,
+        header = FALSE,
+        sep = "\t",
+        quote = '"',
+        fill = TRUE,
+        colClasses = "character"
+      ),
+      error = function(e) NULL
+    )
+    if (is.null(tab) || ncol(tab) == 0) {
+      return(character())
+    }
+    vals <- unname(unlist(as.list(tab[1, ]), use.names = FALSE))
+    gsub('^"|"$', "", trimws(vals))
   }
 
   out <- list()
@@ -925,6 +989,11 @@ parse_series_generic <- function(manifest) {
     if (length(title_line) == 0) next
     titles <- parse_values(title_line[1])
     df <- data.frame(sample = titles, stringsAsFactors = FALSE)
+
+    geo_line <- lines[startsWith(lines, "!Sample_geo_accession")]
+    if (length(geo_line) > 0) {
+      df$geo_accession <- parse_values(geo_line[1])
+    }
 
     source_line <- lines[startsWith(lines, "!Sample_source_name_ch1")]
     if (length(source_line) > 0) {
@@ -948,7 +1017,19 @@ parse_series_generic <- function(manifest) {
   }
 
   if (length(out) == 0) return(NULL)
-  do.call(rbind, out)
+  tryCatch(
+    do.call(rbind, out),
+    error = function(e) {
+      log_msg("series matrix column mismatch; using rbind.fill: ", conditionMessage(e))
+      if (requireNamespace("plyr", quietly = TRUE)) {
+        plyr::rbind.fill(out)
+      } else if (requireNamespace("dplyr", quietly = TRUE)) {
+        dplyr::bind_rows(out)
+      } else {
+        stop("Cannot combine series matrix tables with mismatched columns")
+      }
+    }
+  )
 }
 
 infer_condition_from_sample_names <- function(samples) {
@@ -998,6 +1079,47 @@ infer_condition_from_sample_names <- function(samples) {
   }, character(1))
 }
 
+reduce_condition_to_two_groups <- function(vals) {
+  vals <- as.character(vals)
+  uni <- unique(vals[!is.na(vals) & nzchar(trimws(vals))])
+  if (length(uni) <= 2) {
+    return(vals)
+  }
+
+  disease_prefixes <- c("ICC", "HCC")
+  prefix_vals <- sub("^\\s*([A-Za-z]+).*$", "\\1", vals)
+  if (all(prefix_vals %in% disease_prefixes) &&
+      length(unique(prefix_vals)) >= 2) {
+    return(prefix_vals)
+  }
+
+  tissue_vals <- vals
+  tissue_vals <- ifelse(
+    grepl("normal|adjacent|control", tissue_vals, ignore.case = TRUE),
+    "Normal",
+    tissue_vals
+  )
+  tissue_vals <- ifelse(
+    grepl("tumor|cancer|metastasis|lymph node", tissue_vals, ignore.case = TRUE),
+    "Tumor",
+    tissue_vals
+  )
+  tissue_uni <- unique(
+    tissue_vals[!is.na(tissue_vals) & nzchar(trimws(tissue_vals))]
+  )
+  if (length(tissue_uni) == 2 && all(c("Normal", "Tumor") %in% tissue_uni)) {
+    return(tissue_vals)
+  }
+
+  tt <- sort(table(vals), decreasing = TRUE)
+  if (length(tt) >= 2) {
+    top2 <- names(tt)[1:2]
+    out <- ifelse(vals %in% top2, vals, top2[1])
+    return(out)
+  }
+  vals
+}
+
 infer_condition <- function(meta, sample_ann) {
   candidates <- c(
     "condition", "group", "disease", "disease_status", "health_status",
@@ -1014,7 +1136,16 @@ infer_condition <- function(meta, sample_ann) {
     }
   }
 
-  if (!is.null(sample_ann) && "sample" %in% colnames(meta)) {
+  match_meta_sample <- if (
+    !is.null(sample_ann) && "sample_annotation" %in% colnames(meta)
+  ) {
+    as.character(meta$sample_annotation)
+  } else if (!is.null(sample_ann) && "sample" %in% colnames(meta)) {
+    as.character(meta$sample)
+  } else {
+    NULL
+  }
+  if (!is.null(match_meta_sample)) {
     extract_key <- function(v) {
       v <- sub("^.*:", "", as.character(v))
       v <- sub("^\\s+|\\s+$", "", v)
@@ -1046,7 +1177,7 @@ infer_condition <- function(meta, sample_ann) {
       if (tolower(col) == "sample") next
       vals <- as.character(sample_ann[[col]])
       if (length(unique(vals[!is.na(vals)])) >= 2) {
-        idx <- match_samples(meta$sample, sample_ann$sample)
+        idx <- match_samples(match_meta_sample, sample_ann$sample)
         log_msg(
           "condition candidate ",
           col,
@@ -1057,7 +1188,10 @@ infer_condition <- function(meta, sample_ann) {
         )
         cond <- vals[idx]
         if (any(!is.na(cond))) {
-          return(cond)
+          reduced <- reduce_condition_to_two_groups(cond)
+          if (length(unique(reduced[!is.na(reduced)])) >= 2) {
+            return(reduced)
+          }
         }
       }
     }
@@ -1099,7 +1233,18 @@ read_generic_dataset <- function(manifest) {
   if (!is.null(ann) && "sample" %in% colnames(ann)) {
     ann_samples <- as.character(ann$sample)
     count_samples <- colnames(counts)
-    idx <- match(count_samples, ann_samples)
+    idx <- if ("geo_accession" %in% colnames(ann)) {
+      count_gsm <- sub(
+        "^(GSM[0-9]+).*$",
+        "\\1",
+        count_samples
+      )
+      ann_gsm <- as.character(ann$geo_accession)
+      gsm_idx <- match(count_gsm, ann_gsm)
+      if (sum(!is.na(gsm_idx)) >= 2) gsm_idx else match(count_samples, ann_samples)
+    } else {
+      match(count_samples, ann_samples)
+    }
     if (sum(!is.na(idx)) < 5) {
       idx <- match(sub("_[^_]+$", "", count_samples), ann_samples)
     }
@@ -1115,11 +1260,35 @@ read_generic_dataset <- function(manifest) {
         sub("^.*(G[0-9]+[A-Z]?).*$", "\\1", ann_samples)
       )
     }
+    if (sum(!is.na(idx)) < 5) {
+      extract_patient_id <- function(x) {
+        m <- regexpr(
+          "(?:patient[ _-]?)?(?:P|Patient)[ _-]?[0-9]+",
+          x,
+          ignore.case = TRUE
+        )
+        out <- rep(NA_character_, length(x))
+        hits <- m > 0
+        if (any(hits)) {
+          raw <- regmatches(x, m)
+          out[hits] <- sub(
+            "^[^0-9]*",
+            "",
+            gsub("[ _-]", "", raw[hits])
+          )
+        }
+        toupper(out)
+      }
+      idx <- match(
+        extract_patient_id(count_samples),
+        extract_patient_id(ann_samples)
+      )
+    }
     if (sum(!is.na(idx)) >= 2) {
       sample_vals <- loaded$cell_sample
       matched <- !is.na(idx)
       sample_vals[matched] <- ann_samples[idx[matched]]
-      meta$sample <- sample_vals
+      meta$sample_annotation <- sample_vals
       log_msg(
         "matched series matrix sample labels: ",
         sum(matched), "/", length(idx)
@@ -1863,6 +2032,24 @@ if (stage_allowed("05")) run_stage("05_annotation", {
     ]
     names(sort(table(labs), decreasing = TRUE))[1]
   }, character(1))
+  short_cluster_ids <- if (all(grepl("^[0-9]+$", cluster_ids))) {
+    cluster_ids
+  } else {
+    paste0("C", seq_along(cluster_ids))
+  }
+  cluster_id_map <- stats::setNames(short_cluster_ids, cluster_ids)
+  seurat$cluster_short <- unname(cluster_id_map[
+    as.character(seurat$seurat_clusters)
+  ])
+  seurat$celltype_short <- as.character(seurat$celltype_annot)
+  seurat$celltype_short <- ifelse(
+    nchar(seurat$celltype_short) > 24,
+    paste0("CellType", match(
+      seurat$celltype_short,
+      unique(seurat$celltype_short)
+    )),
+    seurat$celltype_short
+  )
   seurat$cluster_label <- unname(cluster_labels[match(
     as.character(seurat$seurat_clusters),
     cluster_ids
@@ -1881,21 +2068,21 @@ if (stage_allowed("05")) run_stage("05_annotation", {
   )
   write.csv(annotation_tbl, stage_data_file("fig_05_16_17_cell_annotations.csv"), row.names = FALSE)
 
-  p_clusters <- DimPlot(seurat, group.by = "seurat_clusters", label = FALSE) +
+  p_clusters <- DimPlot(seurat, group.by = "cluster_short", label = FALSE) +
     ggtitle("Seurat clusters (marker-based names)")
   p_clusters <- tryCatch(
     {
-      cluster_legend_labels <- paste0(cluster_ids, " - ", cluster_labels)
+      cluster_legend_labels <- paste0(short_cluster_ids, " - ", cluster_labels)
       p_clusters$data$seurat_clusters <- factor(
         cluster_legend_labels[match(
-          as.character(p_clusters$data$seurat_clusters),
-          cluster_ids
+          as.character(p_clusters$data$cluster_short),
+          short_cluster_ids
         )],
         levels = unique(c(cluster_legend_labels, cluster_labels))
       )
       LabelClusters(
         p_clusters,
-        id = "seurat_clusters",
+        id = "cluster_short",
         clusters = cluster_legend_labels,
         labels = cluster_labels,
         size = 4
@@ -1906,15 +2093,23 @@ if (stage_allowed("05")) run_stage("05_annotation", {
         "custom cluster labels failed, using numeric labels: ",
         conditionMessage(e)
       )
-      DimPlot(seurat, group.by = "seurat_clusters", label = TRUE) +
+      DimPlot(seurat, group.by = "cluster_short", label = TRUE) +
         ggtitle("Seurat clusters")
     }
   )
   p_condition <- DimPlot(seurat, group.by = "condition") +
     ggtitle(paste(sort(unique(as.character(seurat$condition))), collapse = " vs "))
-  p_annot <- DimPlot(seurat, group.by = "celltype_annot", label = TRUE) +
+  p_annot <- DimPlot(seurat, group.by = "celltype_short", label = TRUE) +
     ggtitle("Marker-based annotation")
-  p_pub <- DimPlot(seurat, group.by = "published_type", label = TRUE) +
+  p_pub <- DimPlot(
+    seurat,
+    group.by = if ("published_type" %in% colnames(seurat[[]])) {
+      "published_type"
+    } else {
+      "celltype_short"
+    },
+    label = TRUE
+  ) +
     ggtitle("Published cell type")
 
   save_fig(
@@ -1931,12 +2126,34 @@ if (stage_allowed("05")) run_stage("05_annotation", {
     height = 7,
     dpi = 150
   )
-  save_fig(
-    file.path(fig_dir, "fig_05_umap_annotation.png"),
-    p_annot + p_pub,
-    width = 15,
-    height = 7,
-    dpi = 150
+  tryCatch(
+    save_fig(
+      file.path(fig_dir, "fig_05_umap_annotation.png"),
+      p_annot + p_pub,
+      width = 15,
+      height = 7,
+      dpi = 150
+    ),
+    error = function(e) {
+      log_msg(
+        "combined annotation patchwork failed, saving panels separately: ",
+        conditionMessage(e)
+      )
+      save_fig(
+        file.path(fig_dir, "fig_05_umap_annotation.png"),
+        p_annot,
+        width = 8,
+        height = 7,
+        dpi = 150
+      )
+      save_fig(
+        file.path(fig_dir, "fig_05_umap_annotation_published.png"),
+        p_pub,
+        width = 8,
+        height = 7,
+        dpi = 150
+      )
+    }
   )
 
   dot_features <- expand_genes(c(
@@ -2123,97 +2340,57 @@ if (stage_allowed("06")) run_stage("06_differential_expression", {
     stringsAsFactors = FALSE
   ))
   sample_counts <- table(sample_cond$condition)
-  use_pseudobulk <- nrow(sample_cond) >= 4 && all(sample_counts >= 2)
-
-  if (use_pseudobulk) {
-    log_msg("using DESeq2 pseudobulk differential expression")
+  # Sample-level datasets already contain one column per biological sample,
+  # so differential expression must be computed on the raw sample counts
+  # directly instead of aggregating them into a pseudobulk matrix.
+  if (dataset_mode == "sample_level" && nrow(sample_cond) >= 4 && all(sample_counts >= 2)) {
+    log_msg("sample-level dataset: using DESeq2 directly on sample counts")
     warn_file <- file.path(data_dir, "pseudobulk_warning.txt")
     if (file.exists(warn_file)) {
       unlink(warn_file)
     }
-    bulk <- AggregateExpression(
-      seurat,
-      group.by = c("sample", "condition"),
-      assays = "RNA",
-      return.seurat = FALSE
-    )$RNA
-    bulk_meta <- data.frame(row.names = colnames(bulk), stringsAsFactors = FALSE)
-    bulk_meta$sample <- gsub(
-      "-",
-      "_",
-      sub("_[^_]+$", "", colnames(bulk))
-    )
-    bulk_meta$condition <- sample_cond$condition[
-      match(bulk_meta$sample, sample_cond$sample)
+    count_mat <- GetAssayData(seurat, layer = "counts")
+    count_mat <- as.matrix(count_mat)
+    sample_meta <- sample_cond
+    rownames(sample_meta) <- sample_meta$sample
+    sample_meta <- sample_meta[
+      intersect(rownames(sample_meta), colnames(count_mat)),
+      ,
+      drop = FALSE
     ]
-    bulk_meta$condition <- factor(bulk_meta$condition, levels = cond_levels)
-    bulk_meta <- bulk_meta[!is.na(bulk_meta$condition), , drop = FALSE]
-    bulk <- bulk[, rownames(bulk_meta), drop = FALSE]
-    if (sum(bulk) == 0 || nrow(bulk_meta) < 4) {
-      use_pseudobulk <- FALSE
-      log_msg("pseudobulk invalid; falling back to Seurat Wilcoxon")
-      writeLines(
-        "Sample count insufficient for pseudobulk; used Seurat Wilcoxon",
-        file.path(data_dir, "pseudobulk_warning.txt")
-      )
-    }
-  }
-
-  if (use_pseudobulk) {
-    dds <- DESeqDataSetFromMatrix(
-      countData = round(as.matrix(bulk)),
-      colData = bulk_meta,
-      design = ~ condition
+    count_mat <- count_mat[, rownames(sample_meta), drop = FALSE]
+    sample_meta$condition <- factor(
+      sample_meta$condition,
+      levels = cond_levels
     )
     dds <- tryCatch(
-      DESeq(dds, quiet = TRUE),
+      {
+        d <- DESeqDataSetFromMatrix(
+          countData = round(count_mat),
+          colData = sample_meta,
+          design = ~ condition
+        )
+        DESeq(d, quiet = TRUE)
+      },
       error = function(e) {
-        log_msg("pseudobulk DESeq2 failed: ", conditionMessage(e))
+        log_msg("sample-level DESeq2 failed: ", conditionMessage(e))
         NULL
       }
     )
-    if (is.null(dds)) {
-      use_pseudobulk <- FALSE
+    if (!is.null(dds)) {
+      res <- results(dds, contrast = c("condition", cond_levels[1], cond_levels[2]))
+      deg <- as.data.frame(res)
+      deg$gene <- rownames(deg)
+      deg$avg_log2FC <- deg$log2FoldChange
+      deg$p_val <- deg$pvalue
+      deg$p_val_adj <- deg$padj
+      deg$pct.1 <- NA_real_
+      deg$pct.2 <- NA_real_
+    } else {
+      log_msg("sample-level DESeq2 failed; falling back to Seurat Wilcoxon")
       writeLines(
-        "DESeq2 pseudobulk failed; used Seurat Wilcoxon",
+        "DESeq2 failed on sample-level counts; used Seurat Wilcoxon",
         file.path(data_dir, "pseudobulk_warning.txt")
-      )
-    }
-  }
-
-  if (use_pseudobulk) {
-    res <- results(dds, contrast = c("condition", cond_levels[1], cond_levels[2]))
-    deg <- as.data.frame(res)
-    deg$gene <- rownames(deg)
-    deg$avg_log2FC <- deg$log2FoldChange
-    deg$p_val <- deg$pvalue
-    deg$p_val_adj <- deg$padj
-    deg$pct.1 <- NA_real_
-    deg$pct.2 <- NA_real_
-  } else {
-    log_msg("using Seurat Wilcoxon with downsampling")
-    writeLines(
-      "Sample count insufficient for pseudobulk; used Seurat Wilcoxon",
-      file.path(data_dir, "pseudobulk_warning.txt")
-    )
-    deg <- tryCatch(
-      FindMarkers(
-        seurat,
-        ident.1 = cond_levels[1],
-        ident.2 = cond_levels[2],
-        test.use = "wilcox",
-        max.cells.per.ident = 3000,
-        logfc.threshold = de_logfc,
-        min.pct = 0.1,
-        only.pos = FALSE,
-        verbose = FALSE
-      ),
-      error = function(e) NULL
-    )
-    if (is.null(deg) || nrow(deg) == 0 || ncol(deg) == 0) {
-      log_msg(
-        "no DEGs passed default filters; ",
-        "rerunning without logFC/min.pct filters"
       )
       deg <- tryCatch(
         FindMarkers(
@@ -2229,6 +2406,115 @@ if (stage_allowed("06")) run_stage("06_differential_expression", {
         ),
         error = function(e) NULL
       )
+    }
+  } else {
+    use_pseudobulk <- nrow(sample_cond) >= 4 && all(sample_counts >= 2)
+
+    if (use_pseudobulk) {
+      log_msg("using DESeq2 pseudobulk differential expression")
+      warn_file <- file.path(data_dir, "pseudobulk_warning.txt")
+      if (file.exists(warn_file)) {
+        unlink(warn_file)
+      }
+      bulk <- AggregateExpression(
+        seurat,
+        group.by = c("sample", "condition"),
+        assays = "RNA",
+        return.seurat = FALSE
+      )$RNA
+      bulk_meta <- data.frame(row.names = colnames(bulk), stringsAsFactors = FALSE)
+      bulk_meta$sample <- gsub(
+        "-",
+        "_",
+        sub("_[^_]+$", "", colnames(bulk))
+      )
+      bulk_meta$condition <- sample_cond$condition[
+        match(bulk_meta$sample, sample_cond$sample)
+      ]
+      bulk_meta$condition <- factor(bulk_meta$condition, levels = cond_levels)
+      bulk_meta <- bulk_meta[!is.na(bulk_meta$condition), , drop = FALSE]
+      bulk <- bulk[, rownames(bulk_meta), drop = FALSE]
+      if (sum(bulk) == 0 || nrow(bulk_meta) < 4) {
+        use_pseudobulk <- FALSE
+        log_msg("pseudobulk invalid; falling back to Seurat Wilcoxon")
+        writeLines(
+          "Sample count insufficient for pseudobulk; used Seurat Wilcoxon",
+          file.path(data_dir, "pseudobulk_warning.txt")
+        )
+      }
+    }
+
+    if (use_pseudobulk) {
+      dds <- DESeqDataSetFromMatrix(
+        countData = round(as.matrix(bulk)),
+        colData = bulk_meta,
+        design = ~ condition
+      )
+      dds <- tryCatch(
+        DESeq(dds, quiet = TRUE),
+        error = function(e) {
+          log_msg("pseudobulk DESeq2 failed: ", conditionMessage(e))
+          NULL
+        }
+      )
+      if (is.null(dds)) {
+        use_pseudobulk <- FALSE
+        writeLines(
+          "DESeq2 pseudobulk failed; used Seurat Wilcoxon",
+          file.path(data_dir, "pseudobulk_warning.txt")
+        )
+      }
+    }
+
+    if (use_pseudobulk) {
+      res <- results(dds, contrast = c("condition", cond_levels[1], cond_levels[2]))
+      deg <- as.data.frame(res)
+      deg$gene <- rownames(deg)
+      deg$avg_log2FC <- deg$log2FoldChange
+      deg$p_val <- deg$pvalue
+      deg$p_val_adj <- deg$padj
+      deg$pct.1 <- NA_real_
+      deg$pct.2 <- NA_real_
+    } else {
+      log_msg("using Seurat Wilcoxon with downsampling")
+      writeLines(
+        "Sample count insufficient for pseudobulk; used Seurat Wilcoxon",
+        file.path(data_dir, "pseudobulk_warning.txt")
+      )
+      deg <- tryCatch(
+        FindMarkers(
+          seurat,
+          ident.1 = cond_levels[1],
+          ident.2 = cond_levels[2],
+          test.use = "wilcox",
+          max.cells.per.ident = 3000,
+          logfc.threshold = de_logfc,
+          min.pct = 0.1,
+          only.pos = FALSE,
+          verbose = FALSE
+        ),
+        error = function(e) NULL
+      )
+      if (is.null(deg) || nrow(deg) == 0 || ncol(deg) == 0) {
+        log_msg(
+          "no DEGs passed default filters; ",
+          "rerunning without logFC/min.pct filters"
+        )
+        deg <- tryCatch(
+          FindMarkers(
+            seurat,
+            ident.1 = cond_levels[1],
+            ident.2 = cond_levels[2],
+            test.use = "wilcox",
+            max.cells.per.ident = 3000,
+            logfc.threshold = 0,
+            min.pct = 0,
+            only.pos = FALSE,
+            verbose = FALSE
+          ),
+          error = function(e) NULL
+        )
+      }
     }
   }
   deg <- ensure_deg_columns(deg)
@@ -2941,6 +3227,7 @@ if (stage_allowed("08")) run_stage("08_publication_analyses", {
         only.pos = TRUE,
         min.pct = 0.25,
         logfc.threshold = 0.5,
+        max.cells.per.ident = 2000,
         verbose = FALSE
       ),
       error = function(e) NULL

@@ -18,6 +18,12 @@ BULK_COUNT_TABLE_RE = re.compile(
     re.IGNORECASE,
 )
 
+BULK_MATRIX_NAME_RE = re.compile(
+    r"bulk[-_ ]?rna|bulk[-_ ]?seq|_bulk_|bulk_count|"
+    r"raw_counts|count_matrix|expr_matrix|expression_matrix",
+    re.IGNORECASE,
+)
+
 ARCHIVE_SUFFIXES = (
     ".tar",
     ".tar.gz",
@@ -42,6 +48,8 @@ def _files_look_bulk(files: dict) -> bool:
     barcodes = files.get("barcodes") or []
     genes = files.get("genes") or []
     if any(BULK_COUNT_TABLE_RE.search(name) for name in matrices):
+        return True
+    if any(BULK_MATRIX_NAME_RE.search(name) for name in matrices):
         return True
     if any(
         name.lower().endswith((".rds", ".h5", ".h5ad", ".loom"))
@@ -225,6 +233,8 @@ def _select_files(names: list[str]) -> dict:
     genes = []
     matrices = []
     metadata = []
+    bulk_matrices = []
+    single_cell_matrices = []
 
     for name in names:
         low = name.lower()
@@ -258,7 +268,18 @@ def _select_files(names: list[str]) -> dict:
             r"\.h5ad$|\.h5$|\.loom$",
             low,
         ) or BULK_COUNT_TABLE_RE.search(name):
-            matrices.append(name)
+            if BULK_COUNT_TABLE_RE.search(name) or BULK_MATRIX_NAME_RE.search(name):
+                bulk_matrices.append(name)
+            else:
+                single_cell_matrices.append(name)
+
+    # Prefer bulk count tables when a series contains both sample-level and
+    # single-cell matrices (e.g. a bulk cohort plus scRNA-seq subsets). Mixing
+    # them produces matrices with incompatible column semantics.
+    if bulk_matrices:
+        matrices = bulk_matrices
+    else:
+        matrices = single_cell_matrices
 
     return {
         "matrix": matrices,
@@ -316,7 +337,20 @@ def _expand_archive_files(files: dict, base_dir: Path, log) -> dict:
 def _refresh_manifest_mode(manifest: dict, base_dir: Path | None = None) -> dict:
     files = manifest.get("files")
     if isinstance(files, dict):
-        if manifest.get("single_cell_hint"):
+        if _files_look_bulk(files):
+            looks_single_cell = (
+                base_dir is not None
+                and _matrix_files_look_single_cell(
+                    files,
+                    base_dir,
+                )
+            )
+            if looks_single_cell:
+                manifest["single_cell_hint"] = True
+                manifest["mode"] = "single_cell"
+            else:
+                manifest["mode"] = "bulk"
+        elif manifest.get("single_cell_hint"):
             manifest["mode"] = "single_cell"
         elif _files_look_bulk(files):
             looks_single_cell = (
@@ -362,7 +396,24 @@ def _convert_downloaded(downloaded: dict, raw_dir: Path) -> dict:
         prefix = Path(name).parent.as_posix()
         if prefix == ".":
             prefix = ""
-        if name.lower().endswith(".h5ad"):
+        low = name.lower()
+        if low.endswith(".h5ad.gz"):
+            if convert_h5ad is None:
+                raise RuntimeError(
+                    "h5py/scipy are required to convert .h5ad inputs; "
+                    "run: python -m pip install h5py scipy"
+                )
+            from .h5_converter import convert_h5ad_gz
+
+            result = convert_h5ad_gz(path)
+            return {
+                "matrix": f"{prefix}/{result['matrix']}" if prefix else result["matrix"],
+                "barcodes": (
+                    f"{prefix}/{result['barcodes']}" if prefix else result["barcodes"]
+                ),
+                "genes": f"{prefix}/{result['genes']}" if prefix else result["genes"],
+            }
+        if low.endswith(".h5ad"):
             if convert_h5ad is None:
                 raise RuntimeError(
                     "h5py/scipy are required to convert .h5ad inputs; "
