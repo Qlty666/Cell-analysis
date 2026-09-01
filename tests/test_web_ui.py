@@ -1025,12 +1025,21 @@ class TestTemplatePolish(unittest.TestCase):
         html = self._read("results_manifest_optimized.html")
         self.assertIn("resultFilter", html)
         self.assertIn("filterResults", html)
+        self.assertIn("normalizeSearch", html)
+        self.assertIn("textMatches", html)
+
+    def test_results_search_matches_figure_from_full_path(self):
+        html = self._read("results_manifest_optimized.html")
+        self.assertIn("q.split(/[\\\\/]+/)", html)
+        self.assertIn("qNameNorm", html)
 
     def test_results_manifest_includes_latest_figures(self):
         html = self._read("results_manifest_optimized.html")
         for token in [
             "figures/01_qc/fig_48_qc_pvalue_comparison.png",
             "data/01_qc/fig_48_qc_pvalue_comparison.csv",
+            "figures/06_enrichment/fig_22_go_network.png",
+            "figures/06_enrichment/fig_23_kegg_network.png",
             "figures/06_enrichment/fig_46_go_top5.png",
             "figures/06_enrichment/fig_47_kegg_top5.png",
         ]:
