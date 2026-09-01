@@ -21,18 +21,20 @@ APP_ROOT = WEB_DIR.parent
 SCRIPTS_DIR = APP_ROOT / "scripts"
 JOBS = {}
 QUEUE = []
-QUEUE_LOCK = threading.Lock()
+QUEUE_LOCK = threading.RLock()
 TEMPLATE_DIR = WEB_DIR / "templates"
 STATIC_DIR = WEB_DIR / "static"
 INDEX_PATH = TEMPLATE_DIR / "index.html"
 PAGE_TEMPLATE_PATH = TEMPLATE_DIR / "web_page_template.html"
 HISTORY_PATH = WEB_DIR / "history.json"
+HISTORY_LOCK = threading.RLock()
 INSTALL_LOG = WEB_DIR / "install_log.txt"
 INSTALL_JOB = {}
 FINISHED_NOTIFICATIONS: list[dict] = []
 NOTIFY_LOCK = threading.Lock()
 TASK_HISTORY_PATH = WEB_DIR / "task_history.json"
 TASK_HISTORY_LOCK = threading.Lock()
+JOB_RECORD_LOCK = threading.Lock()
 
 HEARTBEAT_CLIENTS: dict[str, float] = {}
 HEARTBEAT_LAST_SEEN_AT: float | None = None
@@ -55,8 +57,9 @@ from common.env import require_rscript  # noqa: E402
 DOCK_TEMPLATE_PATH = TEMPLATE_DIR / "dock_page_template.html"
 DOCK_JOBS = {}
 DOCK_QUEUE = []
-DOCK_QUEUE_LOCK = threading.Lock()
+DOCK_QUEUE_LOCK = threading.RLock()
 DOCK_HISTORY_PATH = WEB_DIR / "dock_history.json"
+DOCK_HISTORY_LOCK = threading.RLock()
 FULL_TEMPLATE_PATH = TEMPLATE_DIR / "full_page_template.html"
 RESULTS_TEMPLATE_PATH = TEMPLATE_DIR / "results_manifest_optimized.html"
 RESULT_GUIDE_PATH = APP_ROOT / "docs" / "result_figure_guide.md"
@@ -69,11 +72,13 @@ DATASET_DOWNLOAD_JOBS = {}
 DATASET_DOWNLOAD_LOCK = threading.Lock()
 FULL_JOBS = {}
 FULL_QUEUE = []
-FULL_QUEUE_LOCK = threading.Lock()
+FULL_QUEUE_LOCK = threading.RLock()
 VALIDATION_REPORT_DIR = APP_ROOT.parent / "y3" / "validation"
 VALIDATION_REPORT_PATH = VALIDATION_REPORT_DIR / "validation_summary.json"
 VALIDATION_LOG = WEB_DIR / "validation_run.log"
 VALIDATION_JOB = {"proc": None, "log": None, "handle": None, "started": None}
+MAX_POST_BODY_BYTES = 1_000_000
+LOCAL_ORIGIN_HOSTS = {"127.0.0.1", "localhost", "[::1]", "::1"}
 NAV_HTML = (
     '<div class="topnav">'
     '<a href="/full">全自动流水线</a>'
@@ -166,6 +171,45 @@ def _purge_stale_heartbeats(
                 HEARTBEAT_CLIENTS.pop(client_id, None)
 
 
+def _has_active_jobs() -> bool:
+    for store in (JOBS, DOCK_JOBS, FULL_JOBS):
+        for info in store.values():
+            proc = info.get("proc")
+            if proc is None:
+                if info.get("queued"):
+                    return True
+                continue
+            exit_code = proc.poll()
+            if exit_code is None or info.get("paused") or exit_code == 98:
+                return True
+    with DATASET_DOWNLOAD_LOCK:
+        if any(info.get("running") for info in DATASET_DOWNLOAD_JOBS.values()):
+            return True
+    for proc in (VALIDATION_JOB.get("proc"), INSTALL_JOB.get("proc")):
+        if proc is not None and proc.poll() is None:
+            return True
+    return False
+
+
+def _origin_allowed(origin: str) -> bool:
+    origin = (origin or "").strip()
+    if not origin:
+        return True
+    try:
+        parts = urlparse(origin)
+    except Exception:
+        return False
+    return (
+        parts.scheme.lower() in ("http", "https")
+        and (parts.hostname or "").lower() in LOCAL_ORIGIN_HOSTS
+    )
+
+
+def _fetch_site_allowed(site: str) -> bool:
+    site = (site or "").strip().lower()
+    return not site or site in ("same-origin", "same-site", "none")
+
+
 def _inject_heartbeat_script(body: bytes) -> bytes:
     if b"</body>" not in body:
         return body
@@ -180,7 +224,7 @@ def _run_idle_shutdown_monitor(
     while True:
         now = time.monotonic()
         _purge_stale_heartbeats(now)
-        if _heartbeat_client_ids():
+        if _heartbeat_client_ids() or _has_active_jobs():
             idle_since = None
         else:
             if idle_since is None:
@@ -466,7 +510,8 @@ def start_job(
         "paused": False,
         "notified": False,
     }
-    QUEUE.append(JOBS[job_id])
+    with QUEUE_LOCK:
+        QUEUE.append(JOBS[job_id])
     _drain_queue()
     return {
         "job": job_id,
@@ -501,19 +546,21 @@ def _drain_queue() -> None:
 
 
 def load_history() -> list[dict]:
-    if not HISTORY_PATH.exists():
-        return []
-    try:
-        return json.loads(HISTORY_PATH.read_text(encoding="utf-8"))
-    except Exception:
-        return []
+    with HISTORY_LOCK:
+        if not HISTORY_PATH.exists():
+            return []
+        try:
+            return json.loads(HISTORY_PATH.read_text(encoding="utf-8"))
+        except Exception:
+            return []
 
 
 def save_history(records: list[dict]) -> None:
-    HISTORY_PATH.write_text(
-        json.dumps(records, ensure_ascii=False, indent=2),
-        encoding="utf-8",
-    )
+    with HISTORY_LOCK:
+        HISTORY_PATH.write_text(
+            json.dumps(records, ensure_ascii=False, indent=2),
+            encoding="utf-8",
+        )
 
 
 def record_job(info: dict, ok: bool) -> None:
@@ -532,9 +579,10 @@ def record_job(info: dict, ok: bool) -> None:
         "figures": figure_count,
         "report": str(info["out"] / "results" / "result_report.html"),
     }
-    records = load_history()
-    records.insert(0, record)
-    save_history(records)
+    with HISTORY_LOCK:
+        records = load_history()
+        records.insert(0, record)
+        save_history(records)
 
 
 def resume_job(job_id: str) -> dict:
@@ -1351,7 +1399,8 @@ def start_dock_job(data: dict) -> dict:
         "recorded": False,
         "notified": False,
     }
-    DOCK_QUEUE.append(DOCK_JOBS[job_id])
+    with DOCK_QUEUE_LOCK:
+        DOCK_QUEUE.append(DOCK_JOBS[job_id])
     _drain_dock_queue()
     return {
         "job": job_id,
@@ -1416,9 +1465,10 @@ def _dock_status(info: dict) -> dict:
                 "error": error,
             }
         ok = info["proc"].returncode == 0
-        if not info.get("recorded"):
-            record_dock_job(info, ok)
-            info["recorded"] = True
+        with JOB_RECORD_LOCK:
+            if not info.get("recorded"):
+                record_dock_job(info, ok)
+                info["recorded"] = True
         _drain_dock_queue()
         stage, error = _finished_info(marker_dir, DOCK_STAGE_LABELS, log_paths, False)
         status = "completed" if ok else "interrupted"
@@ -1549,7 +1599,8 @@ def start_full_job(data: dict) -> dict:
         "queued": True,
         "notified": False,
     }
-    FULL_QUEUE.append(FULL_JOBS[job_id])
+    with FULL_QUEUE_LOCK:
+        FULL_QUEUE.append(FULL_JOBS[job_id])
     _drain_full_queue()
     return {
         "job": job_id,
@@ -1690,9 +1741,10 @@ def _single_status(info: dict) -> dict:
     if not running:
         ok = info["proc"].returncode == 0
         paused = info["proc"].returncode == 98
-        if not info.get("recorded") and not paused:
-            record_job(info, ok)
-            info["recorded"] = True
+        with JOB_RECORD_LOCK:
+            if not info.get("recorded") and not paused:
+                record_job(info, ok)
+                info["recorded"] = True
         _drain_queue()
         marker_dir = info["out"] / "results" / ".stages"
         log_paths = [info["log"], info["out"] / "logs" / "pipeline_r.log"]
@@ -2410,36 +2462,39 @@ def validation_job_status() -> dict:
 
 
 def load_dock_history() -> list[dict]:
-    if not DOCK_HISTORY_PATH.exists():
-        return []
-    try:
-        return json.loads(DOCK_HISTORY_PATH.read_text(encoding="utf-8"))
-    except Exception:
-        return []
+    with DOCK_HISTORY_LOCK:
+        if not DOCK_HISTORY_PATH.exists():
+            return []
+        try:
+            return json.loads(DOCK_HISTORY_PATH.read_text(encoding="utf-8"))
+        except Exception:
+            return []
 
 
 def save_dock_history(records: list[dict]) -> None:
-    DOCK_HISTORY_PATH.write_text(
-        json.dumps(records, ensure_ascii=False, indent=2),
-        encoding="utf-8",
-    )
+    with DOCK_HISTORY_LOCK:
+        DOCK_HISTORY_PATH.write_text(
+            json.dumps(records, ensure_ascii=False, indent=2),
+            encoding="utf-8",
+        )
 
 
 def record_dock_job(info: dict, ok: bool) -> None:
-    records = load_dock_history()
-    records.insert(
-        0,
-        {
-            "job": info["log"].stem.replace("web_dock_", ""),
-            "stage": info.get("stage", ""),
-            "workdir": str(info["workdir"]),
-            "output": str(info["output_dir"]),
-            "status": "success" if ok else "failed",
-            "started": info["started"],
-            "finished": time.time(),
-        },
-    )
-    save_dock_history(records)
+    with DOCK_HISTORY_LOCK:
+        records = load_dock_history()
+        records.insert(
+            0,
+            {
+                "job": info["log"].stem.replace("web_dock_", ""),
+                "stage": info.get("stage", ""),
+                "workdir": str(info["workdir"]),
+                "output": str(info["output_dir"]),
+                "status": "success" if ok else "failed",
+                "started": info["started"],
+                "finished": time.time(),
+            },
+        )
+        save_dock_history(records)
 
 
 def dock_results(info: dict) -> dict:
@@ -2792,6 +2847,9 @@ class Handler(BaseHTTPRequestHandler):
 
     def do_GET(self):
         parsed = urlparse(self.path)
+        if not _fetch_site_allowed(self.headers.get("Sec-Fetch-Site", "")):
+            self._send(403, b"cross-site request blocked", "text/plain; charset=utf-8")
+            return
         if parsed.path == "/heartbeat":
             self._handle_heartbeat(parse_qs(parsed.query))
             return
@@ -3289,7 +3347,20 @@ class Handler(BaseHTTPRequestHandler):
 
     def do_POST(self):
         parsed = urlparse(self.path)
-        length = int(self.headers.get("Content-Length", 0))
+        if not _fetch_site_allowed(self.headers.get("Sec-Fetch-Site", "")):
+            self._send(403, b"cross-site request blocked", "text/plain; charset=utf-8")
+            return
+        if not _origin_allowed(self.headers.get("Origin", "")):
+            self._send(403, b"cross-origin request blocked", "text/plain; charset=utf-8")
+            return
+        try:
+            length = int(self.headers.get("Content-Length", "0"))
+        except ValueError:
+            self._send(400, b"invalid Content-Length", "text/plain; charset=utf-8")
+            return
+        if length < 0 or length > MAX_POST_BODY_BYTES:
+            self._send(413, b"request body too large", "text/plain; charset=utf-8")
+            return
         body = self.rfile.read(length).decode("utf-8", "replace")
         data = parse_qs(body)
 
@@ -3761,6 +3832,11 @@ def main() -> int:
         return 1
     url = f"http://{args.host}:{args.port}"
     print(f"Web UI started: {url}")
+    if args.host not in ("127.0.0.1", "localhost", "::1"):
+        print(
+            "WARNING: Web UI exposes pipeline command and file endpoints "
+            "on a non-loopback host; only use this on a trusted network."
+        )
     threading.Thread(
         target=_run_idle_shutdown_monitor,
         args=(server, time.monotonic()),
