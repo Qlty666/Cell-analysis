@@ -421,6 +421,29 @@ read_generic_counts <- function(manifest) {
       }
     } else if (grepl("\\.h5$", mat_file, ignore.case = TRUE)) {
       m <- Read10X_h5(mat_path)
+      if (is.list(m) && !inherits(m, "Matrix")) {
+        pick_h5_gex <- function(x) {
+          if (inherits(x, "Matrix") || is.matrix(x)) {
+            return(x)
+          }
+          if (is.list(x) && "Gene Expression" %in% names(x)) {
+            return(x[["Gene Expression"]])
+          }
+          NULL
+        }
+        picked <- pick_h5_gex(m)
+        if (is.null(picked)) {
+          for (entry in m) {
+            picked <- pick_h5_gex(entry)
+            if (!is.null(picked)) break
+          }
+        }
+        if (is.null(picked)) {
+          stop("H5 file has no Gene Expression matrix: ", mat_file)
+        }
+        log_msg("selecting Gene Expression matrix from multi-modal H5: ", mat_file)
+        m <- picked
+      }
     } else if (grepl("\\.mtx", mat_file, ignore.case = TRUE)) {
       if (length(barcodes) < i || length(genes) < i) {
         stop("Missing barcode or gene files for ", mat_file)
