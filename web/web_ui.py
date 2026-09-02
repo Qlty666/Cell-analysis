@@ -97,6 +97,10 @@ NAV_CSS = (
     "font-weight:600;padding:6px 10px;border-radius:6px;"
     "background:rgba(255,255,255,.08);}"
     ".topnav a:hover,.topnav a.active{background:#1665c0;color:#fff;}"
+    ".topnav a .nav-count{display:inline-flex;align-items:center;"
+    "justify-content:center;min-width:20px;height:20px;margin-left:6px;"
+    "padding:0 6px;border-radius:999px;background:#f59e0b;color:#fff;"
+    "font-size:12px;font-weight:700;line-height:1;}"
     ".topnav .nav-right{margin-left:auto;}"
 )
 
@@ -624,6 +628,7 @@ PAGE_TEMPLATE = """<!DOCTYPE html>
 <head>
 <meta charset="utf-8">
 <meta name="viewport" content="width=device-width, initial-scale=1">
+<script src="/static/nav.js" defer></script>
 <title>表达分析流水线</title>
 <style>
 body { font-family: "Segoe UI", Arial, sans-serif; background: #f5f7fa; margin: 0; color: #1f2933; }
@@ -3339,6 +3344,7 @@ class Handler(BaseHTTPRequestHandler):
                 ".jpg": "image/jpeg",
                 ".svg": "image/svg+xml",
                 ".css": "text/css; charset=utf-8",
+                ".js": "text/javascript; charset=utf-8",
                 ".json": "application/json; charset=utf-8",
             }.get(target.suffix.lower(), "application/octet-stream")
             self._send(200, target.read_bytes(), content_type)

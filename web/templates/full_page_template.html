@@ -4,6 +4,7 @@
 <meta charset="utf-8">
 <meta name="viewport" content="width=device-width, initial-scale=1">
 <link rel="stylesheet" href="/static/app.css">
+<script src="/static/nav.js" defer></script>
 <title>全自动流水线</title>
 <style>
 body {
@@ -542,6 +543,12 @@ function saveFormState() {
   }
 }
 
+function autoSaveFormState() {
+  try {
+    sessionStorage.setItem(FULL_FORM_KEY, JSON.stringify(collectFormState()));
+  } catch (e) {}
+}
+
 function restoreFormState() {
   let saved = null;
   try {
@@ -621,6 +628,7 @@ async function startRun() {
     if (!resp.ok) throw new Error(result.error || '启动失败');
     currentJob = result.job;
     saveJobRecord();
+    autoSaveFormState();
     document.getElementById('log').textContent = '';
     document.getElementById('pauseBtn').disabled = false;
     document.getElementById('resumeBtn').disabled = false;
