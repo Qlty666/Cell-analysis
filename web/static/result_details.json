@@ -187,9 +187,9 @@
       "kind": "fig",
       "content": "marker 基因在 UMAP 上的表达位置。",
       "type": "UMAP 特征图（FeaturePlot）",
-      "use": "检查 marker 表达是否集中在预期细胞类型区域。",
+      "use": "检查 marker 表达是否集中在预期细胞类型区域；仅数据集中存在固定 marker 基因时生成。",
       "optional": true,
-      "legend": "坐标轴：UMAP_1/UMAP_2，每个 marker 基因一个面板（最多 6 个）。\n颜色：点颜色表示 marker 表达量，浅灰到深红渐变（FeaturePlot 默认配色）。\n读取：表达信号应集中在预期细胞类型区域；全图均匀灰色时不可用。"
+      "legend": "坐标轴：UMAP_1/UMAP_2，每个 marker 基因一个面板（最多 6 个）。\n颜色：点颜色表示 marker 表达量，浅灰到深红渐变（FeaturePlot 默认配色）。\n输出条件：数据集中存在固定 marker 基因（与表达矩阵交集非空，最多 6 个）。\n读取：表达信号应集中在预期细胞类型区域；全图均匀灰色时不可用。"
     },
     {
       "file": "figures/04_annotation/fig_17_marker_violin.png",
@@ -197,9 +197,9 @@
       "kind": "fig",
       "content": "marker 基因在各细胞类型中的表达分布。",
       "type": "小提琴图（多面板）",
-      "use": "验证 marker 在对应细胞类型中表达更高。",
+      "use": "验证 marker 在对应细胞类型中表达更高；仅数据集中存在可用 marker 基因时生成。",
       "optional": true,
-      "legend": "坐标轴：横轴为细胞类型，纵轴为表达量。\n图形：小提琴按细胞类型分组，每个 marker 一个面板。\n读取：预期细胞类型表达明显更高；分布完全一致时不能作为注释支持。"
+      "legend": "坐标轴：横轴为细胞类型，纵轴为表达量。\n图形：小提琴按细胞类型分组，每个 marker 一个面板。\n输出条件：同 fig_16，需存在可用 marker 基因。\n读取：预期细胞类型表达明显更高；分布完全一致时不能作为注释支持。"
     },
     {
       "file": "figures/04_annotation/fig_18_celltype_proportion.png",
@@ -309,7 +309,7 @@
       "type": "UMAP 散点图",
       "use": "检查细胞周期是否干扰聚类结构。",
       "optional": true,
-      "legend": "坐标轴：UMAP_1/UMAP_2。\n颜色/图例：点颜色表示细胞周期阶段（Seurat Phase：G1/S/G2M 默认离散配色）。\n开关：LIVER_RUN_CELLCYCLE=yes，且需足够 S/G2M 基因。\n读取：phase 强分群时需评估细胞周期回归。"
+      "legend": "坐标轴：UMAP_1/UMAP_2。\n颜色/图例：点颜色表示细胞周期阶段（Seurat Phase：G1/S/G2M 默认离散配色）。\n输出条件：LIVER_RUN_CELLCYCLE=yes（默认），且 CellCycleScoring 成功写入 Phase（至少 5 个 S 期、5 个 G2M 期基因，或元数据已含 Phase）。\n读取：phase 强分群时需评估细胞周期回归。"
     },
     {
       "file": "figures/08_publication/fig_27_cellcycle_proportion.png",
@@ -319,7 +319,7 @@
       "type": "堆叠条形图",
       "use": "比较细胞周期构成差异。",
       "optional": true,
-      "legend": "坐标轴：横轴为条件，纵轴为比例（0-100%）。\n颜色/图例：填充颜色表示细胞周期阶段。\n读取：比较组间周期构成。"
+      "legend": "坐标轴：横轴为条件，纵轴为比例（0-100%）。\n颜色/图例：填充颜色表示细胞周期阶段。\n输出条件：同 fig_26，LIVER_RUN_CELLCYCLE=yes 且元数据含 Phase。\n读取：比较组间周期构成。"
     },
     {
       "file": "figures/08_publication/fig_28_umap_sample.png",
@@ -359,7 +359,7 @@
       "type": "热图",
       "use": "查看聚类 marker 表达模式，辅助定义聚类标签。",
       "optional": true,
-      "legend": "坐标轴：横轴为聚类 marker 基因，纵轴为聚类（seurat_clusters）。\n颜色：viridis 色阶（深紫到黄，值越大表达越高）。\n输入：FindAllMarkers（only.pos=TRUE，min.pct=0.25，logfc.threshold=0.5），每聚类 Top3。\n读取：查看每聚类 marker 表达块，辅助定义聚类标签。"
+      "legend": "坐标轴：横轴为聚类 marker 基因，纵轴为聚类（seurat_clusters）。\n颜色：viridis 色阶（深紫到黄，值越大表达越高）。\n输入：FindAllMarkers（only.pos=TRUE，min.pct=0.25，logfc.threshold=0.5），每聚类 Top3。\n输出条件：LIVER_RUN_CLUSTER_MARKERS=yes（默认）且 marker 非空、Top 基因存在于表达矩阵。\n读取：查看每聚类 marker 表达块，辅助定义聚类标签。"
     },
     {
       "file": "figures/08_publication/fig_32_cluster_marker_dotplot.png",
@@ -369,7 +369,7 @@
       "type": "点图（DotPlot）",
       "use": "检查 marker 是否具有聚类特异性。",
       "optional": true,
-      "legend": "坐标轴：横轴为 marker 基因，纵轴为聚类。\n颜色/图例：点颜色表示平均表达量，点大小表示表达比例。\n读取：marker 应在对应聚类高表达高比例。"
+      "legend": "坐标轴：横轴为 marker 基因，纵轴为聚类。\n颜色/图例：点颜色表示平均表达量，点大小表示表达比例。\n输出条件：同 fig_31，LIVER_RUN_CLUSTER_MARKERS=yes 且存在可绘制的 Top marker。\n读取：marker 应在对应聚类高表达高比例。"
     },
     {
       "file": "figures/08_publication/fig_33_signature_scores_umap.png",
@@ -379,7 +379,7 @@
       "type": "UMAP 特征图（多面板）",
       "use": "查看功能签名是否集中在特定细胞群。",
       "optional": true,
-      "legend": "坐标轴：UMAP_1/UMAP_2，每个签名一个面板。\n颜色：点颜色表示功能签名得分，浅灰 grey90 到深红 #B31B1B。\n输入：AddModuleScore 计算的增殖/EMT/缺氧/免疫检查点等签名，签名基因不足 3 个时跳过。\n读取：签名集中特定细胞群才有解释意义。"
+      "legend": "坐标轴：UMAP_1/UMAP_2，每个签名一个面板。\n颜色：点颜色表示功能签名得分，浅灰 grey90 到深红 #B31B1B。\n输入：AddModuleScore 计算的增殖/EMT/缺氧/免疫检查点等签名。\n输出条件：LIVER_RUN_SIGNATURES=yes（默认）且签名基因与表达矩阵交集非空（每签名至少 3 个）。\n读取：签名集中特定细胞群才有解释意义。"
     },
     {
       "file": "figures/08_publication/fig_34_signature_scores_boxplot.png",
@@ -389,7 +389,7 @@
       "type": "箱线图或小提琴图",
       "use": "比较条件间签名活性差异。",
       "optional": true,
-      "legend": "坐标轴：横轴为条件，纵轴为签名得分。\n颜色/图例：小提琴/箱线按条件填充（图例隐藏），每个签名一个分面面板。\n读取：比较条件间签名活性；无差异不代表损坏。"
+      "legend": "坐标轴：横轴为条件，纵轴为签名得分。\n颜色/图例：小提琴/箱线按条件填充（图例隐藏），每个签名一个分面面板。\n输出条件：同 fig_33，LIVER_RUN_SIGNATURES=yes 且签名基因充足。\n读取：比较条件间签名活性；无差异不代表损坏。"
     },
     {
       "file": "figures/08_publication/fig_35_celltype_abundance_effect.png",
@@ -409,7 +409,7 @@
       "type": "热图",
       "use": "查看细胞亚群的染色体拷贝数变化和肿瘤异质性。",
       "optional": true,
-      "legend": "坐标轴：横轴为染色体滑动窗口（按染色体顺序），纵轴为细胞（聚类后）。\n颜色：蓝 #3B4CC0-白-红 #B40426，蓝为相对低表达（推断拷贝缺失），红为相对高表达（推断拷贝增益）。\n注释：顶部 Condition 红/蓝/绿、CellType 彩虹色。\n输入：每条件最多 750 细胞，滑动窗口推断；全白或窗口过少不可用。"
+      "legend": "坐标轴：横轴为染色体滑动窗口（按染色体顺序），纵轴为细胞（聚类后）。\n颜色：蓝 #3B4CC0-白-红 #B40426，蓝为相对低表达（推断拷贝缺失），红为相对高表达（推断拷贝增益）。\n注释：顶部 Condition 红/蓝/绿、CellType 彩虹色。\n输出条件：LIVER_RUN_CNV=yes（默认）且注释库可用、CHRLOC 非缺失基因 >500、可映射基因 >=200。\n输入：每条件最多 750 细胞，滑动窗口推断；全白或窗口过少不可用。"
     },
     {
       "file": "figures/08_publication/fig_37_singler_umap.png",
@@ -419,7 +419,7 @@
       "type": "UMAP 散点图",
       "use": "查看参考注释与现有注释的空间一致性。",
       "optional": true,
-      "legend": "坐标轴：UMAP_1/UMAP_2。\n颜色/图例：点颜色表示 SingleR 参考注释（singleR_label）。\n输入：celldex 参考（HPCA/MouseRNAseq），最多 20000 细胞。\n回退：参考数据不可用时不生成，缺失正常。"
+      "legend": "坐标轴：UMAP_1/UMAP_2。\n颜色/图例：点颜色表示 SingleR 参考注释（singleR_label）。\n输入：celldex 参考（HPCA/MouseRNAseq），最多 20000 细胞。\n输出条件：LIVER_RUN_SINGLER=yes（默认）且参考数据可用、预测成功。\n回退：参考数据不可用时不生成，缺失正常。"
     },
     {
       "file": "figures/08_publication/fig_38_singler_confusion_heatmap.png",
@@ -429,7 +429,7 @@
       "type": "热图",
       "use": "定量评估注释一致性。",
       "optional": true,
-      "legend": "坐标轴：横轴为 SingleR 注释，纵轴为 marker 注释。\n颜色/图例：pheatmap 默认蓝-白渐变，格内数字为细胞计数。\n读取：查看两种注释的一致性。"
+      "legend": "坐标轴：横轴为 SingleR 注释，纵轴为 marker 注释。\n颜色/图例：pheatmap 默认蓝-白渐变，格内数字为细胞计数。\n输出条件：同 fig_37，LIVER_RUN_SINGLER=yes 且预测成功、混淆矩阵行列数均 >0。\n读取：查看两种注释的一致性。"
     },
     {
       "file": "figures/08_publication/fig_39_trajectory_umap.png",
@@ -439,7 +439,7 @@
       "type": "UMAP 轨迹图",
       "use": "查看分化轨迹、伪时序梯度和谱系结构。",
       "optional": true,
-      "legend": "坐标轴：UMAP_1/UMAP_2，左右双面板。\n颜色/图例：左面板伪时序（viridis），右面板聚类着色、黑色线为 slingshot 谱系。\n开关：LIVER_RUN_TRAJECTORY=no 时不生成；轨迹无结构时不能作分化结论。"
+      "legend": "坐标轴：UMAP_1/UMAP_2，左右双面板。\n颜色/图例：左面板伪时序（viridis），右面板聚类着色、黑色线为 slingshot 谱系。\n输出条件：LIVER_RUN_TRAJECTORY=yes（默认 no）、slingshot 已安装且至少推断出 1 条谱系。\n轨迹无结构时不能作分化结论。"
     },
     {
       "file": "figures/09_cellchat/fig_40_cellchat_network.png",
@@ -449,7 +449,7 @@
       "type": "网络图",
       "use": "查看细胞间通讯关系和强度。",
       "optional": true,
-      "legend": "坐标轴：无笛卡尔坐标，环形网络布局。\n颜色/图例：节点颜色/大小表示细胞类型与细胞数；边粗细表示通讯数量，弧上标签为通讯数。\n输入：CellChat 标准流程，LIVER_RUN_CELLCHAT=yes 且 R 环境可用。\n回退：未运行/未安装/无通讯时不生成。"
+      "legend": "坐标轴：无笛卡尔坐标，环形网络布局。\n颜色/图例：节点颜色/大小表示细胞类型与细胞数；边粗细表示通讯数量，弧上标签为通讯数。\n输出条件：LIVER_RUN_CELLCHAT=yes、R 环境可用、CellChat 已安装且 filterCommunication 后存在通讯。\n回退：未运行/未安装/无通讯时不生成。"
     },
     {
       "file": "figures/09_cellchat/fig_41_cellchat_heatmap.png",
@@ -459,7 +459,7 @@
       "type": "热图",
       "use": "比较不同细胞类型对之间的通讯强度。",
       "optional": true,
-      "legend": "坐标轴：横轴为目标细胞类型，纵轴为来源细胞类型。\n颜色/图例：CellChat 默认红蓝渐变，颜色越红通讯强度越高。\n读取：全部为零或空白时不能作为通讯证据。"
+      "legend": "坐标轴：横轴为目标细胞类型，纵轴为来源细胞类型。\n颜色/图例：CellChat 默认红蓝渐变，颜色越红通讯强度越高。\n输出条件：同 fig_40，LIVER_RUN_CELLCHAT=yes 且通讯矩阵非空。\n读取：全部为零或空白时不能作为通讯证据。"
     },
     {
       "file": "figures/09_cellchat/fig_42_cellchat_bubble.png",
@@ -469,7 +469,7 @@
       "type": "气泡图",
       "use": "筛选候选配体受体互作。",
       "optional": true,
-      "legend": "坐标轴：横轴为配体受体/信号通路，纵轴为细胞类型对（来源→目标）。\n颜色/图例：点颜色表示通讯概率，点大小表示贡献/显著性。\n读取：无显著对时只能说明未检出。"
+      "legend": "坐标轴：横轴为配体受体/信号通路，纵轴为细胞类型对（来源→目标）。\n颜色/图例：点颜色表示通讯概率，点大小表示贡献/显著性。\n输出条件：同 fig_40，LIVER_RUN_CELLCHAT=yes 且存在通路/配体受体通讯结果。\n读取：无显著对时只能说明未检出。"
     },
     {
       "file": "figures/07_ml/fig_43_ml_confusion_matrix.png",
@@ -509,7 +509,7 @@
       "type": "折线图（带完美校准参考线）",
       "use": "检查预测概率是否校准，辅助判断概率阈值可靠性。",
       "optional": true,
-      "legend": "坐标轴：横轴为平均预测概率，纵轴为观测频率。\n颜色/图例：蓝色校准折线，灰色虚线为完美校准。\n读取：越接近对角线表示概率越可靠；仅二分类生成。"
+      "legend": "坐标轴：横轴为平均预测概率，纵轴为观测频率。\n颜色/图例：蓝色校准折线，灰色虚线为完美校准。\n输出条件：仅二分类模型且 calibration_curve 计算成功时生成。\n读取：越接近对角线表示概率越可靠；仅二分类生成。"
     },
     {
       "file": "data/07_ml/fig_24_ml_selected_features.csv",
@@ -517,7 +517,7 @@
       "kind": "data",
       "content": "ML 选定特征表",
       "type": "CSV 数据表",
-      "use": "LASSO+SVM-RFE 选定特征；该表用于复现对应图表、复核统计结果，并作为下游筛选或报告汇总的输入。",
+      "use": "LASSO+SVM-RFE 选定特征；仅 LIVER_ML_MODEL=lasso_svm 时生成。该表用于复现对应图表、复核统计结果，并作为下游筛选或报告汇总的输入。",
       "optional": true
     },
     {
@@ -670,7 +670,7 @@
       "kind": "data",
       "content": "聚类 marker 基因",
       "type": "CSV 数据表",
-      "use": "marker 列表；该表用于复现对应图表、复核统计结果，并作为下游筛选或报告汇总的输入。",
+      "use": "marker 列表；仅 LIVER_RUN_CLUSTER_MARKERS=yes 且 FindAllMarkers 返回非空时生成。该表用于复现对应图表、复核统计结果，并作为下游筛选或报告汇总的输入。",
       "optional": true
     },
     {
@@ -679,7 +679,7 @@
       "kind": "data",
       "content": "细胞周期评分",
       "type": "CSV 数据表",
-      "use": "每细胞周期评分；该表用于复现对应图表、复核统计结果，并作为下游筛选或报告汇总的输入。",
+      "use": "每细胞周期评分；仅 LIVER_RUN_CELLCYCLE=yes 且成功执行 CellCycleScoring 时生成。该表用于复现对应图表、复核统计结果，并作为下游筛选或报告汇总的输入。",
       "optional": true
     },
     {
@@ -697,7 +697,7 @@
       "kind": "data",
       "content": "功能签名评分",
       "type": "CSV 数据表",
-      "use": "每细胞签名评分；该表用于复现对应图表、复核统计结果，并作为下游筛选或报告汇总的输入。",
+      "use": "每细胞签名评分；仅 LIVER_RUN_SIGNATURES=yes 且签名基因充足时生成。该表用于复现对应图表、复核统计结果，并作为下游筛选或报告汇总的输入。",
       "optional": true
     },
     {
@@ -706,7 +706,7 @@
       "kind": "data",
       "content": "CNV 热图矩阵",
       "type": "CSV 数据表",
-      "use": "推断 CNV 数据；该表用于复现对应图表、复核统计结果，并作为下游筛选或报告汇总的输入。",
+      "use": "推断 CNV 数据；仅 LIVER_RUN_CNV=yes 且注释库/CHRLOC 充足时生成。该表用于复现对应图表、复核统计结果，并作为下游筛选或报告汇总的输入。",
       "optional": true
     },
     {
@@ -715,7 +715,7 @@
       "kind": "data",
       "content": "SingleR 注释",
       "type": "CSV 数据表",
-      "use": "参考注释结果；该表用于复现对应图表、复核统计结果，并作为下游筛选或报告汇总的输入。",
+      "use": "参考注释结果；仅 LIVER_RUN_SINGLER=yes 且参考可用、预测成功时生成。该表用于复现对应图表、复核统计结果，并作为下游筛选或报告汇总的输入。",
       "optional": true
     },
     {
@@ -724,7 +724,7 @@
       "kind": "data",
       "content": "SingleR 混淆矩阵",
       "type": "CSV 数据表",
-      "use": "注释一致性；该表用于复现对应图表、复核统计结果，并作为下游筛选或报告汇总的输入。",
+      "use": "注释一致性；仅 LIVER_RUN_SINGLER=yes 且预测成功时生成。该表用于复现对应图表、复核统计结果，并作为下游筛选或报告汇总的输入。",
       "optional": true
     },
     {
@@ -733,7 +733,7 @@
       "kind": "data",
       "content": "拟时序结果",
       "type": "CSV 数据表",
-      "use": "每细胞伪时间；该表用于复现对应图表、复核统计结果，并作为下游筛选或报告汇总的输入。",
+      "use": "每细胞伪时间；仅 LIVER_RUN_TRAJECTORY=yes 且 slingshot 谱系推断成功时生成。该表用于复现对应图表、复核统计结果，并作为下游筛选或报告汇总的输入。",
       "optional": true
     },
     {
@@ -778,7 +778,7 @@
       "kind": "data",
       "content": "CellChat 通讯计数",
       "type": "CSV 数据表",
-      "use": "通讯对数；该表用于复现对应图表、复核统计结果，并作为下游筛选或报告汇总的输入。",
+      "use": "通讯对数；仅 LIVER_RUN_CELLCHAT=yes、CellChat 已安装且存在通讯时生成。该表用于复现对应图表、复核统计结果，并作为下游筛选或报告汇总的输入。",
       "optional": true
     },
     {
@@ -787,7 +787,7 @@
       "kind": "data",
       "content": "CellChat 通讯权重",
       "type": "CSV 数据表",
-      "use": "通讯强度；该表用于复现对应图表、复核统计结果，并作为下游筛选或报告汇总的输入。",
+      "use": "通讯强度；仅 LIVER_RUN_CELLCHAT=yes、CellChat 已安装且存在通讯时生成。该表用于复现对应图表、复核统计结果，并作为下游筛选或报告汇总的输入。",
       "optional": true
     },
     {
@@ -796,7 +796,7 @@
       "kind": "data",
       "content": "CellChat 通路结果",
       "type": "CSV 数据表",
-      "use": "通路通讯结果；该表用于复现对应图表、复核统计结果，并作为下游筛选或报告汇总的输入。",
+      "use": "通路通讯结果；仅 LIVER_RUN_CELLCHAT=yes 且存在通路/配体受体结果时生成。该表用于复现对应图表、复核统计结果，并作为下游筛选或报告汇总的输入。",
       "optional": true
     },
     {
@@ -805,7 +805,7 @@
       "kind": "data",
       "content": "CellChat 对象",
       "type": "R 对象（RDS）",
-      "use": "完整通讯分析对象；该对象用于断点续跑、深度复核或后续分析。",
+      "use": "完整通讯分析对象；仅 LIVER_RUN_CELLCHAT=yes 且 CellChat 完成时生成。该对象用于断点续跑、深度复核或后续分析。",
       "optional": true
     },
     {
@@ -983,7 +983,7 @@
       "type": "散点图 + 直方图（双面板）",
       "use": "检查初筛排序和亲和力的稳定性。",
       "optional": true,
-      "legend": "坐标轴：左图初始亲和力（x）与重对接亲和力（y）；右图亲和力变化量（x）与配体数量（y）。\n颜色/图例：左绿色散点+黑色 y=x 虚线；右蓝色直方图+红色 0 虚线。\n读取：点接近对角线、变化围绕 0 表示重对接稳定。"
+      "legend": "坐标轴：左图初始亲和力（x）与重对接亲和力（y）；右图亲和力变化量（x）与配体数量（y）。\n颜色/图例：左绿色散点+黑色 y=x 虚线；右蓝色直方图+红色 0 虚线。\n输出条件：重对接阶段启用（redock.enabled 默认 true）且至少 1 个配体初始/重对接亲和力可合并（合格判据建议至少 2 个）。\n读取：点接近对角线、变化围绕 0 表示重对接稳定。"
     },
     {
       "file": "results/02_redock/data/fig_49_redock_results.csv",
@@ -1000,7 +1000,7 @@
       "kind": "data",
       "content": "初对接与重对接对比数据",
       "type": "CSV 数据表",
-      "use": "一致性对比；该表用于复现对应图表、复核统计结果，并作为下游筛选或报告汇总的输入。",
+      "use": "一致性对比；仅重对接阶段启用且初始/重对接亲和力可合并时生成。该表用于复现对应图表、复核统计结果，并作为下游筛选或报告汇总的输入。",
       "optional": true
     },
     {
@@ -1011,7 +1011,7 @@
       "type": "条形图",
       "use": "解释哪些分子特征影响重打分结果。",
       "optional": true,
-      "legend": "坐标轴：横轴为特征重要性，纵轴为特征名。\n颜色：条形蓝色 #1665c0。\n可用性：ml-train 阶段且模型有 feature_importances_/coef_ 时生成；MLP/torch 无原生重要性时不生成。"
+      "legend": "坐标轴：横轴为特征重要性，纵轴为特征名。\n颜色：条形蓝色 #1665c0。\n输出条件：仅 ml-train 阶段且模型有 feature_importances_/coef_ 时生成；MLP/torch 无原生重要性时不生成。"
     },
     {
       "file": "results/03_ml/figures/fig_51_ml_roc.png",
@@ -1021,7 +1021,7 @@
       "type": "折线图",
       "use": "评估分类模型排序能力。",
       "optional": true,
-      "legend": "坐标轴：横轴为假阳性率，纵轴为真阳性率。\n颜色/图例：蓝色 ROC 曲线，灰色虚线为随机基线，图例显示 AUC。\n可用性：仅分类任务；AUC≈0.5 时模型不能用于优先排序。"
+      "legend": "坐标轴：横轴为假阳性率，纵轴为真阳性率。\n颜色/图例：蓝色 ROC 曲线，灰色虚线为随机基线，图例显示 AUC。\n输出条件：仅 ml-train 阶段且任务为二分类、模型可输出概率；回归任务不生成。\nAUC≈0.5 时模型不能用于优先排序。"
     },
     {
       "file": "results/03_ml/data/fig_50_ml_feature_importance.csv",
@@ -1029,7 +1029,7 @@
       "kind": "data",
       "content": "ML 特征重要性数据",
       "type": "CSV 数据表",
-      "use": "特征排序；该表用于复现对应图表、复核统计结果，并作为下游筛选或报告汇总的输入。",
+      "use": "特征排序；仅 ml-train 阶段且模型有 feature_importances_/coef_ 时生成。该表用于复现对应图表、复核统计结果，并作为下游筛选或报告汇总的输入。",
       "optional": true
     },
     {
@@ -1038,7 +1038,7 @@
       "kind": "data",
       "content": "ML ROC 数据",
       "type": "CSV 数据表",
-      "use": "绘制 ROC 的数据；该表用于复现对应图表、复核统计结果，并作为下游筛选或报告汇总的输入。",
+      "use": "绘制 ROC 的数据；仅 ml-train 阶段且任务为二分类时生成。该表用于复现对应图表、复核统计结果，并作为下游筛选或报告汇总的输入。",
       "optional": true
     },
     {
@@ -1047,7 +1047,7 @@
       "kind": "data",
       "content": "ML 重打分排序结果",
       "type": "CSV 数据表",
-      "use": "融合亲和力与 ML 排名；该表用于复现对应图表、复核统计结果，并作为下游筛选或报告汇总的输入。",
+      "use": "融合亲和力与 ML 排名；仅 ml-train 阶段成功重打分时生成。该表用于复现对应图表、复核统计结果，并作为下游筛选或报告汇总的输入。",
       "optional": true
     },
     {
@@ -1227,7 +1227,7 @@
       "kind": "data",
       "content": "STRING PPI degree/betweenness/clustering 评分",
       "type": "CSV 数据表",
-      "use": "PPI hub 靶点评分；该表用于复现对应图表、复核统计结果，并作为下游筛选或报告汇总的输入。",
+      "use": "PPI hub 靶点评分；仅提供 --ppi-network-csv 输入时生成。该表用于复现对应图表、复核统计结果，并作为下游筛选或报告汇总的输入。",
       "optional": true
     },
     {
