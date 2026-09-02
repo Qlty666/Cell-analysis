@@ -280,6 +280,25 @@ a.file-link { color: #1665c0; text-decoration: none; margin-right: 12px; }
       <label>Top N
         <input name="ko_top_n" type="number" min="1" value="50">
       </label>
+      <label>单细胞虚拟敲除基因（可选）
+        <input name="ko_insilico_gene" placeholder="如 Gata1，填写后运行 GRN 虚拟敲除">
+      </label>
+      <label>物种（可选，富集用）
+        <select name="ko_insilico_species">
+          <option value="">auto</option>
+          <option value="hs">hs</option>
+          <option value="mm">mm</option>
+        </select>
+      </label>
+      <label>UMAP 坐标 CSV（可选）
+        <input name="ko_insilico_embedding" placeholder="data/knockout/umap_coordinates.csv">
+      </label>
+      <label>候选调控因子 CSV（可选）
+        <input name="ko_insilico_regulators" placeholder="data/knockout/regulators.csv">
+      </label>
+      <label>图片/报告输出目录（可选）
+        <input name="ko_insilico_photo" placeholder="如 D:/photo">
+      </label>
     </div>
     <div class="actions">
       <button type="button" onclick="runKnockout(this)">运行虚拟敲除</button>
@@ -864,12 +883,15 @@ function renderKnockout(data) {
   const classText = Object.keys(classes).map(k =>
     k + ' ' + classes[k]
   ).join('；');
+  const insilico = summary.in_silico_knockout || {};
   summaryEl.innerHTML = '<p class="muted">评分基因 ' + esc(summary.genes_scored || 0) +
     ' 个，病例样本 ' + esc(summary.case_samples || 0) +
     '，正常样本 ' + esc(summary.normal_samples || 0) +
     '，DepMap 细胞系 ' + esc(summary.depmap_lines || 0) +
     '，多维评分 ' + (summary.multidimensional_scoring ? '是' : '否') +
     '。分类：' + esc(classText || '无') +
+    (insilico.status ? '。单细胞虚拟敲除：' + esc(insilico.ko_gene || '') +
+      ' ' + esc(insilico.status || '') : '') +
     '。输出目录：' + esc(data.output_dir) + '</p>';
 
   const linkBase = '/dock/knockout/file?workdir=' +
