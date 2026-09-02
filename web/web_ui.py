@@ -2562,6 +2562,17 @@ def run_knockout_request(data: dict) -> dict:
         "case_label": _first(data, "ko_case", "") or None,
         "normal_label": _first(data, "ko_normal", "") or None,
         "ko_top_n": _int_field(data, "ko_top_n"),
+        "insilico_gene": _first(data, "ko_insilico_gene", "") or None,
+        "insilico_species": _first(data, "ko_insilico_species", "") or None,
+        "insilico_embedding_csv": _first(
+            data, "ko_insilico_embedding", ""
+        ) or None,
+        "insilico_regulators_csv": _first(
+            data, "ko_insilico_regulators", ""
+        ) or None,
+        "insilico_photo_dir": _first(
+            data, "ko_insilico_photo", ""
+        ) or None,
     }
     cfg = load_config(APP_ROOT / "config" / "docking_config.json", overrides)
     import logging
@@ -2581,6 +2592,9 @@ def run_knockout_request(data: dict) -> dict:
                 rows.append(row)
     figures = _list_result_images(ko_dir)
     files = _list_result_files(ko_dir)
+    report_rel = "in_silico/in_silico_knockout_report.html"
+    if (ko_dir / report_rel).exists():
+        files.append(report_rel)
     return {
         "summary": summary,
         "rows": rows,
@@ -2782,7 +2796,10 @@ def _ko_file_path(workdir: str, name: str):
     for folder in (cfg.knockout_dir(), cfg.validation_dir()):
         folder = folder.resolve()
         target = (folder / Path(name)).resolve()
-        if _is_result_file(target) and folder in target.parents:
+        if (
+            (_is_result_file(target) or target.suffix.lower() == ".html")
+            and folder in target.parents
+        ):
             return target
     return None
 

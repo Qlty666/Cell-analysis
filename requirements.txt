@@ -8,3 +8,4 @@ openpyxl
 h5py
 scipy
 scikit-learn
+umap-learn

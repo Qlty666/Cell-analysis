@@ -109,6 +109,11 @@ def main(argv: list[str] | None = None) -> int:
         "case_label": args.case_label,
         "normal_label": args.normal_label,
         "ko_top_n": args.ko_top_n,
+        "insilico_gene": args.insilico_gene,
+        "insilico_species": args.insilico_species,
+        "insilico_embedding_csv": args.insilico_embedding_csv,
+        "insilico_regulators_csv": args.insilico_regulators_csv,
+        "insilico_photo_dir": args.insilico_photo_dir,
         "validation_top_n": args.validation_top_n,
         "compound_name": args.compound_name,
         "disease_name": args.disease_name,
@@ -166,6 +171,8 @@ def main(argv: list[str] | None = None) -> int:
     elif args.command == "report":
         report.generate_report(cfg, log)
     elif args.command == "virtual-knockout":
+        if args.insilico_gene:
+            cfg.data.setdefault("insilico_knockout", {})["enabled"] = True
         knockout.run_knockout(cfg, log)
     elif args.command == "network":
         network_toxicology.run_network_toxicology(cfg, log)
@@ -264,6 +271,28 @@ def _add_common(sub: argparse.ArgumentParser) -> None:
     sub.add_argument(
         "--ppi-network-csv",
         help="STRING-style PPI edge table used by virtual knockout and network",
+    )
+    sub.add_argument(
+        "--insilico-gene",
+        help="gene to perturb in the single-cell in-silico knockout analysis",
+    )
+    sub.add_argument(
+        "--insilico-species",
+        choices=["hs", "mm", "auto"],
+        default=None,
+        help="species used for GO/KEGG enrichment (default: auto)",
+    )
+    sub.add_argument(
+        "--insilico-embedding-csv",
+        help="cell embedding CSV (cell, UMAP_1, UMAP_2) for fate-shift plots",
+    )
+    sub.add_argument(
+        "--insilico-regulators-csv",
+        help="one-column CSV of candidate regulator/TF symbols",
+    )
+    sub.add_argument(
+        "--insilico-photo-dir",
+        help="optional output folder for the final figures and HTML report",
     )
     sub.add_argument(
         "--validation-top-n",

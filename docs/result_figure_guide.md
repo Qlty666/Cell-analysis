@@ -782,6 +782,21 @@
 
 注意：虚拟敲除分数由表达差异、增殖共表达、网络 hub 和可选 DepMap 数据计算，附加维度会进一步生成 `target_score`。该分数是实验前筛选启发式指标，不等同于基因敲除的机制模拟。
 
+#### 单细胞调控网络虚拟敲除（`04_knockout/in_silico/`）
+
+传入 `virtual-knockout --insilico-gene <gene>` 后追加输出：
+
+| 文件 | 内容 | 判读 |
+| --- | --- | --- |
+| `fig_63_ko_target_expression_table.png` | Top 15 靶基因 WT/KO 表达定量变化表 | 查看最受敲除影响的基因与变化方向 |
+| `fig_64_ko_target_expression_bar.png` | WT/KO 平均表达柱状图 | 查看代表性靶基因变化幅度 |
+| `fig_65_ko_regulatory_network.png` | 以敲除基因为中心的调控网络 | 绿边激活、红边抑制，线粗代表调控权重 |
+| `fig_66_ko_shift_umap.png` | UMAP 上的细胞命运偏转矢量图 | 箭头方向代表预测状态位移 |
+| `fig_67_ko_go_enrichment.png` / `fig_68_ko_kegg_enrichment.png` | GO/KEGG 富集气泡图 | 查看下游靶基因富集的通路 |
+| `in_silico_knockout_report.html` | 中文 HTML 分析报告 | 汇总分析背景、图、表格与富集结果 |
+
+数据文件位于 `04_knockout/in_silico/data/`，包括 `insilico_target_changes.csv`、`insilico_cell_shift.csv`、`insilico_regulatory_edges.csv`、`insilico_go_enrichment.csv` 与 `insilico_kegg_enrichment.csv`。该部分为调控网络预测，不等同于真实敲除结果。
+
 ## 6. 全自动集成流水线与细胞反馈结果图
 
 ### 6.1 输出位置和状态文件

@@ -83,6 +83,28 @@
       "ppi_hub": 0.10
     }
   },
+  "insilico_knockout": {
+    "enabled": false,
+    "ko_gene": null,
+    "species": "auto",
+    "embedding_csv": null,
+    "regulators_csv": null,
+    "min_cells": 100,
+    "max_cells": 5000,
+    "max_genes": 1800,
+    "seed": 123,
+    "knn_impute_neighbors": 66,
+    "n_propagation": 3,
+    "network_edges_per_regulator": 300,
+    "target_top_n": 15,
+    "bar_top_n": 8,
+    "run_enrichment": true,
+    "enrichment_genes": 150,
+    "enrichment_timeout": 900,
+    "gene_note": null,
+    "photo_output_dir": null,
+    "figures": true
+  },
   "network_toxicology": {
     "compound_name": null,
     "disease_name": null,
