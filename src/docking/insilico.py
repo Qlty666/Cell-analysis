@@ -943,19 +943,67 @@ def _plot_umap_shift(
     if max_len > 0:
         u = shift["shift_1"].to_numpy() / max_len
         v = shift["shift_2"].to_numpy() / max_len
-        step = max(1, len(u) // 1200)
-        ax.quiver(
-            embedding["umap_1"].to_numpy()[::step],
-            embedding["umap_2"].to_numpy()[::step],
-            u[::step],
-            v[::step],
-            color="#122a45",
-            alpha=0.45,
-            angles="xy",
-            scale_units="xy",
-            scale=1.0,
-            width=0.002,
-        )
+        if len(u) > 700:
+            n_grid = 26
+            x = embedding["umap_1"].to_numpy()
+            y = embedding["umap_2"].to_numpy()
+            pad_x = max(1e-6, (x.max() - x.min()) * 0.04)
+            pad_y = max(1e-6, (y.max() - y.min()) * 0.04)
+            hist, x_edges, y_edges = np.histogram2d(
+                x,
+                y,
+                bins=n_grid,
+                range=[[x.min() - pad_x, x.max() + pad_x], [y.min() - pad_y, y.max() + pad_y]],
+            )
+            sum_u, _, _ = np.histogram2d(
+                x,
+                y,
+                bins=n_grid,
+                range=[[x.min() - pad_x, x.max() + pad_x], [y.min() - pad_y, y.max() + pad_y]],
+                weights=u,
+            )
+            sum_v, _, _ = np.histogram2d(
+                x,
+                y,
+                bins=n_grid,
+                range=[[x.min() - pad_x, x.max() + pad_x], [y.min() - pad_y, y.max() + pad_y]],
+                weights=v,
+            )
+            with np.errstate(invalid="ignore", divide="ignore"):
+                grid_u = np.where(hist > 0, sum_u / np.maximum(hist, 1), 0.0)
+                grid_v = np.where(hist > 0, sum_v / np.maximum(hist, 1), 0.0)
+            gx = (x_edges[:-1] + x_edges[1:]) / 2
+            gy = (y_edges[:-1] + y_edges[1:]) / 2
+            Xg, Yg = np.meshgrid(gx, gy)
+            valid = (hist >= 2) & (np.hypot(grid_u, grid_v) > 1e-6)
+            ax.quiver(
+                Xg[valid],
+                Yg[valid],
+                grid_u[valid],
+                grid_v[valid],
+                color="#122a45",
+                alpha=0.62,
+                angles="xy",
+                scale_units="xy",
+                scale=1.0,
+                width=0.004,
+                headwidth=3.0,
+                headlength=3.2,
+            )
+        else:
+            step = max(1, len(u) // 700)
+            ax.quiver(
+                embedding["umap_1"].to_numpy()[::step],
+                embedding["umap_2"].to_numpy()[::step],
+                u[::step],
+                v[::step],
+                color="#122a45",
+                alpha=0.45,
+                angles="xy",
+                scale_units="xy",
+                scale=1.0,
+                width=0.002,
+            )
     ax.set_xlabel("UMAP 1")
     ax.set_ylabel("UMAP 2")
     ax.set_title(f"UMAP Projection of {ko_gene} Knockout Shift Vectors")

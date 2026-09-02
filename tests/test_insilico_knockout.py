@@ -18,12 +18,39 @@ if str(APP_ROOT / "src") not in sys.path:
 
 from docking.config import load_config  # noqa: E402
 from docking.insilico import run_insilico_knockout  # noqa: E402
+from docking.insilico import _plot_umap_shift  # noqa: E402
 
 DEFAULT_CONFIG = APP_ROOT / "config" / "docking_config.json"
 LOG = logging.getLogger("test_insilico_knockout")
 
 
 class TestInSilicoKnockout(unittest.TestCase):
+    def test_dense_umap_arrows_use_grid_without_error(self):
+        with tempfile.TemporaryDirectory() as tmp:
+            n = 1200
+            rng = np.random.default_rng(5)
+            embedding = pd.DataFrame(
+                {
+                    "umap_1": rng.normal(0, 4, n),
+                    "umap_2": rng.normal(0, 3, n),
+                },
+                index=[f"C{i}" for i in range(n)],
+            )
+            shift = pd.DataFrame(
+                {
+                    "shift_1": rng.normal(0, 0.5, n),
+                    "shift_2": rng.normal(0, 0.5, n),
+                },
+                index=embedding.index,
+            )
+            cell_types = pd.Series(
+                rng.choice(["A", "B", "C"], n), index=embedding.index
+            )
+            out = Path(tmp) / "fig_66_dense.png"
+            _plot_umap_shift(embedding, shift, cell_types, "TF1", out)
+            self.assertTrue(out.exists())
+            self.assertGreater(out.stat().st_size, 10_000)
+
     def _write_inputs(self, workdir: Path) -> Path:
         data_dir = workdir / "data" / "knockout"
         data_dir.mkdir(parents=True, exist_ok=True)
