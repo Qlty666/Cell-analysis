@@ -34,19 +34,19 @@
       badge.className = "nav-count";
       link.appendChild(badge);
     }
-    fetch("/tasks/data", {headers: {"Accept": "application/json"}})
+    fetch("/tasks/count", {headers: {"Accept": "application/json"}})
       .then(function (response) {
         if (!response.ok) throw new Error("bad status");
         return response.json();
       })
       .then(function (data) {
-        var tasks = (data && data.tasks) || [];
-        if (!tasks.length) {
+        var count = Number(data && data.count);
+        if (!count || count < 0) {
           badge.hidden = true;
           badge.textContent = "";
           return;
         }
-        badge.textContent = String(tasks.length);
+        badge.textContent = String(count);
         badge.hidden = false;
       })
       .catch(function () {

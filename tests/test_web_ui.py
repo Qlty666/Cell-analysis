@@ -24,6 +24,7 @@ from web_ui import (  # noqa: E402
     FULL_JOBS,
     HEARTBEAT_CLIENTS,
     HEARTBEAT_LOCK,
+    JOBS,
     NOTIFY_LOCK,
     _analysis_file_path,
     _dock_file_path,
@@ -41,6 +42,7 @@ from web_ui import (  # noqa: E402
     dock_results,
     full_results,
     register_heartbeat,
+    running_task_counts,
     run_faers_request,
     run_network_request,
     start_dock_job,
@@ -973,12 +975,24 @@ class TestTemplatePolish(unittest.TestCase):
         js = (
             APP_ROOT / "web" / "static" / "nav.js"
         ).read_text(encoding="utf-8")
-        self.assertIn("/tasks/data", js)
+        self.assertIn("/tasks/count", js)
         self.assertIn("nav-count", js)
         css = (
             APP_ROOT / "web" / "static" / "app.css"
         ).read_text(encoding="utf-8")
         self.assertIn(".topnav a .nav-count", css)
+        self.assertIn(".topnav a .nav-count[hidden]", css)
+
+    def test_running_task_counts_empty_stores(self):
+        with (
+            mock.patch.dict(JOBS, {}),
+            mock.patch.dict(DOCK_JOBS, {}),
+            mock.patch.dict(FULL_JOBS, {}),
+        ):
+            self.assertEqual(
+                running_task_counts(),
+                {"count": 0, "running": 0, "queued": 0, "paused": 0},
+            )
 
     def test_full_page_has_layout_and_form_helpers(self):
         html = self._read("full_page_template.html")
