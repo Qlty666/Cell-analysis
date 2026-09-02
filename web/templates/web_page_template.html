@@ -4,6 +4,7 @@
 <meta charset="utf-8">
 <meta name="viewport" content="width=device-width, initial-scale=1">
 <link rel="stylesheet" href="/static/app.css">
+<script src="/static/nav.js" defer></script>
 <title>单细胞数据集分析</title>
 <style>
 body {
@@ -311,6 +312,12 @@ function saveFormState() {
   }
 }
 
+function autoSaveFormState() {
+  try {
+    sessionStorage.setItem(SINGLE_FORM_KEY, JSON.stringify(collectFormState()));
+  } catch (e) {}
+}
+
 function restoreFormState() {
   let saved = null;
   try {
@@ -353,6 +360,7 @@ function setupFigureSlots() {
 async function startRun() {
   const form = document.getElementById('form');
   const data = new URLSearchParams(new FormData(form));
+  autoSaveFormState();
   const btn = document.getElementById('startBtn');
   const pauseBtn = document.getElementById('pauseBtn');
   const resumeBtn = document.getElementById('resumeBtn');

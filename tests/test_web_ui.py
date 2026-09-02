@@ -24,6 +24,7 @@ from web_ui import (  # noqa: E402
     FULL_JOBS,
     HEARTBEAT_CLIENTS,
     HEARTBEAT_LOCK,
+    JOBS,
     NOTIFY_LOCK,
     _analysis_file_path,
     _dock_file_path,
@@ -41,6 +42,7 @@ from web_ui import (  # noqa: E402
     dock_results,
     full_results,
     register_heartbeat,
+    running_task_counts,
     run_faers_request,
     run_network_request,
     start_dock_job,
@@ -956,6 +958,42 @@ class TestTemplatePolish(unittest.TestCase):
         self.assertIn(".form-section", css)
         self.assertIn(".stat-card", css)
 
+    def test_all_pages_load_shared_nav_status_script(self):
+        for name in (
+            "web_page_template.html",
+            "full_page_template.html",
+            "dock_page_template.html",
+            "results_manifest_optimized.html",
+            "tasks_template.html",
+            "datasets_template.html",
+        ):
+            html = self._read(name)
+            self.assertIn(
+                '<script src="/static/nav.js" defer></script>',
+                html,
+            )
+        js = (
+            APP_ROOT / "web" / "static" / "nav.js"
+        ).read_text(encoding="utf-8")
+        self.assertIn("/tasks/count", js)
+        self.assertIn("nav-count", js)
+        css = (
+            APP_ROOT / "web" / "static" / "app.css"
+        ).read_text(encoding="utf-8")
+        self.assertIn(".topnav a .nav-count", css)
+        self.assertIn(".topnav a .nav-count[hidden]", css)
+
+    def test_running_task_counts_empty_stores(self):
+        with (
+            mock.patch.dict(JOBS, {}),
+            mock.patch.dict(DOCK_JOBS, {}),
+            mock.patch.dict(FULL_JOBS, {}),
+        ):
+            self.assertEqual(
+                running_task_counts(),
+                {"count": 0, "running": 0, "queued": 0, "paused": 0},
+            )
+
     def test_full_page_has_layout_and_form_helpers(self):
         html = self._read("full_page_template.html")
         for token in [
@@ -990,7 +1028,12 @@ class TestTemplatePolish(unittest.TestCase):
 
     def test_single_cell_page_has_collapsible_sections(self):
         html = self._read("web_page_template.html")
-        for token in ["form-section", "SINGLE_FORM_KEY", "saveFormState"]:
+        for token in [
+            "form-section",
+            "SINGLE_FORM_KEY",
+            "saveFormState",
+            "autoSaveFormState",
+        ]:
             self.assertIn(token, html)
 
     def test_dataset_page_groups_search_options(self):

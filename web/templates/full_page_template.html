@@ -4,6 +4,7 @@
 <meta charset="utf-8">
 <meta name="viewport" content="width=device-width, initial-scale=1">
 <link rel="stylesheet" href="/static/app.css">
+<script src="/static/nav.js" defer></script>
 <title>全自动流水线</title>
 <style>
 body {
@@ -542,6 +543,12 @@ function saveFormState() {
   }
 }
 
+function autoSaveFormState() {
+  try {
+    sessionStorage.setItem(FULL_FORM_KEY, JSON.stringify(collectFormState()));
+  } catch (e) {}
+}
+
 function restoreFormState() {
   let saved = null;
   try {
@@ -609,6 +616,7 @@ function renderTable(id, rows, columns) {
 async function startRun() {
   const form = document.getElementById('form');
   const data = new URLSearchParams(new FormData(form));
+  autoSaveFormState();
   const accession = (data.get('accession') || '').trim().toUpperCase();
     const btn = document.getElementById('startBtn');
     btn.disabled = true;
