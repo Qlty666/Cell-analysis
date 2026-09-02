@@ -802,6 +802,7 @@ def _plot_target_table(
 ) -> None:
     import matplotlib.pyplot as plt
 
+    _configure_cjk_font(plt)
     frame = frame.head(15).copy()
     rows = [
         [
@@ -809,7 +810,7 @@ def _plot_target_table(
             f"{row.wt_mean:.4f}",
             f"{row.ko_mean:.4f}",
             f"{row.delta:.4f}",
-            "up" if row.delta > 0 else "down",
+            "上调" if row.delta > 0 else "下调",
         ]
         for row in frame.itertuples(index=False)
     ]
@@ -817,22 +818,55 @@ def _plot_target_table(
     ax.axis("off")
     cell_colours = [["#f7f7f7"] * 5 for _ in range(len(frame))]
     for i, row in enumerate(frame.itertuples(index=False)):
-        colour = "#d9534f" if row.delta < 0 else "#3d9a50"
+        colour = "#f5c6cb" if row.delta < 0 else "#c8e6c9"
         cell_colours[i][2] = colour
         cell_colours[i][3] = colour
     table = ax.table(
         cellText=rows,
-        colLabels=["Gene", "WT mean", "KO mean", "Delta", "Trend"],
+        colLabels=[
+            "靶基因",
+            "野生型 (WT) 表达均值",
+            "敲除型 (KO) 表达均值",
+            "表达变化值 (Δ)",
+            "调控倾向",
+        ],
         cellLoc="center",
         loc="center",
         cellColours=cell_colours,
+        colColours=["#dbe9f4"] * 5,
     )
     table.auto_set_font_size(False)
-    table.set_fontsize(9)
+    table.set_fontsize(8.5)
     table.scale(1.0, 1.35)
-    ax.set_title(f"{ko_gene} KO Target Expression Changes (Top 15)", pad=18)
+    ax.set_title(
+        f"{ko_gene} 靶基因表达定量变化数据表 (Top 15)",
+        pad=14,
+        fontsize=12,
+    )
     fig.tight_layout()
     fig.savefig(path, dpi=160)
+
+
+def _configure_cjk_font(plt) -> str | None:
+    """Use a system CJK font when available so Chinese labels render cleanly."""
+    from matplotlib import font_manager
+
+    installed = {f.name for f in font_manager.fontManager.ttflist}
+    for name in (
+        "Microsoft YaHei",
+        "SimHei",
+        "Noto Sans CJK SC",
+        "WenQuanYi Zen Hei",
+        "Arial Unicode MS",
+    ):
+        if name in installed:
+            plt.rcParams["font.sans-serif"] = [
+                name,
+                *plt.rcParams.get("font.sans-serif", []),
+            ]
+            plt.rcParams["axes.unicode_minus"] = False
+            return name
+    return None
 
 
 def _plot_target_bar(
@@ -876,36 +910,87 @@ def _plot_network(
     row = row.reindex(row.abs().sort_values(ascending=False).index).head(top_n)
     if row.empty:
         return False
-    fig, ax = plt.subplots(figsize=(9, 9))
+    fig, ax = plt.subplots(figsize=(10, 10))
+    fig.patch.set_facecolor("white")
+    ax.set_facecolor("#fafcfe")
     angles = np.linspace(0, 2 * math.pi, len(row), endpoint=False)
     radius = 1.0
-    positions = {gene: (radius * math.cos(a), radius * math.sin(a)) for gene, a in zip(row.index, angles)}
+    positions = {
+        gene: (radius * math.cos(a), radius * math.sin(a))
+        for gene, a in zip(row.index, angles)
+    }
     positions[ko_gene] = (0.0, 0.0)
     max_w = float(row.abs().max())
     for gene, weight in row.items():
         x0, y0 = positions[ko_gene]
         x1, y1 = positions[gene]
-        colour = "#2e8b57" if weight > 0 else "#d1495b"
+        colour = "#2f9e63" if weight > 0 else "#e2574c"
         ax.plot(
             [x0, x1],
             [y0, y1],
             color=colour,
-            alpha=0.75,
-            linewidth=0.8 + 5.0 * abs(weight) / max_w,
+            alpha=0.9,
+            linewidth=0.6 + 4.6 * abs(weight) / max_w,
+            solid_capstyle="round",
         )
     for gene, (x, y) in positions.items():
         if gene == ko_gene:
-            ax.scatter(x, y, s=850, color="#2f6db0", edgecolor="white", zorder=4)
-            ax.text(x, y, gene, ha="center", va="center", color="white", fontsize=10, fontweight="bold")
+            ax.scatter(
+                x,
+                y,
+                s=1200,
+                color="#2f6db0",
+                edgecolor="#ffffff",
+                linewidth=2.5,
+                zorder=5,
+            )
+            ax.text(
+                x,
+                y,
+                gene,
+                ha="center",
+                va="center",
+                color="white",
+                fontsize=13,
+                fontweight="bold",
+                zorder=6,
+            )
         else:
-            weight = row.get(gene, 0.0)
-            ax.scatter(x, y, s=380, color="#dce8f5", edgecolor="#2f6db0", zorder=3)
-            ax.text(x, y, gene, ha="center", va="center", fontsize=7.5)
-    ax.set_xlim(-1.35, 1.35)
-    ax.set_ylim(-1.35, 1.35)
+            weight = float(row.get(gene, 0.0))
+            edge = "#2f9e63" if weight > 0 else "#e2574c"
+            ax.scatter(
+                x,
+                y,
+                s=520,
+                color="#ffffff",
+                edgecolor=edge,
+                linewidth=2.0,
+                zorder=4,
+            )
+            ax.text(
+                x * 1.16,
+                y * 1.16,
+                gene,
+                ha="center",
+                va="center",
+                fontsize=7.8,
+                zorder=5,
+                bbox={
+                    "boxstyle": "round,pad=0.12",
+                    "facecolor": "#ffffff",
+                    "edgecolor": "none",
+                    "alpha": 0.85,
+                },
+            )
+    ax.set_xlim(-1.45, 1.45)
+    ax.set_ylim(-1.45, 1.45)
     ax.set_aspect("equal")
     ax.axis("off")
-    ax.set_title(f"{ko_gene} Local Regulatory Network Weights")
+    ax.set_title(
+        f"{ko_gene} Local Regulatory Network Weights",
+        fontsize=13,
+        pad=12,
+    )
     fig.tight_layout()
     fig.savefig(path, dpi=160)
     return True
@@ -1182,14 +1267,23 @@ def _plot_enrichment_bubble(
     else:
         x = colour
         xlabel = "-log10 adjusted p"
-    fig, ax = plt.subplots(figsize=(9, max(4.5, 0.34 * len(df) + 2)))
+    max_desc = int(df["Description"].astype(str).str.len().max())
+    left_margin = min(0.46, max(0.24, 0.27 + max_desc * 0.0022))
+    fig, ax = plt.subplots(figsize=(10.5, max(4.8, 0.34 * len(df) + 2)))
+    fig.subplots_adjust(
+        left=left_margin,
+        right=0.86,
+        top=0.94,
+        bottom=0.10,
+    )
     y = np.arange(len(df))
     scatter = ax.scatter(x, y, s=count * 8, c=colour, cmap="RdYlBu_r", edgecolor="black", linewidth=0.3)
     ax.set_yticks(y)
     ax.set_yticklabels(df["Description"].astype(str), fontsize=7.5)
     ax.set_xlabel(xlabel)
     ax.set_title(title)
-    cb = fig.colorbar(scatter, ax=ax, pad=0.02)
+    cbar_ax = fig.add_axes([0.885, 0.15, 0.022, 0.70])
+    cb = fig.colorbar(scatter, cax=cbar_ax)
     cb.set_label("-log10 p")
     legend_sizes = sorted(
         {
@@ -1220,7 +1314,6 @@ def _plot_enrichment_bubble(
         title_fontsize=8,
         labelspacing=0.7,
     )
-    fig.tight_layout()
     fig.savefig(out_path, dpi=160)
     return True
 
