@@ -387,6 +387,20 @@ def run_knockout(cfg: ResolvedConfig, log) -> dict:
     _write_markdown_report(data_dir, frame, summary, top_n)
     target_report = _write_target_report(data_dir, frame, summary, top_n)
     summary["target_report"] = str(target_report)
+    if cfg.data.get("insilico_knockout", {}).get("enabled", False):
+        from .insilico import run_insilico_knockout
+
+        try:
+            insilico_summary = run_insilico_knockout(cfg, log)
+            summary["in_silico_knockout"] = insilico_summary
+            write_json(ko_dir / "summary.json", summary)
+        except DockingError as exc:
+            summary["in_silico_knockout"] = {
+                "status": "failed",
+                "reason": str(exc),
+            }
+            write_json(ko_dir / "summary.json", summary)
+            log.warning("in-silico knockout failed: %s", exc)
     log.info(
         "virtual knockout complete: %s genes scored, output %s",
         len(frame),
