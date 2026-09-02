@@ -910,38 +910,32 @@ def _plot_network(
     row = row.reindex(row.abs().sort_values(ascending=False).index).head(top_n)
     if row.empty:
         return False
-    fig, ax = plt.subplots(figsize=(10, 10))
-    fig.patch.set_facecolor("white")
-    ax.set_facecolor("#fafcfe")
+    fig, ax = plt.subplots(figsize=(9, 9))
     angles = np.linspace(0, 2 * math.pi, len(row), endpoint=False)
     radius = 1.0
-    positions = {
-        gene: (radius * math.cos(a), radius * math.sin(a))
-        for gene, a in zip(row.index, angles)
-    }
+    positions = {gene: (radius * math.cos(a), radius * math.sin(a)) for gene, a in zip(row.index, angles)}
     positions[ko_gene] = (0.0, 0.0)
     max_w = float(row.abs().max())
     for gene, weight in row.items():
         x0, y0 = positions[ko_gene]
         x1, y1 = positions[gene]
-        colour = "#2f9e63" if weight > 0 else "#e2574c"
+        colour = "#2e8b57" if weight > 0 else "#d1495b"
         ax.plot(
             [x0, x1],
             [y0, y1],
             color=colour,
-            alpha=0.9,
-            linewidth=0.6 + 4.6 * abs(weight) / max_w,
-            solid_capstyle="round",
+            alpha=0.75,
+            linewidth=0.4 + 2.0 * abs(weight) / max_w,
         )
     for gene, (x, y) in positions.items():
         if gene == ko_gene:
             ax.scatter(
                 x,
                 y,
-                s=1200,
+                s=1500,
                 color="#2f6db0",
                 edgecolor="#ffffff",
-                linewidth=2.5,
+                linewidth=2.0,
                 zorder=5,
             )
             ax.text(
@@ -951,46 +945,34 @@ def _plot_network(
                 ha="center",
                 va="center",
                 color="white",
-                fontsize=13,
+                fontsize=12,
                 fontweight="bold",
                 zorder=6,
             )
         else:
             weight = float(row.get(gene, 0.0))
-            edge = "#2f9e63" if weight > 0 else "#e2574c"
             ax.scatter(
                 x,
                 y,
-                s=520,
-                color="#ffffff",
-                edgecolor=edge,
-                linewidth=2.0,
-                zorder=4,
+                s=800,
+                color="#dce8f5",
+                edgecolor="#2f6db0",
+                linewidth=1.2,
+                zorder=3,
             )
             ax.text(
-                x * 1.16,
-                y * 1.16,
+                x,
+                y,
                 gene,
                 ha="center",
                 va="center",
-                fontsize=7.8,
-                zorder=5,
-                bbox={
-                    "boxstyle": "round,pad=0.12",
-                    "facecolor": "#ffffff",
-                    "edgecolor": "none",
-                    "alpha": 0.85,
-                },
+                fontsize=7.5,
             )
-    ax.set_xlim(-1.45, 1.45)
-    ax.set_ylim(-1.45, 1.45)
+    ax.set_xlim(-1.5, 1.5)
+    ax.set_ylim(-1.5, 1.5)
     ax.set_aspect("equal")
     ax.axis("off")
-    ax.set_title(
-        f"{ko_gene} Local Regulatory Network Weights",
-        fontsize=13,
-        pad=12,
-    )
+    ax.set_title(f"{ko_gene} Local Regulatory Network Weights")
     fig.tight_layout()
     fig.savefig(path, dpi=160)
     return True
