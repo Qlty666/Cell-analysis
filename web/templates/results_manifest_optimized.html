@@ -346,7 +346,16 @@ footer { color: #64748b; font-size: 12px; margin: 30px 0 8px; }
 &lt;workdir&gt;/                       # 全自动流水线工作目录
 ├─ data/knockout/               # 04 阶段敲除输入（不列入结果清单）
 ├─ outputs/
-│  ├─ integration/              # 02/03/06/07/08 阶段结果数据、QC 门控与差异丰度
+│  ├─ integration/              # 02/03/05/06/07 阶段结果数据、QC 门控与差异丰度
+│  │  ├─ key_genes.csv          # 02 关键基因
+│  │  ├─ gene_evidence.csv      # 03 基因证据
+│  │  ├─ knockout_summary.json  # 05 虚拟敲除汇总
+│  │  ├─ docking_targets.csv    # 06 虚拟筛选靶点与命中
+│  │  ├─ docking_summary.json   # 06 虚拟筛选汇总
+│  │  ├─ cell_feedback/         # 07 筛选结果回补表达分析
+│  │  │  ├─ figures/            # fig_54-62 反馈图（UMAP/火山/GO-KEGG 网络）
+│  │  │  └─ data/               # feedback_targets/feedback_deg/富集表
+│  │  └─ qc_metrics.json / differential_abundance.csv  # QC 门控与差异丰度
 │  └─ run_001/results/
 │     ├─ 01_analysis/           # 单靶点对接分析：figures + data
 │     ├─ 02_redock/             # 精修重对接：figures + data
