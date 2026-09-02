@@ -97,6 +97,11 @@ NAV_CSS = (
     "font-weight:600;padding:6px 10px;border-radius:6px;"
     "background:rgba(255,255,255,.08);}"
     ".topnav a:hover,.topnav a.active{background:#1665c0;color:#fff;}"
+    ".topnav a .nav-count{display:inline-flex;align-items:center;"
+    "justify-content:center;min-width:20px;height:20px;margin-left:6px;"
+    "padding:0 6px;border-radius:999px;background:#f59e0b;color:#fff;"
+    "font-size:12px;font-weight:700;line-height:1;}"
+    ".topnav a .nav-count[hidden]{display:none;}"
     ".topnav .nav-right{margin-left:auto;}"
 )
 
@@ -624,6 +629,7 @@ PAGE_TEMPLATE = """<!DOCTYPE html>
 <head>
 <meta charset="utf-8">
 <meta name="viewport" content="width=device-width, initial-scale=1">
+<script src="/static/nav.js" defer></script>
 <title>表达分析流水线</title>
 <style>
 body { font-family: "Segoe UI", Arial, sans-serif; background: #f5f7fa; margin: 0; color: #1f2933; }
@@ -2018,7 +2024,7 @@ def _notify_finished(
         pass
 
 
-def running_tasks_data() -> dict:
+def running_tasks_data(include_logs: bool = True) -> dict:
     tasks = []
     now = time.time()
     for job_id, info in list(JOBS.items()):
@@ -2037,12 +2043,16 @@ def running_tasks_data() -> dict:
             else "已暂停" if state == "paused"
             else _current_stage(marker_dir, SINGLE_STAGE_LABELS) or "准备中"
         )
-        log_text = "\n".join(
-            [
-                _log_tail(info["log"]),
-                _log_tail(info["out"] / "logs" / "pipeline_r.log"),
-            ]
-        ).strip()
+        log_text = (
+            "\n".join(
+                [
+                    _log_tail(info["log"]),
+                    _log_tail(info["out"] / "logs" / "pipeline_r.log"),
+                ]
+            ).strip()
+            if include_logs
+            else ""
+        )
         started = float(info.get("started") or now)
         tasks.append(
             {
@@ -2094,7 +2104,7 @@ def running_tasks_data() -> dict:
                 "elapsed": int(now - started),
                 "progress": progress,
                 "stage_label": stage_label,
-                "log_tail": _log_tail(info["log"]),
+                "log_tail": _log_tail(info["log"]) if include_logs else "",
             }
         )
 
@@ -2132,14 +2142,28 @@ def running_tasks_data() -> dict:
                 "elapsed": int(now - started),
                 "progress": progress,
                 "stage_label": stage_label,
-                "log_tail": "\n".join(
-                    _log_tail(path, 4000) for path in _full_log_paths(info)
-                ).strip(),
+                "log_tail": (
+                    "\n".join(
+                        _log_tail(path, 4000) for path in _full_log_paths(info)
+                    ).strip()
+                    if include_logs
+                    else ""
+                ),
             }
         )
 
     tasks.sort(key=lambda item: float(item.get("started") or 0))
     return {"tasks": tasks}
+
+
+def running_task_counts() -> dict:
+    tasks = running_tasks_data(include_logs=False)["tasks"]
+    return {
+        "count": len(tasks),
+        "running": sum(1 for task in tasks if task.get("status") == "running"),
+        "queued": sum(1 for task in tasks if task.get("status") == "queued"),
+        "paused": sum(1 for task in tasks if task.get("status") == "paused"),
+    }
 
 
 def _read_json(path: Path) -> dict:
@@ -3052,6 +3076,13 @@ class Handler(BaseHTTPRequestHandler):
                 "text/html; charset=utf-8",
             )
             return
+        if parsed.path == "/tasks/count":
+            body = json.dumps(
+                running_task_counts(),
+                ensure_ascii=False,
+            ).encode("utf-8")
+            self._send(200, body, "application/json")
+            return
         if parsed.path == "/tasks/data":
             body = json.dumps(
                 running_tasks_data(),
@@ -3356,6 +3387,7 @@ class Handler(BaseHTTPRequestHandler):
                 ".jpg": "image/jpeg",
                 ".svg": "image/svg+xml",
                 ".css": "text/css; charset=utf-8",
+                ".js": "text/javascript; charset=utf-8",
                 ".json": "application/json; charset=utf-8",
             }.get(target.suffix.lower(), "application/octet-stream")
             self._send(200, target.read_bytes(), content_type)
