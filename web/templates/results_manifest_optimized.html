@@ -397,8 +397,8 @@ footer { color: #64748b; font-size: 12px; margin: 30px 0 8px; }
       <tr><td><code>figures/06_enrichment/fig_13_kegg_down.png</code></td><td>下调基因 KEGG 富集</td><td><span class="badge fig">结果图</span></td><td>查看下调通路</td></tr>
       <tr><td><code>figures/03_cluster/fig_14_pca.png</code></td><td>PCA 分组图</td><td><span class="badge fig">结果图</span></td><td>查看主成分结构</td></tr>
       <tr><td><code>figures/03_cluster/fig_15_elbow.png</code></td><td>主成分 Elbow 图</td><td><span class="badge fig">结果图</span></td><td>辅助选择主成分数</td></tr>
-      <tr><td><code>figures/04_annotation/fig_16_featureplot_markers.png</code></td><td>Marker FeaturePlot</td><td><span class="badge fig">结果图</span></td><td>查看 marker 空间分布 <span class="badge opt">条件</span></td></tr>
-      <tr><td><code>figures/04_annotation/fig_17_marker_violin.png</code></td><td>Marker 小提琴图</td><td><span class="badge fig">结果图</span></td><td>查看 marker 表达水平 <span class="badge opt">条件</span></td></tr>
+      <tr><td><code>figures/04_annotation/fig_16_featureplot_markers.png</code></td><td>Marker FeaturePlot</td><td><span class="badge fig">结果图</span></td><td>查看 marker 空间分布 <span class="badge opt">需 marker 基因</span></td></tr>
+      <tr><td><code>figures/04_annotation/fig_17_marker_violin.png</code></td><td>Marker 小提琴图</td><td><span class="badge fig">结果图</span></td><td>查看 marker 表达水平 <span class="badge opt">需 marker 基因</span></td></tr>
       <tr><td><code>figures/04_annotation/fig_18_celltype_proportion.png</code></td><td>细胞类型比例堆叠图</td><td><span class="badge fig">结果图</span></td><td>比较组间细胞类型构成</td></tr>
       <tr><td><code>figures/04_annotation/fig_19_condition_proportion.png</code></td><td>分组构成比例图</td><td><span class="badge fig">结果图</span></td><td>查看各细胞类型分组构成</td></tr>
       <tr><td><code>figures/06_enrichment/fig_20_gsea_go.png</code></td><td>GSEA GO 图</td><td><span class="badge fig">结果图</span></td><td>查看 GO 富集趋势</td></tr>
@@ -409,28 +409,28 @@ footer { color: #64748b; font-size: 12px; margin: 30px 0 8px; }
       <tr><td><code>figures/06_enrichment/fig_47_kegg_top5.png</code></td><td>KEGG 筛选后 Top5 富集</td><td><span class="badge fig">结果图</span></td><td>查看筛选后 Top5 上调 KEGG 通路</td></tr>
       <tr><td><code>figures/07_ml/fig_24_ml_feature_importance.png</code></td><td>ML 特征重要性图</td><td><span class="badge fig">结果图</span></td><td>查看分类关键特征</td></tr>
       <tr><td><code>figures/07_ml/fig_25_ml_shap.png</code></td><td>SHAP 可解释性图</td><td><span class="badge fig">结果图</span></td><td>查看特征对预测贡献</td></tr>
-      <tr><td><code>figures/08_publication/fig_26_cellcycle_umap.png</code></td><td>细胞周期 UMAP</td><td><span class="badge fig">结果图</span></td><td>查看细胞周期分布 <span class="badge opt">条件</span></td></tr>
-      <tr><td><code>figures/08_publication/fig_27_cellcycle_proportion.png</code></td><td>细胞周期比例图</td><td><span class="badge fig">结果图</span></td><td>比较组间周期构成 <span class="badge opt">条件</span></td></tr>
+      <tr><td><code>figures/08_publication/fig_26_cellcycle_umap.png</code></td><td>细胞周期 UMAP</td><td><span class="badge fig">结果图</span></td><td>查看细胞周期分布 <span class="badge opt">LIVER_RUN_CELLCYCLE=yes</span></td></tr>
+      <tr><td><code>figures/08_publication/fig_27_cellcycle_proportion.png</code></td><td>细胞周期比例图</td><td><span class="badge fig">结果图</span></td><td>比较组间周期构成 <span class="badge opt">LIVER_RUN_CELLCYCLE=yes</span></td></tr>
       <tr><td><code>figures/08_publication/fig_28_umap_sample.png</code></td><td>UMAP 按样本</td><td><span class="badge fig">结果图</span></td><td>检查样本分布 <span class="badge opt">多样本</span></td></tr>
       <tr><td><code>figures/08_publication/fig_29_doublet_rate_sample.png</code></td><td>样本双细胞率图</td><td><span class="badge fig">结果图</span></td><td>查看样本质量</td></tr>
       <tr><td><code>figures/08_publication/fig_30_sample_proportion.png</code></td><td>样本细胞类型比例图</td><td><span class="badge fig">结果图</span></td><td>查看样本间构成</td></tr>
-      <tr><td><code>figures/08_publication/fig_31_cluster_marker_heatmap.png</code></td><td>聚类 marker 热图</td><td><span class="badge fig">结果图</span></td><td>查看聚类 marker 模式 <span class="badge opt">条件</span></td></tr>
-      <tr><td><code>figures/08_publication/fig_32_cluster_marker_dotplot.png</code></td><td>聚类 marker DotPlot</td><td><span class="badge fig">结果图</span></td><td>查看 marker 特异性 <span class="badge opt">条件</span></td></tr>
-      <tr><td><code>figures/08_publication/fig_33_signature_scores_umap.png</code></td><td>功能签名 UMAP</td><td><span class="badge fig">结果图</span></td><td>查看签名空间分布 <span class="badge opt">条件</span></td></tr>
-      <tr><td><code>figures/08_publication/fig_34_signature_scores_boxplot.png</code></td><td>功能签名箱线图</td><td><span class="badge fig">结果图</span></td><td>比较签名评分 <span class="badge opt">条件</span></td></tr>
+      <tr><td><code>figures/08_publication/fig_31_cluster_marker_heatmap.png</code></td><td>聚类 marker 热图</td><td><span class="badge fig">结果图</span></td><td>查看聚类 marker 模式 <span class="badge opt">LIVER_RUN_CLUSTER_MARKERS=yes</span></td></tr>
+      <tr><td><code>figures/08_publication/fig_32_cluster_marker_dotplot.png</code></td><td>聚类 marker DotPlot</td><td><span class="badge fig">结果图</span></td><td>查看 marker 特异性 <span class="badge opt">LIVER_RUN_CLUSTER_MARKERS=yes</span></td></tr>
+      <tr><td><code>figures/08_publication/fig_33_signature_scores_umap.png</code></td><td>功能签名 UMAP</td><td><span class="badge fig">结果图</span></td><td>查看签名空间分布 <span class="badge opt">LIVER_RUN_SIGNATURES=yes</span></td></tr>
+      <tr><td><code>figures/08_publication/fig_34_signature_scores_boxplot.png</code></td><td>功能签名箱线图</td><td><span class="badge fig">结果图</span></td><td>比较签名评分 <span class="badge opt">LIVER_RUN_SIGNATURES=yes</span></td></tr>
       <tr><td><code>figures/08_publication/fig_35_celltype_abundance_effect.png</code></td><td>细胞类型丰度变化图</td><td><span class="badge fig">结果图</span></td><td>查看细胞类型比例变化</td></tr>
-      <tr><td><code>figures/08_publication/fig_36_cnv_heatmap.png</code></td><td>推断 CNV 热图</td><td><span class="badge fig">结果图</span></td><td>查看染色体拷贝变化 <span class="badge opt">条件</span></td></tr>
-      <tr><td><code>figures/08_publication/fig_37_singler_umap.png</code></td><td>SingleR 注释 UMAP</td><td><span class="badge fig">结果图</span></td><td>查看参考注释结果 <span class="badge opt">条件</span></td></tr>
-      <tr><td><code>figures/08_publication/fig_38_singler_confusion_heatmap.png</code></td><td>SingleR 混淆矩阵热图</td><td><span class="badge fig">结果图</span></td><td>对比注释一致性 <span class="badge opt">条件</span></td></tr>
-      <tr><td><code>figures/08_publication/fig_39_trajectory_umap.png</code></td><td>拟时序轨迹</td><td><span class="badge fig">结果图</span></td><td>查看分化轨迹 <span class="badge opt">条件</span></td></tr>
-      <tr><td><code>figures/09_cellchat/fig_40_cellchat_network.png</code></td><td>CellChat 通讯网络</td><td><span class="badge fig">结果图</span></td><td>查看细胞间通讯 <span class="badge opt">条件</span></td></tr>
-      <tr><td><code>figures/09_cellchat/fig_41_cellchat_heatmap.png</code></td><td>CellChat 通讯热图</td><td><span class="badge fig">结果图</span></td><td>查看通讯强度 <span class="badge opt">条件</span></td></tr>
-      <tr><td><code>figures/09_cellchat/fig_42_cellchat_bubble.png</code></td><td>CellChat 配体受体气泡图</td><td><span class="badge fig">结果图</span></td><td>查看配体受体关系 <span class="badge opt">条件</span></td></tr>
+      <tr><td><code>figures/08_publication/fig_36_cnv_heatmap.png</code></td><td>推断 CNV 热图</td><td><span class="badge fig">结果图</span></td><td>查看染色体拷贝变化 <span class="badge opt">LIVER_RUN_CNV=yes</span></td></tr>
+      <tr><td><code>figures/08_publication/fig_37_singler_umap.png</code></td><td>SingleR 注释 UMAP</td><td><span class="badge fig">结果图</span></td><td>查看参考注释结果 <span class="badge opt">LIVER_RUN_SINGLER=yes</span></td></tr>
+      <tr><td><code>figures/08_publication/fig_38_singler_confusion_heatmap.png</code></td><td>SingleR 混淆矩阵热图</td><td><span class="badge fig">结果图</span></td><td>对比注释一致性 <span class="badge opt">LIVER_RUN_SINGLER=yes</span></td></tr>
+      <tr><td><code>figures/08_publication/fig_39_trajectory_umap.png</code></td><td>拟时序轨迹</td><td><span class="badge fig">结果图</span></td><td>查看分化轨迹 <span class="badge opt">LIVER_RUN_TRAJECTORY=yes</span></td></tr>
+      <tr><td><code>figures/09_cellchat/fig_40_cellchat_network.png</code></td><td>CellChat 通讯网络</td><td><span class="badge fig">结果图</span></td><td>查看细胞间通讯 <span class="badge opt">LIVER_RUN_CELLCHAT=yes</span></td></tr>
+      <tr><td><code>figures/09_cellchat/fig_41_cellchat_heatmap.png</code></td><td>CellChat 通讯热图</td><td><span class="badge fig">结果图</span></td><td>查看通讯强度 <span class="badge opt">LIVER_RUN_CELLCHAT=yes</span></td></tr>
+      <tr><td><code>figures/09_cellchat/fig_42_cellchat_bubble.png</code></td><td>CellChat 配体受体气泡图</td><td><span class="badge fig">结果图</span></td><td>查看配体受体关系 <span class="badge opt">LIVER_RUN_CELLCHAT=yes</span></td></tr>
       <tr><td><code>figures/07_ml/fig_43_ml_confusion_matrix.png</code></td><td>ML 混淆矩阵</td><td><span class="badge fig">结果图</span></td><td>查看分类准确度</td></tr>
       <tr><td><code>figures/07_ml/fig_44_ml_roc_pr.png</code></td><td>ML ROC / PR 曲线</td><td><span class="badge fig">结果图</span></td><td>查看分类性能</td></tr>
       <tr><td><code>figures/07_ml/fig_45_ml_cv_scores.png</code></td><td>ML 交叉验证得分</td><td><span class="badge fig">结果图</span></td><td>查看模型稳定性</td></tr>
-      <tr><td><code>figures/07_ml/fig_45_ml_calibration_curve.png</code></td><td>ML 校准曲线</td><td><span class="badge fig">结果图</span></td><td>查看预测概率校准程度 <span class="badge opt">条件</span></td></tr>
-      <tr><td><code>data/07_ml/fig_24_ml_selected_features.csv</code></td><td>ML 选定特征表</td><td><span class="badge data">结果数据</span></td><td>LASSO+SVM-RFE 选定特征 <span class="badge opt">条件</span></td></tr>
+      <tr><td><code>figures/07_ml/fig_45_ml_calibration_curve.png</code></td><td>ML 校准曲线</td><td><span class="badge fig">结果图</span></td><td>查看预测概率校准程度 <span class="badge opt">仅二分类</span></td></tr>
+      <tr><td><code>data/07_ml/fig_24_ml_selected_features.csv</code></td><td>ML 选定特征表</td><td><span class="badge data">结果数据</span></td><td>LASSO+SVM-RFE 选定特征 <span class="badge opt">仅 lasso_svm</span></td></tr>
     </tbody>
   </table>
 
@@ -454,22 +454,22 @@ footer { color: #64748b; font-size: 12px; margin: 30px 0 8px; }
       <tr><td><code>data/06_enrichment/fig_11_enrichment_down_go.csv</code></td><td>下调基因 GO 富集表</td><td><span class="badge data">结果数据</span></td><td>通路结果表</td></tr>
       <tr><td><code>data/06_enrichment/fig_12_enrichment_up_kegg.csv</code></td><td>上调基因 KEGG 富集表</td><td><span class="badge data">结果数据</span></td><td>通路结果表</td></tr>
       <tr><td><code>data/06_enrichment/fig_13_enrichment_down_kegg.csv</code></td><td>下调基因 KEGG 富集表</td><td><span class="badge data">结果数据</span></td><td>通路结果表</td></tr>
-      <tr><td><code>data/04_annotation/fig_16_17_31_32_cluster_markers.csv</code></td><td>聚类 marker 基因</td><td><span class="badge data">结果数据</span></td><td>marker 列表 <span class="badge opt">条件</span></td></tr>
-      <tr><td><code>data/08_publication/fig_26_27_cell_cycle_scores.csv</code></td><td>细胞周期评分</td><td><span class="badge data">结果数据</span></td><td>每细胞周期评分 <span class="badge opt">条件</span></td></tr>
+      <tr><td><code>data/04_annotation/fig_16_17_31_32_cluster_markers.csv</code></td><td>聚类 marker 基因</td><td><span class="badge data">结果数据</span></td><td>marker 列表 <span class="badge opt">LIVER_RUN_CLUSTER_MARKERS=yes</span></td></tr>
+      <tr><td><code>data/08_publication/fig_26_27_cell_cycle_scores.csv</code></td><td>细胞周期评分</td><td><span class="badge data">结果数据</span></td><td>每细胞周期评分 <span class="badge opt">LIVER_RUN_CELLCYCLE=yes</span></td></tr>
       <tr><td><code>data/08_publication/fig_29_doublet_rate_by_sample.csv</code></td><td>样本双细胞率</td><td><span class="badge data">结果数据</span></td><td>样本质量统计</td></tr>
-      <tr><td><code>data/08_publication/fig_33_34_35_signature_scores.csv</code></td><td>功能签名评分</td><td><span class="badge data">结果数据</span></td><td>每细胞签名评分 <span class="badge opt">条件</span></td></tr>
-      <tr><td><code>data/08_publication/fig_36_cnv_heatmap.csv</code></td><td>CNV 热图矩阵</td><td><span class="badge data">结果数据</span></td><td>推断 CNV 数据 <span class="badge opt">条件</span></td></tr>
-      <tr><td><code>data/08_publication/fig_37_singleR_annotations.csv</code></td><td>SingleR 注释</td><td><span class="badge data">结果数据</span></td><td>参考注释结果 <span class="badge opt">条件</span></td></tr>
-      <tr><td><code>data/08_publication/fig_38_singleR_confusion.csv</code></td><td>SingleR 混淆矩阵</td><td><span class="badge data">结果数据</span></td><td>注释一致性 <span class="badge opt">条件</span></td></tr>
-      <tr><td><code>data/08_publication/fig_39_trajectory_pseudotime.csv</code></td><td>拟时序结果</td><td><span class="badge data">结果数据</span></td><td>每细胞伪时间 <span class="badge opt">条件</span></td></tr>
+      <tr><td><code>data/08_publication/fig_33_34_35_signature_scores.csv</code></td><td>功能签名评分</td><td><span class="badge data">结果数据</span></td><td>每细胞签名评分 <span class="badge opt">LIVER_RUN_SIGNATURES=yes</span></td></tr>
+      <tr><td><code>data/08_publication/fig_36_cnv_heatmap.csv</code></td><td>CNV 热图矩阵</td><td><span class="badge data">结果数据</span></td><td>推断 CNV 数据 <span class="badge opt">LIVER_RUN_CNV=yes</span></td></tr>
+      <tr><td><code>data/08_publication/fig_37_singleR_annotations.csv</code></td><td>SingleR 注释</td><td><span class="badge data">结果数据</span></td><td>参考注释结果 <span class="badge opt">LIVER_RUN_SINGLER=yes</span></td></tr>
+      <tr><td><code>data/08_publication/fig_38_singleR_confusion.csv</code></td><td>SingleR 混淆矩阵</td><td><span class="badge data">结果数据</span></td><td>注释一致性 <span class="badge opt">LIVER_RUN_SINGLER=yes</span></td></tr>
+      <tr><td><code>data/08_publication/fig_39_trajectory_pseudotime.csv</code></td><td>拟时序结果</td><td><span class="badge data">结果数据</span></td><td>每细胞伪时间 <span class="badge opt">LIVER_RUN_TRAJECTORY=yes</span></td></tr>
       <tr><td><code>data/liver_cancer_seurat.rds</code></td><td>最终 Seurat 对象</td><td><span class="badge data">结果数据</span></td><td>完整单细胞对象</td></tr>
       <tr><td><code>data/07_ml/fig_24_ml_feature_importance.csv</code></td><td>ML 特征重要性</td><td><span class="badge data">结果数据</span></td><td>特征排序</td></tr>
       <tr><td><code>data/07_ml/fig_43_44_45_ml_classification_results.csv</code></td><td>ML 分类预测</td><td><span class="badge data">结果数据</span></td><td>每样本预测结果</td></tr>
       <tr><td><code>data/07_ml/fig_43_44_45_ml_classification_report.csv</code></td><td>ML 分类报告表</td><td><span class="badge data">结果数据</span></td><td>分类指标</td></tr>
-      <tr><td><code>data/09_cellchat/fig_40_cellchat_communication.csv</code></td><td>CellChat 通讯计数</td><td><span class="badge data">结果数据</span></td><td>通讯对数 <span class="badge opt">条件</span></td></tr>
-      <tr><td><code>data/09_cellchat/fig_40_cellchat_communication_weight.csv</code></td><td>CellChat 通讯权重</td><td><span class="badge data">结果数据</span></td><td>通讯强度 <span class="badge opt">条件</span></td></tr>
-      <tr><td><code>data/09_cellchat/fig_42_cellchat_pathways.csv</code></td><td>CellChat 通路结果</td><td><span class="badge data">结果数据</span></td><td>通路通讯结果 <span class="badge opt">条件</span></td></tr>
-      <tr><td><code>data/09_cellchat/cellchat_object.rds</code></td><td>CellChat 对象</td><td><span class="badge data">结果数据</span></td><td>完整通讯分析对象 <span class="badge opt">条件</span></td></tr>
+      <tr><td><code>data/09_cellchat/fig_40_cellchat_communication.csv</code></td><td>CellChat 通讯计数</td><td><span class="badge data">结果数据</span></td><td>通讯对数 <span class="badge opt">LIVER_RUN_CELLCHAT=yes</span></td></tr>
+      <tr><td><code>data/09_cellchat/fig_40_cellchat_communication_weight.csv</code></td><td>CellChat 通讯权重</td><td><span class="badge data">结果数据</span></td><td>通讯强度 <span class="badge opt">LIVER_RUN_CELLCHAT=yes</span></td></tr>
+      <tr><td><code>data/09_cellchat/fig_42_cellchat_pathways.csv</code></td><td>CellChat 通路结果</td><td><span class="badge data">结果数据</span></td><td>通路通讯结果 <span class="badge opt">LIVER_RUN_CELLCHAT=yes</span></td></tr>
+      <tr><td><code>data/09_cellchat/cellchat_object.rds</code></td><td>CellChat 对象</td><td><span class="badge data">结果数据</span></td><td>完整通讯分析对象 <span class="badge opt">LIVER_RUN_CELLCHAT=yes</span></td></tr>
     </tbody>
   </table>
 </div>
@@ -544,14 +544,14 @@ footer { color: #64748b; font-size: 12px; margin: 30px 0 8px; }
       <tr><td><code>results/01_analysis/data/fig_47_top_hits.csv</code></td><td>命中配体表</td><td><span class="badge data">结果数据</span></td><td>低于阈值候选</td></tr>
       <tr><td><code>results/01_analysis/data/fig_48_diverse_hits.csv</code></td><td>多样性命中表</td><td><span class="badge data">结果数据</span></td><td>Tanimoto 选择结果</td></tr>
       <tr><td><code>results/01_analysis/data/docking_results.xlsx</code></td><td>多工作表 Excel</td><td><span class="badge data">结果数据</span></td><td>all / hits / top / diverse 表</td></tr>
-      <tr><td><code>results/02_redock/figures/fig_49_redock_comparison.png</code></td><td>精修前后对比图</td><td><span class="badge fig">结果图</span></td><td>查看重对接一致性 <span class="badge opt">条件</span></td></tr>
+      <tr><td><code>results/02_redock/figures/fig_49_redock_comparison.png</code></td><td>精修前后对比图</td><td><span class="badge fig">结果图</span></td><td>查看重对接一致性 <span class="badge opt">重对接开启</span></td></tr>
       <tr><td><code>results/02_redock/data/fig_49_redock_results.csv</code></td><td>精修重对接结果</td><td><span class="badge data">结果数据</span></td><td>Top 命中精修表</td></tr>
-      <tr><td><code>results/02_redock/data/fig_49_redock_comparison.csv</code></td><td>初对接与重对接对比数据</td><td><span class="badge data">结果数据</span></td><td>一致性对比 <span class="badge opt">条件</span></td></tr>
-      <tr><td><code>results/03_ml/figures/fig_50_ml_feature_importance.png</code></td><td>ML 特征重要性图</td><td><span class="badge fig">结果图</span></td><td>查看重打分特征 <span class="badge opt">条件</span></td></tr>
-      <tr><td><code>results/03_ml/figures/fig_51_ml_roc.png</code></td><td>ML ROC 曲线</td><td><span class="badge fig">结果图</span></td><td>查看模型性能 <span class="badge opt">条件</span></td></tr>
-      <tr><td><code>results/03_ml/data/fig_50_ml_feature_importance.csv</code></td><td>ML 特征重要性数据</td><td><span class="badge data">结果数据</span></td><td>特征排序 <span class="badge opt">条件</span></td></tr>
-      <tr><td><code>results/03_ml/data/fig_51_ml_roc.csv</code></td><td>ML ROC 数据</td><td><span class="badge data">结果数据</span></td><td>绘制 ROC 的数据 <span class="badge opt">条件</span></td></tr>
-      <tr><td><code>results/03_ml/data/ml_ranked_results.csv</code></td><td>ML 重打分排序结果</td><td><span class="badge data">结果数据</span></td><td>融合亲和力与 ML 排名 <span class="badge opt">条件</span></td></tr>
+      <tr><td><code>results/02_redock/data/fig_49_redock_comparison.csv</code></td><td>初对接与重对接对比数据</td><td><span class="badge data">结果数据</span></td><td>一致性对比 <span class="badge opt">重对接开启</span></td></tr>
+      <tr><td><code>results/03_ml/figures/fig_50_ml_feature_importance.png</code></td><td>ML 特征重要性图</td><td><span class="badge fig">结果图</span></td><td>查看重打分特征 <span class="badge opt">ml-train 且有重要性</span></td></tr>
+      <tr><td><code>results/03_ml/figures/fig_51_ml_roc.png</code></td><td>ML ROC 曲线</td><td><span class="badge fig">结果图</span></td><td>查看模型性能 <span class="badge opt">ml-train 且二分类</span></td></tr>
+      <tr><td><code>results/03_ml/data/fig_50_ml_feature_importance.csv</code></td><td>ML 特征重要性数据</td><td><span class="badge data">结果数据</span></td><td>特征排序 <span class="badge opt">ml-train 且有重要性</span></td></tr>
+      <tr><td><code>results/03_ml/data/fig_51_ml_roc.csv</code></td><td>ML ROC 数据</td><td><span class="badge data">结果数据</span></td><td>绘制 ROC 的数据 <span class="badge opt">ml-train 且二分类</span></td></tr>
+      <tr><td><code>results/03_ml/data/ml_ranked_results.csv</code></td><td>ML 重打分排序结果</td><td><span class="badge data">结果数据</span></td><td>融合亲和力与 ML 排名 <span class="badge opt">ml-train</span></td></tr>
     </tbody>
   </table>
 </div>
@@ -590,7 +590,7 @@ footer { color: #64748b; font-size: 12px; margin: 30px 0 8px; }
     <thead><tr><th>文件</th><th>内容</th><th>类型</th><th>用途</th></tr></thead>
     <tbody>
       <tr><td><code>network_toxicology/data/compound_disease_overlap.csv</code></td><td>化合物靶点与疾病基因交集表</td><td><span class="badge data">结果数据</span></td><td>核心交集靶点及来源数</td></tr>
-      <tr><td><code>network_toxicology/data/ppi_hub_scores.csv</code></td><td>STRING PPI degree/betweenness/clustering 评分</td><td><span class="badge data">结果数据</span></td><td>PPI hub 靶点评分 <span class="badge opt">条件</span></td></tr>
+      <tr><td><code>network_toxicology/data/ppi_hub_scores.csv</code></td><td>STRING PPI degree/betweenness/clustering 评分</td><td><span class="badge data">结果数据</span></td><td>PPI hub 靶点评分 <span class="badge opt">需 --ppi-network-csv</span></td></tr>
       <tr><td><code>network_toxicology/data/ctpd_nodes.csv</code></td><td>C-T-P-D 网络节点表</td><td><span class="badge data">结果数据</span></td><td>化合物、靶点、疾病节点</td></tr>
       <tr><td><code>network_toxicology/data/ctpd_edges.csv</code></td><td>C-T-P-D 网络边表</td><td><span class="badge data">结果数据</span></td><td>化合物-靶点、靶点-疾病、PPI 边</td></tr>
       <tr><td><code>network_toxicology/data/ctpd_network.html</code></td><td>C-T-P-D 网络可视化页</td><td><span class="badge data">结果数据</span></td><td>快速查看网络关系</td></tr>
@@ -610,7 +610,25 @@ footer { color: #64748b; font-size: 12px; margin: 30px 0 8px; }
 
 <div class="card">
   <h2>条件输出说明</h2>
-  <p class="muted">带“条件”标记的文件仅在对应开关、依赖或数据满足时输出，例如 CellChat、拟时序、SingleR、CNV、聚类 marker、样本数等。</p>
+  <p class="muted">带“条件”标记的文件不是固定输出，只有对应开关、依赖或数据满足时才生成；下面对应每个标记给出具体条件。</p>
+  <ul class="muted">
+    <li><span class="badge opt">需 marker 基因</span>：数据集中存在固定 marker 列表中的基因（与表达矩阵的交集非空，最多 6 个）。</li>
+    <li><span class="badge opt">多样本</span>：样本数大于 1 时生成。</li>
+    <li><span class="badge opt">LIVER_RUN_CELLCYCLE=yes</span>：默认开启；同时需成功执行细胞周期打分（至少 5 个 S 期、5 个 G2M 期基因）或元数据已含 Phase。</li>
+    <li><span class="badge opt">LIVER_RUN_CLUSTER_MARKERS=yes</span>：默认开启；同时需 <code>FindAllMarkers</code> 返回非空 marker，且 Top 基因在表达矩阵中存在。</li>
+    <li><span class="badge opt">LIVER_RUN_SIGNATURES=yes</span>：默认开启；同时需签名基因与表达矩阵的交集非空。</li>
+    <li><span class="badge opt">LIVER_RUN_CNV=yes</span>：默认开启；同时需物种注释库可用且 CHRLOC 注释充足（非缺失 &gt; 500 且可映射基因 &ge; 200）。</li>
+    <li><span class="badge opt">LIVER_RUN_SINGLER=yes</span>：默认开启；同时需参考数据可用且 SingleR 预测成功。</li>
+    <li><span class="badge opt">LIVER_RUN_TRAJECTORY=yes</span>：默认关闭，需显式开启；同时需安装 <code>slingshot</code> 且谱系推断成功。</li>
+    <li><span class="badge opt">LIVER_RUN_CELLCHAT=yes</span>：默认关闭，需显式开启；同时需 R 环境可用、CellChat 已安装且有通讯结果。</li>
+    <li><span class="badge opt">仅二分类</span>：单细胞 ML 校准曲线仅在二分类模型且校准曲线计算成功时生成。</li>
+    <li><span class="badge opt">仅 lasso_svm</span>：ML 选定特征表仅在 <code>LIVER_ML_MODEL=lasso_svm</code> 时生成。</li>
+    <li><span class="badge opt">重对接开启</span>：重对接阶段启用（<code>redock.enabled</code>，默认 true）且存在可重对接的 Top 命中、初始与重对接亲和力可合并时生成。</li>
+    <li><span class="badge opt">ml-train</span>：仅 <code>ml-train</code> 阶段生成 ML 重打分结果。</li>
+    <li><span class="badge opt">ml-train 且有重要性</span>：需 <code>ml-train</code> 阶段且模型提供 <code>feature_importances_</code>/<code>coef_</code>；MLP/torch 无原生重要性时不生成。</li>
+    <li><span class="badge opt">ml-train 且二分类</span>：需 <code>ml-train</code> 阶段、分类任务且模型可输出概率；回归任务不生成。</li>
+    <li><span class="badge opt">需 --ppi-network-csv</span>：PPI hub 评分仅在提供 <code>--ppi-network-csv</code> 输入时生成。</li>
+  </ul>
   <div class="note">本页只列结果图与结果数据；若后续代码修改输出文件名或目录，请同步更新本页。</div>
 </div>
 
@@ -1008,7 +1026,7 @@ footer { color: #64748b; font-size: 12px; margin: 30px 0 8px; }
 
     const figCount = rows.filter(tr => tr.dataset.type === 'fig').length;
     const dataCount = rows.filter(tr => tr.dataset.type === 'data').length;
-    const condCount = rows.filter(tr => tr.textContent.includes('条件')).length;
+    const condCount = rows.filter(tr => tr.querySelector('.badge.opt')).length;
     const stats = document.getElementById('searchStats');
     if (q) {
       stats.textContent = '搜索“' + state.query + '”：结果清单命中 ' + rowHits + ' 条。';

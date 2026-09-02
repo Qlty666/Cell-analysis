@@ -36,8 +36,8 @@
 | `fig_07_annotation_confusion_heatmap.png` | 发布细胞类型 | marker 注释细胞类型 | 热图默认蓝-白渐变，颜色越深计数越高 | 格内数字为细胞计数；用于查看注释对应关系 |
 | `fig_14_pca.png` | `PC_1` | `PC_2` | 点颜色表示条件（`condition`） | 主成分散点，用于查看主要变异来源 |
 | `fig_15_elbow.png` | 主成分序号（PC 1..N） | 主成分标准差 | 单条折线 | 拐点处建议保留的维度数 |
-| `fig_16_featureplot_markers.png` | `UMAP_1` | `UMAP_2` | 点颜色表示 marker 基因表达量（浅灰到深红渐变，默认 `FeaturePlot` 配色） | 每个基因一个面板，最多展示 6 个 marker |
-| `fig_17_marker_violin.png` | 细胞类型（`celltype_annot`） | 表达量 | 小提琴按细胞类型分组 | 每个 marker 一个面板 |
+| `fig_16_featureplot_markers.png` | `UMAP_1` | `UMAP_2` | 点颜色表示 marker 基因表达量（浅灰到深红渐变，默认 `FeaturePlot` 配色） | 每个基因一个面板，最多展示 6 个 marker；输出条件：数据集中存在固定 marker 基因（与表达矩阵交集非空） |
+| `fig_17_marker_violin.png` | 细胞类型（`celltype_annot`） | 表达量 | 小提琴按细胞类型分组 | 每个 marker 一个面板；输出条件：同 `fig_16`，需存在可用 marker 基因 |
 | `fig_18_celltype_proportion.png` | 细胞类型 | 比例（0-100%，`position="fill"`） | 填充颜色表示条件（`condition`） | 柱高合计为 1，用于比较条件间细胞类型构成 |
 | `fig_19_condition_proportion.png` | 条件（`coord_flip` 后显示为纵轴） | 比例（0-100%） | 填充颜色表示细胞类型 | 横向堆叠条形图，用于查看每个细胞类型内部的条件构成 |
 | `fig_28_umap_sample.png` | `UMAP_1` | `UMAP_2` | 点颜色表示条件（`condition`），固定为红 `#E64B35` 与蓝 `#4DBBD5` | 标题为 “UMAP by sample”，用于评估样本混合和批次效应 |
@@ -307,6 +307,7 @@
 - 坐标轴：横轴为平均预测概率（`Mean predicted probability`），纵轴为观测频率（`Observed frequency`）。
 - 颜色/图例：蓝色校准折线，灰色虚线为完美校准对角线（标签 Perfect）。
 - 读取方法：越接近对角线表示预测概率越可靠；仅二分类且概率可用时生成，样本极少时需谨慎。
+- 输出条件：单细胞 ML 阶段中仅当类别数为 2（二分类）且 `calibration_curve` 计算成功时生成；模型状态为 `skipped`/`failed` 时不生成。
 
 #### `fig_26_cellcycle_umap.png`
 
@@ -314,12 +315,14 @@
 - 颜色/图例：点颜色表示细胞周期阶段（Seurat `Phase`：G1/S/G2M，默认离散配色）。
 - 读取方法：若 phase 形成强分群，说明需要评估细胞周期回归；图本身不一定损坏。
 - 开关：`LIVER_RUN_CELLCYCLE`（默认 `yes`），需至少 5 个 S 期与 5 个 G2M 期基因。
+- 输出条件：`LIVER_RUN_CELLCYCLE=yes`（默认）且 `CellCycleScoring` 成功写入 `Phase`（至少 5 个 S 期、5 个 G2M 期基因，或元数据已含 `Phase`）；否则不生成。
 
 #### `fig_27_cellcycle_proportion.png`
 
 - 坐标轴：横轴为条件，纵轴为比例（0-100%，`position="fill"`）。
 - 颜色/图例：填充颜色表示细胞周期阶段。
 - 读取方法：比较组间细胞周期构成；比例信息过少时需谨慎。
+- 输出条件：同 `fig_26`，需 `LIVER_RUN_CELLCYCLE=yes` 且元数据含 `Phase`。
 
 #### `fig_28_umap_sample.png`
 
@@ -327,6 +330,7 @@
 - 颜色/图例：点颜色表示条件，固定为红 `#E64B35` 与蓝 `#4DBBD5`，图例标题为 `Condition`。
 - 读取方法：评估样本混合和批次效应；仅当样本数 > 1 时生成。
 - 回退/占位：单样本时不生成，缺失正常。
+- 输出条件：样本数 `length(unique(seurat$sample)) > 1` 时生成，无环境变量开关。
 
 #### `fig_29_doublet_rate_sample.png`
 
@@ -346,12 +350,14 @@
 - 颜色/图例：`viridis` 色阶，深紫到黄表示表达量低到高。
 - 输入：`FindAllMarkers`（only.pos=TRUE，`min.pct=0.25`，`logfc.threshold=0.5`），每聚类 Top3 marker。
 - 读取方法：查看每聚类 marker 表达块，辅助定义聚类标签；无 marker 时不生成。
+- 输出条件：`LIVER_RUN_CLUSTER_MARKERS=yes`（默认）且 `FindAllMarkers` 返回非空、Top 基因存在于表达矩阵；否则不生成。
 
 #### `fig_32_cluster_marker_dotplot.png`
 
 - 坐标轴：横轴为 marker 基因，纵轴为聚类。
 - 颜色/图例：点颜色表示平均表达量，点大小表示表达比例。
 - 读取方法：marker 应在对应聚类中高表达且高比例；无 marker 或全 0 时不可用。
+- 输出条件：同 `fig_31`，需 `LIVER_RUN_CLUSTER_MARKERS=yes` 且存在可绘制的 Top marker 基因。
 
 #### `fig_33_signature_scores_umap.png`
 
@@ -359,12 +365,14 @@
 - 颜色/图例：点颜色表示功能签名得分，浅灰 `grey90` 到深红 `#B31B1B`。
 - 输入：`AddModuleScore` 计算的签名（默认展示增殖、EMT、缺氧、免疫检查点；可用 `LIVER_RUN_SIGNATURES=yes` 开启），签名基因不足 3 个时跳过。
 - 读取方法：查看签名是否集中在特定细胞群；得分全图均匀时不能解释。
+- 输出条件：`LIVER_RUN_SIGNATURES=yes`（默认）且签名基因与表达矩阵交集非空（每个签名至少 3 个基因）。
 
 #### `fig_34_signature_scores_boxplot.png`
 
 - 坐标轴：横轴为条件，纵轴为签名得分。
 - 颜色/图例：小提琴/箱线按条件填充（图例隐藏），每个签名一个分面面板，纵轴自由缩放。
 - 读取方法：比较条件间签名活性；无差异不代表损坏，但不能当作“有差异”结论。
+- 输出条件：同 `fig_33`，需 `LIVER_RUN_SIGNATURES=yes` 且签名基因充足。
 
 #### `fig_35_celltype_abundance_effect.png`
 
@@ -380,6 +388,7 @@
 - 注释：顶部注释条 `Condition` 使用红/蓝/绿，`CellType` 使用彩虹色。
 - 输入：每条件最多 750 个细胞，基于染色体滑动窗口均值推断；仅展示 `CHRLOC` 注释充足的基因（>500）。
 - 读取方法：查看细胞亚群的染色体拷贝数变化和肿瘤异质性；全图白色或窗口过少时不可用。
+- 输出条件：`LIVER_RUN_CNV=yes`（默认）且物种注释库（`org.Hs.eg.db`/`org.Mm.eg.db`）可用、`CHRLOC` 非缺失基因 > 500、可映射基因 >= 200；否则不生成。
 
 #### `fig_37_singler_umap.png`
 
@@ -387,12 +396,14 @@
 - 颜色/图例：点颜色表示 SingleR 参考注释（`singleR_label`），图例在右侧。
 - 输入：`celldex` 参考（人类 `HumanPrimaryCellAtlasData`、小鼠 `MouseRNAseqData`），最多 20000 个细胞，按聚类填充标签。
 - 回退/占位：参考数据不可用或预测失败时不生成，缺失正常。
+- 输出条件：`LIVER_RUN_SINGLER=yes`（默认）、参考数据可用且 SingleR 预测成功。
 
 #### `fig_38_singler_confusion_heatmap.png`
 
 - 坐标轴：横轴为 SingleR 注释，纵轴为 marker 注释。
 - 颜色/图例：`pheatmap` 默认蓝-白渐变，格内数字为细胞计数。
 - 读取方法：查看对角线一致性；无 SingleR 预测时不生成。
+- 输出条件：同 `fig_37`，需 `LIVER_RUN_SINGLER=yes` 且 SingleR 预测成功、混淆矩阵行列数均 > 0。
 
 #### `fig_39_trajectory_umap.png`
 
@@ -400,6 +411,7 @@
 - 颜色/图例：左面板点颜色为伪时序（`pseudotime`，`viridis`），右面板点颜色为聚类，黑色线为 slingshot 谱系曲线。
 - 输入：`slingshot` 以聚类为起点推断谱系，取第一条谱系伪时序写入 `fig_39_trajectory_pseudotime.csv`。
 - 开关：`LIVER_RUN_TRAJECTORY`（默认 `no`），未开启时不生成，缺失正常；轨迹无结构时不能作分化结论。
+- 输出条件：`LIVER_RUN_TRAJECTORY=yes`、R 环境安装 `slingshot` 且至少推断出 1 条谱系。
 
 #### `fig_40_cellchat_network.png`
 
@@ -407,18 +419,21 @@
 - 颜色/图例：节点颜色/大小表示细胞类型及该类型细胞数；边粗细表示通讯数量（`cellchat@net$count`，`weight.scale=TRUE`），弧上标签为通讯数。
 - 输入：CellChat 标准流程（`computeCommunProb` → `filterCommunication` → `aggregateNet`），`LIVER_RUN_CELLCHAT=yes` 且 R 环境可用时生成。
 - 回退/占位：未运行、未安装或无通讯时不生成，缺失正常。
+- 输出条件：`LIVER_RUN_CELLCHAT=yes`、R 环境可用、CellChat 已安装且 `filterCommunication` 后存在通讯；否则不生成。
 
 #### `fig_41_cellchat_heatmap.png`
 
 - 坐标轴：横轴为目标细胞类型，纵轴为来源细胞类型。
 - 颜色/图例：CellChat 默认热图（红蓝渐变），颜色越红通讯数量/强度越高。
 - 读取方法：比较细胞类型对之间的通讯强度；全部为零或空白时不能作为通讯证据。
+- 输出条件：同 `fig_40`，需 `LIVER_RUN_CELLCHAT=yes` 且通讯矩阵非空。
 
 #### `fig_42_cellchat_bubble.png`
 
 - 坐标轴：横轴为配体受体/信号通路，纵轴为细胞类型对（来源→目标）。
 - 颜色/图例：点颜色表示通讯概率（p 值相关颜色，默认红蓝渐变），点大小表示贡献/显著性；`remove.isolate=TRUE` 移除孤立对。
 - 读取方法：筛选候选配体受体互作；无显著对时只能说明未检出。
+- 输出条件：同 `fig_40`，需 `LIVER_RUN_CELLCHAT=yes` 且存在通路/配体受体通讯结果。
 
 #### `fig_46_affinity_distribution.png`
 
@@ -446,6 +461,7 @@
 - 坐标轴：左图横轴为初始亲和力（`Initial affinity`），纵轴为重对接亲和力（`Redock affinity`），单位 kcal/mol；右图横轴为亲和力变化量（`Affinity change`），纵轴为配体数量。
 - 颜色/图例：左散点统一绿色 `#2e7d32`，黑色虚线为 `y=x` 对角线；右直方图蓝色 `#4c7bb8`，红色虚线为 0。
 - 读取方法：点接近对角线表示排序稳定；右图围绕 0 分布表示无系统性漂移；只有 1 个可比较配体时可能不生成。
+- 输出条件：重对接阶段启用（`redock.enabled`，默认 true）、存在可重对接的 Top 命中且至少 1 个配体的初始与重对接亲和力可合并；合格判据建议至少 2 个可比较配体。
 
 #### `fig_50_ml_feature_importance.png`
 
@@ -634,8 +650,8 @@
 | `fig_04_umap_condition.png` | UMAP 按条件着色，用于评估条件分离与批次效应 | 条件分布与细胞类型结构可解释，不是完全由批次主导 | 单条件图不能支持条件差异；条件完全分离时需确认是否来自批次 |
 | `fig_05_umap_annotation.png` | marker 注释与发表注释并排 UMAP，用于验证注释一致性 | 同类型细胞形成较连贯区域，标签清晰可见 | 注释与 UMAP 结构明显冲突时需要回到 marker 图和混淆矩阵复核 |
 | `fig_06_dotplot_markers.png` | marker 基因在各细胞类型中的表达比例和表达量，用于验证注释 | 预期 marker 在对应细胞类型中高表达，其他类型低表达 | 所有点大小/颜色无差异、基因缺失或图像空白时不可用 |
-| `fig_16_featureplot_markers.png` | marker 基因在 UMAP 上的表达位置 | 表达信号集中在预期细胞类型区域，不是全图均匀灰色 | 基因未匹配或表达全为 0 时不能验证注释 |
-| `fig_17_marker_violin.png` | marker 基因在细胞类型中的表达分布 | 预期细胞类型表达明显更高，分布可见 | 各细胞类型分布完全一致时不能作为注释支持 |
+| `fig_16_featureplot_markers.png` | marker 基因在 UMAP 上的表达位置 | 表达信号集中在预期细胞类型区域，不是全图均匀灰色 | 数据集中无可用 marker 基因时不生成；基因未匹配或表达全为 0 时不能验证注释 |
+| `fig_17_marker_violin.png` | marker 基因在细胞类型中的表达分布 | 预期细胞类型表达明显更高，分布可见 | 同 `fig_16`，无可用 marker 基因时不生成；各细胞类型分布完全一致时不能作为注释支持 |
 | `fig_18_celltype_proportion.png` | 细胞类型比例按条件堆叠，用于观察组成变化 | 比例柱可见，条件完整，细胞数足够 | 某些细胞类型细胞数过少时比例不可靠 |
 | `fig_19_condition_proportion.png` | 条件构成按细胞类型堆叠，用于观察每个细胞类型中的条件比例 | 条件完整，比例可读，能对应 `fig_18_19_celltype_proportion_stats.csv` | 小样本、单条件或缺失细胞类型时需谨慎 |
 | `fig_07_annotation_confusion_heatmap.png` | marker 注释与发表注释混淆矩阵热图 | 对角线计数较高，能看出主要细胞类型对应关系 | 图中出现 “No published annotations” 时只能说明缺少发表注释，不能用于一致性判断 |
@@ -674,26 +690,26 @@
 | `fig_43_ml_confusion_matrix.png` | 交叉验证混淆矩阵，用于查看具体错分 | 类别标签正确，对角线数量清楚，样本数可对应 | 样本量很小或模型状态失败时只能谨慎解释 |
 | `fig_44_ml_roc_pr.png` | ROC 与 PR 曲线，用于评估分类能力 | 曲线高于随机线，AUC/AP 可见，不是全部等于随机水平 | AUC 接近 0.5、样本极少或类别不平衡时不能用于强结论 |
 | `fig_45_ml_cv_scores.png` | 交叉验证准确率分布，用于评估模型稳定性 | 有 CV 分数点，均值和离散程度可读 | CV 分数波动过大或状态失败时不可用 |
-| `fig_45_ml_calibration_curve.png` | 校准曲线，用于检查预测概率是否可靠 | 校准点接近对角线，样本量足够 | 样本极少、曲线无法计算或模型状态失败时不可用 |
+| `fig_45_ml_calibration_curve.png` | 校准曲线，用于检查预测概率是否可靠 | 校准点接近对角线，样本量足够 | 仅二分类模型生成；非二分类、样本极少、曲线无法计算或模型状态失败时不可用 |
 | `data/07_ml/fig_24_ml_selected_features.csv` | `lasso_svm` 模型 LASSO 初筛 + SVM-RFE 选定的特征 | 状态为 `completed`，特征数 > 0 | 未选择 `lasso_svm` 时不生成，缺失正常 |
 
 ### 4.7 高级分析与发表图
 
 | 文件 | 内容与用途 | 合格判据 | 不可用或警示 |
 | --- | --- | --- | --- |
-| `fig_26_cellcycle_umap.png` | 细胞周期阶段 UMAP，用于检查细胞周期对聚类的干扰 | 各 phase 分布在 UMAP 上可读 | 如果 phase 形成强分群，说明需要评估周期回归，图本身不一定损坏 |
-| `fig_27_cellcycle_proportion.png` | 细胞周期阶段比例图 | 分组、细胞类型、phase 比例可读 | 比例信息过少时需谨慎 |
+| `fig_26_cellcycle_umap.png` | 细胞周期阶段 UMAP，用于检查细胞周期对聚类的干扰 | 各 phase 分布在 UMAP 上可读 | 未开启 `LIVER_RUN_CELLCYCLE` 或 S/G2M 基因不足时不生成；如果 phase 形成强分群，说明需要评估周期回归，图本身不一定损坏 |
+| `fig_27_cellcycle_proportion.png` | 细胞周期阶段比例图 | 分组、细胞类型、phase 比例可读 | 同 `fig_26`，未开启 `LIVER_RUN_CELLCYCLE` 或无 `Phase` 时不生成；比例信息过少时需谨慎 |
 | `fig_28_umap_sample.png` | UMAP 按样本着色，用于评估样本混合和批次效应 | 多样本时生成，样本标签可见，同一细胞类型跨样本混合情况可读 | 单样本时不生成，不缺失视为正常 |
 | `fig_29_doublet_rate_sample.png` | 每样本双细胞率，用于识别异常样本 | 样本标签和双细胞率可读，与 `fig_29_doublet_rate_by_sample.csv` 一致 | 某样本双细胞率异常高时提示该样本质量风险 |
 | `fig_30_sample_proportion.png` | 每样本细胞类型比例，用于检查样本异质性 | 样本和细胞类型比例可读 | 样本过少或比例全为 0 时不可用 |
-| `fig_31_cluster_marker_heatmap.png` | 聚类 marker 热图，用于重新定义聚类标签 | 每个聚类有 marker 表达块，热图颜色可读 | 无聚类 marker 时不生成，缺失正常 |
-| `fig_32_cluster_marker_dotplot.png` | 聚类 marker DotPlot | marker 在对应聚类中表达比例/水平更高 | 无 marker 或全 0 时不可用 |
-| `fig_33_signature_scores_umap.png` | 增殖、EMT、缺氧等签名得分 UMAP | 得分梯度可见，不是全图均匀 | 签名基因未匹配或得分为常数时不能解释 |
-| `fig_34_signature_scores_boxplot.png` | 功能签名得分按条件箱线图/小提琴图 | 条件和签名面板完整，分布可见 | 无差异不代表损坏，但不能当作“有差异”结论 |
+| `fig_31_cluster_marker_heatmap.png` | 聚类 marker 热图，用于重新定义聚类标签 | 每个聚类有 marker 表达块，热图颜色可读 | 未开启 `LIVER_RUN_CLUSTER_MARKERS` 或无聚类 marker 时不生成，缺失正常 |
+| `fig_32_cluster_marker_dotplot.png` | 聚类 marker DotPlot | marker 在对应聚类中表达比例/水平更高 | 同 `fig_31`，未开启 `LIVER_RUN_CLUSTER_MARKERS` 或无 marker 时不生成；全 0 时不可用 |
+| `fig_33_signature_scores_umap.png` | 增殖、EMT、缺氧等签名得分 UMAP | 得分梯度可见，不是全图均匀 | 未开启 `LIVER_RUN_SIGNATURES` 或签名基因不足时不生成；签名基因未匹配或得分为常数时不能解释 |
+| `fig_34_signature_scores_boxplot.png` | 功能签名得分按条件箱线图/小提琴图 | 条件和签名面板完整，分布可见 | 同 `fig_33`，未开启 `LIVER_RUN_SIGNATURES` 或签名基因不足时不生成；无差异不代表损坏，但不能当作“有差异”结论 |
 | `fig_35_celltype_abundance_effect.png` | 细胞类型丰度变化的 log2OR 与 -log10 校正 P 值图 | 点、细胞类型标签和显著性信息可读，数据来自 `fig_18_19_celltype_proportion_stats.csv` | 细胞数过少、OR 不有限或 P 值缺失时需谨慎 |
-| `fig_36_cnv_heatmap.png` | 基于染色体滑动窗口均值的推断 CNV 热图 | 细胞按行、染色体窗口按列，红蓝块可见，有条件和细胞类型注释 | 基因注释不足、窗口过少或热图全为白色时不可用 |
-| `fig_37_singler_umap.png` | SingleR 参考注释 UMAP | 同类型细胞形成连贯区域，标签可读 | 参考数据不可用或预测失败时不生成，缺失正常 |
-| `fig_38_singler_confusion_heatmap.png` | SingleR 与现有注释混淆矩阵热图 | 对角线可读，能看出注释一致性 | 无 SingleR 预测时不生成；一致性差时应复核注释 |
+| `fig_36_cnv_heatmap.png` | 基于染色体滑动窗口均值的推断 CNV 热图 | 细胞按行、染色体窗口按列，红蓝块可见，有条件和细胞类型注释 | 未开启 `LIVER_RUN_CNV`、注释库缺失、CHRLOC 不足或可映射基因 < 200 时不生成；基因注释不足、窗口过少或热图全为白色时不可用 |
+| `fig_37_singler_umap.png` | SingleR 参考注释 UMAP | 同类型细胞形成连贯区域，标签可读 | 未开启 `LIVER_RUN_SINGLER`、参考数据不可用或预测失败时不生成，缺失正常 |
+| `fig_38_singler_confusion_heatmap.png` | SingleR 与现有注释混淆矩阵热图 | 对角线可读，能看出注释一致性 | 同 `fig_37`，未开启 `LIVER_RUN_SINGLER` 或无 SingleR 预测时不生成；一致性差时应复核注释 |
 | `fig_39_trajectory_umap.png` | slingshot 拟时序轨迹图 | 伪时序梯度或轨迹线可见，UMAP 背景可读 | 默认 `LIVER_RUN_TRAJECTORY=no` 时不生成，缺失正常；轨迹无结构时不能作分化结论 |
 
 ### 4.8 CellChat 细胞通讯
@@ -746,7 +762,7 @@
 
 | 文件 | 内容与用途 | 合格判据 | 不可用或警示 |
 | --- | --- | --- | --- |
-| `fig_49_redock_comparison.png` | 初始亲和力与重对接亲和力的散点图，以及变化量直方图，用于检查结果稳定性 | 至少 2 个可比较配体，点接近对角线，变化直方图围绕 0 分布，无系统性偏移 | 只有 1 个配体、重对接全部失败或 CSV 无法合并时不生成；出现明显系统性漂移时应视为重对接不稳定，不能直接使用该批排序 |
+| `fig_49_redock_comparison.png` | 初始亲和力与重对接亲和力的散点图，以及变化量直方图，用于检查结果稳定性 | 至少 2 个可比较配体，点接近对角线，变化直方图围绕 0 分布，无系统性偏移 | 未启用重对接阶段（`redock.enabled=false`）、重对接全部失败或初始/重对接亲和力无法合并时不生成；只有 1 个配体时可能不生成；出现明显系统性漂移时应视为重对接不稳定，不能直接使用该批排序 |
 
 ### 5.4 ML/DL 重打分
 
@@ -754,8 +770,8 @@
 
 | 文件 | 内容与用途 | 合格判据 | 不可用或警示 |
 | --- | --- | --- | --- |
-| `fig_50_ml_feature_importance.png` | ML 重打分模型的特征重要性，用于解释哪些分子特征影响分数 | 模型有 `feature_importances_`，图非空，特征名可读 | MLP/torch 等没有原生特征重要性时可能不生成；缺失不等于流程错误 |
-| `fig_51_ml_roc.png` | ML 重打分分类模型的 ROC 曲线 | 任务为分类，曲线高于随机线，AUC 可见且明显大于 0.5 | 回归任务不生成；AUC 接近 0.5 时模型不能用于优先排序 |
+| `fig_50_ml_feature_importance.png` | ML 重打分模型的特征重要性，用于解释哪些分子特征影响分数 | 模型有 `feature_importances_`，图非空，特征名可读 | 仅 `ml-train` 阶段且模型提供 `feature_importances_`/`coef_` 时生成；MLP/torch 等没有原生特征重要性时可能不生成；缺失不等于流程错误 |
+| `fig_51_ml_roc.png` | ML 重打分分类模型的 ROC 曲线 | 任务为分类，曲线高于随机线，AUC 可见且明显大于 0.5 | 仅 `ml-train` 阶段、分类任务且模型可输出概率时生成；回归任务不生成；AUC 接近 0.5 时模型不能用于优先排序 |
 
 ### 5.5 虚拟敲除与靶点优先级
 
