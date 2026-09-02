@@ -36,6 +36,10 @@ body {
   line-height: 1;
 }
 
+.topnav a .nav-count[hidden] {
+  display: none;
+}
+
 .wrap {
   position: relative;
 }

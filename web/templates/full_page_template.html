@@ -616,6 +616,7 @@ function renderTable(id, rows, columns) {
 async function startRun() {
   const form = document.getElementById('form');
   const data = new URLSearchParams(new FormData(form));
+  autoSaveFormState();
   const accession = (data.get('accession') || '').trim().toUpperCase();
     const btn = document.getElementById('startBtn');
     btn.disabled = true;
@@ -628,7 +629,6 @@ async function startRun() {
     if (!resp.ok) throw new Error(result.error || '启动失败');
     currentJob = result.job;
     saveJobRecord();
-    autoSaveFormState();
     document.getElementById('log').textContent = '';
     document.getElementById('pauseBtn').disabled = false;
     document.getElementById('resumeBtn').disabled = false;
