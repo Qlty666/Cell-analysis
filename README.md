@@ -712,6 +712,7 @@ MIT License. See `LICENSE` for details.
 - 新增 `insilico_enrichment.R`，复用项目现有 `org.Hs.eg.db` / `org.Mm.eg.db` / `clusterProfiler` 环境完成 GO（BP/CC/MF）与 KEGG 富集。
 - 新增 `tests/test_insilico_knockout.py` 单元测试与 `requirements.txt` 中的 `umap-learn` 依赖。
 - 真实数据验证后修复密集 UMAP 箭头重叠问题：`fig_66_ko_shift_umap.png` 在细胞数较多时自动改为网格聚合箭头，避免箭头成片遮挡散点；新增 `src/docking/export_single_cell_insilico.R` 从 Seurat 对象导出虚拟敲除输入。
+- 图表细节优化：`fig_63_ko_target_expression_table.png` 增加中文标题与中文表头；`fig_65_ko_regulatory_network.png` 补全中心基因标签、连接线变细并放大节点；GO/KEGG 富集气泡图增加独立颜色条区域，避免右侧标签压入绘图区或被裁剪。
 
 ### v1.1.0
 
