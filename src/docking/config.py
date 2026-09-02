@@ -135,6 +135,28 @@ DEFAULTS = {
             "ppi_hub": 0.10,
         },
     },
+    "insilico_knockout": {
+        "enabled": False,
+        "ko_gene": None,
+        "species": "auto",
+        "embedding_csv": None,
+        "regulators_csv": None,
+        "min_cells": 100,
+        "max_cells": 5000,
+        "max_genes": 1800,
+        "seed": 123,
+        "knn_impute_neighbors": 66,
+        "n_propagation": 3,
+        "network_edges_per_regulator": 300,
+        "target_top_n": 15,
+        "bar_top_n": 8,
+        "run_enrichment": True,
+        "enrichment_genes": 150,
+        "enrichment_timeout": 900,
+        "gene_note": None,
+        "photo_output_dir": None,
+        "figures": True,
+    },
     "network_toxicology": {
         "compound_name": None,
         "disease_name": None,
@@ -359,6 +381,11 @@ def apply_overrides(cfg: ResolvedConfig, overrides: dict) -> ResolvedConfig:
         "normal_label": ("knockout", "normal_label"),
         "ko_top_n": ("knockout", "top_n"),
         "validation_top_n": ("validation", "top_n"),
+        "insilico_gene": ("insilico_knockout", "ko_gene"),
+        "insilico_species": ("insilico_knockout", "species"),
+        "insilico_embedding_csv": ("insilico_knockout", "embedding_csv"),
+        "insilico_regulators_csv": ("insilico_knockout", "regulators_csv"),
+        "insilico_photo_dir": ("insilico_knockout", "photo_output_dir"),
         "compound_name": ("network_toxicology", "compound_name"),
         "disease_name": ("network_toxicology", "disease_name"),
         "compound_targets_csv": ("network_toxicology", "compound_targets_csv"),
@@ -524,6 +551,35 @@ def save_config(cfg: ResolvedConfig, path: Path) -> None:
                     "ppi_hub": 0.10,
                 },
             ),
+        },
+        "insilico_knockout": {
+            "enabled": cfg.get("insilico_knockout", "enabled", False),
+            "ko_gene": cfg.get("insilico_knockout", "ko_gene"),
+            "species": cfg.get("insilico_knockout", "species", "auto"),
+            "embedding_csv": cfg.get("insilico_knockout", "embedding_csv"),
+            "regulators_csv": cfg.get("insilico_knockout", "regulators_csv"),
+            "min_cells": cfg.get("insilico_knockout", "min_cells", 100),
+            "max_cells": cfg.get("insilico_knockout", "max_cells", 5000),
+            "max_genes": cfg.get("insilico_knockout", "max_genes", 1800),
+            "n_propagation": cfg.get(
+                "insilico_knockout", "n_propagation", 3
+            ),
+            "network_edges_per_regulator": cfg.get(
+                "insilico_knockout", "network_edges_per_regulator", 300
+            ),
+            "target_top_n": cfg.get("insilico_knockout", "target_top_n", 15),
+            "bar_top_n": cfg.get("insilico_knockout", "bar_top_n", 8),
+            "run_enrichment": cfg.get(
+                "insilico_knockout", "run_enrichment", True
+            ),
+            "enrichment_genes": cfg.get(
+                "insilico_knockout", "enrichment_genes", 150
+            ),
+            "gene_note": cfg.get("insilico_knockout", "gene_note"),
+            "photo_output_dir": cfg.get(
+                "insilico_knockout", "photo_output_dir"
+            ),
+            "figures": cfg.get("insilico_knockout", "figures", True),
         },
         "network_toxicology": {
             "compound_name": cfg.get("network_toxicology", "compound_name"),
