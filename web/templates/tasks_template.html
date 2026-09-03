@@ -3,7 +3,6 @@
 <head>
 <meta charset="utf-8">
 <meta name="viewport" content="width=device-width, initial-scale=1">
-<link rel="stylesheet" href="/static/app.css">
 <script src="/static/nav.js" defer></script>
 <title>任务进度</title>
 <style>
@@ -201,6 +200,7 @@ button.danger:hover { background: #991b1b; }
   word-break: break-all;
 }
 </style>
+<link rel="stylesheet" href="/static/app.css">
 </head>
 <body>
 <div class="topnav">
@@ -216,10 +216,6 @@ button.danger:hover { background: #991b1b; }
   <div class="page-title">
     <h1>任务进度</h1>
     <p class="page-sub">集中显示三个页面启动的排队、运行和暂停任务；任务完成后自动从列表移除，跳转不会中断后台进程。</p>
-  </div>
-  <div class="page-actions">
-    <a class="link-button" href="/full">全自动流水线</a>
-    <a class="link-button" href="/results">结果清单</a>
   </div>
 </div>
 
@@ -457,7 +453,10 @@ function renderHistory(records) {
     tbody.appendChild(tr);
   });
   table.appendChild(tbody);
-  box.appendChild(table);
+  const wrapper = document.createElement('div');
+  wrapper.className = 'tablebox';
+  wrapper.appendChild(table);
+  box.appendChild(wrapper);
 }
 
 async function loadHistory() {

@@ -3,7 +3,6 @@
 <head>
 <meta charset="utf-8">
 <meta name="viewport" content="width=device-width, initial-scale=1">
-<link rel="stylesheet" href="/static/app.css">
 <script src="/static/nav.js" defer></script>
 <title>全自动流水线结果清单</title>
 <style>
@@ -282,6 +281,7 @@ footer { color: #64748b; font-size: 12px; margin: 30px 0 8px; }
   .result-detail { grid-template-columns: 1fr; gap: 4px 0; }
 }
 </style>
+<link rel="stylesheet" href="/static/app.css">
 </head>
 <body>
 <div class="topnav">
@@ -298,14 +298,10 @@ footer { color: #64748b; font-size: 12px; margin: 30px 0 8px; }
     <h1>全自动流水线结果清单</h1>
     <p class="page-sub">仅列出各阶段可交付的结果图和结果数据；路径以默认参数 <code>--workdir dock</code>、<code>--output ../liver_cancer</code> 为例，<code>&lt;gene&gt;</code> 表示实际参与对接的基因名。报告、清单、断点、日志、配置、原始证据等过程文件不列入。</p>
   </div>
-  <div class="page-actions">
-    <a class="link-button" href="/full">返回全自动流水线</a>
-    <a class="link-button" href="/tasks">任务进度</a>
-  </div>
 </div>
 
 <div class="toolbar">
-  <input type="search" id="resultFilter" placeholder="搜索结果清单、解释文档或图名..." oninput="filterResults(this.value)">
+  <input type="search" id="resultFilter" aria-label="搜索" placeholder="搜索结果清单、解释文档或图名..." oninput="filterResults(this.value)">
   <button type="button" class="secondary" onclick="clearResultFilter()">清空筛选</button>
   <div class="filter-group" id="stageFilters">
     <span class="filter-label">阶段</span>
@@ -667,7 +663,7 @@ footer { color: #64748b; font-size: 12px; margin: 30px 0 8px; }
     for (let i = 2; i < rows.length; i++) {
       html += '<tr>' + rows[i].map(cell => '<td>' + cell + '</td>').join('') + '</tr>';
     }
-    return html + '</tbody></table>';
+    return '<div class="tablebox">' + html + '</tbody></table></div>';
   }
 
   function renderMarkdown(raw) {
@@ -1069,10 +1065,24 @@ footer { color: #64748b; font-size: 12px; margin: 30px 0 8px; }
     });
   }
 
+  function wrapCardTables() {
+    document.querySelectorAll('.card').forEach(card => {
+      if (card.id === 'guideCard') return;
+      card.querySelectorAll(':scope > table').forEach(table => {
+        if (table.parentElement && table.parentElement.classList.contains('tablebox')) return;
+        const wrapper = document.createElement('div');
+        wrapper.className = 'tablebox';
+        table.replaceWith(wrapper);
+        wrapper.appendChild(table);
+      });
+    });
+  }
+
   window.filterResults = filterResults;
   window.clearResultFilter = clearResultFilter;
   (async () => {
     await loadResultDetails();
+    wrapCardTables();
     transformResultRows();
     indexRows();
     bindFilters();
