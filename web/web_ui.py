@@ -3820,6 +3820,8 @@ class Handler(BaseHTTPRequestHandler):
             "LIVER_QC_MIN_COUNTS",
             "LIVER_QC_MAX_COUNTS",
             "LIVER_QC_MAX_MT",
+            "LIVER_QC_MAX_RIBO",
+            "LIVER_QC_MAX_HB",
             "LIVER_CLUSTER_RESOLUTION",
             "LIVER_CLUSTER_ALGORITHM",
             "LIVER_DE_LOGFc",

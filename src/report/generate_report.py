@@ -40,9 +40,9 @@ STAGE_LABELS = {
 }
 
 FIGURE_GUIDE = {
-    "fig_01_qc_raw_violin.png": ("QC 小提琴图（原始）", "过滤前 nFeature、nCount、percent.mt 的分布，用于识别低质量细胞和数据批次差异。"),
+    "fig_01_qc_raw_violin.png": ("QC 小提琴图（原始）", "过滤前 nFeature、nCount、percent.mt、percent.ribo、percent.hb 的分布，用于识别低质量细胞、核糖体/血红蛋白污染和数据批次差异。"),
     "fig_01_qc_filtered_violin.png": ("QC 小提琴图（过滤后）", "过滤后的 QC 指标分布，确认阈值是否合理、主要细胞群是否保留。"),
-    "fig_48_qc_pvalue_comparison.png": ("QC 质控差异度 P 值图", "以 Wilcoxon 秩和检验 P 值衡量原始/过滤后 QC 指标在不同条件间的差异程度。"),
+    "fig_48_qc_pvalue_comparison.png": ("QC 质控差异度 P 值图", "以 Wilcoxon 秩和检验 P 值衡量原始/过滤后 QC 指标（含核糖体和血红蛋白比例）在不同条件间的差异程度。"),
     "fig_02_doublet_scores.png": ("双细胞得分图", "scDblFinder 双细胞得分的分布，用于判断双细胞分类边界。"),
     "fig_03_umap_clusters.png": ("UMAP 聚类图", "Seurat 聚类在 UMAP 上的结构，检查分群是否清晰、是否存在过度分割。"),
     "fig_04_umap_condition.png": ("UMAP 分组图", "不同条件下细胞在 UMAP 上的分布，检查分组偏移和批次效应。"),
@@ -93,8 +93,9 @@ FIGURE_GUIDE = {
 }
 
 DATA_GUIDE = {
-    "fig_01_qc_metrics.csv": ("QC 指标表", "每细胞的 nFeature、nCount、percent.mt 以及样本/分组信息，用于检查过滤前后细胞质量。"),
-    "qc_metrics.csv": ("QC 指标表", "每细胞的 nFeature、nCount、percent.mt 以及样本/分组信息，用于检查过滤前后细胞质量。"),
+    "fig_01_qc_metrics.csv": ("QC 指标表", "每细胞的 nFeature、nCount、percent.mt、percent.ribo、percent.hb 以及样本/分组信息，用于检查过滤前后细胞质量。"),
+    "qc_metrics.csv": ("QC 指标表", "每细胞的 nFeature、nCount、percent.mt、percent.ribo、percent.hb 以及样本/分组信息，用于检查过滤前后细胞质量。"),
+    "fig_01_qc_thresholds.csv": ("QC 过滤规则表", "每条 QC 规则的上下限、按该规则移除的细胞数和比例。"),
     "fig_02_doublet_results.csv": ("双细胞结果表", "每细胞的双细胞得分和分类结果，用于评估双细胞去除。"),
     "doublet_results.csv": ("双细胞结果表", "每细胞的双细胞得分和分类结果，用于评估双细胞去除。"),
     "fig_05_16_17_cell_annotations.csv": ("细胞注释表", "每细胞的聚类、细胞类型注释和样本分组信息。"),
@@ -144,9 +145,20 @@ DATA_GUIDE = {
 }
 
 FIGURE_DATA_MAP = {
-    "fig_01_qc_raw_violin.png": ["fig_01_qc_metrics.csv", "qc_metrics.csv"],
-    "fig_01_qc_filtered_violin.png": ["fig_01_qc_metrics.csv", "qc_metrics.csv"],
-    "fig_48_qc_pvalue_comparison.png": ["fig_48_qc_pvalue_comparison.csv"],
+    "fig_01_qc_raw_violin.png": [
+        "fig_01_qc_metrics.csv",
+        "qc_metrics.csv",
+        "fig_01_qc_thresholds.csv",
+    ],
+    "fig_01_qc_filtered_violin.png": [
+        "fig_01_qc_metrics.csv",
+        "qc_metrics.csv",
+        "fig_01_qc_thresholds.csv",
+    ],
+    "fig_48_qc_pvalue_comparison.png": [
+        "fig_48_qc_pvalue_comparison.csv",
+        "fig_01_qc_thresholds.csv",
+    ],
     "fig_02_doublet_scores.png": [
         "fig_02_doublet_results.csv",
         "doublet_results.csv",
@@ -1186,6 +1198,7 @@ def main() -> int:
         data_link("fig_09_deg_significant.csv", "显著差异表达基因"),
         data_link("fig_09_deg_horizontal_violin.csv", "Top DEG 横向小提琴图数据"),
         data_link("fig_01_qc_metrics.csv", "QC 指标"),
+        data_link("fig_01_qc_thresholds.csv", "QC 过滤规则"),
         data_link("fig_48_qc_pvalue_comparison.csv", "QC 质控差异度 P 值"),
         data_link("fig_02_doublet_results.csv", "双细胞结果"),
         data_link("fig_05_16_17_cell_annotations.csv", "细胞注释"),

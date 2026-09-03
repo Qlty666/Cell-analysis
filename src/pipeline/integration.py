@@ -536,6 +536,7 @@ def collect_qc_metrics(single_cell_root: Path, workdir: Path) -> dict:
     data_dir = single_cell_root / "results" / "data"
     metrics: dict = {
         "single_cell": _read_json(single_cell_root / "results" / "summary.json"),
+        "qc_thresholds": [],
         "doublet_rate": None,
         "doublet_rate_by_sample": [],
         "pseudobulk_used": None,
@@ -543,6 +544,16 @@ def collect_qc_metrics(single_cell_root: Path, workdir: Path) -> dict:
         "knockout": {},
         "docking": {},
     }
+
+    qc_threshold_csv = data_dir / "01_qc" / "fig_01_qc_thresholds.csv"
+    if qc_threshold_csv.exists():
+        try:
+            threshold_frame = pd.read_csv(qc_threshold_csv)
+            metrics["qc_thresholds"] = threshold_frame.to_dict(
+                orient="records"
+            )
+        except Exception:
+            pass
 
     doublet_csv = data_dir / "08_publication" / "fig_29_doublet_rate_by_sample.csv"
     if not doublet_csv.exists():

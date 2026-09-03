@@ -20,9 +20,9 @@
 
 | 文件 | 横轴 | 纵轴 | 颜色/图例 | 关键符号 |
 | --- | --- | --- | --- | --- |
-| `fig_01_qc_raw_violin.png` | 条件（`condition`） | `nFeature_RNA`、`nCount_RNA`、`percent.mt` 的数值 | 小提琴主体默认按条件分组，图例被移除 | 三个并列面板分别对应三个指标，用于查看过滤前分布 |
-| `fig_01_qc_filtered_violin.png` | 条件（`condition`） | 过滤后 `nFeature_RNA`、`nCount_RNA`、`percent.mt` 的数值 | 同上 | 三个并列面板，用于查看过滤后分布 |
-| `fig_48_qc_pvalue_comparison.png` | QC 指标（`nFeature_RNA`、`nCount_RNA`、`percent.mt`、`percent.ribo`） | `-log10(P value)` | 条形填充色表示不同的条件两两比较（`comparison`） | 灰色虚线为 `P = 0.05`（即 `-log10(0.05)`）；柱顶文字为原始 `P` 值；按 raw/filtered 两个面板分面 |
+| `fig_01_qc_raw_violin.png` | 条件（`condition`） | `nFeature_RNA`、`nCount_RNA`、`percent.mt`、`percent.ribo`、`percent.hb` 的数值 | 小提琴主体默认按条件分组，图例被移除 | 五个并列面板分别对应五个指标，用于查看过滤前分布与污染尾部 |
+| `fig_01_qc_filtered_violin.png` | 条件（`condition`） | 过滤后 `nFeature_RNA`、`nCount_RNA`、`percent.mt`、`percent.ribo`、`percent.hb` 的数值 | 同上 | 五个并列面板，用于查看过滤后分布 |
+| `fig_48_qc_pvalue_comparison.png` | QC 指标（`nFeature_RNA`、`nCount_RNA`、`percent.mt`、`percent.ribo`、`percent.hb`） | `-log10(P value)` | 条形填充色表示不同的条件两两比较（`comparison`） | 灰色虚线为 `P = 0.05`（即 `-log10(0.05)`）；柱顶文字为原始 `P` 值；按 raw/filtered 两个面板分面 |
 | `fig_02_doublet_scores.png` | 双细胞判定（`singlet`/`doublet`） | `scDblFinder score`（双细胞得分） | `singlet` 为浅蓝 `#4DBBD5`，`doublet` 为红 `#E64B35` | 小提琴叠加窄箱线图；得分越高越可能为双细胞 |
 
 ### 聚类、降维与注释
@@ -124,23 +124,23 @@
 
 #### `fig_01_qc_raw_violin.png`
 
-- 坐标轴：横轴为样本条件（Seurat 元数据 `condition`）；纵轴为 QC 指标数值，三个并列面板依次为 `nFeature_RNA`（检测到的基因数）、`nCount_RNA`（总 UMI/总分子数）、`percent.mt`（线粒体基因百分比）。
+- 坐标轴：横轴为样本条件（Seurat 元数据 `condition`）；纵轴为 QC 指标数值，五个并列面板依次为 `nFeature_RNA`（检测到的基因数）、`nCount_RNA`（总 UMI/总分子数）、`percent.mt`（线粒体基因百分比）、`percent.ribo`（核糖体基因百分比）、`percent.hb`（血红蛋白基因百分比）。
 - 颜色/图例：小提琴按条件分组填充，代码使用 `NoLegend()` 移除图例，因此图中不显示图例；分组由横轴标签区分。
-- 读取方法：比较每个条件下小提琴主体位置、宽度和长尾。`nFeature_RNA`/`nCount_RNA` 过低代表低质量或空液滴，`percent.mt` 过高代表细胞状态差或细胞破裂；单条件时只能描述质量分布，不能用于“条件间差异”结论。
+- 读取方法：比较每个条件下小提琴主体位置、宽度和长尾。`nFeature_RNA`/`nCount_RNA` 过低代表低质量或空液滴，`percent.mt` 过高代表细胞状态差或细胞破裂，`percent.hb` 明显抬升提示红细胞污染；单条件时只能描述质量分布，不能用于“条件间差异”结论。
 - 数据来源：`data/01_qc/fig_01_qc_metrics.csv`（含 raw 前原始指标）与 `results/checkpoints/seurat_raw.rds`。
 - 回退/占位：无。若图像空白或全部为 0，应检查输入矩阵与 QC 计算是否成功。
 
 #### `fig_01_qc_filtered_violin.png`
 
-- 坐标轴：横轴为条件；纵轴为过滤后 `nFeature_RNA`、`nCount_RNA`、`percent.mt` 的数值；三个面板同上。
+- 坐标轴：横轴为条件；纵轴为过滤后 `nFeature_RNA`、`nCount_RNA`、`percent.mt`、`percent.ribo`、`percent.hb` 的数值；五个面板同上。
 - 颜色/图例：同 `fig_01_qc_raw_violin.png`，图例被移除。
-- 读取方法：确认低质量尾部被去除、主要细胞群保留，并检查两个条件是否仍可比较。默认过滤阈值见环境变量 `LIVER_QC_MIN_FEATURES`、`LIVER_QC_MAX_FEATURES`、`LIVER_QC_MIN_COUNTS`、`LIVER_QC_MAX_COUNTS`、`LIVER_QC_MAX_MT`；未设置时由数据分位数自动计算。
-- 数据来源：`fig_01_qc_metrics.csv` 的过滤后子集。
+- 读取方法：确认低质量尾部被去除、主要细胞群保留，并检查两个条件是否仍可比较。默认过滤阈值见环境变量 `LIVER_QC_MIN_FEATURES`、`LIVER_QC_MAX_FEATURES`、`LIVER_QC_MIN_COUNTS`、`LIVER_QC_MAX_COUNTS`、`LIVER_QC_MAX_MT`；未设置时由数据分位数自动计算。`percent.hb` 未设置 `LIVER_QC_MAX_HB` 时取 99% 分位数（上限 25），`percent.ribo` 默认仅统计不过滤，可用 `LIVER_QC_MAX_RIBO` 打开过滤。
+- 数据来源：`fig_01_qc_metrics.csv` 的过滤后子集与 `fig_01_qc_thresholds.csv`。
 - 回退/占位：无。过滤后细胞数过少或分布被过度压缩时，该图不能作为质量合格证据。
 
 #### `fig_48_qc_pvalue_comparison.png`
 
-- 坐标轴：横轴为 QC 指标（`nFeature_RNA`、`nCount_RNA`、`percent.mt`、`percent.ribo`）；纵轴为 `-log10(P value)`，数值越大表示条件间差异越显著。
+- 坐标轴：横轴为 QC 指标（`nFeature_RNA`、`nCount_RNA`、`percent.mt`、`percent.ribo`、`percent.hb`）；纵轴为 `-log10(P value)`，数值越大表示条件间差异越显著。
 - 颜色/图例：条形填充颜色表示条件两两比较（`comparison`，格式为“组1 vs 组2”）；图例在底部。
 - 阈值与参考线：灰色虚线为 `P = 0.05`（对应 `-log10(0.05) ≈ 1.301`）；柱顶文字直接标注原始 `P` 值。
 - 面板布局：按 `raw`/`filtered` 两个阶段分面，纵轴可各自缩放（`scales="free_y"`）。
@@ -271,7 +271,7 @@
 
 - 坐标轴：横轴为特征重要性数值，纵轴为特征名。
 - 颜色/图例：条形统一蓝色 `#4C72B0`，无分类图例。
-- 输入：单细胞 ML 分类模型的 `feature_importances_`/`coef_` 绝对值均值；特征为样本级 QC 均值（`nFeature_RNA`、`nCount_RNA`、`percent.mt`、`percent.ribo`）与细胞类型比例。
+- 输入：单细胞 ML 分类模型的 `feature_importances_`/`coef_` 绝对值均值；特征为样本级 QC 均值（`nFeature_RNA`、`nCount_RNA`、`percent.mt`、`percent.ribo`，有血红蛋白基因时含 `percent.hb`）与细胞类型比例。
 - 读取方法：查看影响样本分类的关键特征；仅展示 Top15。
 - 数据来源：`data/07_ml/fig_24_ml_feature_importance.csv`、`ml_model_summary.json`（状态为 completed 才可用）。
 
@@ -635,7 +635,7 @@
 
 | 文件 | 内容与用途 | 合格判据 | 不可用或警示 |
 | --- | --- | --- | --- |
-| `fig_01_qc_raw_violin.png` | 过滤前 `nFeature_RNA`、`nCount_RNA`、`percent.mt` 按条件展示的小提琴图，用于判断低质量细胞和条件间质量差异 | 三个指标的小提琴图均可见，细胞数足够，图形不是空白或全部为零 | 只有一个条件、只有一个样本或严重批次混杂时不能用于“条件差异”结论 |
+| `fig_01_qc_raw_violin.png` | 过滤前 `nFeature_RNA`、`nCount_RNA`、`percent.mt`、`percent.ribo`、`percent.hb` 按条件展示的小提琴图，用于判断低质量细胞、污染和条件间质量差异 | 五个指标的小提琴图均可见，细胞数足够，图形不是空白或全部为零 | 只有一个条件、只有一个样本或严重批次混杂时不能用于“条件差异”结论 |
 | `fig_01_qc_filtered_violin.png` | 过滤后相同 QC 指标分布，用于确认过滤阈值是否合理 | 低质量尾部被去除，主要细胞群仍保留，两个条件仍可比较 | 过滤后细胞数过少、分布被过度压缩，或图像空白时不可用 |
 | `fig_48_qc_pvalue_comparison.png` | 原始/过滤后 QC 指标在条件间的 Wilcoxon P 值对比图，用于量化过滤是否改变条件差异 | 图中显示真实 P 值，`fig_48_qc_pvalue_comparison.csv` 存在且指标、P 值可对应 | 图中出现 “At least two conditions are required” 时，只能说明没有两组条件，不能用于条件差异判断 |
 | `fig_02_doublet_scores.png` | `scDblFinder` 双细胞得分按 singlet/doublet 分类展示，用于判断双细胞去除边界 | singlet 与 doublet 得分有区分度，或可明确看到无 doublet；对应 `fig_02_doublet_results.csv` 可核对 | 如果 `scDblFinder` 失败后所有细胞被标记为 singlet，图不能作为真实双细胞检测结果 |
