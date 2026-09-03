@@ -5,21 +5,21 @@
       "file": "figures/01_qc/fig_01_qc_raw_violin.png",
       "name": "fig_01_qc_raw_violin.png",
       "kind": "fig",
-      "content": "过滤前 nFeature_RNA、nCount_RNA、percent.mt 按条件展示的原始分布。",
+      "content": "过滤前 nFeature_RNA、nCount_RNA、percent.mt、percent.ribo、percent.hb 按条件展示的原始分布。",
       "type": "小提琴图（多面板）",
       "use": "判断原始数据质量，识别低质量细胞尾部、条件间差异和异常样本。",
       "optional": false,
-      "legend": "坐标轴：横轴为条件（condition），纵轴为 QC 指标数值。三个并列面板依次为 nFeature_RNA（检测基因数）、nCount_RNA（总分子数）、percent.mt（线粒体基因百分比）。\n颜色/图例：小提琴按条件分组填充，图中 NoLegend 移除图例，分组由横轴标签区分。\n读取：对比条件间分布主体与长尾；nFeature/nCount 过低提示低质量或空液滴，percent.mt 过高提示细胞状态差。\n数据来源：data/01_qc/fig_01_qc_metrics.csv 与 seurat_raw.rds。"
+      "legend": "坐标轴：横轴为条件（condition），纵轴为 QC 指标数值。五个面板依次为 nFeature_RNA（检测基因数）、nCount_RNA（总分子数）、percent.mt（线粒体基因百分比）、percent.ribo（核糖体基因百分比）、percent.hb（血红蛋白基因百分比）。\n颜色/图例：小提琴按条件分组填充，图中 NoLegend 移除图例，分组由横轴标签区分。\n读取：对比条件间分布主体与长尾；nFeature/nCount 过低提示低质量或空液滴，percent.mt 过高提示细胞状态差，percent.hb 明显抬升提示红细胞污染。\n数据来源：data/01_qc/fig_01_qc_metrics.csv 与 seurat_raw.rds。"
     },
     {
       "file": "figures/01_qc/fig_01_qc_filtered_violin.png",
       "name": "fig_01_qc_filtered_violin.png",
       "kind": "fig",
-      "content": "过滤后保留细胞的 nFeature_RNA、nCount_RNA、percent.mt 分布。",
+      "content": "过滤后保留细胞的 nFeature_RNA、nCount_RNA、percent.mt、percent.ribo、percent.hb 分布。",
       "type": "小提琴图（多面板）",
       "use": "确认过滤阈值是否合理，验证低质量尾部被去除且主要细胞群保留。",
       "optional": false,
-      "legend": "坐标轴：横轴为条件（condition），纵轴为过滤后 nFeature_RNA、nCount_RNA、percent.mt 数值，三个面板同原始图。\n颜色/图例：小提琴按条件分组，图例被移除。\n阈值：默认由 LIVER_QC_MIN_FEATURES/MAX_FEATURES/MIN_COUNTS/MAX_COUNTS/MAX_MT 决定，未设置时按数据分位数自动计算。\n读取：确认低质量尾部被去除且主要细胞群保留。\n数据来源：fig_01_qc_metrics.csv 的过滤后子集。"
+      "legend": "坐标轴：横轴为条件（condition），纵轴为过滤后 nFeature_RNA、nCount_RNA、percent.mt、percent.ribo、percent.hb 数值，五个面板同原始图。\n颜色/图例：小提琴按条件分组，图例被移除。\n阈值：默认由 LIVER_QC_MIN_FEATURES/MAX_FEATURES/MIN_COUNTS/MAX_COUNTS/MAX_MT 决定，未设置时按数据分位数自动计算；percent.hb 未设置时取 99% 分位数（上限 25），percent.ribo 默认 100，可通过 LIVER_QC_MAX_HB/LIVER_QC_MAX_RIBO 覆盖。\n读取：确认低质量尾部被去除、红细胞污染被标记/过滤且主要细胞群保留。\n数据来源：fig_01_qc_metrics.csv 的过滤后子集与 fig_01_qc_thresholds.csv。"
     },
     {
       "file": "figures/01_qc/fig_48_qc_pvalue_comparison.png",
@@ -29,7 +29,7 @@
       "type": "分组条形图（按原始/过滤后面板分面）",
       "use": "量化过滤是否改变条件间质量差异，辅助判断 QC 是否引入偏倚。",
       "optional": false,
-      "legend": "坐标轴：横轴为 QC 指标（nFeature_RNA、nCount_RNA、percent.mt、percent.ribo），纵轴为 -log10(P value)。\n颜色/图例：条形填充色表示条件两两比较（comparison）；灰色虚线为 P=0.05（约 1.301）；柱顶文字为原始 P 值。\n面板：按 raw/filtered 分面，纵轴自由缩放。\n统计：Wilcoxon 秩和检验，padj 使用 BH FDR。\n回退：条件少于 2 组时显示 At least two conditions are required。\n数据来源：data/01_qc/fig_48_qc_pvalue_comparison.csv。"
+      "legend": "坐标轴：横轴为 QC 指标（nFeature_RNA、nCount_RNA、percent.mt、percent.ribo、percent.hb），纵轴为 -log10(P value)。\n颜色/图例：条形填充色表示条件两两比较（comparison）；灰色虚线为 P=0.05（约 1.301）；柱顶文字为原始 P 值。\n面板：按 raw/filtered 分面，纵轴自由缩放。\n统计：Wilcoxon 秩和检验，padj 使用 BH FDR。\n回退：条件少于 2 组时显示 At least two conditions are required。\n数据来源：data/01_qc/fig_48_qc_pvalue_comparison.csv。"
     },
     {
       "file": "figures/02_doublets/fig_02_doublet_scores.png",
@@ -527,6 +527,15 @@
       "content": "QC 指标表",
       "type": "CSV 数据表",
       "use": "复现质控结果；该表用于复现对应图表、复核统计结果，并作为下游筛选或报告汇总的输入。",
+      "optional": false
+    },
+    {
+      "file": "data/01_qc/fig_01_qc_thresholds.csv",
+      "name": "fig_01_qc_thresholds.csv",
+      "kind": "data",
+      "content": "QC 过滤规则表",
+      "type": "CSV 数据表",
+      "use": "记录每条 QC 规则的上下限、按该规则移除的细胞数和比例，复核质控是否过度过滤。",
       "optional": false
     },
     {

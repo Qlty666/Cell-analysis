@@ -151,9 +151,15 @@ def main() -> int:
 
         props = pd.crosstab(ann["sample"], ann["celltype_annot"], normalize="index")
         meta = ann[["sample", "condition"]].drop_duplicates()
-        qc_means = qc.groupby("sample")[
-            ["nFeature_RNA", "nCount_RNA", "percent.mt", "percent.ribo"]
-        ].mean()
+        qc_mean_cols = [
+            "nFeature_RNA",
+            "nCount_RNA",
+            "percent.mt",
+            "percent.ribo",
+        ]
+        if "percent.hb" in qc.columns:
+            qc_mean_cols.append("percent.hb")
+        qc_means = qc.groupby("sample")[qc_mean_cols].mean()
         features = props.join(meta.set_index("sample"), how="inner")
         features = features.join(qc_means, how="left")
         features = features.dropna(subset=["condition"])
