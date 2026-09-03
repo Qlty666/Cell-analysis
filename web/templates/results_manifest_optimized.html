@@ -362,13 +362,15 @@ footer { color: #64748b; font-size: 12px; margin: 30px 0 8px; }
 │     ├─ 02_redock/             # 精修重对接：figures + data
 │     ├─ 03_ml/                 # ML 重打分：figures + data
 │     ├─ 04_knockout/           # 虚拟敲除：figures + data
-│     └─ 05_validation/         # 验证候选：data
+│     ├─ 05_validation/         # 验证候选：data
+│     └─ 06_md/                 # MD 模拟：每配体输入 + RMSD/RMSF
 └─ work/&lt;gene&gt;/outputs/run_001/
    ├─ docked/                   # Vina 结果表（结果数据）
    └─ results/
       ├─ 01_analysis/           # 每靶点对接分析
       ├─ 02_redock/             # 每靶点精修
-      └─ 03_ml/                 # 每靶点 ML 重打分</div>
+      ├─ 03_ml/                 # 每靶点 ML 重打分
+      └─ 06_md/                 # 每靶点 MD 模拟</div>
   <p class="muted">不列入：config、data/receptors、data/ligands/prepared、evidence 原始响应、checkpoints、.stages、logs、manifest、summary、报告等过程或溯源文件。</p>
 </div>
 
@@ -554,6 +556,8 @@ footer { color: #64748b; font-size: 12px; margin: 30px 0 8px; }
       <tr><td><code>results/03_ml/data/fig_50_ml_feature_importance.csv</code></td><td>ML 特征重要性数据</td><td><span class="badge data">结果数据</span></td><td>特征排序 <span class="badge opt">ml-train 且有重要性</span></td></tr>
       <tr><td><code>results/03_ml/data/fig_51_ml_roc.csv</code></td><td>ML ROC 数据</td><td><span class="badge data">结果数据</span></td><td>绘制 ROC 的数据 <span class="badge opt">ml-train 且二分类</span></td></tr>
       <tr><td><code>results/03_ml/data/ml_ranked_results.csv</code></td><td>ML 重打分排序结果</td><td><span class="badge data">结果数据</span></td><td>融合亲和力与 ML 排名 <span class="badge opt">ml-train</span></td></tr>
+      <tr><td><code>results/06_md/&lt;ligand&gt;/md_rmsd_rmsf.png</code></td><td>MD 蛋白/配体 RMSD 与配体 RMSF</td><td><span class="badge fig">结果图</span></td><td>检查复合物稳定性和构象收敛 <span class="badge opt">md-simulation auto</span></td></tr>
+      <tr><td><code>results/06_md/md_simulation_results.csv</code></td><td>MD 每配体状态与均值指标</td><td><span class="badge data">结果数据</span></td><td>查看时长、RMSD、RMSF <span class="badge opt">md-simulation</span></td></tr>
     </tbody>
   </table>
 </div>
