@@ -1373,6 +1373,20 @@ def start_dock_job(data: dict) -> dict:
         "model": _first(data, "model", "") or None,
         "training_csv": _first(data, "training_csv", "") or None,
         "label_column": _first(data, "label_column", "") or None,
+        "md_mode": _first(data, "md_mode", "") or None,
+        "md_receptor_pdb": _first(data, "md_receptor_pdb", "") or None,
+        "md_gmx_data": _first(data, "md_gmx_data", "") or None,
+        "md_top_n": _int_field(data, "md_top_n"),
+        "md_protein_ff": _first(data, "md_protein_ff", "") or None,
+        "md_water": _first(data, "md_water", "") or None,
+        "md_em_steps": _int_field(data, "md_em_steps"),
+        "md_equil_steps": _int_field(data, "md_equil_steps"),
+        "md_prod_steps": _int_field(data, "md_prod_steps"),
+        "md_temperature": _float_field(data, "md_temperature"),
+        "md_ligand_charge": _int_field(data, "md_ligand_charge"),
+        "md_cpu": _int_field(data, "md_cpu"),
+        "md_gpu": _first(data, "md_gpu", "0") in ("1", "true", "on", "yes"),
+        "md_topology_dir": _first(data, "md_topology_dir", "") or None,
     }
     cfg = load_config(APP_ROOT / "config" / "docking_config.json", overrides)
     save_config(cfg, cfg_path)
@@ -1462,6 +1476,8 @@ def _dock_status(info: dict) -> dict:
                 error,
                 exit_code=info["proc"].returncode,
             )
+            if stage in ("", "未知") and info.get("stage") == "md-simulation":
+                stage = "MD 模拟"
             return {
                 "running": False,
                 "ok": False,
@@ -1490,6 +1506,8 @@ def _dock_status(info: dict) -> dict:
             error,
             exit_code=info["proc"].returncode,
         )
+        if stage in ("", "未知") and info.get("stage") == "md-simulation":
+            stage = "MD 模拟"
         return {
             "running": False,
             "ok": ok,
@@ -2088,7 +2106,11 @@ def running_tasks_data(include_logs: bool = True) -> dict:
         stage_label = (
             "排队中" if state == "queued"
             else "已暂停" if state == "paused"
-            else _current_stage(marker_dir, DOCK_STAGE_LABELS) or "准备中"
+            else (
+                "MD 模拟"
+                if info.get("stage") == "md-simulation"
+                else _current_stage(marker_dir, DOCK_STAGE_LABELS) or "准备中"
+            )
         )
         started = float(info.get("started") or now)
         tasks.append(
@@ -2545,13 +2567,45 @@ def dock_results(info: dict) -> dict:
     docked_files = _list_result_files(info["output_dir"] / "docked")
     files.extend(f"docked/{rel}" for rel in docked_files)
     files = sorted(set(files))
+    md = _md_results(info)
     return {
         "summary": summary,
         "rows": rows,
         "figures": figures,
         "files": files,
+        "md": md,
         "output_dir": str(reports),
         "stage": info.get("stage", ""),
+    }
+
+
+def _md_results(info: dict) -> dict:
+    md_dir = info["output_dir"] / "results" / "06_md"
+    if not md_dir.exists():
+        return {}
+    summary = {}
+    summary_path = md_dir / "md_simulation_summary.json"
+    if summary_path.exists():
+        try:
+            summary = json.loads(summary_path.read_text(encoding="utf-8"))
+        except Exception:
+            summary = {}
+    rows: list[dict] = []
+    results_csv = md_dir / "md_simulation_results.csv"
+    if results_csv.exists():
+        import csv as csv_module
+
+        with results_csv.open("r", newline="", encoding="utf-8") as fh:
+            for i, row in enumerate(csv_module.DictReader(fh)):
+                if i >= 200:
+                    break
+                rows.append(row)
+    return {
+        "summary": summary,
+        "rows": rows,
+        "figures": _list_result_images(md_dir),
+        "files": _list_result_files(md_dir),
+        "output_dir": str(md_dir),
     }
 
 

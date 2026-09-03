@@ -15,6 +15,7 @@ from . import (
     handoff,
     knockout,
     ligands,
+    md_simulation,
     ml,
     network_toxicology,
     pipeline,
@@ -48,6 +49,7 @@ def main(argv: list[str] | None = None) -> int:
         ("evidence", "collect target/ligand evidence from public databases"),
         ("ml-train", "train ML/DL rescoring model"),
         ("ml-predict", "apply trained ML/DL model to docking results"),
+        ("md-simulation", "prepare or run GROMACS MD for top docking poses"),
         ("export-md", "export top hits to Amber/GROMACS templates"),
         ("export-external", "export UniDock/HDOCK/HADDOCK templates"),
         ("redock", "re-dock top hits with higher exhaustiveness"),
@@ -88,6 +90,21 @@ def main(argv: list[str] | None = None) -> int:
         "model": args.model,
         "label_column": args.label_column,
         "training_csv": args.training_csv,
+        "md_mode": args.md_mode,
+        "md_executable": args.md_executable,
+        "md_gmx_data": args.md_gmx_data,
+        "md_top_n": args.md_top_n,
+        "md_receptor_pdb": args.md_receptor_pdb,
+        "md_protein_ff": args.md_protein_ff,
+        "md_water": args.md_water,
+        "md_em_steps": args.md_em_steps,
+        "md_equil_steps": args.md_equil_steps,
+        "md_prod_steps": args.md_prod_steps,
+        "md_temperature": args.md_temperature,
+        "md_ligand_charge": args.md_ligand_charge,
+        "md_cpu": args.md_cpu,
+        "md_gpu": args.md_gpu,
+        "md_topology_dir": args.md_topology_dir,
         "epochs": args.epochs,
         "hidden_size": args.hidden_size,
         "uniprot": args.uniprot,
@@ -162,6 +179,13 @@ def main(argv: list[str] | None = None) -> int:
         )
     elif args.command == "ml-predict":
         ml.predict_ml(cfg, log)
+    elif args.command == "md-simulation":
+        md_simulation.run_md_simulation(
+            cfg,
+            log,
+            mode=args.md_mode,
+            force=args.force,
+        )
     elif args.command == "export-md":
         handoff.export_md(cfg, log)
     elif args.command == "export-external":
@@ -233,6 +257,36 @@ def _add_common(sub: argparse.ArgumentParser) -> None:
     sub.add_argument("--model", help="ML model: rf, gbm, mlp, lasso_svm or torch")
     sub.add_argument("--label-column", help="training label column")
     sub.add_argument("--training-csv", help="training CSV path")
+    sub.add_argument(
+        "--md-mode",
+        choices=["prepare", "auto"],
+        default=None,
+        help="MD mode: prepare only or run GROMACS simulation (default: prepare)",
+    )
+    sub.add_argument("--md-executable", help="GROMACS gmx executable path")
+    sub.add_argument("--md-gmx-data", help="GROMACS data root containing share/gromacs/top")
+    sub.add_argument("--md-top-n", type=int, help="number of top poses for MD")
+    sub.add_argument("--md-receptor-pdb", help="clean receptor PDB for MD")
+    sub.add_argument(
+        "--md-protein-ff",
+        help="GROMACS protein force field, e.g. amber99sb-ildn",
+    )
+    sub.add_argument("--md-water", help="water model, e.g. tip3p")
+    sub.add_argument("--md-em-steps", type=int, help="energy minimization steps")
+    sub.add_argument("--md-equil-steps", type=int, help="NVT/NPT steps")
+    sub.add_argument("--md-prod-steps", type=int, help="production MD steps")
+    sub.add_argument("--md-temperature", type=float, help="simulation temperature (K)")
+    sub.add_argument("--md-ligand-charge", type=int, help="ligand net charge")
+    sub.add_argument("--md-cpu", type=int, help="GROMACS OpenMP threads")
+    sub.add_argument(
+        "--md-gpu",
+        action="store_true",
+        help="use GROMACS GPU acceleration when available",
+    )
+    sub.add_argument(
+        "--md-topology-dir",
+        help="folder containing <id>.itp and <id>.gro ligand topologies",
+    )
     sub.add_argument("--epochs", type=int, help="MLP/torch training epochs")
     sub.add_argument("--hidden-size", type=int, help="MLP hidden layer size")
     sub.add_argument("--uniprot", help="UniProt accession for evidence")

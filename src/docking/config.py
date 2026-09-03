@@ -83,6 +83,32 @@ DEFAULTS = {
         "export_dir": "outputs/md",
         "top_n": 10,
     },
+    "md_simulation": {
+        "mode": "prepare",
+        "executable": None,
+        "gmx_data_dir": None,
+        "top_n": 1,
+        "receptor_pdb": None,
+        "protein_forcefield": "amber99sb-ildn",
+        "water": "tip3p",
+        "box_type": "cubic",
+        "box_padding_nm": 1.2,
+        "ion_concentration": 0.15,
+        "ligand_charge": 0,
+        "ligand_forcefield": "gaff2",
+        "topology_dir": None,
+        "em_steps": 5000,
+        "equil_steps": 5000,
+        "prod_steps": 250000,
+        "dt_ps": 0.002,
+        "temperature": 300,
+        "pressure": 1.0,
+        "timeout_seconds": 86400,
+        "cpu": 4,
+        "gpu": False,
+        "figures": True,
+        "maxwarn": 20,
+    },
     "redock": {
         "enabled": True,
         "top_n": 20,
@@ -278,6 +304,9 @@ class ResolvedConfig:
     def md_export_dir(self) -> Path:
         return self._resolve(self.get("md", "export_dir", "outputs/md"))
 
+    def md_dir(self) -> Path:
+        return self.reports_dir() / "06_md"
+
     def validate(self) -> None:
         for name, values in [
             ("center", self.receptor_center()),
@@ -362,6 +391,22 @@ def apply_overrides(cfg: ResolvedConfig, overrides: dict) -> ResolvedConfig:
         "training_csv": ("ml", "training_csv"),
         "epochs": ("ml", "epochs"),
         "hidden_size": ("ml", "hidden_size"),
+        "md_mode": ("md_simulation", "mode"),
+        "md_executable": ("md_simulation", "executable"),
+        "md_gmx_data": ("md_simulation", "gmx_data_dir"),
+        "md_top_n": ("md_simulation", "top_n"),
+        "md_receptor_pdb": ("md_simulation", "receptor_pdb"),
+        "md_protein_ff": ("md_simulation", "protein_forcefield"),
+        "md_water": ("md_simulation", "water"),
+        "md_em_steps": ("md_simulation", "em_steps"),
+        "md_equil_steps": ("md_simulation", "equil_steps"),
+        "md_prod_steps": ("md_simulation", "prod_steps"),
+        "md_temperature": ("md_simulation", "temperature"),
+        "md_ligand_charge": ("md_simulation", "ligand_charge"),
+        "md_cpu": ("md_simulation", "cpu"),
+        "md_gpu": ("md_simulation", "gpu"),
+        "md_maxwarn": ("md_simulation", "maxwarn"),
+        "md_topology_dir": ("md_simulation", "topology_dir"),
         "uniprot": ("evidence", "uniprot_accession"),
         "pdb": ("evidence", "pdb_id"),
         "chembl_target": ("evidence", "chembl_target_id"),
@@ -489,6 +534,42 @@ def save_config(cfg: ResolvedConfig, path: Path) -> None:
         "md": {
             "export_dir": cfg.get("md", "export_dir", "outputs/md"),
             "top_n": cfg.get("md", "top_n", 10),
+        },
+        "md_simulation": {
+            "mode": cfg.get("md_simulation", "mode", "prepare"),
+            "executable": cfg.get("md_simulation", "executable"),
+            "gmx_data_dir": cfg.get("md_simulation", "gmx_data_dir"),
+            "top_n": cfg.get("md_simulation", "top_n", 1),
+            "receptor_pdb": cfg.get("md_simulation", "receptor_pdb"),
+            "protein_forcefield": cfg.get(
+                "md_simulation", "protein_forcefield", "amber99sb-ildn"
+            ),
+            "water": cfg.get("md_simulation", "water", "tip3p"),
+            "box_type": cfg.get("md_simulation", "box_type", "cubic"),
+            "box_padding_nm": cfg.get(
+                "md_simulation", "box_padding_nm", 1.2
+            ),
+            "ion_concentration": cfg.get(
+                "md_simulation", "ion_concentration", 0.15
+            ),
+            "ligand_charge": cfg.get("md_simulation", "ligand_charge", 0),
+            "ligand_forcefield": cfg.get(
+                "md_simulation", "ligand_forcefield", "gaff2"
+            ),
+            "topology_dir": cfg.get("md_simulation", "topology_dir"),
+            "em_steps": cfg.get("md_simulation", "em_steps", 5000),
+            "equil_steps": cfg.get("md_simulation", "equil_steps", 5000),
+            "prod_steps": cfg.get("md_simulation", "prod_steps", 250000),
+            "dt_ps": cfg.get("md_simulation", "dt_ps", 0.002),
+            "temperature": cfg.get("md_simulation", "temperature", 300),
+            "pressure": cfg.get("md_simulation", "pressure", 1.0),
+            "timeout_seconds": cfg.get(
+                "md_simulation", "timeout_seconds", 86400
+            ),
+            "cpu": cfg.get("md_simulation", "cpu", 4),
+            "gpu": cfg.get("md_simulation", "gpu", False),
+            "figures": cfg.get("md_simulation", "figures", True),
+            "maxwarn": cfg.get("md_simulation", "maxwarn", 20),
         },
         "redock": {
             "enabled": cfg.get("redock", "enabled", True),
