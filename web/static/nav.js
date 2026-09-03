@@ -1,6 +1,10 @@
 (function () {
   "use strict";
 
+  function isSmallScreen() {
+    return window.matchMedia && window.matchMedia("(max-width: 760px)").matches;
+  }
+
   function currentPath() {
     try {
       return new URL(window.location.href).pathname;
@@ -21,8 +25,55 @@
       href = href.replace(/\/+$/, "") || "/";
       if (href === path) {
         link.classList.add("active");
+        link.setAttribute("aria-current", "page");
       }
     });
+    var activeLink = document.querySelector(".topnav a.active");
+    if (activeLink && isSmallScreen() && activeLink.scrollIntoView) {
+      activeLink.scrollIntoView({inline: "center", block: "nearest"});
+    }
+  }
+
+  function bindPrimaryActions() {
+    document.querySelectorAll("form").forEach(function (form) {
+      form.addEventListener("keydown", function (event) {
+        if (event.key !== "Enter" || event.isComposing) return;
+        var target = event.target;
+        if (!target || !/^(INPUT|SELECT)$/.test(target.tagName)) return;
+        if (target.type === "checkbox" || target.type === "radio") return;
+        var primary = form.querySelector(
+          "button[data-primary], button[type='submit']"
+        );
+        if (!primary || primary.disabled) return;
+        event.preventDefault();
+        primary.click();
+      });
+    });
+  }
+
+  function addBackToTop() {
+    if (document.querySelector(".back-to-top")) return;
+    var button = document.createElement("button");
+    button.type = "button";
+    button.className = "back-to-top";
+    button.setAttribute("aria-label", "返回顶部");
+    button.innerHTML = "&uarr;";
+    button.addEventListener("click", function () {
+      window.scrollTo({top: 0, behavior: "smooth"});
+    });
+    document.body.appendChild(button);
+
+    function updateVisibility() {
+      var shouldShow =
+        window.scrollY > 420 &&
+        (document.documentElement.scrollHeight >
+          window.innerHeight + 420 || isSmallScreen());
+      button.classList.toggle("visible", Boolean(shouldShow));
+    }
+
+    updateVisibility();
+    window.addEventListener("scroll", updateVisibility, {passive: true});
+    window.addEventListener("resize", updateVisibility, {passive: true});
   }
 
   function updateTaskBadge() {
@@ -55,6 +106,8 @@
   }
 
   markActivePage();
+  bindPrimaryActions();
+  addBackToTop();
   updateTaskBadge();
   window.setInterval(updateTaskBadge, 4000);
 })();

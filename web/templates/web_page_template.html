@@ -3,7 +3,6 @@
 <head>
 <meta charset="utf-8">
 <meta name="viewport" content="width=device-width, initial-scale=1">
-<link rel="stylesheet" href="/static/app.css">
 <script src="/static/nav.js" defer></script>
 <title>单细胞数据集分析</title>
 <style>
@@ -121,6 +120,7 @@ a { color: #1665c0; text-decoration: none; }
   cursor: pointer;
 }
 </style>
+<link rel="stylesheet" href="/static/app.css">
 </head>
 <body>
 <div class="wrap">
@@ -128,10 +128,6 @@ a { color: #1665c0; text-decoration: none; }
   <div class="page-title">
     <h1>表达数据集分析</h1>
     <p class="page-sub">输入 GEO 数据集编号和输出路径，自动完成下载、质控、差异表达与富集分析；单细胞数据额外执行双细胞、聚类与注释。</p>
-  </div>
-  <div class="page-actions">
-    <a class="link-button" href="/full">全自动流水线</a>
-    <a class="link-button" href="/results">结果清单</a>
   </div>
 </div>
 
@@ -191,7 +187,7 @@ a { color: #1665c0; text-decoration: none; }
       </div>
     </details>
 
-    <button id="startBtn" type="button" onclick="startRun()">开始分析</button>
+    <button id="startBtn" type="button" data-primary onclick="startRun()">开始分析</button>
     <button id="pauseBtn" type="button" onclick="pauseRun()" disabled>暂停分析</button>
     <button id="resumeBtn" type="button" onclick="resumeRun()" disabled>继续分析</button>
   </form>
@@ -557,9 +553,9 @@ async function loadVersions() {
       '</td><td><code>' + esc(item.install || '') + '</code></td></tr>'
     )).join('');
     let html = '<h3>软件</h3>';
-    html += '<table><thead><tr><th>软件</th><th>版本</th><th>状态</th><th>下载地址</th></tr></thead><tbody>' + softwareRows + '</tbody></table>';
+    html += '<div class="tablebox"><table><thead><tr><th>软件</th><th>版本</th><th>状态</th><th>下载地址</th></tr></thead><tbody>' + softwareRows + '</tbody></table></div>';
     html += '<h3>R 插件 / 包</h3>';
-    html += '<table><thead><tr><th>插件</th><th>版本</th><th>状态</th><th>安装命令</th></tr></thead><tbody>' + packageRows + '</tbody></table>';
+    html += '<div class="tablebox"><table><thead><tr><th>插件</th><th>版本</th><th>状态</th><th>安装命令</th></tr></thead><tbody>' + packageRows + '</tbody></table></div>';
     box.innerHTML = html;
   } catch (e) {
     box.textContent = '版本信息加载失败：' + String(e.message || e);
@@ -597,7 +593,7 @@ async function loadHistory() {
       esc(item.output) + '</td><td><a href="/report?output=' +
       encodeURIComponent(item.output) + '" target="_blank" rel="noopener">打开</a></td></tr>'
     )).join('');
-    box.innerHTML = '<table><thead><tr><th>数据集</th><th>物种</th><th>状态</th><th>图数量</th><th>完成时间</th><th>输出路径</th><th>报告</th></tr></thead><tbody>' + rows + '</tbody></table>';
+    box.innerHTML = '<div class="tablebox"><table><thead><tr><th>数据集</th><th>物种</th><th>状态</th><th>图数量</th><th>完成时间</th><th>输出路径</th><th>报告</th></tr></thead><tbody>' + rows + '</tbody></table></div>';
   } catch (e) {
     box.textContent = '历史记录加载失败：' + String(e.message || e);
   }

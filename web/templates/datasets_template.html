@@ -3,7 +3,6 @@
 <head>
 <meta charset="utf-8">
 <meta name="viewport" content="width=device-width, initial-scale=1">
-<link rel="stylesheet" href="/static/app.css">
 <script src="/static/nav.js" defer></script>
 <title>多数据库数据集搜索</title>
 <style>
@@ -140,6 +139,7 @@ a { color: #1665c0; text-decoration: none; }
   .summary { max-width: 220px; }
 }
 </style>
+<link rel="stylesheet" href="/static/app.css">
 </head>
 <body>
 <div class="topnav">
@@ -156,10 +156,6 @@ a { color: #1665c0; text-decoration: none; }
   <div class="page-title">
     <h1>多数据库数据集搜索</h1>
     <p class="page-sub">按疾病、研究方向或原始查询搜索 NCBI GEO、ArrayExpress/BioStudies 和 Expression Atlas 数据集，支持直接下载并带入全自动流水线；<code>run_supported</code> 为可自动运行候选，实际文件可用性在下载时校验。</p>
-  </div>
-  <div class="page-actions">
-    <a class="link-button" href="/full">全自动流水线</a>
-    <a class="link-button" href="/results">结果清单</a>
   </div>
 </div>
 
@@ -205,7 +201,7 @@ a { color: #1665c0; text-decoration: none; }
       </div>
     </details>
     <div class="actions">
-      <button id="searchBtn" type="button" onclick="searchDatasets()">搜索数据集</button>
+      <button id="searchBtn" type="button" data-primary onclick="searchDatasets()">搜索数据集</button>
       <button id="downloadTopBtn" class="secondary" type="button" onclick="downloadTop()" disabled>
         下载前 <input id="topN" type="number" min="1" value="3" onclick="event.stopPropagation()"> 个
       </button>
