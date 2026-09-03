@@ -60,6 +60,12 @@ DOCK_QUEUE = []
 DOCK_QUEUE_LOCK = threading.RLock()
 DOCK_HISTORY_PATH = WEB_DIR / "dock_history.json"
 DOCK_HISTORY_LOCK = threading.RLock()
+MOLECULAR_DOCK_TEMPLATE_PATH = TEMPLATE_DIR / "molecular_docking_template.html"
+MOLECULAR_DOCK_JOBS = {}
+MOLECULAR_DOCK_QUEUE = []
+MOLECULAR_DOCK_QUEUE_LOCK = threading.RLock()
+MOLECULAR_DOCK_HISTORY_PATH = WEB_DIR / "molecular_docking_history.json"
+MOLECULAR_DOCK_HISTORY_LOCK = threading.RLock()
 FULL_TEMPLATE_PATH = TEMPLATE_DIR / "full_page_template.html"
 RESULTS_TEMPLATE_PATH = TEMPLATE_DIR / "results_manifest_optimized.html"
 RESULT_GUIDE_PATH = APP_ROOT / "docs" / "result_figure_guide.md"
@@ -85,6 +91,7 @@ NAV_HTML = (
     '<a href="/">表达分析</a>'
     '<a href="/datasets">数据集搜索</a>'
     '<a href="/dock">虚拟筛选</a>'
+    '<a href="/molecular-docking">分子对接</a>'
     '<a href="/results">结果清单</a>'
     '<a href="/tasks" class="nav-right">任务进度</a>'
     '</div>'
@@ -177,7 +184,7 @@ def _purge_stale_heartbeats(
 
 
 def _has_active_jobs() -> bool:
-    for store in (JOBS, DOCK_JOBS, FULL_JOBS):
+    for store in (JOBS, DOCK_JOBS, MOLECULAR_DOCK_JOBS, FULL_JOBS):
         for info in store.values():
             proc = info.get("proc")
             if proc is None:
@@ -940,6 +947,15 @@ def render_dock_page() -> str:
     )
 
 
+def render_molecular_docking_page() -> str:
+    if MOLECULAR_DOCK_TEMPLATE_PATH.exists():
+        return MOLECULAR_DOCK_TEMPLATE_PATH.read_text(encoding="utf-8")
+    return (
+        "<html><body><h1>molecular docking template missing</h1>"
+        "<p>web/templates/molecular_docking_template.html not found</p></body></html>"
+    )
+
+
 def render_full_page() -> str:
     if FULL_TEMPLATE_PATH.exists():
         return FULL_TEMPLATE_PATH.read_text(encoding="utf-8")
@@ -1519,6 +1535,185 @@ def _dock_status(info: dict) -> dict:
     return {"running": True, "ok": False, "queued": False, "paused": False, "stage": "", "error": ""}
 
 
+def start_molecular_docking_job(data: dict) -> dict:
+    from molecular_docking.config import load_config, save_config
+
+    workdir = Path(
+        _first(data, "workdir", str(APP_ROOT / "molecular_docking"))
+    ).expanduser().resolve()
+    workdir.mkdir(parents=True, exist_ok=True)
+    stage = _first(data, "stage", "pipeline")
+    job_id = uuid.uuid4().hex[:8]
+    cfg_path = workdir / "config" / f"molecular_docking_web_{job_id}.json"
+
+    overrides = {
+        "workdir": str(workdir),
+        "receptor": _first(data, "receptor", "") or None,
+        "ligand": _first(data, "ligand", "") or None,
+        "center": _float3(data, "center"),
+        "size": _float3(data, "size"),
+        "exhaustiveness": _int_field(data, "exhaustiveness"),
+        "num_modes": _int_field(data, "num_modes"),
+        "energy_range": _float_field(data, "energy_range"),
+        "max_workers": _int_field(data, "max_workers"),
+        "cutoff": _float_field(data, "cutoff"),
+        "top_n": _int_field(data, "top_n"),
+        "executable": _first(data, "executable", "") or None,
+    }
+    cfg = load_config(
+        APP_ROOT / "config" / "molecular_docking_config.json",
+        overrides,
+    )
+    save_config(cfg, cfg_path)
+
+    log_path = workdir / "logs" / f"molecular_docking_{job_id}.log"
+    log_path.parent.mkdir(parents=True, exist_ok=True)
+    cmd = [
+        sys.executable,
+        str(SCRIPTS_DIR / "run_molecular_docking.py"),
+        stage,
+        "--config",
+        str(cfg_path),
+    ]
+    if _first(data, "force", "") in ("1", "true", "on", "yes"):
+        cmd.append("--force")
+
+    env = os.environ.copy()
+    env["DOCK_WORKDIR"] = str(workdir)
+    MOLECULAR_DOCK_JOBS[job_id] = {
+        "job_id": job_id,
+        "log": log_path,
+        "proc": None,
+        "started": time.time(),
+        "workdir": workdir,
+        "output_dir": cfg.output_dir,
+        "stage": stage,
+        "cmd": cmd,
+        "env": env,
+        "queued": True,
+        "recorded": False,
+        "notified": False,
+    }
+    with MOLECULAR_DOCK_QUEUE_LOCK:
+        MOLECULAR_DOCK_QUEUE.append(MOLECULAR_DOCK_JOBS[job_id])
+    _drain_molecular_docking_queue()
+    return {
+        "job": job_id,
+        "log_url": f"/molecular-docking/log?job={job_id}",
+        "status_url": f"/molecular-docking/status?job={job_id}",
+    }
+
+
+def _start_molecular_docking_process(info: dict) -> None:
+    log_handle = info["log"].open("w", encoding="utf-8", errors="replace")
+    proc = subprocess.Popen(
+        info["cmd"],
+        cwd=APP_ROOT,
+        env=info["env"],
+        stdout=log_handle,
+        stderr=subprocess.STDOUT,
+        text=True,
+        encoding="utf-8",
+        errors="replace",
+    )
+    info["proc"] = proc
+    info["queued"] = False
+    info["started"] = time.time()
+
+
+def _drain_molecular_docking_queue() -> None:
+    with MOLECULAR_DOCK_QUEUE_LOCK:
+        for info in MOLECULAR_DOCK_QUEUE:
+            if info.get("proc") is None:
+                _start_molecular_docking_process(info)
+                break
+
+
+def _molecular_docking_status(info: dict) -> dict:
+    queued = info.get("proc") is None
+    if queued:
+        return {
+            "running": False,
+            "ok": False,
+            "queued": True,
+            "paused": False,
+            "stage": "",
+            "error": "",
+        }
+    running = info["proc"].poll() is None
+    paused = bool(info.get("paused"))
+    ok = False
+    if not running:
+        marker_dir = info["output_dir"] / ".stages"
+        log_paths = [info["log"]]
+        if paused:
+            stage, error = _finished_info(
+                marker_dir,
+                MOLECULAR_DOCK_STAGE_LABELS,
+                log_paths,
+                True,
+            )
+            _notify_finished(
+                info,
+                "molecular-docking",
+                "分子对接",
+                f"{info.get('stage', 'pipeline')} 分子对接",
+                "paused",
+                stage,
+                error,
+                exit_code=info["proc"].returncode,
+            )
+            return {
+                "running": False,
+                "ok": False,
+                "queued": False,
+                "paused": True,
+                "stage": stage,
+                "error": error,
+            }
+        ok = info["proc"].returncode == 0
+        with JOB_RECORD_LOCK:
+            if not info.get("recorded"):
+                record_molecular_docking_job(info, ok)
+                info["recorded"] = True
+        _drain_molecular_docking_queue()
+        stage, error = _finished_info(
+            marker_dir,
+            MOLECULAR_DOCK_STAGE_LABELS,
+            log_paths,
+            False,
+        )
+        status = "completed" if ok else "interrupted"
+        if status == "completed":
+            error = ""
+        _notify_finished(
+            info,
+            "molecular-docking",
+            "分子对接",
+            f"{info.get('stage', 'pipeline')} 分子对接",
+            status,
+            stage,
+            error,
+            exit_code=info["proc"].returncode,
+        )
+        return {
+            "running": False,
+            "ok": ok,
+            "queued": False,
+            "paused": False,
+            "stage": stage,
+            "error": error,
+        }
+    return {
+        "running": True,
+        "ok": False,
+        "queued": False,
+        "paused": False,
+        "stage": "",
+        "error": "",
+    }
+
+
 def start_full_job(data: dict) -> dict:
     output_value = _first(data, "output", "").strip()
     if not output_value:
@@ -1817,6 +2012,8 @@ DOCK_STAGE_LABELS = {
     "05": "精修重对接",
     "06": "HTML 报告",
 }
+
+MOLECULAR_DOCK_STAGE_LABELS = DOCK_STAGE_LABELS
 
 FULL_STAGE_LABELS = {
     "01": "表达分析",
@@ -2120,6 +2317,53 @@ def running_tasks_data(include_logs: bool = True) -> dict:
                 "job": job_id,
                 "url": f"/dock?job={job_id}",
                 "title": f"{info.get('stage', 'pipeline')} · 虚拟筛选",
+                "detail": str(info["workdir"]),
+                "status": state,
+                "started": started,
+                "elapsed": int(now - started),
+                "progress": progress,
+                "stage_label": stage_label,
+                "log_tail": _log_tail(info["log"]) if include_logs else "",
+            }
+        )
+
+    for job_id, info in list(MOLECULAR_DOCK_JOBS.items()):
+        status = _molecular_docking_status(info)
+        if not (
+            status.get("running")
+            or status.get("queued")
+            or status.get("paused")
+        ):
+            continue
+        state = (
+            "queued"
+            if status.get("queued")
+            else "paused"
+            if status.get("paused")
+            else "running"
+        )
+        marker_dir = info["output_dir"] / ".stages"
+        progress = (
+            0
+            if state == "queued"
+            else _marker_progress(marker_dir, len(MOLECULAR_DOCK_STAGE_LABELS))
+        )
+        stage_label = (
+            "排队中"
+            if state == "queued"
+            else "已暂停"
+            if state == "paused"
+            else _current_stage(marker_dir, MOLECULAR_DOCK_STAGE_LABELS)
+            or "准备中"
+        )
+        started = float(info.get("started") or now)
+        tasks.append(
+            {
+                "page": "molecular-docking",
+                "page_label": "分子对接",
+                "job": job_id,
+                "url": f"/molecular-docking?job={job_id}",
+                "title": f"{info.get('stage', 'pipeline')} · 分子对接",
                 "detail": str(info["workdir"]),
                 "status": state,
                 "started": started,
@@ -2623,6 +2867,99 @@ def _dock_file_path(info: dict, name: str):
     return None
 
 
+def load_molecular_docking_history() -> list[dict]:
+    with MOLECULAR_DOCK_HISTORY_LOCK:
+        if not MOLECULAR_DOCK_HISTORY_PATH.exists():
+            return []
+        try:
+            return json.loads(MOLECULAR_DOCK_HISTORY_PATH.read_text(encoding="utf-8"))
+        except Exception:
+            return []
+
+
+def save_molecular_docking_history(records: list[dict]) -> None:
+    with MOLECULAR_DOCK_HISTORY_LOCK:
+        MOLECULAR_DOCK_HISTORY_PATH.write_text(
+            json.dumps(records, ensure_ascii=False, indent=2),
+            encoding="utf-8",
+        )
+
+
+def record_molecular_docking_job(info: dict, ok: bool) -> None:
+    with MOLECULAR_DOCK_HISTORY_LOCK:
+        records = load_molecular_docking_history()
+        records.insert(
+            0,
+            {
+                "job": info["log"].stem.replace("molecular_docking_", ""),
+                "stage": info.get("stage", ""),
+                "workdir": str(info["workdir"]),
+                "output": str(info["output_dir"]),
+                "status": "success" if ok else "failed",
+                "started": info["started"],
+                "finished": time.time(),
+            },
+        )
+        save_molecular_docking_history(records)
+
+
+def molecular_docking_results(info: dict) -> dict:
+    import csv as csv_module
+
+    reports = info["output_dir"] / "results"
+    summary = {}
+    summary_path = reports / "01_analysis" / "summary.json"
+    if summary_path.exists():
+        try:
+            summary = json.loads(summary_path.read_text(encoding="utf-8"))
+        except Exception:
+            summary = {}
+    rows: list[dict] = []
+    ranked = reports / "01_analysis" / "data" / "fig_46_47_ranked_results.csv"
+    if ranked.exists():
+        with ranked.open("r", newline="", encoding="utf-8") as fh:
+            for i, row in enumerate(csv_module.DictReader(fh)):
+                if i >= 200:
+                    break
+                rows.append(row)
+    figures = _list_result_images(reports)
+    files = _list_result_files(reports)
+    docked_root = info["output_dir"] / "docked"
+    if docked_root.exists():
+        for p in sorted(docked_root.glob("*.pdbqt")):
+            if p.is_file():
+                files.append(f"docked/{p.name}")
+    report_rel = "molecular_docking_report.html"
+    html_report = report_rel if (reports / report_rel).exists() else ""
+    return {
+        "summary": summary,
+        "rows": rows,
+        "figures": figures,
+        "files": sorted(set(files)),
+        "html_report": html_report,
+        "output_dir": str(reports),
+        "stage": info.get("stage", ""),
+    }
+
+
+def _molecular_docking_file_path(info: dict, name: str):
+    out = info["output_dir"].resolve()
+    results_root = (out / "results").resolve()
+    docked_root = (out / "docked").resolve()
+    clean = Path(name)
+    target = (results_root / clean).resolve()
+    if (
+        (target.is_file() or target.suffix.lower() == ".html")
+        and results_root in target.parents
+    ):
+        return target
+    base = Path(name).name
+    target = (docked_root / base).resolve()
+    if target.is_file() and target.parent == docked_root:
+        return target
+    return None
+
+
 def run_knockout_request(data: dict) -> dict:
     from docking.config import load_config
     from docking.knockout import run_knockout
@@ -2882,6 +3219,41 @@ def _ko_file_path(workdir: str, name: str):
     return None
 
 
+def _detect_and_save_molecular_box(workdir: str, receptor: str) -> dict:
+    from docking.box import detect_box_data
+    from molecular_docking.config import load_config, save_config
+
+    workdir = Path(workdir).expanduser().resolve()
+    receptor_path = Path(receptor).expanduser()
+    if not receptor_path.is_absolute():
+        receptor_path = workdir / receptor_path
+    receptor_path = receptor_path.resolve()
+    if not receptor_path.is_file():
+        raise ValueError(f"receptor file not found: {receptor_path}")
+    center, size, mode = detect_box_data(receptor_path)
+    config_path = workdir / "config" / "molecular_docking_config.json"
+    if config_path.exists():
+        cfg = load_config(config_path)
+    else:
+        cfg = load_config(
+            APP_ROOT / "config" / "molecular_docking_config.json",
+            {"workdir": str(workdir)},
+        )
+    rel = os.path.relpath(receptor_path, workdir)
+    rel_path = rel if not rel.startswith("..") else str(receptor_path)
+    cfg.data["receptor"]["detect_input"] = rel_path
+    cfg.data["receptor"]["input"] = rel_path
+    cfg.data["receptor"]["center"] = center
+    cfg.data["receptor"]["size"] = size
+    save_config(cfg, config_path)
+    return {
+        "center": center,
+        "size": size,
+        "mode": mode,
+        "config": str(config_path),
+    }
+
+
 def _detect_and_save_box(workdir: str, receptor: str) -> dict:
     from docking.box import detect_box_data
     from docking.config import load_config, save_config
@@ -2960,6 +3332,13 @@ class Handler(BaseHTTPRequestHandler):
             return
         if parsed.path == "/dock":
             self._send(200, render_dock_page().encode("utf-8"), "text/html; charset=utf-8")
+            return
+        if parsed.path == "/molecular-docking":
+            self._send(
+                200,
+                render_molecular_docking_page().encode("utf-8"),
+                "text/html; charset=utf-8",
+            )
             return
         if parsed.path == "/log":
             query = parse_qs(parsed.query)
@@ -3094,6 +3473,88 @@ class Handler(BaseHTTPRequestHandler):
                 return
             body = json.dumps(_dock_status(info)).encode("utf-8")
             self._send(200, body, "application/json")
+            return
+        if parsed.path == "/molecular-docking/log":
+            query = parse_qs(parsed.query)
+            job = query.get("job", [""])[0]
+            info = MOLECULAR_DOCK_JOBS.get(job)
+            if not info:
+                self._send(404, b"job not found", "text/plain; charset=utf-8")
+                return
+            text = (
+                info["log"].read_text(encoding="utf-8", errors="replace")
+                if info["log"].exists()
+                else ""
+            )
+            self._send(200, text.encode("utf-8"), "text/plain; charset=utf-8")
+            return
+        if parsed.path == "/molecular-docking/status":
+            query = parse_qs(parsed.query)
+            job = query.get("job", [""])[0]
+            info = MOLECULAR_DOCK_JOBS.get(job)
+            if not info:
+                self._send(404, b"job not found", "application/json")
+                return
+            body = json.dumps(_molecular_docking_status(info)).encode("utf-8")
+            self._send(200, body, "application/json")
+            return
+        if parsed.path == "/molecular-docking/results":
+            query = parse_qs(parsed.query)
+            job = query.get("job", [""])[0]
+            info = MOLECULAR_DOCK_JOBS.get(job)
+            if not info:
+                self._send(404, b"job not found", "application/json")
+                return
+            body = json.dumps(
+                molecular_docking_results(info),
+                ensure_ascii=False,
+            ).encode("utf-8")
+            self._send(200, body, "application/json")
+            return
+        if parsed.path == "/molecular-docking/file":
+            query = parse_qs(parsed.query)
+            job = query.get("job", [""])[0]
+            name = Path(query.get("name", [""])[0])
+            info = MOLECULAR_DOCK_JOBS.get(job)
+            if not info:
+                self._send(404, b"job not found", "text/plain; charset=utf-8")
+                return
+            target = _molecular_docking_file_path(info, name)
+            if not target:
+                self._send(404, b"file not found", "text/plain; charset=utf-8")
+                return
+            content_type = {
+                ".png": "image/png",
+                ".jpg": "image/jpeg",
+                ".jpeg": "image/jpeg",
+                ".svg": "image/svg+xml",
+                ".pdf": "application/pdf",
+                ".csv": "text/csv; charset=utf-8",
+                ".xlsx": "application/vnd.openxmlformats-officedocument.spreadsheetml.sheet",
+                ".json": "application/json",
+                ".html": "text/html; charset=utf-8",
+                ".pdbqt": "chemical/x-pdbqt",
+            }.get(target.suffix.lower(), "application/octet-stream")
+            self._send(200, target.read_bytes(), content_type)
+            return
+        if parsed.path == "/molecular-docking/history":
+            body = json.dumps(
+                load_molecular_docking_history(),
+                ensure_ascii=False,
+            ).encode("utf-8")
+            self._send(200, body, "application/json")
+            return
+        if parsed.path == "/molecular-docking/check-env":
+            from docking.environment import check_environment
+
+            self._send(
+                200,
+                json.dumps(
+                    {"checks": check_environment()},
+                    ensure_ascii=False,
+                ).encode("utf-8"),
+                "application/json",
+            )
             return
         if parsed.path == "/full":
             self._send(
@@ -3555,6 +4016,66 @@ class Handler(BaseHTTPRequestHandler):
             )
             return
 
+        if parsed.path == "/molecular-docking/pause":
+            job = data.get("job", [""])[0]
+            info = MOLECULAR_DOCK_JOBS.get(job)
+            if not info:
+                self._send(404, b"job not found", "application/json")
+                return
+            info["workdir"].mkdir(parents=True, exist_ok=True)
+            (info["workdir"] / "pause_request.flag").write_text(
+                "pause",
+                encoding="utf-8",
+            )
+            proc = info.get("proc")
+            if proc and proc.poll() is None:
+                proc.terminate()
+                try:
+                    proc.wait(timeout=20)
+                except subprocess.TimeoutExpired:
+                    proc.kill()
+                    proc.wait()
+            info["paused"] = True
+            self._send(
+                200,
+                json.dumps({"paused": True}).encode("utf-8"),
+                "application/json",
+            )
+            return
+
+        if parsed.path == "/molecular-docking/resume":
+            job = data.get("job", [""])[0]
+            info = MOLECULAR_DOCK_JOBS.get(job)
+            if not info:
+                self._send(404, b"job not found", "application/json")
+                return
+            flag = info["workdir"] / "pause_request.flag"
+            if flag.exists():
+                flag.unlink()
+            info["paused"] = False
+            info["notified"] = False
+            log_handle = info["log"].open("a", encoding="utf-8", errors="replace")
+            log_handle.write("\n[pipeline] resume requested\n")
+            log_handle.flush()
+            proc = subprocess.Popen(
+                info["cmd"],
+                cwd=APP_ROOT,
+                env=info.get("env", os.environ.copy()),
+                stdout=log_handle,
+                stderr=subprocess.STDOUT,
+                text=True,
+                encoding="utf-8",
+                errors="replace",
+            )
+            info["proc"] = proc
+            info["started"] = time.time()
+            self._send(
+                200,
+                json.dumps({"resumed": True}).encode("utf-8"),
+                "application/json",
+            )
+            return
+
         if parsed.path == "/full/pause":
             job = data.get("job", [""])[0]
             info = FULL_JOBS.get(job)
@@ -3667,6 +4188,17 @@ class Handler(BaseHTTPRequestHandler):
                 )
             return
 
+        if parsed.path == "/molecular-docking/check-env":
+            from docking.environment import check_environment
+
+            checks = check_environment()
+            self._send(
+                200,
+                json.dumps({"checks": checks}, ensure_ascii=False).encode("utf-8"),
+                "application/json",
+            )
+            return
+
         if parsed.path == "/dock/check-env":
             from docking.environment import check_environment
 
@@ -3707,6 +4239,65 @@ class Handler(BaseHTTPRequestHandler):
                     json.dumps(
                         {"ok": False, "output": "install timed out after 600s"}
                     ).encode("utf-8"),
+                    "application/json",
+                )
+            except Exception as exc:
+                self._send(
+                    400,
+                    json.dumps({"error": str(exc)}).encode("utf-8"),
+                    "application/json",
+                )
+            return
+
+        if parsed.path == "/molecular-docking/install":
+            try:
+                proc = subprocess.run(
+                    [
+                        sys.executable,
+                        str(APP_ROOT / "launchers" / "install_dock_dependencies.py"),
+                    ],
+                    cwd=APP_ROOT,
+                    capture_output=True,
+                    text=True,
+                    encoding="utf-8",
+                    errors="replace",
+                    timeout=600,
+                )
+                output = (proc.stdout or "") + (proc.stderr or "")
+                body = json.dumps(
+                    {
+                        "ok": proc.returncode == 0,
+                        "output": output[-8000:],
+                    },
+                    ensure_ascii=False,
+                ).encode("utf-8")
+                self._send(200, body, "application/json")
+            except subprocess.TimeoutExpired:
+                self._send(
+                    200,
+                    json.dumps(
+                        {"ok": False, "output": "install timed out after 600s"}
+                    ).encode("utf-8"),
+                    "application/json",
+                )
+            except Exception as exc:
+                self._send(
+                    400,
+                    json.dumps({"error": str(exc)}).encode("utf-8"),
+                    "application/json",
+                )
+            return
+
+        if parsed.path == "/molecular-docking/detect-box":
+            try:
+                workdir = _first(data, "workdir", "")
+                receptor = _first(data, "receptor", "")
+                if not workdir or not receptor:
+                    raise ValueError("workdir and receptor are required")
+                result = _detect_and_save_molecular_box(workdir, receptor)
+                self._send(
+                    200,
+                    json.dumps(result, ensure_ascii=False).encode("utf-8"),
                     "application/json",
                 )
             except Exception as exc:
@@ -3795,6 +4386,22 @@ class Handler(BaseHTTPRequestHandler):
                     {"error": str(exc)}, ensure_ascii=False
                 ).encode("utf-8")
                 self._send(400, body, "application/json")
+            return
+
+        if parsed.path == "/molecular-docking/start":
+            try:
+                result = start_molecular_docking_job(data)
+                self._send(
+                    200,
+                    json.dumps(result).encode("utf-8"),
+                    "application/json",
+                )
+            except Exception as exc:
+                self._send(
+                    400,
+                    json.dumps({"error": str(exc)}).encode("utf-8"),
+                    "application/json",
+                )
             return
 
         if parsed.path == "/dock/start":
@@ -3911,7 +4518,15 @@ def main() -> int:
     parser.add_argument("--port", type=int, default=8000)
     parser.add_argument(
         "--page",
-        choices=["single", "dock", "full", "results", "tasks", "datasets"],
+        choices=[
+            "single",
+            "dock",
+            "molecular-docking",
+            "full",
+            "results",
+            "tasks",
+            "datasets",
+        ],
         default="full",
         help="page to open in the browser",
     )
@@ -3950,6 +4565,8 @@ def main() -> int:
     ).start()
     if args.page == "dock":
         open_url = url + "/dock"
+    elif args.page == "molecular-docking":
+        open_url = url + "/molecular-docking"
     elif args.page == "full":
         open_url = url + "/full"
     elif args.page == "results":

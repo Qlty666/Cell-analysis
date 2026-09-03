@@ -32,6 +32,7 @@ Thumbs.db
 # Web runtime files
 web/history.json
 web/dock_history.json
+web/molecular_docking_history.json
 web/task_history.json
 web/install_log.txt
 web/validation_run.log
@@ -64,6 +65,9 @@ dock/data/receptors/*.pdbqt
 dock/config/docking_web_*.json
 dock/tools/
 dock/work/
+
+# Standalone molecular docking board
+/molecular_docking/
 
 # Validation artifacts
 *.log
