@@ -201,6 +201,8 @@ qc_max_features <- param_num("LIVER_QC_MAX_FEATURES")
 qc_min_counts <- param_num("LIVER_QC_MIN_COUNTS")
 qc_max_counts <- param_num("LIVER_QC_MAX_COUNTS")
 qc_max_mt <- param_num("LIVER_QC_MAX_MT")
+qc_max_ribo <- param_num("LIVER_QC_MAX_RIBO")
+qc_max_hb <- param_num("LIVER_QC_MAX_HB")
 cluster_resolution <- param_num("LIVER_CLUSTER_RESOLUTION")
 cluster_algorithm <- param_num("LIVER_CLUSTER_ALGORITHM")
 de_logfc <- param_num("LIVER_DE_LOGFc")
@@ -367,6 +369,37 @@ log_msg <- function(...) {
 }
 
 mt_pattern <- "^MT-|^mt-"
+
+qc_percentage <- function(object, features) {
+  counts <- GetAssayData(object, assay = "RNA", layer = "counts")
+  features <- intersect(features, rownames(counts))
+  if (length(features) == 0 || ncol(counts) == 0) {
+    return(rep(0, ncol(object)))
+  }
+  total_counts <- Matrix::colSums(counts)
+  100 * Matrix::colSums(counts[features, , drop = FALSE]) /
+    pmax(total_counts, 1)
+}
+
+ribo_features <- function(object) {
+  grep("^(RP[SL]|Rp[ls])", rownames(object), value = TRUE)
+}
+
+hemoglobin_features <- function(object) {
+  genes <- rownames(object)
+  if (species == "mm") {
+    patterns <- c(
+      "^Hba-a[12]$", "^Hbb-[a-z0-9]+$", "^Hbd$", "^Hbe1?$",
+      "^Hbg[12]$", "^Hbm$", "^Hbq1[ab]?$", "^Hbz$"
+    )
+  } else {
+    patterns <- c(
+      "^HBA1$", "^HBA2$", "^HBB$", "^HBD$", "^HBE1$",
+      "^HBG1$", "^HBG2$", "^HBM$", "^HBQ1$", "^HBZ$"
+    )
+  }
+  unique(unlist(lapply(patterns, grep, x = genes, value = TRUE)))
+}
 
 run_stage <- function(name, expr) {
   marker <- file.path(stage_dir, paste0(name, ".done"))
@@ -1421,7 +1454,19 @@ if (stage_allowed("01")) run_stage("01_load_data", {
   )
   seurat_raw$orig.ident <- accession
   seurat_raw[["percent.mt"]] <- PercentageFeatureSet(seurat_raw, pattern = mt_pattern)
-  seurat_raw[["percent.ribo"]] <- PercentageFeatureSet(seurat_raw, pattern = "^RP[SL]")
+  seurat_raw[["percent.ribo"]] <- qc_percentage(
+    seurat_raw,
+    ribo_features(seurat_raw)
+  )
+  seurat_raw[["percent.hb"]] <- qc_percentage(
+    seurat_raw,
+    hemoglobin_features(seurat_raw)
+  )
+  log_msg(
+    "QC contamination genes: ",
+    "ribo=", length(ribo_features(seurat_raw)),
+    ", hemoglobin=", length(hemoglobin_features(seurat_raw))
+  )
 
   log_msg("raw cells: ", ncol(seurat_raw))
   log_msg("raw genes: ", nrow(seurat_raw))
@@ -1436,9 +1481,28 @@ if (stage_allowed("02")) run_stage("02_qc_filter", {
   if (!exists("seurat_raw")) {
     seurat_raw <- readRDS(ckpt_path("seurat_raw.rds"))
   }
+  if (!"percent.ribo" %in% colnames(seurat_raw[[]])) {
+    seurat_raw[["percent.ribo"]] <- qc_percentage(
+      seurat_raw,
+      ribo_features(seurat_raw)
+    )
+  }
+  if (!"percent.hb" %in% colnames(seurat_raw[[]])) {
+    seurat_raw[["percent.hb"]] <- qc_percentage(
+      seurat_raw,
+      hemoglobin_features(seurat_raw)
+    )
+  }
+  qc_metric_cols <- c(
+    "nFeature_RNA",
+    "nCount_RNA",
+    "percent.mt",
+    "percent.ribo",
+    "percent.hb"
+  )
   p_raw <- VlnPlot(
     seurat_raw,
-    features = c("nFeature_RNA", "nCount_RNA", "percent.mt"),
+    features = qc_metric_cols,
     group.by = "condition",
     ncol = 3,
     pt.size = 0
@@ -1446,21 +1510,21 @@ if (stage_allowed("02")) run_stage("02_qc_filter", {
   save_fig(
     file.path(fig_dir, "fig_01_qc_raw_violin.png"),
     p_raw,
-    width = 12,
-    height = 6,
+    width = 14,
+    height = 9,
     dpi = 150
   )
 
   qc_data <- FetchData(
     seurat_raw,
-    vars = c("nFeature_RNA", "nCount_RNA", "percent.mt", "percent.ribo")
+    vars = qc_metric_cols
   )
   qc_data$sample <- seurat_raw$sample
   qc_data$condition <- seurat_raw$condition
 
   qc_pvalue_table <- function(qc_frame, stage) {
     group_col <- as.character(qc_frame$condition)
-    metrics <- c("nFeature_RNA", "nCount_RNA", "percent.mt", "percent.ribo")
+    metrics <- qc_metric_cols
     groups <- sort(unique(group_col[!is.na(group_col) & nzchar(group_col)]))
     if (length(groups) < 2) {
       return(data.frame(
@@ -1533,6 +1597,8 @@ if (stage_allowed("02")) run_stage("02_qc_filter", {
     lo_count <- 0
     hi_count <- max(qc_data$nCount_RNA) + 1
     hi_mt <- 100
+    hi_ribo <- 100
+    hi_hb <- 100
   } else {
     lo_feature <- if (!is.na(qc_min_features)) {
       qc_min_features
@@ -1559,9 +1625,26 @@ if (stage_allowed("02")) run_stage("02_qc_filter", {
     } else {
       min(30, as.numeric(quantile(qc_data$percent.mt, 0.99)))
     }
+    hi_ribo <- if (!is.na(qc_max_ribo)) {
+      qc_max_ribo
+    } else {
+      100
+    }
+    hi_hb <- if (!is.na(qc_max_hb)) {
+      qc_max_hb
+    } else {
+      min(25, as.numeric(quantile(qc_data$percent.hb, 0.99)))
+    }
   }
 
-  if (lo_feature > hi_feature || lo_count > hi_count) {
+  if (
+    lo_feature > hi_feature ||
+    lo_count > hi_count ||
+    !is.finite(hi_ribo) ||
+    hi_ribo < 0 ||
+    !is.finite(hi_hb) ||
+    hi_hb < 0
+  ) {
     log_msg(
       "QC bounds are incompatible for this dataset; ",
       "relaxing thresholds to keep all samples"
@@ -1571,13 +1654,17 @@ if (stage_allowed("02")) run_stage("02_qc_filter", {
     lo_count <- 0
     hi_count <- max(qc_data$nCount_RNA) + 1
     hi_mt <- 100
+    hi_ribo <- 100
+    hi_hb <- 100
   }
 
   log_msg(
     "QC thresholds: nFeature ",
     round(lo_feature, 1), "-", round(hi_feature, 1),
     ", nCount ", round(lo_count, 1), "-", round(hi_count, 1),
-    ", percent.mt <= ", round(hi_mt, 1)
+    ", percent.mt <= ", round(hi_mt, 1),
+    ", percent.ribo <= ", round(hi_ribo, 1),
+    ", percent.hb <= ", round(hi_hb, 1)
   )
 
   seurat_qc <- subset(
@@ -1586,12 +1673,50 @@ if (stage_allowed("02")) run_stage("02_qc_filter", {
       nFeature_RNA <= hi_feature &
       nCount_RNA >= lo_count &
       nCount_RNA <= hi_count &
-      percent.mt <= hi_mt
+      percent.mt <= hi_mt &
+      percent.ribo <= hi_ribo &
+      percent.hb <= hi_hb
+  )
+
+  threshold_summary <- data.frame(
+    metric = c(
+      "nFeature_RNA", "nCount_RNA",
+      "percent.mt", "percent.ribo", "percent.hb"
+    ),
+    lower = c(lo_feature, lo_count, 0, 0, 0),
+    upper = c(hi_feature, hi_count, hi_mt, hi_ribo, hi_hb),
+    n_removed = c(
+      sum(
+        qc_data$nFeature_RNA < lo_feature |
+          qc_data$nFeature_RNA > hi_feature
+      ),
+      sum(
+        qc_data$nCount_RNA < lo_count |
+          qc_data$nCount_RNA > hi_count
+      ),
+      sum(qc_data$percent.mt > hi_mt),
+      sum(qc_data$percent.ribo > hi_ribo),
+      sum(qc_data$percent.hb > hi_hb)
+    ),
+    stringsAsFactors = FALSE
+  )
+  threshold_summary$pct_removed <- 100 * threshold_summary$n_removed /
+    max(1, nrow(qc_data))
+  write.csv(
+    threshold_summary,
+    stage_data_file("fig_01_qc_thresholds.csv"),
+    row.names = FALSE
+  )
+  log_msg(
+    "hemoglobin-filtered cells: ",
+    sum(qc_data$percent.hb > hi_hb),
+    "; ribosomal-filtered cells: ",
+    sum(qc_data$percent.ribo > hi_ribo)
   )
 
   qc_metrics <- FetchData(
     seurat_qc,
-    vars = c("nFeature_RNA", "nCount_RNA", "percent.mt", "percent.ribo")
+    vars = qc_metric_cols
   )
   qc_metrics$sample <- seurat_qc$sample
   qc_metrics$condition <- seurat_qc$condition
@@ -1644,7 +1769,7 @@ if (stage_allowed("02")) run_stage("02_qc_filter", {
 
   p_qc <- VlnPlot(
     seurat_qc,
-    features = c("nFeature_RNA", "nCount_RNA", "percent.mt"),
+    features = qc_metric_cols,
     group.by = "condition",
     ncol = 3,
     pt.size = 0
@@ -1652,8 +1777,8 @@ if (stage_allowed("02")) run_stage("02_qc_filter", {
   save_fig(
     file.path(fig_dir, "fig_01_qc_filtered_violin.png"),
     p_qc,
-    width = 12,
-    height = 6,
+    width = 14,
+    height = 9,
     dpi = 150
   )
 
