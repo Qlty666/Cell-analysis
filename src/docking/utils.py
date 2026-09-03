@@ -35,6 +35,7 @@ def run_command(
     timeout: int = 300,
     cwd: Path | None = None,
     env: dict[str, str] | None = None,
+    stdin_text: str | None = None,
 ) -> subprocess.CompletedProcess:
     logger = logging.getLogger("docking")
     logger.debug("$ %s", " ".join(str(part) for part in cmd))
@@ -43,6 +44,7 @@ def run_command(
             cmd,
             cwd=str(cwd) if cwd else None,
             env=env,
+            input=stdin_text,
             capture_output=True,
             text=True,
             encoding="utf-8",

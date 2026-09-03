@@ -37,7 +37,27 @@ python -m pip install ./dock/tools/AutoDockTools_py3
 
 - AutoDock Vina 1.2.x：`dock/tools/vina.exe` 或加入 PATH
 - 可选：UniDock-Pro、HDOCK、HADDOCK（外部对接模板）
-- 可选：Amber/AmberTools、GROMACS（对接后 MD 交接）
+- 可选：Amber/AmberTools、GROMACS（对接后 MD 模拟）
+
+## 分子动力学模拟
+
+`md-simulation` 命令会把 Top 对接姿态转成 GROMACS 蛋白-配体复合物，并在 `auto`
+模式下执行能量最小化、NVT/NPT 平衡与生产模拟。运行前需要：
+
+- GROMACS `gmx`（加入 PATH，或通过 `md_simulation.executable` 指定）
+- 如果 GROMACS 数据目录不在可执行文件旁，配置 `md_simulation.gmx_data_dir`
+  为包含 `share/gromacs/top` 的安装根目录
+- 配体参数化二选一：
+  - ACPYPE + AmberTools：`acpype -a gaff2 -c bcc` 自动生成 GAFF2 拓扑
+  - 把预先生成好的 `<id>.itp` 与 `<id>.gro` 放入
+    `md_simulation.topology_dir`
+
+Linux/WSL/conda 环境示例：
+
+```bash
+conda install -c conda-forge gromacs ambertools
+python -m pip install acpype
+```
 
 ## ML/DL 重打分
 

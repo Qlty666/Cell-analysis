@@ -735,6 +735,7 @@
   03_ml/figures/
   04_knockout/figures/
   05_validation/
+  06_md/<ligand_id>/
 ```
 
 对应状态和数据文件：
@@ -746,6 +747,8 @@
 - `02_redock/data/fig_49_redock_results.csv` 和 `fig_49_redock_comparison.csv`：重对接结果。
 - `03_ml/data/ml_model_info.json`：模型类型、任务类型、模型文件。
 - `04_knockout/data/fig_52_53_ranked_knockout.csv`：敲除评分和靶点评分表。
+- `06_md/md_simulation_results.csv`：每个参与 MD 的配体状态、生产时长、蛋白/配体 RMSD 与配体 RMSF。
+- `06_md/md_simulation_summary.json`：MD 模式、请求/完成/失败数量与输出目录。
 - `docking_report.html`：HTML 报告，会汇总该报告目录下所有 PNG。
 
 默认参数参考 `config/docking_config.json`：命中阈值为 -7.0 kcal/mol，Top N 为 100，多样性 Tanimoto 阈值为 0.7，重对接 Top 20，重对接 exhaustiveness 默认 32。
@@ -796,6 +799,24 @@
 | `in_silico_knockout_report.html` | 中文 HTML 分析报告 | 汇总分析背景、图、表格与富集结果 |
 
 数据文件位于 `04_knockout/in_silico/data/`，包括 `insilico_target_changes.csv`、`insilico_cell_shift.csv`、`insilico_regulatory_edges.csv`、`insilico_go_enrichment.csv` 与 `insilico_kegg_enrichment.csv`。该部分为调控网络预测，不等同于真实敲除结果。
+
+### 5.6 分子动力学模拟（`06_md`）
+
+该板块由 `python scripts\run_docking.py md-simulation` 或虚拟筛选页
+“分子动力学模拟”卡片生成，不属于默认 `pipeline` 阶段。`prepare` 模式只需
+GROMACS 输入文件；`auto` 模式需要 GROMACS，并通过 ACPYPE 或
+`md_simulation.topology_dir` 提供配体拓扑。
+
+| 文件 | 内容与用途 | 合格判据 | 不可用或警示 |
+| --- | --- | --- | --- |
+| `<id>/complex.pdb` | 受体与 Top 对接姿态组成的复合物 | PDB 可打开，配体与受体坐标都存在 | 受体 PDB 或姿态缺失时不生成；`prepare` 模式没有该文件的力场验证 |
+| `<id>/md_rmsd_rmsf.png` | 蛋白骨架 RMSD、配体 RMSD 与配体原子 RMSF 图 | 生产轨迹存在且分析成功，曲线非空 | `auto` 未完成、轨迹为空或 GROMACS 分析失败时不生成 |
+| `md_simulation_results.csv` | 每个配体的模拟状态与均值指标 | `status=completed` 的行有时间和 RMSD 数值 | `prepare` 模式或失败行为空状态，不能当作已完成的模拟结论 |
+| `md_simulation_summary.json` | 模式与完成/失败统计 | 数值与结果 CSV 一致 | 全部失败时命令会返回非零退出码并记录原因 |
+
+`auto` 模式按“最小化 → NVT → NPT → 生产模拟”运行，生产时长由
+`md_simulation.prod_steps` 控制；默认 250000 步为快速验证值，正式研究应
+根据体系和采样需要调大，并核对力场、溶剂盒子、离子浓度与轨迹收敛后再下结论。
 
 ## 6. 全自动集成流水线与细胞反馈结果图
 
