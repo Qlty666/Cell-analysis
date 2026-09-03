@@ -6,6 +6,7 @@
 
 - 表达谱分析（单细胞 / bulk RNA-seq / microarray 等）：GEO 数据下载、QC、差异表达、富集分析和 ML 可解释性分析；单细胞数据额外执行双细胞检测、聚类注释。
 - 虚拟筛选（CADD）：靶点证据收集、受体/配体准备、AutoDock Vina 并行对接、命中排序、精细重对接、ML/DL 重打分和 MD/外部工具交接。
+- 独立分子对接：单独运行受体/配体准备、AutoDock Vina 对接、结果分析、精细重对接和 HTML 报告，不依赖虚拟筛选的旁路分析。
 - 全自动集成流水线：从表达分析直接筛选关键基因/蛋白，再自动完成证据富集、虚拟敲除和虚拟筛选，最终输出集成报告和湿实验验证方案。
 
 ## 1. 项目解决什么问题
@@ -150,6 +151,15 @@
 - 其余 `scripts/validate_*.py` 分别验证合成数据流水线、对接流水线、真实 GEO 数据、证据收集和随机真实数据。
 - 每次评分/导出写入 `run_manifest.json`，记录配置、输入哈希、软件版本和参数。
 
+### 2.7 独立分子对接板块
+
+除虚拟筛选流水线外，项目还提供一套独立分子对接板块。它使用自己的工作目录、配置和结果报告，不调用虚拟筛选中的证据收集、虚拟敲除、网络毒理学或 FAERS 模块：
+
+- CLI：`scripts/run_molecular_docking.py`，支持 `init`、`prepare-receptor`、`prepare-ligands`、`dock`、`analyze`、`redock`、`report`、`detect-box` 和 `check-env`。
+- 默认工作目录：`molecular_docking/`，独立于 `dock/`。
+- 网页端：顶部导航“分子对接”独立页面，与“虚拟筛选”页面并存，支持任务日志、暂停/继续、设置保存/恢复、自动检测对接盒、结果表、图库、HTML 报告和 PDBQT 构象下载。
+- 结果目录：`molecular_docking/outputs/run_001/results/`，报告文件为 `molecular_docking_report.html`。
+
 ## 3. 安装方法
 
 ### 环境要求
@@ -250,6 +260,44 @@ ML/DL 重打分：
 ```bash
 python scripts\run_docking.py ml-train --training-csv data/ml/training.csv --model rf
 python scripts\run_docking.py ml-predict
+```
+
+### 4.2.1 独立分子对接命令行
+
+初始化独立工作目录：
+
+```bash
+python scripts\run_molecular_docking.py init
+```
+
+运行完整对接流程：
+
+```bash
+python scripts\run_molecular_docking.py pipeline --config config/molecular_docking_config.json
+```
+
+分阶段运行：
+
+```bash
+python scripts\run_molecular_docking.py prepare-receptor
+python scripts\run_molecular_docking.py prepare-ligands
+python scripts\run_molecular_docking.py dock
+python scripts\run_molecular_docking.py analyze
+python scripts\run_molecular_docking.py redock
+python scripts\run_molecular_docking.py report
+```
+
+常用覆盖参数示例：
+
+```bash
+python scripts\run_molecular_docking.py pipeline \
+  --workdir molecular_docking \
+  --receptor data/receptors/receptor.pdb \
+  --ligand data/ligands/library.sdf \
+  --center 10.0 20.0 30.0 \
+  --size 25.0 25.0 25.0 \
+  --exhaustiveness 16 \
+  --cutoff -7.5
 ```
 
 导出 MD/外部交接模板：
@@ -396,6 +444,7 @@ launchers\run_web_ui.bat
 
 ```text
 launchers\run_web_ui.bat --page dock
+launchers\run_web_ui.bat --page molecular-docking
 launchers\run_web_ui.bat --page full
 launchers\run_web_ui.bat --page results
 launchers\run_web_ui.bat --page tasks

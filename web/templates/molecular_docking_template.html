@@ -1,0 +1,570 @@
+<!DOCTYPE html>
+<html lang="zh-CN">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1">
+<link rel="stylesheet" href="/static/app.css">
+<script src="/static/nav.js" defer></script>
+<title>分子对接</title>
+<style>
+body {
+  font-family: "Segoe UI", Arial, sans-serif;
+  margin: 0;
+  color: #1f2933;
+  background: url('/static/background.png') no-repeat center center fixed;
+  background-size: cover;
+}
+.topnav {
+  position: sticky;
+  top: 0;
+  z-index: 100;
+  background: #0f172a;
+  padding: 12px 28px;
+  display: flex;
+  gap: 18px;
+  align-items: center;
+  flex-wrap: wrap;
+  box-shadow: 0 2px 8px rgba(15, 23, 42, 0.35);
+}
+.topnav a {
+  color: #ffffff;
+  text-decoration: none;
+  font-size: 15px;
+  font-weight: 600;
+  padding: 6px 10px;
+  border-radius: 6px;
+  background: rgba(255, 255, 255, 0.08);
+}
+.topnav a:hover, .topnav a.active { background: #1665c0; color: #fff; }
+.topnav .nav-right { margin-left: auto; }
+.wrap { max-width: 1180px; margin: 0 auto; padding: 28px; }
+.card {
+  background: rgba(255, 255, 255, 0.95);
+  border: 1px solid #d7dde4;
+  border-radius: 8px;
+  padding: 20px;
+  margin-bottom: 18px;
+  box-shadow: 0 1px 4px rgba(15, 23, 42, 0.08);
+}
+.grid { display: grid; grid-template-columns: repeat(auto-fit, minmax(220px, 1fr)); gap: 10px; }
+.grid.wide { grid-template-columns: repeat(auto-fit, minmax(260px, 1fr)); }
+label { display: block; margin: 10px 0 4px; font-weight: 600; font-size: 13px; }
+input, select {
+  width: 100%;
+  padding: 9px;
+  border: 1px solid #cbd2d9;
+  border-radius: 6px;
+  box-sizing: border-box;
+  font-size: 13px;
+}
+.inline3 { display: grid; grid-template-columns: 1fr 1fr 1fr; gap: 8px; }
+.actions { display: flex; gap: 12px; margin-top: 18px; flex-wrap: wrap; align-items: center; }
+button {
+  padding: 10px 18px;
+  border: 0;
+  border-radius: 6px;
+  background: #1665c0;
+  color: #fff;
+  font-size: 14px;
+  cursor: pointer;
+}
+button.secondary { background: #475569; }
+button:disabled { background: #9aa5b1; cursor: not-allowed; }
+.toggle { display: flex; align-items: center; gap: 8px; margin-top: 14px; font-weight: 600; }
+.toggle input { width: auto; }
+pre {
+  background: #0f172a;
+  color: #dbeafe;
+  padding: 14px;
+  border-radius: 8px;
+  height: 380px;
+  overflow: auto;
+  font-size: 12px;
+  white-space: pre-wrap;
+}
+.error { color: #b91c1c; margin-top: 10px; }
+.ok { color: #047857; margin-top: 10px; }
+table { width: 100%; border-collapse: collapse; background: #fff; font-size: 13px; }
+th, td { border: 1px solid #e5e7eb; padding: 7px 8px; text-align: left; }
+th { background: #eef2f7; }
+.tablebox { max-height: 420px; overflow: auto; border: 1px solid #e5e7eb; border-radius: 6px; }
+.gallery { display: grid; grid-template-columns: repeat(auto-fit, minmax(320px, 1fr)); gap: 16px; margin-top: 10px; }
+.gallery figure { margin: 0; }
+.gallery img { width: 100%; border: 1px solid #e5e7eb; border-radius: 6px; background: #fff; }
+.gallery figcaption { color: #52606d; font-size: 12px; margin-top: 5px; word-break: break-all; }
+a.file-link { color: #1665c0; text-decoration: none; margin-right: 12px; }
+.job-toast {
+  position: fixed;
+  top: 76px;
+  right: 24px;
+  z-index: 999;
+  max-width: 440px;
+  background: #ffffff;
+  border: 1px solid #d7dde4;
+  border-left: 6px solid #1665c0;
+  border-radius: 8px;
+  box-shadow: 0 12px 32px rgba(15, 23, 42, 0.28);
+  padding: 14px 16px;
+}
+.job-toast.ok { border-left-color: #047857; }
+.job-toast.error { border-left-color: #b91c1c; }
+.job-toast.paused { border-left-color: #b45309; }
+.job-toast-title { font-weight: 700; font-size: 15px; margin-bottom: 6px; }
+.job-toast-body {
+  font-size: 13px;
+  color: #334155;
+  white-space: pre-wrap;
+  word-break: break-all;
+  max-height: 190px;
+  overflow: auto;
+}
+@media (max-width: 720px) {
+  .wrap { padding: 14px; }
+  .topnav { padding: 10px 14px; }
+  pre { height: 300px; }
+}
+</style>
+</head>
+<body>
+<div class="topnav">
+  <a href="/full">全自动流水线</a>
+  <a href="/">表达分析</a>
+  <a href="/datasets">数据集搜索</a>
+  <a href="/dock">虚拟筛选</a>
+  <a href="/molecular-docking" class="active">分子对接</a>
+  <a href="/results">结果清单</a>
+  <a href="/tasks" class="nav-right">任务进度</a>
+</div>
+<div class="wrap">
+<div class="page-head">
+  <div class="page-title">
+    <h1>分子对接</h1>
+    <p class="page-sub">独立处理受体、配体库和 AutoDock Vina 对接，与虚拟筛选流程分开运行；支持断点续跑、自动检测对接盒、结果排序与报告下载。</p>
+  </div>
+  <div class="page-actions">
+    <a class="link-button" href="/full">全自动流水线</a>
+    <a class="link-button" href="/results">结果清单</a>
+  </div>
+</div>
+
+<div class="card">
+  <form id="form">
+    <div class="page-actions" style="margin-bottom: 8px;">
+      <button type="button" class="secondary" onclick="saveSettings()">保存设置</button>
+      <button type="button" class="secondary" onclick="restoreSettings()">恢复设置</button>
+      <button type="button" class="secondary" onclick="resetSettings()">恢复默认</button>
+    </div>
+    <details class="form-section" open>
+      <summary>基础设置</summary>
+      <div class="grid wide">
+        <label>工作目录
+          <input name="workdir" placeholder="默认 Script/molecular_docking" required>
+        </label>
+        <label>受体文件（相对工作目录）
+          <input name="receptor" placeholder="data/receptors/receptor.pdb">
+        </label>
+        <label>配体库文件（相对工作目录）
+          <input name="ligand" placeholder="data/ligands/library.sdf">
+        </label>
+        <label>执行步骤
+          <select name="stage">
+            <option value="pipeline">完整流程（断点续跑）</option>
+            <option value="prepare-receptor">仅准备受体</option>
+            <option value="prepare-ligands">仅准备配体</option>
+            <option value="dock">仅对接</option>
+            <option value="analyze">仅分析</option>
+            <option value="redock">Top 命中精细重对接</option>
+            <option value="report">生成 HTML 报告</option>
+          </select>
+        </label>
+      </div>
+    </details>
+    <details class="form-section" open>
+      <summary>对接盒与运行参数</summary>
+      <div class="grid wide">
+        <div>
+          <label>对接盒中心 (X Y Z)</label>
+          <div class="inline3">
+            <input name="center_x" type="number" step="0.1" value="0">
+            <input name="center_y" type="number" step="0.1" value="0">
+            <input name="center_z" type="number" step="0.1" value="0">
+          </div>
+        </div>
+        <div>
+          <label>对接盒尺寸 (X Y Z)</label>
+          <div class="inline3">
+            <input name="size_x" type="number" step="0.5" value="22.5">
+            <input name="size_y" type="number" step="0.5" value="22.5">
+            <input name="size_z" type="number" step="0.5" value="22.5">
+          </div>
+        </div>
+        <div style="align-self:end;">
+          <button type="button" class="secondary" onclick="detectBox()">自动检测对接盒</button>
+        </div>
+        <label>exhaustiveness
+          <input name="exhaustiveness" type="number" min="1" value="8">
+        </label>
+        <label>num_modes
+          <input name="num_modes" type="number" min="1" value="9">
+        </label>
+        <label>energy_range
+          <input name="energy_range" type="number" step="0.5" value="3.0">
+        </label>
+        <label>并行数
+          <input name="max_workers" type="number" min="1" value="4">
+        </label>
+        <label>命中阈值 (kcal/mol)
+          <input name="cutoff" type="number" step="0.1" value="-7.0">
+        </label>
+        <label>Top N
+          <input name="top_n" type="number" min="1" value="100">
+        </label>
+        <label>Vina 路径（可选）
+          <input name="executable" placeholder="vina 或 dock/tools/vina.exe">
+        </label>
+      </div>
+      <label class="toggle"><input type="checkbox" name="force" value="1"> 强制从第一阶段重跑</label>
+    </details>
+    <div class="actions">
+      <button id="startBtn" type="button" onclick="startRun()">开始对接</button>
+      <button id="pauseBtn" type="button" class="secondary" onclick="pauseRun()" disabled>暂停任务</button>
+      <button id="resumeBtn" type="button" class="secondary" onclick="resumeRun()" disabled>继续任务</button>
+    </div>
+  </form>
+  <div id="message"></div>
+</div>
+
+<div class="card">
+  <h2 style="margin-top:0;">实时进度</h2>
+  <pre id="log">等待开始...</pre>
+</div>
+
+<div class="card">
+  <h2 style="margin-top:0;">对接结果</h2>
+  <div id="summaryRow"></div>
+  <div id="fileLinks"></div>
+  <div class="tablebox"><table id="resultTable"><thead><tr><th>排名</th><th>ID</th><th>SMILES</th><th>亲和力</th><th>模式</th><th>状态</th></tr></thead><tbody></tbody></table></div>
+  <div id="gallery" class="gallery"></div>
+</div>
+
+<div class="card">
+  <h2 style="margin-top:0;">分析历史</h2>
+  <div id="history">正在加载历史记录...</div>
+</div>
+
+<div class="card">
+  <h2 style="margin-top:0;">环境状态</h2>
+  <label for="installPath">安装地址</label>
+  <input id="installPath" name="install_path" placeholder="可选">
+  <div class="actions" style="margin-top:10px;">
+    <button type="button" onclick="checkEnv()">检查环境</button>
+    <button type="button" class="secondary" onclick="installEnv()">补全环境</button>
+  </div>
+  <pre id="envOutput">点击“检查环境”查看依赖状态。</pre>
+</div>
+</div>
+
+<script>
+function esc(value) {
+  return String(value == null ? '' : value).replace(/[&<>"']/g, c => ({'&':'&amp;','<':'&lt;','>':'&gt;','"':'&quot;',"'":'&#39;'}[c]));
+}
+function msg(text, kind) {
+  const box = document.getElementById('message');
+  box.className = kind || '';
+  box.textContent = text;
+}
+let currentJob = null;
+let pollTimer = null;
+let jobAlerted = false;
+const JOB_KEY = 'liver_ui_molecular_docking_job';
+const FORM_KEY = 'liver_ui_molecular_docking_form';
+
+function saveJob() {
+  try { sessionStorage.setItem(JOB_KEY, currentJob); } catch (e) {}
+}
+function clearJob() {
+  try { sessionStorage.removeItem(JOB_KEY); } catch (e) {}
+}
+function restoreJob() {
+  let saved = null;
+  let target = null;
+  try { saved = sessionStorage.getItem(JOB_KEY); } catch (e) {}
+  try { target = new URLSearchParams(window.location.search).get('job'); } catch (e) {}
+  const job = target || saved;
+  if (!job) return;
+  currentJob = job;
+  saveJob();
+  if (target) {
+    try {
+      const url = new URL(window.location.href);
+      url.searchParams.delete('job');
+      window.history.replaceState(null, '', url.toString());
+    } catch (e) {}
+  }
+  msg('已恢复分子对接任务，日志继续刷新。', 'ok');
+  document.getElementById('pauseBtn').disabled = false;
+  pollTimer = setInterval(pollLog, 1000);
+}
+
+function collectForm() {
+  const state = {};
+  new FormData(document.getElementById('form')).forEach((value, key) => { state[key] = value; });
+  return state;
+}
+function saveSettings() {
+  try {
+    sessionStorage.setItem(FORM_KEY, JSON.stringify(collectForm()));
+    msg('设置已保存到当前浏览器标签页。', 'ok');
+  } catch (e) {
+    msg('保存设置失败：' + String(e.message || e), 'error');
+  }
+}
+function restoreSettings() {
+  let saved = null;
+  try { saved = JSON.parse(sessionStorage.getItem(FORM_KEY) || 'null'); } catch (e) {}
+  if (!saved) { msg('没有已保存的设置。', 'error'); return; }
+  const form = document.getElementById('form');
+  Object.entries(saved).forEach(([name, value]) => {
+    const el = form.querySelector('[name="' + name + '"]');
+    if (el) el.value = value;
+  });
+  msg('设置已恢复。', 'ok');
+}
+function resetSettings() {
+  try { sessionStorage.removeItem(FORM_KEY); } catch (e) {}
+  document.getElementById('form').reset();
+  msg('已恢复默认设置。', 'ok');
+}
+
+async function startRun() {
+  const btn = document.getElementById('startBtn');
+  btn.disabled = true;
+  jobAlerted = false;
+  closeToast();
+  msg('正在启动...');
+  try {
+    const data = new URLSearchParams(new FormData(document.getElementById('form')));
+    const resp = await fetch('/molecular-docking/start', {method: 'POST', body: data});
+    const result = await resp.json();
+    if (!resp.ok) throw new Error(result.error || '启动失败');
+    currentJob = result.job;
+    saveJob();
+    document.getElementById('log').textContent = '';
+    msg('任务已启动，日志实时刷新。', 'ok');
+    document.getElementById('pauseBtn').disabled = false;
+    document.getElementById('resumeBtn').disabled = true;
+    if (pollTimer) clearInterval(pollTimer);
+    pollTimer = setInterval(pollLog, 1000);
+  } catch (e) {
+    msg(String(e.message || e), 'error');
+  } finally {
+    btn.disabled = false;
+  }
+}
+
+async function pollLog() {
+  if (!currentJob) return;
+  try {
+    const logResp = await fetch('/molecular-docking/log?job=' + currentJob);
+    const box = document.getElementById('log');
+    box.textContent = await logResp.text();
+    box.scrollTop = box.scrollHeight;
+    const statusResp = await fetch('/molecular-docking/status?job=' + currentJob);
+    const status = await statusResp.json();
+    if (!status.running) {
+      if (status.queued) { msg('任务已进入队列。', 'ok'); return; }
+      if (status.paused) {
+        clearInterval(pollTimer);
+        msg('任务已暂停，可点击继续任务从断点恢复。', 'ok');
+        document.getElementById('pauseBtn').disabled = true;
+        document.getElementById('resumeBtn').disabled = false;
+        if (!jobAlerted) showToast('paused', '任务已暂停', status.stage || '');
+        return;
+      }
+      clearInterval(pollTimer);
+      await loadResults();
+      msg(status.ok ? '分子对接任务已完成。' : '任务运行失败，请查看日志。', status.ok ? 'ok' : 'error');
+      document.getElementById('pauseBtn').disabled = true;
+      document.getElementById('resumeBtn').disabled = true;
+      if (!jobAlerted) {
+        showToast(status.ok ? 'ok' : 'error', status.ok ? '任务已完成' : '任务中断', status.error || status.stage || '');
+      }
+      currentJob = null;
+      clearJob();
+      loadHistory();
+    }
+  } catch (e) {
+    // transient polling errors are ignored
+  }
+}
+
+async function pauseRun() {
+  if (!currentJob) return;
+  try {
+    await fetch('/molecular-docking/pause', {method: 'POST', body: new URLSearchParams({job: currentJob})});
+    msg('暂停请求已发送。', 'ok');
+  } catch (e) {
+    msg('暂停失败：' + String(e.message || e), 'error');
+  }
+}
+async function resumeRun() {
+  if (!currentJob) return;
+  try {
+    const resp = await fetch('/molecular-docking/resume', {method: 'POST', body: new URLSearchParams({job: currentJob})});
+    const result = await resp.json();
+    if (!resp.ok) throw new Error(result.error || '继续失败');
+    document.getElementById('resumeBtn').disabled = true;
+    document.getElementById('pauseBtn').disabled = false;
+    msg('正在从断点继续。', 'ok');
+    if (pollTimer) clearInterval(pollTimer);
+    pollTimer = setInterval(pollLog, 1000);
+  } catch (e) {
+    msg('继续失败：' + String(e.message || e), 'error');
+  }
+}
+
+async function detectBox() {
+  const form = document.getElementById('form');
+  const data = new URLSearchParams(new FormData(form));
+  try {
+    const resp = await fetch('/molecular-docking/detect-box', {method: 'POST', body: data});
+    const result = await resp.json();
+    if (!resp.ok) throw new Error(result.error || '检测失败');
+    document.querySelector('[name="center_x"]').value = result.center[0];
+    document.querySelector('[name="center_y"]').value = result.center[1];
+    document.querySelector('[name="center_z"]').value = result.center[2];
+    document.querySelector('[name="size_x"]').value = result.size[0];
+    document.querySelector('[name="size_y"]').value = result.size[1];
+    document.querySelector('[name="size_z"]').value = result.size[2];
+    msg('对接盒已自动检测：' + result.mode, 'ok');
+  } catch (e) {
+    msg('自动检测失败：' + String(e.message || e), 'error');
+  }
+}
+
+async function loadResults() {
+  if (!currentJob) return;
+  try {
+    const resp = await fetch('/molecular-docking/results?job=' + currentJob);
+    const data = await resp.json();
+    if (!resp.ok) throw new Error(data.error || '结果读取失败');
+    renderResults(data);
+  } catch (e) {
+    document.getElementById('summaryRow').innerHTML = '<p class="error">' + esc(e.message || e) + '</p>';
+  }
+}
+function renderResults(data) {
+  const summary = data.summary || {};
+  const rows = data.rows || [];
+  const files = data.files || [];
+  const figures = data.figures || [];
+  const box = document.getElementById('summaryRow');
+  box.innerHTML = '<div class="stat-grid">' +
+    '<div class="stat-card ok"><div class="stat-label">成功对接</div><div class="stat-value">' + esc(summary.total_docked || 0) + '</div></div>' +
+    '<div class="stat-card"><div class="stat-label">命中数</div><div class="stat-value">' + esc(summary.hits || 0) + '</div></div>' +
+    '<div class="stat-card"><div class="stat-label">最佳亲和力</div><div class="stat-value">' + esc(summary.best_affinity == null ? '-' : summary.best_affinity) + '</div></div>' +
+    '</div>';
+  const links = document.getElementById('fileLinks');
+  let html = '';
+  if (data.html_report) {
+    html += '<a class="file-link" href="/molecular-docking/file?job=' + currentJob + '&name=' + encodeURIComponent(data.html_report) + '" target="_blank" rel="noopener">打开 HTML 报告</a>';
+  }
+  html += (files || []).map(name =>
+    '<a class="file-link" href="/molecular-docking/file?job=' + currentJob + '&name=' + encodeURIComponent(name) + '" download>' + esc(name) + '</a>'
+  ).join('');
+  links.innerHTML = html;
+  const table = document.getElementById('resultTable');
+  if (rows.length) {
+    table.innerHTML = '<thead><tr><th>排名</th><th>ID</th><th>SMILES</th><th>亲和力</th><th>模式</th><th>状态</th></tr></thead><tbody>' +
+      rows.map(row => '<tr><td>' + esc(row.rank || '') + '</td><td>' + esc(row.id || '') + '</td><td>' + esc(row.smiles || '') +
+      '</td><td>' + esc(row.affinity || '') + '</td><td>' + esc(row.mode || '') + '</td><td>' + esc(row.status || '') + '</td></tr>').join('') +
+      '</tbody>';
+  } else {
+    table.innerHTML = '<tbody><tr><td colspan="6">暂无结果。</td></tr></tbody>';
+  }
+  const gallery = document.getElementById('gallery');
+  gallery.innerHTML = (figures || []).map(name =>
+    '<figure><img src="/molecular-docking/file?job=' + currentJob + '&name=' + encodeURIComponent(name) + '"><figcaption>' + esc(name) + '</figcaption></figure>'
+  ).join('');
+}
+
+async function loadHistory() {
+  const box = document.getElementById('history');
+  try {
+    const resp = await fetch('/molecular-docking/history');
+    const items = await resp.json();
+    if (!items.length) { box.innerHTML = '<p class="muted">暂无分析历史。</p>'; return; }
+    box.innerHTML = '<table><thead><tr><th>任务</th><th>步骤</th><th>状态</th><th>完成时间</th><th>工作目录</th><th>结果</th></tr></thead><tbody>' +
+      items.map(item => '<tr><td>' + esc(item.job) + '</td><td>' + esc(item.stage || 'pipeline') + '</td><td>' + esc(item.status) +
+      '</td><td>' + new Date((item.finished || 0) * 1000).toLocaleString() + '</td><td>' + esc(item.workdir) +
+      '</td><td><a href="/molecular-docking?job=' + esc(item.job) + '">查看</a></td></tr>').join('') + '</tbody></table>';
+  } catch (e) {
+    box.innerHTML = '<p class="error">历史记录加载失败：' + esc(e.message || e) + '</p>';
+  }
+}
+
+async function checkEnv() {
+  const box = document.getElementById('envOutput');
+  box.textContent = '正在检查环境...';
+  try {
+    const resp = await fetch('/molecular-docking/check-env');
+    const data = await resp.json();
+    const checks = data.checks || [];
+    const text = checks.map(item => '[' + (item.ok ? 'OK  ' : 'FAIL') + '] ' + item.name + ' - ' + item.detail).join('\n');
+    box.textContent = text || '环境检查完成';
+    msg(data.checks && data.checks.every(item => item.ok) ? '环境检测通过' : '环境缺少组件，可点击补全环境', data.checks && data.checks.every(item => item.ok) ? 'ok' : 'error');
+  } catch (e) {
+    box.textContent = '环境检查失败：' + String(e.message || e);
+  }
+}
+async function installEnv() {
+  const box = document.getElementById('envOutput');
+  box.textContent = '正在自动补全环境...';
+  try {
+    const form = new URLSearchParams();
+    const target = document.getElementById('installPath').value.trim();
+    if (target) form.set('target', target);
+    await fetch('/molecular-docking/install', {method: 'POST', body: form});
+    const timer = setInterval(async () => {
+      try {
+        const resp = await fetch('/install-status');
+        const data = await resp.json();
+        box.textContent = data.log || '正在安装...';
+        if (!data.running) {
+          clearInterval(timer);
+          msg(data.ok ? '环境补全完成' : '环境补全失败，请查看日志', data.ok ? 'ok' : 'error');
+          await checkEnv();
+        }
+      } catch (e) {
+        clearInterval(timer);
+        box.textContent = '环境补全状态读取失败：' + String(e.message || e);
+      }
+    }, 1000);
+  } catch (e) {
+    box.textContent = '环境补全启动失败：' + String(e.message || e);
+  }
+}
+
+function showToast(kind, title, body) {
+  const toast = document.getElementById('jobToast');
+  toast.className = 'job-toast ' + kind;
+  document.getElementById('jobToastTitle').textContent = title;
+  document.getElementById('jobToastBody').textContent = body || '';
+  toast.hidden = false;
+  jobAlerted = true;
+}
+function closeToast() {
+  const toast = document.getElementById('jobToast');
+  if (toast) toast.hidden = true;
+}
+
+restoreJob();
+loadHistory();
+</script>
+<div id="jobToast" class="job-toast" hidden>
+  <div class="job-toast-title" id="jobToastTitle"></div>
+  <div class="job-toast-body" id="jobToastBody"></div>
+  <button type="button" onclick="closeToast()">知道了</button>
+</div>
+</body>
+</html>
