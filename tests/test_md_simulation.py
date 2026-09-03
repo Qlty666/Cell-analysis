@@ -127,6 +127,10 @@ class TestMdSimulation(unittest.TestCase):
             self.assertEqual(len(data), 2)
             self.assertEqual(float(data[1, 1]), 0.2)
 
+    def test_parse_xvg_missing_file_returns_none(self):
+        with tempfile.TemporaryDirectory() as raw:
+            self.assertIsNone(parse_xvg(Path(raw) / "missing.xvg"))
+
     def test_normalize_ligand_itp_keeps_comment_line(self):
         with tempfile.TemporaryDirectory() as raw:
             path = Path(raw) / "ligand.itp"
