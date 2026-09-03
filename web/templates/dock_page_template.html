@@ -182,6 +182,7 @@ a.file-link { color: #1665c0; text-decoration: none; margin-right: 12px; }
           <option value="evidence">证据收集（UniProt/PDB/ChEMBL/BindingDB/STRING/Open Targets 等）</option>
           <option value="ml-train">训练 ML/DL 重打分模型</option>
           <option value="ml-predict">ML/DL 重打分</option>
+          <option value="md-simulation">分子动力学模拟</option>
           <option value="export-md">导出 MD 交接模板</option>
           <option value="export-external">导出外部对接模板</option>
           <option value="redock">Top 命中精细重对接</option>
@@ -251,6 +252,64 @@ a.file-link { color: #1665c0; text-decoration: none; margin-right: 12px; }
   </form>
   <div id="message"></div>
   <div id="envBox"></div>
+</div>
+
+<div class="card">
+  <h2>分子动力学模拟</h2>
+  <form id="mdForm">
+    <div class="grid wide">
+      <label>工作目录
+        <input name="workdir" placeholder="默认 dock">
+      </label>
+      <label>执行模式
+        <select name="md_mode">
+          <option value="prepare">prepare（准备输入）</option>
+          <option value="auto">auto（运行 GROMACS）</option>
+        </select>
+      </label>
+      <label>受体 PDB（相对工作目录）
+        <input name="md_receptor_pdb" placeholder="data/receptors/receptor.pdb">
+      </label>
+      <label>GROMACS 数据目录（可选）
+        <input name="md_gmx_data" placeholder="如 E:/gromacs_install_root">
+      </label>
+      <label>Top N 配体
+        <input name="md_top_n" type="number" min="1" value="1">
+      </label>
+      <label>蛋白力场
+        <input name="md_protein_ff" value="amber99sb-ildn">
+      </label>
+      <label>水模型
+        <input name="md_water" value="tip3p">
+      </label>
+      <label>能量最小化步数
+        <input name="md_em_steps" type="number" min="1" value="5000">
+      </label>
+      <label>NVT/NPT 平衡步数
+        <input name="md_equil_steps" type="number" min="1" value="5000">
+      </label>
+      <label>生产模拟步数
+        <input name="md_prod_steps" type="number" min="1" value="250000">
+      </label>
+      <label>温度 (K)
+        <input name="md_temperature" type="number" step="1" value="300">
+      </label>
+      <label>配体净电荷
+        <input name="md_ligand_charge" type="number" step="1" value="0">
+      </label>
+      <label>CPU 线程
+        <input name="md_cpu" type="number" min="1" value="4">
+      </label>
+      <label>配体拓扑目录（可选）
+        <input name="md_topology_dir" placeholder="data/md/topologies">
+      </label>
+      <label class="toggle"><input type="checkbox" name="md_gpu" value="1"> GPU</label>
+    </div>
+    <div class="actions">
+      <button id="mdStartBtn" type="button" onclick="startMdSimulation(this)">开始分子动力学模拟</button>
+    </div>
+  </form>
+  <div id="mdMessage"></div>
 </div>
 
 <div class="card">
@@ -537,14 +596,11 @@ async function detectBox() {
   }
 }
 
-async function startRun() {
-  const form = document.getElementById('form');
-  const data = new URLSearchParams(new FormData(form));
-    const btn = document.getElementById('startBtn');
-    btn.disabled = true;
-    jobAlerted = false;
-    closeJobToast();
-    msg('正在启动...');
+async function launchDock(data, btn) {
+  btn.disabled = true;
+  jobAlerted = false;
+  closeJobToast();
+  msg('正在启动...');
   try {
     const resp = await fetch('/dock/start', {method: 'POST', body: data});
     const result = await resp.json();
@@ -556,6 +612,8 @@ async function startRun() {
     document.getElementById('gallery').innerHTML = '';
     document.getElementById('summaryRow').textContent = '';
     document.getElementById('fileLinks').textContent = '';
+    const mdMessage = document.getElementById('mdMessage');
+    if (mdMessage) mdMessage.textContent = '';
     msg('任务已启动，日志实时刷新。', 'ok');
     document.getElementById('pauseBtn').disabled = false;
     document.getElementById('resumeBtn').disabled = true;
@@ -566,6 +624,20 @@ async function startRun() {
   } finally {
     btn.disabled = false;
   }
+}
+
+function startRun() {
+  const form = document.getElementById('form');
+  const data = new URLSearchParams(new FormData(form));
+  launchDock(data, document.getElementById('startBtn'));
+}
+
+async function startMdSimulation(btn) {
+  const form = document.getElementById('mdForm');
+  const data = new URLSearchParams(new FormData(form));
+  data.set('stage', 'md-simulation');
+  if (!data.get('md_mode')) data.set('md_mode', 'prepare');
+  await launchDock(data, btn || document.getElementById('mdStartBtn'));
 }
 
 async function poll() {
@@ -664,6 +736,10 @@ async function loadResults(job) {
   try {
     const resp = await fetch('/dock/results?job=' + job);
     const data = await resp.json();
+    if (data.stage === 'md-simulation') {
+      renderMdResults(job, data);
+      return;
+    }
     const summary = data.summary || {};
     const summaryRow = document.getElementById('summaryRow');
     summaryRow.innerHTML = '<p class="muted">成功对接 ' + esc(summary.total_docked || 0) +
@@ -695,6 +771,46 @@ async function loadResults(job) {
   } catch (e) {
     document.getElementById('summaryRow').innerHTML = '<div class="error">结果加载失败：' + esc(e.message || e) + '</div>';
   }
+}
+
+function renderMdResults(job, data) {
+  const md = data.md || {};
+  const summary = md.summary || {};
+  const summaryRow = document.getElementById('summaryRow');
+  summaryRow.innerHTML = '<p class="muted">模式 ' + esc(summary.mode || '') +
+    '，请求 ' + esc(summary.requested || 0) +
+    '，完成 ' + esc(summary.completed || 0) +
+    '，准备 ' + esc(summary.prepared || 0) +
+    '，失败 ' + esc(summary.failed || 0) +
+    '。输出目录：' + esc(md.output_dir || '') + '</p>';
+
+  const links = document.getElementById('fileLinks');
+  links.innerHTML = (md.files || []).map(name =>
+    '<a class="file-link" href="/dock/file?job=' + job + '&name=' + encodeURIComponent(name) + '" download>' + esc(name) + '</a>'
+  ).join('');
+
+  const table = document.getElementById('resultTable');
+  const headers = ['ID', '状态', '时间 (ns)', '蛋白 RMSD 均值 (nm)', '配体 RMSD 均值 (nm)', '配体 RMSF 均值 (nm)', '错误'];
+  const keys = ['id', 'status', 'time_ns', 'rmsd_protein_mean_nm', 'rmsd_ligand_mean_nm', 'rmsf_ligand_mean_nm', 'error'];
+  if (md.rows && md.rows.length) {
+    table.innerHTML = '<thead><tr>' + headers.map(h => '<th>' + h + '</th>').join('') + '</tr></thead><tbody>' +
+      md.rows.map(row => '<tr>' + keys.map(key => {
+        let value = row[key];
+        if ((key.indexOf('rmsd') === 0 || key.indexOf('rmsf') === 0) &&
+            value !== '' && value !== undefined && value !== null) {
+          value = Number(value).toFixed(3);
+        }
+        if (value === '' || value === undefined || value === null) value = '-';
+        return '<td>' + esc(value) + '</td>';
+      }).join('') + '</tr>').join('') + '</tbody>';
+  } else {
+    table.innerHTML = '<tbody><tr><td>暂无结果</td></tr></tbody>';
+  }
+
+  const gallery = document.getElementById('gallery');
+  gallery.innerHTML = (md.figures || []).map(name =>
+    '<figure><img src="/dock/file?job=' + job + '&name=' + encodeURIComponent(name) + '"><figcaption>' + esc(name) + '</figcaption></figure>'
+  ).join('');
 }
 
 async function loadDockHistory() {

@@ -315,6 +315,11 @@
 类型: 直方图。
 用途: 判断评分是否有区分度和分层能力。
 
+60_md_rmsd_rmsf.png
+内容: 生产轨迹的蛋白骨架 RMSD、配体 RMSD 与配体原子 RMSF。
+类型: 折线图（三面板）。
+用途: 检查蛋白-配体复合物在 MD 中的收敛与配体构象稳定性。
+
 ## 三、集成与细胞反馈结果图
 
 对应目录：`<workdir>/outputs/integration/cell_feedback/figures/`。

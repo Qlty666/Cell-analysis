@@ -65,6 +65,7 @@
 | `analyze` | 按亲和力排序、阈值筛选、Tanimoto 多样性选择 |
 | `redock` | 对 Top 命中用更高 exhaustiveness 精细重对接 |
 | `ml-train` / `ml-predict` | 随机森林、GBDT、MLP、LASSO+SVM-RFE 或 PyTorch MLP 重打分 |
+| `md-simulation` | 把 Top 命中准备为 GROMACS 蛋白-配体复合物，执行 EM/NVT/NPT/生产模拟并输出 RMSD/RMSF |
 | `export-md` / `export-external` | 导出 Amber/GROMACS 和 UniDock-Pro/HDOCK/HADDOCK 模板 |
 | `report` | 生成 HTML 汇总报告 |
 | `virtual-knockout` | 基因敲除优先级和多维靶点评分；传入 `--insilico-gene` 后追加单细胞 GRN 虚拟敲除、UMAP 命运偏转、调控网络、GO/KEGG 与 HTML 报告 |
@@ -257,6 +258,14 @@ python scripts\run_docking.py ml-predict
 ```bash
 python scripts\run_docking.py export-md
 python scripts\run_docking.py export-external
+```
+
+分子动力学模拟（先准备输入，再在安装 GROMACS + ACPYPE 后运行；配体拓扑也可放到 `md_simulation.topology_dir`）：
+
+```bash
+python scripts\run_docking.py md-simulation --md-mode prepare --md-top-n 1
+python scripts\run_docking.py md-simulation --md-mode auto --md-top-n 1 \
+  --md-gmx-data E:/gromacs_install_root
 ```
 
 虚拟敲除（基础评分）：
