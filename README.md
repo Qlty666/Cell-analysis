@@ -1,6 +1,6 @@
 # Liver Cancer Bioinformatics Workflow
 
-> 当前版本：1.2.0
+> 当前版本：1.3.0
 
 面向肝癌研究的本地生信自动化工作流，整合三条可实际运行的流水线：
 
@@ -796,6 +796,17 @@ GSE165816 和 TCGA PanCancer Atlas 仅用于真实数据验证。
 MIT License. See `LICENSE` for details.
 
 ## 9. 更新日志
+
+### v1.3.0
+
+- 新增血红蛋白 QC 跟踪与可配置污染过滤：表达分析 QC 统计 `percent.hb`，对明显血红蛋白高占比细胞默认做 99% 分位数上限过滤，并可用 `LIVER_QC_MAX_HB` / `LIVER_QC_MAX_RIBO` 覆盖阈值；血红蛋白模式同步纳入小鼠 `Hbq1b`。
+- 新增 `liverbio` 统一软件入口：`scripts/liverbio.py` 把表达分析、虚拟筛选、全自动流水线、数据集搜索、网页端和环境检查集中到同一命令，支持 `help`、`version`、`expression`、`docking`、`full`、`datasets`、`web` 和 `doctor` 子命令。
+- 新增数据集搜索、表达分析、全自动流水线、虚拟筛选四个功能 Codex skill 源文件，配套 `scripts/install_codex_skills.py` 与 `docs/software_guide.md`；skill 只指导 Codex 调用项目现有脚本，不复制核心分析代码。
+- 新增 GROMACS 分子动力学模拟模块：支持准备 GROMACS 输入、运行 MD、容错缺失分析文件并自动填充生产时间、按蛋白骨架对齐计算配体 RMSD；模块已接入虚拟筛选 CLI 与网页端。
+- 新增独立分子对接板块：`src/molecular_docking/`、`scripts/run_molecular_docking.py`、`config/molecular_docking_config.json` 与网页“分子对接”页面，提供独立工作目录、任务日志、暂停/继续、自动检测对接盒、结果表、图库、HTML 报告和 PDBQT 构象下载。
+- 网页版整体体验优化：统一页头与快捷入口、表单分组折叠、设置保存/恢复/重置、结果统计卡片、任务数量统计、结果清单实时筛选，并新增导航高亮与进行中任务数量徽标。
+- 新增 `tests/test_md_simulation.py`、`tests/test_molecular_docking.py`、`tests/test_liverbio_cli.py`，并同步补充网页端模板与运行接口测试。
+- 全量测试通过：236 个测试用例 + 10 个 subtests。
 
 ### v1.2.0
 
