@@ -3,7 +3,6 @@
 <head>
 <meta charset="utf-8">
 <meta name="viewport" content="width=device-width, initial-scale=1">
-<link rel="stylesheet" href="/static/app.css">
 <script src="/static/nav.js" defer></script>
 <title>虚拟筛选流水线</title>
 <style>
@@ -136,6 +135,7 @@ a.file-link { color: #1665c0; text-decoration: none; margin-right: 12px; }
   cursor: pointer;
 }
 </style>
+<link rel="stylesheet" href="/static/app.css">
 </head>
 <body>
 <div class="topnav">
@@ -152,13 +152,18 @@ a.file-link { color: #1665c0; text-decoration: none; margin-right: 12px; }
     <h1>虚拟筛选流水线</h1>
     <p class="page-sub">AutoDock Vina 对接：受体准备、配体库准备、并行对接、命中排序与多样性筛选。</p>
   </div>
-  <div class="page-actions">
-    <a class="link-button" href="/full">全自动流水线</a>
-    <a class="link-button" href="/results">结果清单</a>
-  </div>
 </div>
 
-<div class="card">
+<nav class="quicknav" aria-label="本页功能">
+  <a href="#dock-run">虚拟筛选</a>
+  <a href="#dock-knockout">虚拟敲除</a>
+  <a href="#dock-network">网络毒理学</a>
+  <a href="#dock-faers">FAERS</a>
+  <a href="#dock-results">筛选结果</a>
+  <a href="#dock-env">环境状态</a>
+</nav>
+
+<div class="card" id="dock-run">
   <form id="form">
     <div class="grid wide">
       <label>工作目录
@@ -246,14 +251,14 @@ a.file-link { color: #1665c0; text-decoration: none; margin-right: 12px; }
     </div>
     <label class="toggle"><input type="checkbox" name="force" value="1"> 强制从第一阶段重跑</label>
     <div class="actions">
-      <button id="startBtn" type="button" onclick="startRun()">开始任务</button>
+      <button id="startBtn" type="button" data-primary onclick="startRun()">开始任务</button>
     </div>
   </form>
   <div id="message"></div>
   <div id="envBox"></div>
 </div>
 
-<div class="card">
+<div class="card" id="dock-knockout">
   <h2>虚拟敲除优先级分析</h2>
   <form id="koForm">
     <div class="grid wide">
@@ -302,7 +307,7 @@ a.file-link { color: #1665c0; text-decoration: none; margin-right: 12px; }
       </label>
     </div>
     <div class="actions">
-      <button type="button" onclick="runKnockout(this)">运行虚拟敲除</button>
+      <button type="button" data-primary onclick="runKnockout(this)">运行虚拟敲除</button>
       <button type="button" class="secondary" onclick="exportValidation(this)">导出湿实验验证方案</button>
     </div>
   </form>
@@ -314,7 +319,7 @@ a.file-link { color: #1665c0; text-decoration: none; margin-right: 12px; }
   <div id="koGallery" class="gallery"></div>
 </div>
 
-<div class="card">
+<div class="card" id="dock-network">
   <h2>网络毒理学分析</h2>
   <form id="netForm">
     <div class="grid wide">
@@ -338,7 +343,7 @@ a.file-link { color: #1665c0; text-decoration: none; margin-right: 12px; }
       </label>
     </div>
     <div class="actions">
-      <button type="button" onclick="runNetwork(this)">运行网络毒理学</button>
+      <button type="button" data-primary onclick="runNetwork(this)">运行网络毒理学</button>
     </div>
   </form>
   <div id="netMessage"></div>
@@ -348,7 +353,7 @@ a.file-link { color: #1665c0; text-decoration: none; margin-right: 12px; }
   <div id="netGallery" class="gallery"></div>
 </div>
 
-<div class="card">
+<div class="card" id="dock-faers">
   <h2>FAERS 不相称性信号检测</h2>
   <form id="faersForm">
     <div class="grid wide">
@@ -372,7 +377,7 @@ a.file-link { color: #1665c0; text-decoration: none; margin-right: 12px; }
       </label>
     </div>
     <div class="actions">
-      <button type="button" onclick="runFaers(this)">运行 FAERS 信号检测</button>
+      <button type="button" data-primary onclick="runFaers(this)">运行 FAERS 信号检测</button>
     </div>
   </form>
   <div id="faersMessage"></div>
@@ -399,7 +404,7 @@ a.file-link { color: #1665c0; text-decoration: none; margin-right: 12px; }
   <pre id="log">等待开始...</pre>
 </div>
 
-<div class="card">
+<div class="card" id="dock-results">
   <h2>筛选结果</h2>
   <div id="summaryRow"></div>
   <div id="fileLinks"></div>
@@ -412,7 +417,7 @@ a.file-link { color: #1665c0; text-decoration: none; margin-right: 12px; }
   <div id="dockHistory">正在加载历史记录...</div>
 </div>
 
-<div class="card">
+<div class="card" id="dock-env">
   <h2>环境状态与自动补全</h2>
   <label for="dockInstallPath">安装地址</label>
   <input id="dockInstallPath" name="install_path" placeholder="请输入环境安装地址">
@@ -711,7 +716,7 @@ async function loadDockHistory() {
       new Date(item.finished * 1000).toLocaleString() + '</td><td>' +
       esc(item.output) + '</td></tr>'
     ).join('');
-    box.innerHTML = '<table><thead><tr><th>阶段</th><th>状态</th><th>完成时间</th><th>输出路径</th></tr></thead><tbody>' + rows + '</tbody></table>';
+    box.innerHTML = '<div class="tablebox"><table><thead><tr><th>阶段</th><th>状态</th><th>完成时间</th><th>输出路径</th></tr></thead><tbody>' + rows + '</tbody></table></div>';
   } catch (e) {
     box.textContent = '历史记录加载失败：' + String(e.message || e);
   }
@@ -738,9 +743,9 @@ async function loadDockEnv() {
       '</td><td><code>' + esc(c.install || '') + '</code></td></tr>'
     ).join('');
     let html = '<h3>软件</h3>';
-    html += '<table><thead><tr><th>软件</th><th>版本/路径</th><th>状态</th><th>下载地址</th></tr></thead><tbody>' + softwareRows + '</tbody></table>';
+    html += '<div class="tablebox"><table><thead><tr><th>软件</th><th>版本/路径</th><th>状态</th><th>下载地址</th></tr></thead><tbody>' + softwareRows + '</tbody></table></div>';
     html += '<h3>Python 库 / 插件</h3>';
-    html += '<table><thead><tr><th>插件</th><th>版本</th><th>状态</th><th>安装命令</th></tr></thead><tbody>' + packageRows + '</tbody></table>';
+    html += '<div class="tablebox"><table><thead><tr><th>插件</th><th>版本</th><th>状态</th><th>安装命令</th></tr></thead><tbody>' + packageRows + '</tbody></table></div>';
     box.innerHTML = html;
   } catch (e) {
     box.textContent = '环境信息加载失败：' + String(e.message || e);

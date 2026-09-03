@@ -3,7 +3,6 @@
 <head>
 <meta charset="utf-8">
 <meta name="viewport" content="width=device-width, initial-scale=1">
-<link rel="stylesheet" href="/static/app.css">
 <script src="/static/nav.js" defer></script>
 <title>全自动流水线</title>
 <style>
@@ -138,6 +137,7 @@ a.file-link { color: #1665c0; text-decoration: none; margin-right: 12px; }
   cursor: pointer;
 }
 </style>
+<link rel="stylesheet" href="/static/app.css">
 </head>
 <body>
 <div class="topnav">
@@ -154,13 +154,17 @@ a.file-link { color: #1665c0; text-decoration: none; margin-right: 12px; }
     <h1>全自动流水线</h1>
     <p class="page-sub">单细胞分析 → 关键基因/蛋白筛选 → 证据富集 → 虚拟敲除 → 虚拟筛选 → 细胞反馈 → 集成报告。支持断点续跑、参数指纹失效、QC 门控与 dry-run 预演。</p>
   </div>
-  <div class="page-actions">
-    <a class="link-button" href="/results">结果清单</a>
-    <a class="link-button" href="/tasks">任务进度</a>
-  </div>
 </div>
 
-<div class="card">
+<nav class="quicknav" aria-label="本页功能">
+  <a href="#full-search">搜索数据集</a>
+  <a href="#full-pipeline">流水线设置</a>
+  <a href="#full-existing">加载已有结果</a>
+  <a href="#full-progress">实时进度</a>
+  <a href="#full-results">流程结果</a>
+</nav>
+
+<div class="card" id="full-search">
   <h2>数据集搜索</h2>
   <form id="pipelineSearchForm">
     <div class="grid">
@@ -198,7 +202,7 @@ a.file-link { color: #1665c0; text-decoration: none; margin-right: 12px; }
       </div>
     </details>
     <div class="actions">
-      <button type="button" onclick="searchPipelineDatasets()">搜索数据集</button>
+      <button id="pipelineSearchBtn" type="button" data-primary onclick="searchPipelineDatasets()">搜索数据集</button>
     </div>
   </form>
   <div id="pipelineSearchMessage"></div>
@@ -213,7 +217,7 @@ a.file-link { color: #1665c0; text-decoration: none; margin-right: 12px; }
   <p class="muted" style="margin-top: 6px;">全自动流水线支持 single-cell、bulk RNA-seq、microarray 等表达数据集；非单细胞数据按样本级分析运行；含多模态的 10x H5 自动选用 Gene Expression 矩阵。</p>
 </div>
 
-<div class="card">
+<div class="card" id="full-pipeline">
   <form id="form">
     <div class="page-actions" style="margin-bottom: 12px;">
       <button type="button" class="secondary" onclick="saveFormState()">保存设置</button>
@@ -326,7 +330,7 @@ a.file-link { color: #1665c0; text-decoration: none; margin-right: 12px; }
     </details>
     <div id="datasetPrefillNote" class="ok"></div>
     <div class="actions">
-      <button id="startBtn" type="button" onclick="startRun()">开始全自动流水线</button>
+      <button id="startBtn" type="button" data-primary onclick="startRun()">开始全自动流水线</button>
       <button id="pauseBtn" class="secondary" type="button" onclick="pauseFullJob()" disabled>暂停</button>
       <button id="resumeBtn" class="secondary" type="button" onclick="resumeFullJob()" disabled>继续</button>
     </div>
@@ -334,7 +338,7 @@ a.file-link { color: #1665c0; text-decoration: none; margin-right: 12px; }
   <div id="message"></div>
 </div>
 
-<div class="card">
+<div class="card" id="full-existing">
   <h2>查看已有结果</h2>
   <div class="grid wide">
     <label>工作目录
@@ -347,12 +351,12 @@ a.file-link { color: #1665c0; text-decoration: none; margin-right: 12px; }
   <div id="loadMessage"></div>
 </div>
 
-<div class="card">
+<div class="card" id="full-progress">
   <h2>实时进度</h2>
   <pre id="log">等待开始...</pre>
 </div>
 
-<div class="card">
+<div class="card" id="full-results">
   <h2>流程结果</h2>
   <div id="resultStats" class="stat-grid"></div>
   <div id="summaryRow"></div>
