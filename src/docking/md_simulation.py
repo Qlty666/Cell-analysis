@@ -757,6 +757,7 @@ def _analyze_gromacs_output(cfg: ResolvedConfig, run_dir: Path) -> dict:
         return metrics
     timeout = _timeout(cfg)
     ndx = run_dir / "index.ndx"
+    protein_last_time: float | None = None
     if ndx.exists():
         for label in ("protein", "ligand"):
             out_xvg = run_dir / f"rmsd_{label}.xvg"
@@ -785,6 +786,8 @@ def _analyze_gromacs_output(cfg: ResolvedConfig, run_dir: Path) -> dict:
                 data = parse_xvg(out_xvg)
                 if data is not None and len(data):
                     metrics[f"rmsd_{label}_mean_nm"] = float(np.mean(data[:, 1]))
+                    if label == "protein":
+                        protein_last_time = float(data[-1, 0])
                     if label == "ligand" and metrics.get("time_ns") == "":
                         metrics["time_ns"] = float(data[-1, 0]) if len(data) else ""
         out_rmsf = run_dir / "rmsf_ligand.xvg"
@@ -810,6 +813,8 @@ def _analyze_gromacs_output(cfg: ResolvedConfig, run_dir: Path) -> dict:
             data = parse_xvg(out_rmsf)
             if data is not None and len(data):
                 metrics["rmsf_ligand_mean_nm"] = float(np.mean(data[:, 1]))
+    if metrics.get("time_ns") == "" and protein_last_time is not None:
+        metrics["time_ns"] = protein_last_time
     if cfg.get("md_simulation", "figures", True):
         try:
             make_figures(run_dir)
@@ -819,6 +824,8 @@ def _analyze_gromacs_output(cfg: ResolvedConfig, run_dir: Path) -> dict:
 
 
 def parse_xvg(path: Path) -> np.ndarray | None:
+    if not path.exists():
+        return None
     rows: list[list[float]] = []
     for line in path.read_text(encoding="utf-8", errors="replace").splitlines():
         line = line.strip()
