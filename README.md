@@ -150,6 +150,23 @@
 - 其余 `scripts/validate_*.py` 分别验证合成数据流水线、对接流水线、真实 GEO 数据、证据收集和随机真实数据。
 - 每次评分/导出写入 `run_manifest.json`，记录配置、输入哈希、软件版本和参数。
 
+### 2.7 统一软件入口与功能 Skill
+
+新增 `liverbio` 统一入口，把表达分析、虚拟筛选、全自动流水线、数据集搜索、网页端和环境检查集中到一个命令中。`liverbio` 只做参数转发，不改变原有脚本行为：
+
+```text
+liverbio help
+liverbio version
+liverbio expression GSE125449 --output ../liver_cancer --species auto
+liverbio docking pipeline --config config/docking_config.json
+liverbio full --accession GSE125449 --output ../liver_cancer --workdir ../liver_cancer_full
+liverbio datasets --disease "liver cancer" --max-results 20
+liverbio web --page full
+liverbio doctor
+```
+
+`skills/` 目录按功能拆分为四个 Codex skill 源文件：表达分析、虚拟筛选、全自动流水线和数据集搜索。Skill 只指导 Codex 调用本项目现有脚本，不复制核心分析代码；完整说明见 `docs/software_guide.md`。
+
 ## 3. 安装方法
 
 ### 环境要求
@@ -158,6 +175,7 @@
 - R 4.5+（表达分析和伪 bulk 导出需要）。
 - AutoDock Vina（虚拟筛选需要，可放在 `dock/tools/vina.exe` 或加入 PATH）。
 - 可选 Codex skills（仅证据收集需要）：`uniprot-skill`、`rcsb-pdb-skill`、`chembl-skill`、`bindingdb-skill`、`pubchem-pug-skill`、`chebi-skill`、`string-skill`、`reactome-skill`、`pharmgkb-skill`、`alphafold-skill`、`opentargets-skill`。
+- 可选项目功能 skills：`liver-expression-analysis`、`liver-virtual-screening`、`liver-full-pipeline`、`liver-dataset-search`。
 
 ### 安装步骤
 
@@ -191,6 +209,12 @@ python -m pip install -r requirements_dock.txt
 
 ```text
 conda env create -f environment_dock.yml
+```
+
+安装项目功能 skills 到当前用户 Codex 目录：
+
+```text
+python scripts\install_codex_skills.py
 ```
 
 网页端“软件环境”区域也可以填写安装地址后点击“自动补全环境”。完整软件/插件清单见 `VIRTUAL_SCREENING_REQUIREMENTS.md`。
@@ -530,6 +554,16 @@ python scripts\validate_dataset_search.py \
 ```
 
 支持 `lr`、`rf`、`gbm`、`mlp` 四种模型；其中 `mlp` 为多层感知机。可用 `--eval` 对标注样本做交叉验证；此前一次 285 条启发式标签样本上 MLP 的 ROC AUC 为 0.81，该指标仅作为流程冒烟结果，不代表真实检索质量。
+
+### 4.8 统一软件入口与 Codex Skills
+
+在项目根目录可直接运行 `liverbio.bat`。若不在根目录，可用 `python scripts\liverbio.py <命令>` 调用同一入口。命令详细说明见 `docs/software_guide.md`。
+
+```text
+liverbio help
+liverbio doctor docking
+python scripts\install_codex_skills.py --list
+```
 
 ## 5. 输入输出示例
 
