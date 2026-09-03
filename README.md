@@ -709,6 +709,10 @@ python scripts\install_codex_skills.py --list
 | `scripts/run_pipeline.py` | 表达分析 CLI 入口 |
 | `scripts/run_docking.py` | 虚拟筛选 CLI 入口 |
 | `scripts/run_full_pipeline.py` | 全自动集成流水线 CLI 入口 |
+| `scripts/run_molecular_docking.py` | 独立分子对接 CLI 入口 |
+| `scripts/liverbio.py` | 统一 CLI 入口，转发到各运行脚本 |
+| `scripts/install_codex_skills.py` | 安装 `skills/` 下的 Codex skill |
+| `scripts/run_web_full_new_datasets.py` | 通过网页端批量提交真实数据集全流程 |
 | `scripts/search_datasets.py` | 多数据库数据集搜索与下载（GEO / ArrayExpress-BioStudies / Expression Atlas） |
 | `scripts/dataset_search_ml.py` | 数据集搜索 ML/DL 相关性重排序 |
 | `scripts/validate_pipeline.py` | 合成数据表达流水线验证 |
@@ -724,53 +728,71 @@ python scripts\install_codex_skills.py --list
 | `launchers/run_web_ui.bat` | 启动网页端 |
 | `launchers/run_docking.bat` | 虚拟筛选快捷入口 |
 | `launchers/run_full_pipeline.bat` | 全自动流水线快捷入口 |
+| `launchers/run_molecular_docking.bat` | 独立分子对接快捷入口 |
 | `launchers/run_GSE125449.bat` | GSE125449 表达分析快捷入口 |
 | `launchers/run_pipeline_prompt.bat` | 交互式表达分析入口 |
+| `liverbio.bat` | 根目录统一 CLI 入口 |
 | `src/analysis/*` | R/Python 分析实现（QC、聚类、DEG、富集、CellChat、ML） |
-| `src/data/*` | GEO 下载、格式转换、合成数据生成 |
-| `src/docking/*` | 对接、证据、敲除、验证、报告等实现 |
+| `src/common/*` | Rscript/工具路径与环境探测 |
+| `src/data/*` | GEO/ArrayExpress/BioStudies 下载、格式转换、合成数据生成 |
+| `src/docking/*` | 虚拟筛选、证据、虚拟敲除、MD、验证、报告等实现 |
+| `src/molecular_docking/*` | 独立分子对接板块实现 |
+| `src/liverbio_suite/*` | `liverbio` 统一入口实现 |
 | `src/pipeline/orchestrator.py` | 表达流水线编排 |
 | `src/pipeline/integration.py` | 全自动集成流水线编排 |
 | `src/pipeline/cell_feedback.py` / `cell_feedback.R` | 虚拟敲除/对接结果返回单细胞对象的闭环分析 |
 | `src/pipeline/export_pseudobulk.R` | 伪 bulk 表达矩阵导出 |
 | `src/report/*` | HTML/Word 报告生成 |
 | `web/web_ui.py` | 本地网页服务 |
-| `web/templates/*` | 三个页面的 HTML 模板 |
-| `config/*.json` | 表达分析、对接和全流程配置 |
+| `web/templates/*` | 全流程、表达分析、数据集、虚拟筛选、分子对接、结果清单等页面模板 |
+| `config/*.json` | 表达分析、对接、独立分子对接和全流程配置 |
+| `skills/liver-*/SKILL.md` | Codex skill 定义 |
+| `docs/project_structure.md` | 代码文件结构化说明 |
 | `tests/test_*.py` | 单元/集成测试 |
 
 ## 7. 目录结构
 
 ```text
 Script/
-├── scripts/
-│   ├── run_pipeline.py
-│   ├── run_docking.py
-│   ├── run_full_pipeline.py
-│   ├── search_datasets.py
-│   ├── dataset_search_ml.py
-│   └── validate_*.py
+├── liverbio.bat
 ├── README.md
 ├── AGENTS.md            # Codex 项目执行规则
 ├── VIRTUAL_SCREENING_REQUIREMENTS.md
 ├── requirements.txt
 ├── requirements_dock.txt
 ├── environment_dock.yml
+├── scripts/
+│   ├── run_pipeline.py
+│   ├── run_docking.py
+│   ├── run_full_pipeline.py
+│   ├── run_molecular_docking.py
+│   ├── liverbio.py
+│   ├── install_codex_skills.py
+│   ├── run_web_full_new_datasets.py
+│   ├── search_datasets.py
+│   ├── dataset_search_ml.py
+│   └── validate_*.py
 ├── config/
 │   ├── project_config.json
 │   ├── docking_config.json
+│   ├── molecular_docking_config.json
 │   └── full_pipeline_config.json
 ├── src/
-│   ├── analysis/
-│   ├── data/
-│   ├── docking/
-│   ├── pipeline/
-│   └── report/
+│   ├── analysis/        # 表达分析 R/Python
+│   ├── common/          # 环境探测
+│   ├── data/            # 数据下载与转换
+│   ├── docking/         # 虚拟筛选/CADD/MD/虚拟敲除
+│   ├── molecular_docking/ # 独立分子对接
+│   ├── liverbio_suite/  # liverbio 统一入口
+│   ├── pipeline/        # 流水线编排与细胞反馈
+│   └── report/          # 报告生成
 ├── web/
 │   ├── web_ui.py
 │   ├── static/
 │   └── templates/
-├── launchers/
+├── launchers/           # .bat 快捷入口及同名 .py
+├── skills/              # Codex skill 源文件
+├── docs/                # 使用与结构说明
 ├── tests/
 ├── data_cache/          # 运行时下载缓存（gitignore）
 ├── dock/                # 虚拟筛选工作目录（产物 gitignore）
@@ -806,6 +828,7 @@ MIT License. See `LICENSE` for details.
 - 新增独立分子对接板块：`src/molecular_docking/`、`scripts/run_molecular_docking.py`、`config/molecular_docking_config.json` 与网页“分子对接”页面，提供独立工作目录、任务日志、暂停/继续、自动检测对接盒、结果表、图库、HTML 报告和 PDBQT 构象下载。
 - 网页版整体体验优化：统一页头与快捷入口、表单分组折叠、设置保存/恢复/重置、结果统计卡片、任务数量统计、结果清单实时筛选，并新增导航高亮与进行中任务数量徽标。
 - 新增 `tests/test_md_simulation.py`、`tests/test_molecular_docking.py`、`tests/test_liverbio_cli.py`，并同步补充网页端模板与运行接口测试。
+- 新增 `docs/project_structure.md`，按入口层、实现层、网页层、配置技能层、测试文档层整理全部代码文件；同步更新 README 的脚本文件一览与目录结构。
 - 全量测试通过：236 个测试用例 + 10 个 subtests。
 
 ### v1.2.0
