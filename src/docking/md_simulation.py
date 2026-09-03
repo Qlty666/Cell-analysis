@@ -779,7 +779,7 @@ def _analyze_gromacs_output(cfg: ResolvedConfig, run_dir: Path) -> dict:
                 timeout=timeout,
                 cwd=run_dir,
                 env=_gmx_env(gmx, cfg),
-                stdin_text=("Protein\n" if label == "protein" else "LIG\n")
+                stdin_text="Protein\n"
                 + ("Protein\n" if label == "protein" else "LIG\n"),
             )
             if result.returncode == 0:
