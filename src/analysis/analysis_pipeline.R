@@ -390,7 +390,7 @@ hemoglobin_features <- function(object) {
   if (species == "mm") {
     patterns <- c(
       "^Hba-a[12]$", "^Hbb-[a-z0-9]+$", "^Hbd$", "^Hbe1?$",
-      "^Hbg[12]$", "^Hbm$", "^Hbq1?$", "^Hbz$"
+      "^Hbg[12]$", "^Hbm$", "^Hbq1[ab]?$", "^Hbz$"
     )
   } else {
     patterns <- c(
