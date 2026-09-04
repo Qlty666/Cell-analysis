@@ -1251,7 +1251,9 @@ def _plot_enrichment_bubble(
         xlabel = "-log10 adjusted p"
     max_desc = int(df["Description"].astype(str).str.len().max())
     left_margin = min(0.46, max(0.24, 0.27 + max_desc * 0.0022))
-    fig, ax = plt.subplots(figsize=(10.5, max(4.8, 0.34 * len(df) + 2)))
+    n_rows = len(df)
+    fig_height = max(6.5, 0.34 * n_rows + 2)
+    fig, ax = plt.subplots(figsize=(10.5, fig_height))
     fig.subplots_adjust(
         left=left_margin,
         right=0.86,
@@ -1264,9 +1266,9 @@ def _plot_enrichment_bubble(
     ax.set_yticklabels(df["Description"].astype(str), fontsize=7.5)
     ax.set_xlabel(xlabel)
     ax.set_title(title)
-    cbar_ax = fig.add_axes([0.885, 0.15, 0.022, 0.70])
+    cbar_ax = fig.add_axes([0.885, 0.345, 0.022, 0.35])
     cb = fig.colorbar(scatter, cax=cbar_ax)
-    cb.set_label("-log10 p")
+    cb.set_label("-log10P", fontsize=8, labelpad=6)
     legend_sizes = sorted(
         {
             int(np.ceil(np.percentile(count, p)))
@@ -1286,15 +1288,17 @@ def _plot_enrichment_bubble(
         )
         for size in legend_sizes
     ]
-    ax.legend(
+    fig.legend(
         handles,
         [str(size) for size in legend_sizes],
         title="Count",
-        loc="lower right",
+        loc="upper center",
+        bbox_to_anchor=(0.896, 0.345 - 0.10 / fig_height),
         frameon=False,
         fontsize=7,
         title_fontsize=8,
         labelspacing=0.7,
+        borderaxespad=0,
     )
     fig.savefig(out_path, dpi=160)
     return True
