@@ -18,6 +18,7 @@ if str(APP_ROOT / "src") not in sys.path:
 
 from docking.config import load_config  # noqa: E402
 from docking.insilico import run_insilico_knockout  # noqa: E402
+from docking.insilico import _plot_enrichment_bubble  # noqa: E402
 from docking.insilico import _plot_umap_shift  # noqa: E402
 
 DEFAULT_CONFIG = APP_ROOT / "config" / "docking_config.json"
@@ -25,6 +26,34 @@ LOG = logging.getLogger("test_insilico_knockout")
 
 
 class TestInSilicoKnockout(unittest.TestCase):
+    def test_go_bubble_splits_into_bp_cc_mf(self):
+        with tempfile.TemporaryDirectory() as tmp:
+            rows = []
+            for ont, base_p in (("BP", 1e-5), ("CC", 2e-4), ("MF", 3e-4)):
+                for idx in range(8):
+                    p = base_p * (idx + 1)
+                    rows.append(
+                        {
+                            "ONTOLOGY": ont,
+                            "Description": f"{ont} term {idx}",
+                            "GeneRatio": f"{idx + 2}/100",
+                            "Count": idx + 2,
+                            "pvalue": p,
+                            "p.adjust": p,
+                        }
+                    )
+            csv_path = Path(tmp) / "go.csv"
+            out_path = Path(tmp) / "fig_67_ko_go_enrichment.png"
+            pd.DataFrame(rows).to_csv(csv_path, index=False)
+            ok = _plot_enrichment_bubble(
+                csv_path,
+                out_path,
+                "GO Enrichment",
+                group_col="ONTOLOGY",
+            )
+            self.assertTrue(ok)
+            self.assertGreater(out_path.stat().st_size, 10_000)
+
     def test_dense_umap_arrows_use_grid_without_error(self):
         with tempfile.TemporaryDirectory() as tmp:
             n = 1200

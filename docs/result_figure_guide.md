@@ -795,7 +795,7 @@
 | `fig_64_ko_target_expression_bar.png` | WT/KO 平均表达柱状图 | 查看代表性靶基因变化幅度 |
 | `fig_65_ko_regulatory_network.png` | 以敲除基因为中心的调控网络 | 绿边激活、红边抑制，线粗代表调控权重 |
 | `fig_66_ko_shift_umap.png` | UMAP 上的细胞命运偏转矢量图 | 箭头方向代表预测状态位移 |
-| `fig_67_ko_go_enrichment.png` / `fig_68_ko_kegg_enrichment.png` | GO/KEGG 富集气泡图 | 查看下游靶基因富集的通路 |
+| `fig_67_ko_go_enrichment.png` / `fig_68_ko_kegg_enrichment.png` | GO 按 BP/CC/MF 分面的富集气泡图 / KEGG 富集气泡图 | 查看下游靶基因富集的通路 |
 | `in_silico_knockout_report.html` | 中文 HTML 分析报告 | 汇总分析背景、图、表格与富集结果 |
 
 数据文件位于 `04_knockout/in_silico/data/`，包括 `insilico_target_changes.csv`、`insilico_cell_shift.csv`、`insilico_regulatory_edges.csv`、`insilico_go_enrichment.csv` 与 `insilico_kegg_enrichment.csv`。该部分为调控网络预测，不等同于真实敲除结果。

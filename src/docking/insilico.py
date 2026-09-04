@@ -1228,9 +1228,12 @@ def _plot_enrichment_bubble(
         return False
     p_col = "p.adjust" if "p.adjust" in df.columns else "pvalue"
     df[p_col] = pd.to_numeric(df[p_col], errors="coerce")
-    df = df.dropna(subset=[p_col]).sort_values(p_col).head(30)
+    df = df.dropna(subset=[p_col]).sort_values(p_col)
     if df.empty:
         return False
+    if group_col and group_col in df.columns:
+        return _plot_go_faceted_bubble(df, p_col, out_path, title)
+    df = df.head(30)
     if "Count" not in df.columns and "count" in df.columns:
         df = df.rename(columns={"count": "Count"})
     if "Count" not in df.columns:
@@ -1298,6 +1301,196 @@ def _plot_enrichment_bubble(
         fontsize=7,
         title_fontsize=8,
         labelspacing=0.7,
+        borderaxespad=0,
+    )
+    fig.savefig(out_path, dpi=160)
+    return True
+
+
+def _plot_go_faceted_bubble(
+    df: pd.DataFrame,
+    p_col: str,
+    out_path: Path,
+    title: str,
+) -> bool:
+    """Render GO enrichment as separate BP/CC/MF bubble panels."""
+    import matplotlib.pyplot as plt
+    from matplotlib.colors import LinearSegmentedColormap
+    from matplotlib.colors import Normalize
+    from matplotlib.patches import Rectangle
+    from matplotlib.lines import Line2D
+    from matplotlib.ticker import MaxNLocator
+
+    bubble_cmap = LinearSegmentedColormap.from_list(
+        "pvalue",
+        ["#B2182B", "#D6604D", "#C51B7D", "#762A83", "#2C7BB6"],
+    )
+
+    ontology_order = [
+        ont
+        for ont in ("BP", "CC", "MF")
+        if ont in set(df["ONTOLOGY"].astype(str))
+    ]
+    panels = []
+    for ont in ontology_order:
+        sub = (
+            df[df["ONTOLOGY"].astype(str) == ont]
+            .sort_values(p_col)
+            .head(10)
+            .copy()
+        )
+        if not sub.empty:
+            panels.append((ont, sub))
+    if not panels:
+        return False
+
+    value_col = "pvalue" if "pvalue" in df.columns else p_col
+    for sub in panels:
+        ont, frame = sub
+        if "Count" not in frame.columns:
+            frame["Count"] = 5
+        frame["Count"] = pd.to_numeric(frame["Count"], errors="coerce").fillna(5)
+        ratios = frame["GeneRatio"].astype(str).str.split("/", expand=True)
+        if ratios.shape[1] == 2:
+            frame["_ratio"] = (
+                pd.to_numeric(ratios[0], errors="coerce")
+                / pd.to_numeric(ratios[1], errors="coerce")
+                * 100
+            )
+        else:
+            frame["_ratio"] = 0
+
+    total_rows = sum(len(frame) for _, frame in panels)
+    max_desc = max(
+        int(frame["Description"].astype(str).str.len().max())
+        for _, frame in panels
+    )
+    n_panels = len(panels)
+    left_margin = min(0.44, max(0.25, 0.28 + max_desc * 0.0020))
+    fig_height = max(7.5, 0.32 * total_rows + 1.2 + 0.55 * n_panels)
+    fig, axes = plt.subplots(
+        n_panels,
+        1,
+        figsize=(13.0, fig_height),
+        sharex=True,
+        gridspec_kw={"hspace": 0.22},
+    )
+    if n_panels == 1:
+        axes = [axes]
+    fig.subplots_adjust(
+        left=left_margin,
+        right=0.84,
+        top=0.94,
+        bottom=0.08,
+    )
+
+    all_p = pd.concat([frame[value_col] for _, frame in panels])
+    norm = Normalize(
+        vmin=float(all_p.min()),
+        vmax=float(all_p.max()),
+    )
+    scatter_ref = None
+    for ax, (ont, frame) in zip(axes, panels):
+        frame = frame.sort_values(value_col, na_position="last")
+        x = frame["_ratio"].to_numpy(dtype=float)
+        y = np.arange(len(frame) - 1, -1, -1)
+        colour = pd.to_numeric(frame[value_col], errors="coerce")
+        scatter = ax.scatter(
+            x,
+            y,
+            s=frame["Count"].to_numpy(dtype=float) * 8,
+            c=colour,
+            cmap=bubble_cmap,
+            norm=norm,
+            edgecolor="none",
+            linewidth=0,
+            zorder=2,
+        )
+        if scatter_ref is None:
+            scatter_ref = scatter
+        ax.set_yticks(y)
+        ax.set_yticklabels(frame["Description"].astype(str), fontsize=7.5)
+        ax.grid(
+            axis="both",
+            color="#e6e6e6",
+            linewidth=0.6,
+            zorder=0,
+        )
+        if ax is not axes[-1]:
+            ax.tick_params(axis="x", labelbottom=False)
+
+    for ax, ont in zip(axes, [ont for ont, _ in panels]):
+        pos = ax.get_position()
+        strip_x = pos.x1
+        strip_w = 0.022
+        strip = Rectangle(
+            (strip_x, pos.y0),
+            strip_w,
+            pos.height,
+            facecolor="#e3e3e3",
+            edgecolor="#555555",
+            linewidth=0.5,
+            clip_on=False,
+            transform=fig.transFigure,
+            zorder=3,
+        )
+        fig.add_artist(strip)
+        fig.text(
+            strip_x + strip_w / 2,
+            pos.y0 + pos.height / 2,
+            ont,
+            rotation=90,
+            ha="center",
+            va="center",
+            fontsize=9,
+            fontweight="bold",
+            color="#333333",
+        )
+
+    axes[-1].set_xlabel("Gene Ratio")
+    axes[0].set_title(title, fontsize=12)
+
+    cb_ax = fig.add_axes([0.900, 0.40, 0.028, 0.20])
+    cb = fig.colorbar(scatter_ref, cax=cb_ax)
+    cb.ax.set_title("pvalue", fontsize=10, fontweight="bold", pad=2)
+    cb.ax.tick_params(labelsize=7)
+    cb.ax.yaxis.set_major_locator(MaxNLocator(nbins=3))
+
+    all_counts = pd.concat([frame["Count"] for _, frame in panels])
+    count_min = int(np.floor(all_counts.min()))
+    count_max = int(np.ceil(all_counts.max()))
+    if count_max - count_min <= 4:
+        legend_sizes = list(range(count_min, count_max + 1))
+    else:
+        legend_sizes = sorted(
+            {
+                int(round(value))
+                for value in np.linspace(count_min, count_max, 5)
+            }
+        )
+    handles = [
+        Line2D(
+            [0],
+            [0],
+            marker="o",
+            linestyle="none",
+            markersize=max(2.0, 2.0 * math.sqrt(size)),
+            markerfacecolor="#333333",
+            markeredgecolor="black",
+            markeredgewidth=0.4,
+        )
+        for size in legend_sizes
+    ]
+    fig.legend(
+        handles,
+        [str(size) for size in legend_sizes],
+        title="Count",
+        loc="upper center",
+        bbox_to_anchor=(0.914, 0.40 - 0.10 / fig_height),
+        frameon=False,
+        fontsize=8,
+        title_fontsize=9,
+        labelspacing=0.55,
         borderaxespad=0,
     )
     fig.savefig(out_path, dpi=160)
