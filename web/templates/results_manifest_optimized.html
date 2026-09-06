@@ -382,6 +382,7 @@ footer { color: #64748b; font-size: 12px; margin: 30px 0 8px; }
       <tr><td><code>figures/01_qc/fig_01_qc_raw_violin.png</code></td><td>QC 指标原始分布</td><td><span class="badge fig">结果图</span></td><td>查看过滤前数据质量</td></tr>
       <tr><td><code>figures/01_qc/fig_01_qc_filtered_violin.png</code></td><td>QC 指标过滤后分布</td><td><span class="badge fig">结果图</span></td><td>确认过滤后数据质量</td></tr>
       <tr><td><code>figures/01_qc/fig_48_qc_pvalue_comparison.png</code></td><td>QC 质控差异度 P 值</td><td><span class="badge fig">结果图</span></td><td>比较过滤前后 QC 指标在条件间的差异程度</td></tr>
+      <tr><td><code>figures/01_qc/fig_49_qc_umi_feature_correlation.png</code></td><td>UMI 与基因数关系</td><td><span class="badge fig">结果图</span></td><td>识别偏离主流关系的异常细胞</td></tr>
       <tr><td><code>figures/02_doublets/fig_02_doublet_scores.png</code></td><td>双细胞得分分布</td><td><span class="badge fig">结果图</span></td><td>判断双细胞判定效果</td></tr>
       <tr><td><code>figures/03_cluster/fig_03_umap_clusters.png</code></td><td>UMAP 聚类图</td><td><span class="badge fig">结果图</span></td><td>展示聚类结构</td></tr>
       <tr><td><code>figures/03_cluster/fig_04_umap_condition.png</code></td><td>UMAP 分组图</td><td><span class="badge fig">结果图</span></td><td>对比组间分布</td></tr>
@@ -399,6 +400,8 @@ footer { color: #64748b; font-size: 12px; margin: 30px 0 8px; }
       <tr><td><code>figures/03_cluster/fig_15_elbow.png</code></td><td>主成分 Elbow 图</td><td><span class="badge fig">结果图</span></td><td>辅助选择主成分数</td></tr>
       <tr><td><code>figures/04_annotation/fig_16_featureplot_markers.png</code></td><td>Marker FeaturePlot</td><td><span class="badge fig">结果图</span></td><td>查看 marker 空间分布 <span class="badge opt">需 marker 基因</span></td></tr>
       <tr><td><code>figures/04_annotation/fig_17_marker_violin.png</code></td><td>Marker 小提琴图</td><td><span class="badge fig">结果图</span></td><td>查看 marker 表达水平 <span class="badge opt">需 marker 基因</span></td></tr>
+      <tr><td><code>figures/04_annotation/fig_50_marker_ridgeplot.png</code></td><td>Marker 峰峦图</td><td><span class="badge fig">结果图</span></td><td>横向比较 marker 表达分布 <span class="badge opt">需 marker 基因</span></td></tr>
+      <tr><td><code>figures/04_annotation/fig_51_marker_stacked_violin.png</code></td><td>Marker 堆叠小提琴图</td><td><span class="badge fig">结果图</span></td><td>快速核对 marker 表达模式 <span class="badge opt">需 marker 基因</span></td></tr>
       <tr><td><code>figures/04_annotation/fig_18_celltype_proportion.png</code></td><td>细胞类型比例堆叠图</td><td><span class="badge fig">结果图</span></td><td>比较组间细胞类型构成</td></tr>
       <tr><td><code>figures/04_annotation/fig_19_condition_proportion.png</code></td><td>分组构成比例图</td><td><span class="badge fig">结果图</span></td><td>查看各细胞类型分组构成</td></tr>
       <tr><td><code>figures/06_enrichment/fig_20_gsea_go.png</code></td><td>GSEA GO 图</td><td><span class="badge fig">结果图</span></td><td>查看 GO 富集趋势</td></tr>
@@ -441,6 +444,7 @@ footer { color: #64748b; font-size: 12px; margin: 30px 0 8px; }
       <tr><td><code>data/01_qc/fig_01_qc_metrics.csv</code></td><td>QC 指标表</td><td><span class="badge data">结果数据</span></td><td>复现质控结果</td></tr>
       <tr><td><code>data/01_qc/fig_01_qc_thresholds.csv</code></td><td>QC 过滤规则表</td><td><span class="badge data">结果数据</span></td><td>查看各阈值移除的细胞数与比例</td></tr>
       <tr><td><code>data/01_qc/fig_48_qc_pvalue_comparison.csv</code></td><td>QC 质控差异度 P 值数据</td><td><span class="badge data">结果数据</span></td><td>Wilcoxon 秩和检验与 BH FDR 结果</td></tr>
+      <tr><td><code>data/01_qc/fig_49_qc_umi_feature_correlation_stats.csv</code></td><td>UMI 与基因数关系统计</td><td><span class="badge data">结果数据</span></td><td>log-log 回归与复核统计</td></tr>
       <tr><td><code>data/01_qc/sample_annotations.csv</code></td><td>样本分组注释</td><td><span class="badge data">结果数据</span></td><td>对应样本与分组</td></tr>
       <tr><td><code>data/02_doublets/fig_02_doublet_results.csv</code></td><td>双细胞检测结果</td><td><span class="badge data">结果数据</span></td><td>每细胞双细胞得分和判定</td></tr>
       <tr><td><code>data/03_cluster/fig_03_04_05_umap_coordinates.csv</code></td><td>UMAP 坐标</td><td><span class="badge data">结果数据</span></td><td>复现聚类和注释图</td></tr>

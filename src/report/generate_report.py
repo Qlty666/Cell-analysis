@@ -43,6 +43,7 @@ FIGURE_GUIDE = {
     "fig_01_qc_raw_violin.png": ("QC 小提琴图（原始）", "过滤前 nFeature、nCount、percent.mt、percent.ribo、percent.hb 的分布，用于识别低质量细胞、核糖体/血红蛋白污染和数据批次差异。"),
     "fig_01_qc_filtered_violin.png": ("QC 小提琴图（过滤后）", "过滤后的 QC 指标分布，确认阈值是否合理、主要细胞群是否保留。"),
     "fig_48_qc_pvalue_comparison.png": ("QC 质控差异度 P 值图", "以 Wilcoxon 秩和检验 P 值衡量原始/过滤后 QC 指标（含核糖体和血红蛋白比例）在不同条件间的差异程度。"),
+    "fig_49_qc_umi_feature_correlation.png": ("UMI 与基因数关系 QC 图", "以 log1p 尺度展示 UMI 数与基因数的线性关系，标记通过/未通过当前 QC 阈值的细胞，用于识别远离主流关系的异常细胞。"),
     "fig_02_doublet_scores.png": ("双细胞得分图", "scDblFinder 双细胞得分的分布，用于判断双细胞分类边界。"),
     "fig_03_umap_clusters.png": ("UMAP 聚类图", "Seurat 聚类在 UMAP 上的结构，检查分群是否清晰、是否存在过度分割。"),
     "fig_04_umap_condition.png": ("UMAP 分组图", "不同条件下细胞在 UMAP 上的分布，检查分组偏移和批次效应。"),
@@ -60,6 +61,8 @@ FIGURE_GUIDE = {
     "fig_15_elbow.png": ("主成分 Elbow 图", "各主成分解释的方差比例，用于选择后续分析的主成分数。"),
     "fig_16_featureplot_markers.png": ("Marker 基因 FeaturePlot", "marker 基因在 UMAP 上的表达位置，验证细胞类型注释。"),
     "fig_17_marker_violin.png": ("Marker 基因小提琴图", "marker 基因在不同细胞类型中的表达分布。"),
+    "fig_50_marker_ridgeplot.png": ("Marker 基因峰峦图", "marker 基因表达量按细胞类型绘制的 RidgePlot，用于横向比较表达分布和特异性。"),
+    "fig_51_marker_stacked_violin.png": ("Marker 基因堆叠小提琴图", "多个 marker 基因按细胞类型堆叠排列的小提琴图，便于快速核对注释 marker 模式。"),
     "fig_18_celltype_proportion.png": ("细胞类型比例堆叠图", "不同样本/条件下细胞类型构成的变化。"),
     "fig_19_condition_proportion.png": ("分组构成比例图", "不同分组中细胞类型的比例对比。"),
     "fig_20_gsea_go.png": ("GSEA GO BP 富集图", "GO 生物过程的 GSEA 富集曲线，查看通路的整体上调/下调方向。"),
@@ -96,6 +99,7 @@ DATA_GUIDE = {
     "fig_01_qc_metrics.csv": ("QC 指标表", "每细胞的 nFeature、nCount、percent.mt、percent.ribo、percent.hb 以及样本/分组信息，用于检查过滤前后细胞质量。"),
     "qc_metrics.csv": ("QC 指标表", "每细胞的 nFeature、nCount、percent.mt、percent.ribo、percent.hb 以及样本/分组信息，用于检查过滤前后细胞质量。"),
     "fig_01_qc_thresholds.csv": ("QC 过滤规则表", "每条 QC 规则的上下限、按该规则移除的细胞数和比例。"),
+    "fig_49_qc_umi_feature_correlation_stats.csv": ("UMI 与基因数关系统计表", "log-log 回归斜率、相关系数、残差 MAD、建议复核细胞数等 raw/filtered 两阶段统计。"),
     "fig_02_doublet_results.csv": ("双细胞结果表", "每细胞的双细胞得分和分类结果，用于评估双细胞去除。"),
     "doublet_results.csv": ("双细胞结果表", "每细胞的双细胞得分和分类结果，用于评估双细胞去除。"),
     "fig_05_16_17_cell_annotations.csv": ("细胞注释表", "每细胞的聚类、细胞类型注释和样本分组信息。"),
@@ -157,6 +161,11 @@ FIGURE_DATA_MAP = {
     ],
     "fig_48_qc_pvalue_comparison.png": [
         "fig_48_qc_pvalue_comparison.csv",
+        "fig_01_qc_thresholds.csv",
+    ],
+    "fig_49_qc_umi_feature_correlation.png": [
+        "fig_49_qc_umi_feature_correlation_stats.csv",
+        "fig_01_qc_metrics.csv",
         "fig_01_qc_thresholds.csv",
     ],
     "fig_02_doublet_scores.png": [
@@ -232,6 +241,18 @@ FIGURE_DATA_MAP = {
         "cluster_markers.csv",
     ],
     "fig_17_marker_violin.png": [
+        "fig_05_16_17_cell_annotations.csv",
+        "cell_annotations.csv",
+        "fig_16_17_31_32_cluster_markers.csv",
+        "cluster_markers.csv",
+    ],
+    "fig_50_marker_ridgeplot.png": [
+        "fig_05_16_17_cell_annotations.csv",
+        "cell_annotations.csv",
+        "fig_16_17_31_32_cluster_markers.csv",
+        "cluster_markers.csv",
+    ],
+    "fig_51_marker_stacked_violin.png": [
         "fig_05_16_17_cell_annotations.csv",
         "cell_annotations.csv",
         "fig_16_17_31_32_cluster_markers.csv",
@@ -1200,6 +1221,7 @@ def main() -> int:
         data_link("fig_01_qc_metrics.csv", "QC 指标"),
         data_link("fig_01_qc_thresholds.csv", "QC 过滤规则"),
         data_link("fig_48_qc_pvalue_comparison.csv", "QC 质控差异度 P 值"),
+        data_link("fig_49_qc_umi_feature_correlation_stats.csv", "UMI 与基因数关系统计"),
         data_link("fig_02_doublet_results.csv", "双细胞结果"),
         data_link("fig_05_16_17_cell_annotations.csv", "细胞注释"),
         data_link("fig_07_annotation_confusion.csv", "注释混淆矩阵"),
@@ -1314,6 +1336,7 @@ summary {{ cursor: pointer; color: #1665c0; font-size: 13px; }}
 {image_card('fig_01_qc_raw_violin.png', '原始 QC 指标')}
 {image_card('fig_01_qc_filtered_violin.png', '过滤后 QC 指标')}
 {image_card('fig_48_qc_pvalue_comparison.png', 'QC 质控差异度 P 值')}
+{image_card('fig_49_qc_umi_feature_correlation.png', 'UMI 与基因数关系')}
 
 <h2>2. 双细胞检测</h2>
 {image_card('fig_02_doublet_scores.png', '双细胞得分')}
@@ -1328,6 +1351,8 @@ summary {{ cursor: pointer; color: #1665c0; font-size: 13px; }}
 {image_card('fig_07_annotation_confusion_heatmap.png', '注释混淆矩阵')}
 {image_card('fig_16_featureplot_markers.png', 'Marker 基因 FeaturePlot')}
 {image_card('fig_17_marker_violin.png', 'Marker 基因小提琴图')}
+{image_card('fig_50_marker_ridgeplot.png', 'Marker 基因峰峦图')}
+{image_card('fig_51_marker_stacked_violin.png', 'Marker 基因堆叠小提琴图')}
 {image_card('fig_18_celltype_proportion.png', '细胞类型比例堆叠图')}
 {image_card('fig_19_condition_proportion.png', '分组构成比例图')}
 

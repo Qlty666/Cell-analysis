@@ -8,7 +8,7 @@
 - 虚拟筛选：`scripts/run_docking.py`，结果图位于 `<workdir>/outputs/run_001/results/` 下各阶段目录。
 - 全自动集成流水线：`scripts/run_full_pipeline.py`，除复用上述两类结果外，还会在 `<workdir>/outputs/integration/cell_feedback/figures/` 生成细胞反馈结果图。
 
-说明：README 中“48 张”是历史常见口径。按当前代码逐点核对，单细胞流程的图片保存点共有 50 个文件名，其中部分图片由环境变量、数据条件或可选阶段决定是否生成。判断时应以本清单、实际输出目录、阶段状态文件和对应数据文件为准。
+说明：README 中“48 张”是历史常见口径。按当前代码逐点核对，单细胞流程的图片保存点共有 53 个文件名，其中部分图片由环境变量、数据条件或可选阶段决定是否生成。判断时应以本清单、实际输出目录、阶段状态文件和对应数据文件为准。
 
 每次报告生成时，流水线会读取 `results/figures` 下实际存在的每张结果图，按同编号或同阶段文件自动匹配 `results/data` 中的结果数据，生成 `result_analysis_report.md`（可读版）与 `result_analysis.json`（结构化版）。联合分析中的数值均来自对应数据文件（行数、均值、P 值、差异方向、分类指标、Top 通路等），图面要点只描述图的内容与检查重点；下结论前应回到本指南与原始数据交叉核对。
 
@@ -23,6 +23,7 @@
 | `fig_01_qc_raw_violin.png` | 条件（`condition`） | `nFeature_RNA`、`nCount_RNA`、`percent.mt`、`percent.ribo`、`percent.hb` 的数值 | 小提琴主体默认按条件分组，图例被移除 | 五个并列面板分别对应五个指标，用于查看过滤前分布与污染尾部 |
 | `fig_01_qc_filtered_violin.png` | 条件（`condition`） | 过滤后 `nFeature_RNA`、`nCount_RNA`、`percent.mt`、`percent.ribo`、`percent.hb` 的数值 | 同上 | 五个并列面板，用于查看过滤后分布 |
 | `fig_48_qc_pvalue_comparison.png` | QC 指标（`nFeature_RNA`、`nCount_RNA`、`percent.mt`、`percent.ribo`、`percent.hb`） | `-log10(P value)` | 条形填充色表示不同的条件两两比较（`comparison`） | 灰色虚线为 `P = 0.05`（即 `-log10(0.05)`）；柱顶文字为原始 `P` 值；按 raw/filtered 两个面板分面 |
+| `fig_49_qc_umi_feature_correlation.png` | `log1p(nFeature_RNA)` | `log1p(nCount_RNA)` | 蓝点 `#4DBBD5` 为通过当前 QC 阈值的细胞，红点 `#E64B35` 为被移除细胞；灰线为 log-log 线性拟合 | 按条件分面；用于识别偏离 UMI-基因数主流关系的异常细胞并复核单变量过滤 |
 | `fig_02_doublet_scores.png` | 双细胞判定（`singlet`/`doublet`） | `scDblFinder score`（双细胞得分） | `singlet` 为浅蓝 `#4DBBD5`，`doublet` 为红 `#E64B35` | 小提琴叠加窄箱线图；得分越高越可能为双细胞 |
 
 ### 聚类、降维与注释
@@ -38,6 +39,8 @@
 | `fig_15_elbow.png` | 主成分序号（PC 1..N） | 主成分标准差 | 单条折线 | 拐点处建议保留的维度数 |
 | `fig_16_featureplot_markers.png` | `UMAP_1` | `UMAP_2` | 点颜色表示 marker 基因表达量（浅灰到深红渐变，默认 `FeaturePlot` 配色） | 每个基因一个面板，最多展示 6 个 marker；输出条件：数据集中存在固定 marker 基因（与表达矩阵交集非空） |
 | `fig_17_marker_violin.png` | 细胞类型（`celltype_annot`） | 表达量 | 小提琴按细胞类型分组 | 每个 marker 一个面板；输出条件：同 `fig_16`，需存在可用 marker 基因 |
+| `fig_50_marker_ridgeplot.png` | 细胞类型（`celltype_annot`） | marker 表达量 | 密度按细胞类型分组 | 每个 marker 一个面板；用于比较表达峰值与特异性，输出条件同 `fig_16` |
+| `fig_51_marker_stacked_violin.png` | 细胞类型（`celltype_annot`） | 堆叠 marker 基因 | 颜色区分 marker 基因 | 堆叠小提琴图；快速核对注释 marker 表达模式，输出条件同 `fig_16` |
 | `fig_18_celltype_proportion.png` | 细胞类型 | 比例（0-100%，`position="fill"`） | 填充颜色表示条件（`condition`） | 柱高合计为 1，用于比较条件间细胞类型构成 |
 | `fig_19_condition_proportion.png` | 条件（`coord_flip` 后显示为纵轴） | 比例（0-100%） | 填充颜色表示细胞类型 | 横向堆叠条形图，用于查看每个细胞类型内部的条件构成 |
 | `fig_28_umap_sample.png` | `UMAP_1` | `UMAP_2` | 点颜色表示条件（`condition`），固定为红 `#E64B35` 与蓝 `#4DBBD5` | 标题为 “UMAP by sample”，用于评估样本混合和批次效应 |
@@ -638,6 +641,7 @@
 | `fig_01_qc_raw_violin.png` | 过滤前 `nFeature_RNA`、`nCount_RNA`、`percent.mt`、`percent.ribo`、`percent.hb` 按条件展示的小提琴图，用于判断低质量细胞、污染和条件间质量差异 | 五个指标的小提琴图均可见，细胞数足够，图形不是空白或全部为零 | 只有一个条件、只有一个样本或严重批次混杂时不能用于“条件差异”结论 |
 | `fig_01_qc_filtered_violin.png` | 过滤后相同 QC 指标分布，用于确认过滤阈值是否合理 | 低质量尾部被去除，主要细胞群仍保留，两个条件仍可比较 | 过滤后细胞数过少、分布被过度压缩，或图像空白时不可用 |
 | `fig_48_qc_pvalue_comparison.png` | 原始/过滤后 QC 指标在条件间的 Wilcoxon P 值对比图，用于量化过滤是否改变条件差异 | 图中显示真实 P 值，`fig_48_qc_pvalue_comparison.csv` 存在且指标、P 值可对应 | 图中出现 “At least two conditions are required” 时，只能说明没有两组条件，不能用于条件差异判断 |
+| `fig_49_qc_umi_feature_correlation.png` | UMI 数与基因数 log-log 关系散点图，用于识别主流关系以外的异常细胞并复核 QC 阈值 | 图形可见、拟合线与点群方向一致，`fig_49_qc_umi_feature_correlation_stats.csv` 存在 | 细胞数过少、全部点压成单簇或图像空白时不可用；该图只用于复核，偏离拟合线不等于已自动去除 |
 | `fig_02_doublet_scores.png` | `scDblFinder` 双细胞得分按 singlet/doublet 分类展示，用于判断双细胞去除边界 | singlet 与 doublet 得分有区分度，或可明确看到无 doublet；对应 `fig_02_doublet_results.csv` 可核对 | 如果 `scDblFinder` 失败后所有细胞被标记为 singlet，图不能作为真实双细胞检测结果 |
 
 ### 4.3 聚类与降维
@@ -652,6 +656,8 @@
 | `fig_06_dotplot_markers.png` | marker 基因在各细胞类型中的表达比例和表达量，用于验证注释 | 预期 marker 在对应细胞类型中高表达，其他类型低表达 | 所有点大小/颜色无差异、基因缺失或图像空白时不可用 |
 | `fig_16_featureplot_markers.png` | marker 基因在 UMAP 上的表达位置 | 表达信号集中在预期细胞类型区域，不是全图均匀灰色 | 数据集中无可用 marker 基因时不生成；基因未匹配或表达全为 0 时不能验证注释 |
 | `fig_17_marker_violin.png` | marker 基因在细胞类型中的表达分布 | 预期细胞类型表达明显更高，分布可见 | 同 `fig_16`，无可用 marker 基因时不生成；各细胞类型分布完全一致时不能作为注释支持 |
+| `fig_50_marker_ridgeplot.png` | marker 基因表达量按细胞类型的峰峦图，用于比较表达峰值和特异性 | 各细胞类型的密度分布可读，预期 marker 峰位/面积可区分 | 同 `fig_16`，无可用 marker 基因时不生成；分布完全重叠时不能作为注释支持 |
+| `fig_51_marker_stacked_violin.png` | 多个 marker 按细胞类型堆叠的小提琴图，用于快速核对注释 marker 模式 | 堆叠面板可读，预期细胞类型由对应 marker 主导 | 同 `fig_16`，无可用 marker 基因时不生成；全为低表达或图像空白时不可用 |
 | `fig_18_celltype_proportion.png` | 细胞类型比例按条件堆叠，用于观察组成变化 | 比例柱可见，条件完整，细胞数足够 | 某些细胞类型细胞数过少时比例不可靠 |
 | `fig_19_condition_proportion.png` | 条件构成按细胞类型堆叠，用于观察每个细胞类型中的条件比例 | 条件完整，比例可读，能对应 `fig_18_19_celltype_proportion_stats.csv` | 小样本、单条件或缺失细胞类型时需谨慎 |
 | `fig_07_annotation_confusion_heatmap.png` | marker 注释与发表注释混淆矩阵热图 | 对角线计数较高，能看出主要细胞类型对应关系 | 图中出现 “No published annotations” 时只能说明缺少发表注释，不能用于一致性判断 |

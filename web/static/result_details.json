@@ -32,6 +32,25 @@
       "legend": "坐标轴：横轴为 QC 指标（nFeature_RNA、nCount_RNA、percent.mt、percent.ribo、percent.hb），纵轴为 -log10(P value)。\n颜色/图例：条形填充色表示条件两两比较（comparison）；灰色虚线为 P=0.05（约 1.301）；柱顶文字为原始 P 值。\n面板：按 raw/filtered 分面，纵轴自由缩放。\n统计：Wilcoxon 秩和检验，padj 使用 BH FDR。\n回退：条件少于 2 组时显示 At least two conditions are required。\n数据来源：data/01_qc/fig_48_qc_pvalue_comparison.csv。"
     },
     {
+      "file": "figures/01_qc/fig_49_qc_umi_feature_correlation.png",
+      "name": "fig_49_qc_umi_feature_correlation.png",
+      "kind": "fig",
+      "content": "UMI 数与基因数的 log1p 散点关系，按条件分面并标记当前 QC 阈值下的保留/移除细胞。",
+      "type": "散点图（按条件分面）",
+      "use": "识别偏离主流 UMI-基因数关系的异常细胞，辅助复核单变量 QC 阈值是否充分。",
+      "optional": false,
+      "legend": "坐标轴：横轴为 log1p(nFeature_RNA)，纵轴为 log1p(nCount_RNA)。\n颜色：蓝点为通过当前 QC 阈值的细胞，红点为被单变量阈值移除的细胞。\n图形：每个条件一个面板；灰色直线为 log-log 线性拟合。\n统计：raw/filtered 的斜率、相关系数、残差 MAD 和建议复核细胞数见 data/01_qc/fig_49_qc_umi_feature_correlation_stats.csv。\n读取：偏离拟合线且同时落在单变量阈值内的点需要人工复核，不代表已自动过滤。"
+    },
+    {
+      "file": "data/01_qc/fig_49_qc_umi_feature_correlation_stats.csv",
+      "name": "fig_49_qc_umi_feature_correlation_stats.csv",
+      "kind": "data",
+      "content": "UMI 数与基因数 log-log 回归和残差复核统计（raw/filtered 两阶段）。",
+      "type": "CSV 数据表",
+      "use": "量化 nCount-nFeature 关系是否合理，作为 QC 复核依据。",
+      "optional": false
+    },
+    {
       "file": "figures/02_doublets/fig_02_doublet_scores.png",
       "name": "fig_02_doublet_scores.png",
       "kind": "fig",
@@ -200,6 +219,26 @@
       "use": "验证 marker 在对应细胞类型中表达更高；仅数据集中存在可用 marker 基因时生成。",
       "optional": true,
       "legend": "坐标轴：横轴为细胞类型，纵轴为表达量。\n图形：小提琴按细胞类型分组，每个 marker 一个面板。\n输出条件：同 fig_16，需存在可用 marker 基因。\n读取：预期细胞类型表达明显更高；分布完全一致时不能作为注释支持。"
+    },
+    {
+      "file": "figures/04_annotation/fig_50_marker_ridgeplot.png",
+      "name": "fig_50_marker_ridgeplot.png",
+      "kind": "fig",
+      "content": "marker 基因表达量按细胞类型绘制的峰峦图。",
+      "type": "RidgePlot（峰峦图）",
+      "use": "横向比较 marker 在各细胞类型中的表达分布峰值和特异性。",
+      "optional": true,
+      "legend": "坐标轴：横轴为表达量，纵轴为细胞类型；每个 marker 一个面板（最多 6 个）。\n输出条件：同 fig_16，需存在可用 marker 基因。\n读取：预期 marker 的密度峰值集中在对应细胞类型。"
+    },
+    {
+      "file": "figures/04_annotation/fig_51_marker_stacked_violin.png",
+      "name": "fig_51_marker_stacked_violin.png",
+      "kind": "fig",
+      "content": "多个 marker 基因按细胞类型堆叠排列的表达分布。",
+      "type": "堆叠小提琴图",
+      "use": "快速核对注释 marker 的整体表达模式。",
+      "optional": true,
+      "legend": "坐标轴：横轴为细胞类型，纵轴为堆叠的 marker 基因；颜色区分 marker。\n输出条件：同 fig_16，需存在可用 marker 基因。\n读取：检查每个细胞类型是否由其预期 marker 主导。"
     },
     {
       "file": "figures/04_annotation/fig_18_celltype_proportion.png",

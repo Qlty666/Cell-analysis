@@ -2,7 +2,7 @@
 
 本清单覆盖当前代码中实际存在的结果图文件名，按单细胞分析、虚拟筛选、集成与细胞反馈、网络毒理学分组。仅列结果图，不包含同名 CSV/JSON 数据文件。
 
-可选性说明：`fig_16`、`fig_17` 仅数据集中存在可用 marker 基因时生成；`fig_26`、`fig_27` 受 `LIVER_RUN_CELLCYCLE` 控制（默认 yes，且需成功写入 `Phase`）；`fig_28` 仅多样本（样本数 > 1）时生成；`fig_31`、`fig_32` 受 `LIVER_RUN_CLUSTER_MARKERS` 控制（默认 yes，且需 `FindAllMarkers` 返回非空）；`fig_33`、`fig_34` 受 `LIVER_RUN_SIGNATURES` 控制（默认 yes，且需签名基因充足）；`fig_35` 依赖 `fig_18_19_celltype_proportion_stats.csv` 存在；`fig_36` 受 `LIVER_RUN_CNV` 控制（默认 yes，且需注释库与 CHRLOC 充足）；`fig_37`、`fig_38` 受 `LIVER_RUN_SINGLER` 控制（默认 yes，且需参考数据可用、预测成功）；`fig_39` 受 `LIVER_RUN_TRAJECTORY` 控制（默认 no，且需 `slingshot` 可用）；`fig_40` 至 `fig_42` 受 `LIVER_RUN_CELLCHAT` 控制（默认 no，且需 R/CellChat 可用、存在通讯）；`fig_45_ml_calibration_curve.png` 仅二分类模型成功计算时生成；`fig_24_ml_selected_features.csv` 仅 `LIVER_ML_MODEL=lasso_svm` 时生成；`fig_49_redock_comparison.png` 仅重对接阶段启用且初始/重对接亲和力可合并时生成；`fig_50`/`fig_51` 仅 `ml-train` 阶段生成（`fig_50` 需模型有 `feature_importances_`/`coef_`，`fig_51` 需二分类任务）；`ppi_hub_scores.csv` 仅提供 `--ppi-network-csv` 时生成。
+可选性说明：`fig_16`、`fig_17`、`fig_50_marker_ridgeplot.png`、`fig_51_marker_stacked_violin.png` 仅数据集中存在可用 marker 基因时生成；`fig_26`、`fig_27` 受 `LIVER_RUN_CELLCYCLE` 控制（默认 yes，且需成功写入 `Phase`）；`fig_28` 仅多样本（样本数 > 1）时生成；`fig_31`、`fig_32` 受 `LIVER_RUN_CLUSTER_MARKERS` 控制（默认 yes，且需 `FindAllMarkers` 返回非空）；`fig_33`、`fig_34` 受 `LIVER_RUN_SIGNATURES` 控制（默认 yes，且需签名基因充足）；`fig_35` 依赖 `fig_18_19_celltype_proportion_stats.csv` 存在；`fig_36` 受 `LIVER_RUN_CNV` 控制（默认 yes，且需注释库与 CHRLOC 充足）；`fig_37`、`fig_38` 受 `LIVER_RUN_SINGLER` 控制（默认 yes，且需参考数据可用、预测成功）；`fig_39` 受 `LIVER_RUN_TRAJECTORY` 控制（默认 no，且需 `slingshot` 可用）；`fig_40` 至 `fig_42` 受 `LIVER_RUN_CELLCHAT` 控制（默认 no，且需 R/CellChat 可用、存在通讯）；`fig_45_ml_calibration_curve.png` 仅二分类模型成功计算时生成；`fig_24_ml_selected_features.csv` 仅 `LIVER_ML_MODEL=lasso_svm` 时生成；`fig_49_redock_comparison.png` 仅重对接阶段启用且初始/重对接亲和力可合并时生成；对接 `ml-train` 阶段的 `fig_50_ml_feature_importance.png` 需模型有 `feature_importances_`/`coef_`，`fig_51_ml_roc.png` 需二分类任务；`ppi_hub_scores.csv` 仅提供 `--ppi-network-csv` 时生成。
 
 ## 一、单细胞分析结果图
 
@@ -24,6 +24,11 @@
 内容: 过滤前后各 QC 指标在条件间的 Wilcoxon 检验 -log10 P 值对比，标注 P=0.05 参考线。
 类型: 分组条形图（按原始/过滤后面板分面）。
 用途: 量化过滤是否改变条件间质量差异，辅助判断 QC 是否引入偏倚。
+
+03b_fig_49_qc_umi_feature_correlation.png
+内容: UMI 数与基因数的 log1p 关系散点，按条件分面并标记通过/移除细胞。
+类型: 散点图（log-log 线性拟合）。
+用途: 识别偏离 UMI-基因数主流关系的异常细胞并复核单变量 QC 阈值。
 
 04_fig_02_doublet_scores.png
 内容: scDblFinder 双细胞得分按 singlet/doublet 分类的分布。
@@ -76,6 +81,16 @@
 内容: marker 基因在各细胞类型中的表达分布。
 类型: 小提琴图（多面板）。
 用途: 验证 marker 在对应细胞类型中表达更高。
+
+13b_fig_50_marker_ridgeplot.png
+内容: marker 基因表达量按细胞类型绘制的峰峦图。
+类型: RidgePlot（峰峦图）。
+用途: 横向比较 marker 表达分布峰值和特异性。
+
+13c_fig_51_marker_stacked_violin.png
+内容: 多个 marker 基因按细胞类型堆叠的表达分布。
+类型: 堆叠小提琴图。
+用途: 快速核对注释 marker 的整体表达模式。
 
 14_fig_18_celltype_proportion.png
 内容: 各细胞类型在条件中的比例堆叠。

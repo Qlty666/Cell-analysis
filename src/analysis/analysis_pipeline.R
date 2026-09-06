@@ -133,10 +133,10 @@ fig_style <- function(name) {
 figure_stage <- function(name) {
   num <- as.integer(sub("^fig_([0-9]+)_.*$", "\\1", name))
   if (is.na(num)) return("00_other")
-  if (num <= 1 || num == 48) return("01_qc")
+  if (num <= 1 || num %in% c(48, 49)) return("01_qc")
   if (num == 2) return("02_doublets")
   if (num %in% c(3, 4, 14, 15)) return("03_cluster")
-  if (num %in% c(5, 6, 7, 16, 17, 18, 19)) return("04_annotation")
+  if (num %in% c(5, 6, 7, 16, 17, 18, 19, 50, 51)) return("04_annotation")
   if (num %in% c(8, 9)) return("05_deg")
   if (num %in% c(10, 11, 12, 13, 20, 21, 22, 23, 46, 47)) return("06_enrichment")
   if (num %in% c(24, 25, 43, 44, 45)) return("07_ml")
@@ -399,6 +399,58 @@ hemoglobin_features <- function(object) {
     )
   }
   unique(unlist(lapply(patterns, grep, x = genes, value = TRUE)))
+}
+
+umi_feature_correlation_stats <- function(qc_frame, stage_label) {
+  x <- log1p(as.numeric(qc_frame$nFeature_RNA))
+  y <- log1p(as.numeric(qc_frame$nCount_RNA))
+  n <- length(x)
+  if (n < 3) {
+    return(data.frame(
+      stage = stage_label,
+      n_cells = n,
+      loglog_slope = NA_real_,
+      loglog_intercept = NA_real_,
+      loglog_correlation = NA_real_,
+      residual_sd = NA_real_,
+      residual_mad = NA_real_,
+      review_threshold = NA_real_,
+      n_review = 0L,
+      review_pct = 0,
+      stringsAsFactors = FALSE
+    ))
+  }
+  fit <- lm(y ~ x)
+  residuals_fit <- residuals(fit)
+  residual_sd <- stats::sd(residuals_fit)
+  residual_mad <- suppressWarnings(stats::mad(residuals_fit))
+  if (!is.finite(residual_mad) || residual_mad <= .Machine$double.eps) {
+    residual_mad <- residual_sd
+  }
+  review_threshold <- if (
+    is.finite(residual_mad) && residual_mad > .Machine$double.eps
+  ) {
+    4 * residual_mad
+  } else {
+    max(abs(residuals_fit), na.rm = TRUE)
+  }
+  n_review <- sum(abs(residuals_fit) > review_threshold, na.rm = TRUE)
+  data.frame(
+    stage = stage_label,
+    n_cells = n,
+    loglog_slope = unname(coef(fit)[2]),
+    loglog_intercept = unname(coef(fit)[1]),
+    loglog_correlation = tryCatch(
+      suppressWarnings(cor(x, y, use = "complete.obs")),
+      error = function(e) NA_real_
+    ),
+    residual_sd = residual_sd,
+    residual_mad = residual_mad,
+    review_threshold = review_threshold,
+    n_review = n_review,
+    review_pct = 100 * n_review / max(1, n),
+    stringsAsFactors = FALSE
+  )
 }
 
 run_stage <- function(name, expr) {
@@ -1521,6 +1573,7 @@ if (stage_allowed("02")) run_stage("02_qc_filter", {
   )
   qc_data$sample <- seurat_raw$sample
   qc_data$condition <- seurat_raw$condition
+  qc_relation_stats_raw <- umi_feature_correlation_stats(qc_data, "raw")
 
   qc_pvalue_table <- function(qc_frame, stage) {
     group_col <- as.character(qc_frame$condition)
@@ -1714,6 +1767,19 @@ if (stage_allowed("02")) run_stage("02_qc_filter", {
     sum(qc_data$percent.ribo > hi_ribo)
   )
 
+  qc_data$qc_kept <- qc_data$nFeature_RNA >= lo_feature &
+    qc_data$nFeature_RNA <= hi_feature &
+    qc_data$nCount_RNA >= lo_count &
+    qc_data$nCount_RNA <= hi_count &
+    qc_data$percent.mt <= hi_mt &
+    qc_data$percent.ribo <= hi_ribo &
+    qc_data$percent.hb <= hi_hb
+  qc_data$qc_status <- ifelse(
+    qc_data$qc_kept,
+    "Kept after QC",
+    "Removed by QC"
+  )
+
   qc_metrics <- FetchData(
     seurat_qc,
     vars = qc_metric_cols
@@ -1722,9 +1788,61 @@ if (stage_allowed("02")) run_stage("02_qc_filter", {
   qc_metrics$condition <- seurat_qc$condition
   write.csv(qc_metrics, stage_data_file("fig_01_qc_metrics.csv"))
 
+  qc_relation_stats_filtered <- umi_feature_correlation_stats(
+    qc_metrics,
+    "filtered"
+  )
+  qc_relation_stats <- rbind(
+    qc_relation_stats_raw,
+    qc_relation_stats_filtered
+  )
+  write.csv(
+    qc_relation_stats,
+    stage_data_file("fig_49_qc_umi_feature_correlation_stats.csv"),
+    row.names = FALSE
+  )
+
   qc_diff_filtered <- qc_pvalue_table(qc_metrics, "filtered")
   qc_diff <- rbind(qc_diff_raw, qc_diff_filtered)
   write.csv(qc_diff, stage_data_file("fig_48_qc_pvalue_comparison.csv"), row.names = FALSE)
+
+  set.seed(42)
+  qc_relation_plot <- qc_data
+  if (nrow(qc_relation_plot) > 20000) {
+    qc_relation_plot <- qc_relation_plot[
+      sample.int(nrow(qc_relation_plot), 20000),
+      , drop = FALSE
+    ]
+  }
+  p_qc_corr <- ggplot(
+    qc_relation_plot,
+    aes(x = log1p(nFeature_RNA), y = log1p(nCount_RNA))
+  ) +
+    geom_point(aes(color = qc_status), alpha = 0.25, size = 0.35) +
+    geom_smooth(method = "lm", se = FALSE, color = "grey20", linewidth = 0.5) +
+    scale_color_manual(
+      values = c(
+        "Kept after QC" = "#4DBBD5",
+        "Removed by QC" = "#E64B35"
+      )
+    ) +
+    facet_wrap(~condition, scales = "free") +
+    theme_minimal() +
+    theme(legend.position = "bottom") +
+    labs(
+      x = "log1p(nFeature_RNA)",
+      y = "log1p(nCount_RNA)",
+      color = "QC status",
+      title = "UMI count vs gene count relationship",
+      subtitle = "Blue points pass QC; red points are removed by marginal thresholds"
+    )
+  save_fig(
+    file.path(fig_dir, "fig_49_qc_umi_feature_correlation.png"),
+    p_qc_corr,
+    width = 10,
+    height = 8,
+    dpi = 150
+  )
 
   if (nrow(qc_diff) > 0) {
     qc_diff$comparison <- paste(qc_diff$group1, qc_diff$group2, sep = " vs ")
@@ -2333,6 +2451,48 @@ if (stage_allowed("05")) run_stage("05_annotation", {
       p_marker_violin,
       width = 12,
       height = 4 * ceiling(length(feature_genes) / 3)
+    )
+    tryCatch(
+      {
+        p_marker_ridge <- RidgePlot(
+          seurat,
+          features = feature_genes,
+          group.by = "celltype_annot",
+          ncol = 3
+        )
+        save_fig(
+          file.path(fig_dir, "fig_50_marker_ridgeplot.png"),
+          p_marker_ridge,
+          width = 14,
+          height = 4 * ceiling(length(feature_genes) / 3),
+          dpi = 150
+        )
+      },
+      error = function(e) {
+        log_msg("marker ridge figure failed: ", conditionMessage(e))
+      }
+    )
+    tryCatch(
+      {
+        p_marker_stacked <- VlnPlot(
+          seurat,
+          features = feature_genes,
+          group.by = "celltype_annot",
+          pt.size = 0,
+          stack = TRUE,
+          flip = TRUE
+        ) & NoLegend()
+        save_fig(
+          file.path(fig_dir, "fig_51_marker_stacked_violin.png"),
+          p_marker_stacked,
+          width = 12,
+          height = 8,
+          dpi = 150
+        )
+      },
+      error = function(e) {
+        log_msg("stacked marker violin failed: ", conditionMessage(e))
+      }
     )
   }
 
