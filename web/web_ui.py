@@ -2623,6 +2623,7 @@ def full_results(workdir: Path) -> dict:
     except Exception:
         result["key_genes"] = []
     try:
+        # The page renders only the top knockout rows; cap the JSON payload.
         result["knockout"] = json.loads(
             pd_read_csv(
                 workdir
@@ -2632,7 +2633,9 @@ def full_results(workdir: Path) -> dict:
                 / "04_knockout"
                 / "data"
                 / "fig_52_53_ranked_knockout.csv"
-            ).to_json(orient="records")
+            )
+            .head(200)
+            .to_json(orient="records")
         )
     except Exception:
         result["knockout"] = []
@@ -2695,6 +2698,16 @@ def pd_read_csv(path: Path):
     import pandas as pd
 
     return pd.read_csv(path)
+
+
+def _full_workdir_for_query(job: str, workdir: str) -> str:
+    """Resolve a full-pipeline workdir from an explicit query or a live job."""
+    if workdir:
+        return workdir
+    info = FULL_JOBS.get(job or "")
+    if info:
+        return str(info["workdir"])
+    return ""
 
 
 def _full_file_path(workdir: Path, name: str) -> Path | None:
@@ -3068,6 +3081,8 @@ def run_knockout_request(data: dict) -> dict:
     }
     cfg = load_config(APP_ROOT / "config" / "docking_config.json", overrides)
     insilico = cfg.data.setdefault("insilico_knockout", {})
+    if insilico.get("ko_gene"):
+        insilico["enabled"] = True
     for field, config_key, cast in (
         ("ko_insilico_max_genes", "max_genes", int),
         ("ko_insilico_max_cells", "max_cells", int),
@@ -3785,8 +3800,7 @@ class Handler(BaseHTTPRequestHandler):
             query = parse_qs(parsed.query)
             job = query.get("job", [""])[0]
             workdir = query.get("workdir", [""])[0]
-            if job and job in FULL_JOBS:
-                workdir = str(FULL_JOBS[job]["workdir"])
+            workdir = _full_workdir_for_query(job, workdir)
             if not workdir:
                 self._send(400, b"job or workdir required", "application/json")
                 return
@@ -3801,8 +3815,7 @@ class Handler(BaseHTTPRequestHandler):
             job = query.get("job", [""])[0]
             name = query.get("name", [""])[0]
             workdir = query.get("workdir", [""])[0]
-            if job and job in FULL_JOBS:
-                workdir = str(FULL_JOBS[job]["workdir"])
+            workdir = _full_workdir_for_query(job, workdir)
             if not workdir or not name:
                 self._send(400, b"workdir and name required", "text/plain; charset=utf-8")
                 return
