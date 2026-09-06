@@ -70,7 +70,7 @@
 | `md-simulation` | 把 Top 命中准备为 GROMACS 蛋白-配体复合物，执行 EM/NVT/NPT/生产模拟并输出 RMSD/RMSF、Rg、SASA、氢键与结合口袋 RMSF |
 | `export-md` / `export-external` | 导出 Amber/GROMACS 和 UniDock-Pro/HDOCK/HADDOCK 模板 |
 | `report` | 生成 HTML 汇总报告 |
-| `virtual-knockout` | 基因敲除优先级和多维靶点评分；传入 `--insilico-gene` 后追加单细胞 GRN 虚拟敲除、UMAP 命运偏转、调控网络、GO/KEGG 与 HTML 报告 |
+| `virtual-knockout` | 基因敲除优先级和多维靶点评分；传入 `--insilico-gene` 后调用官方 scTenifoldKnk（原始计数输入）并追加 UMAP 命运偏转、调控网络、GO/KEGG 与 HTML 报告 |
 | `network` | 化合物-疾病靶点交集、PPI hub、Venn 与 C-T-P-D 网络导出 |
 | `faers` | FAERS 风格 ROR/PRR/BCPNN/EBGM 不相称性信号检测 |
 | `export-validation` | 把排序后的靶点导出为湿实验验证方案 |
@@ -106,14 +106,19 @@
 
 ### 2.4 虚拟敲除与多维靶点评分
 
-`virtual-knockout` 保留原有的基因优先级评分。当传入细胞级表达矩阵、`cell_type` 注释和 `--insilico-gene` 时，会在原有评分基础上追加一整套 CellOracle 思路的单细胞虚拟敲除分析：
+`virtual-knockout` 保留原有的基因优先级评分。当传入细胞级原始计数矩阵、`cell_type` 注释和 `--insilico-gene` 时，核心敲除默认改用 GitHub 上的官方 scTenifoldpy/scTenifoldKnk 工作流；同时保留 CellOracle 思路的局部 GRN 传播用于 UMAP 命运偏转和表达变化可视化。
 
-- 使用 KNN 平滑表达、表达相关性构建稀疏调控网络，并用带阻尼的迭代信号传播模拟敲除后的下游表达变化。
-- 输出 UMAP 命运偏转箭头图、以敲除基因为中心的调控网络图、WT/KO 靶基因柱状图和 Top 15 定量变化表。
+- scTenifoldKnk 对 WT 单细胞 GRN 做张量分解，把目标基因从网络中移除后做流形比对与差异调控检验，输出 distance/Z/FC/FDR；结果同时合并到靶基因排序。
+- 使用 KNN 平滑表达、表达相关性构建稀疏调控网络，并用带阻尼的迭代信号传播补充预测细胞状态位移和下游表达变化。
+- 输出 scTenifold differential regulation CSV、UMAP 命运偏转箭头图、以敲除基因为中心的调控网络图、WT/KO 靶基因柱状图和 Top 15 定量变化表。
 - 对变化最明显的靶基因运行 GO（BP/CC/MF）与 KEGG 富集，输出气泡图与富集 CSV。
+- 若配置 `drugreflector_checkpoint_dir`，会用 KO 与 WT 模拟表达差调用 GitHub 的 DrugReflector 官方模型，输出化合物排序表。
 - 自动生成 `in_silico_knockout_report.html` 中文报告，并把结果汇总到 `04_knockout/in_silico/`。
 
-该分析是网络层面的预测启发式结果，不等同于真实敲除表型；需要湿实验验证。
+该分析是网络层面的预测结果，不等同于真实敲除表型；需要湿实验验证。
+
+启用 DrugReflector 前需先从 Zenodo（DOI 10.5281/zenodo.16912444）下载官方模型权重，
+并把含 `model_fold_*.pt` 的目录配置为 `insilico_knockout.drugreflector_checkpoint_dir`。
 
 核心评分 `knockout_score` 由表达差异、增殖共表达、共表达网络 hub 程度和 DepMap CRISPR 依赖加权得到。提供附加数据后还会计算：
 
@@ -359,13 +364,14 @@ python scripts\run_docking.py virtual-knockout \
   --expression-csv data/knockout/single_cell_expression.csv \
   --metadata-csv data/knockout/single_cell_metadata.csv \
   --insilico-gene Gata1 \
+  --insilico-engine scTenifoldKnk \
   --insilico-species mm \
   --insilico-embedding-csv data/knockout/umap_coordinates.csv \
   --insilico-regulators-csv data/knockout/regulators.csv \
   --insilico-photo-dir <PHOTO_DIR>
 ```
 
-结果输出到 `<workdir>/outputs/run_001/results/04_knockout/in_silico/`；设置 `--insilico-photo-dir` 后会把最终图片、数据和 HTML 报告复制到指定目录。
+结果输出到 `<workdir>/outputs/run_001/results/04_knockout/in_silico/`；`data/insilico_scTenifold_results.csv` 保存官方 scTenifoldKnk 差异调控表。设置 `--insilico-photo-dir` 后会把最终图片、数据和 HTML 报告复制到指定目录。
 
 网络毒理学（化合物-疾病交集、PPI hub、Venn 与 C-T-P-D 网络）：
 
@@ -667,7 +673,7 @@ python scripts\install_codex_skills.py --list
 - `outputs/run_001/results/docking_report.html`：HTML 报告。
 - `outputs/run_001/results/02_redock/data/fig_49_redock_results.csv`：精细重对接结果。
 - `outputs/run_001/results/04_knockout/data/fig_52_53_ranked_knockout.csv`、`fig_52_target_candidates.csv`、`target_report.md`，以及编号 `fig_52`、`fig_53` 的敲除结果图。
-- 单细胞虚拟敲除扩展输出位于 `outputs/run_001/results/04_knockout/in_silico/`：`in_silico_knockout_report.html`、`insilico_summary.json`、`data/insilico_target_changes.csv`、`data/insilico_cell_shift.csv`、`data/insilico_regulatory_edges.csv`、`data/insilico_go_enrichment.csv`、`data/insilico_kegg_enrichment.csv`，以及 `fig_63` 至 `fig_68` 的结果图。
+- 单细胞虚拟敲除扩展输出位于 `outputs/run_001/results/04_knockout/in_silico/`：`in_silico_knockout_report.html`、`insilico_summary.json`、`data/insilico_target_changes.csv`、`data/insilico_scTenifold_results.csv`、`data/insilico_cell_shift.csv`、`data/insilico_regulatory_edges.csv`、`data/insilico_go_enrichment.csv`、`data/insilico_kegg_enrichment.csv`，以及 `fig_63` 至 `fig_68` 的结果图。
 - `outputs/run_001/results/05_validation/data/validation_candidates.csv`、`validation_plan.md`。
 - `evidence/evidence_report.md`、`known_ligands.csv`。
 

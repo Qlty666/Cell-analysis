@@ -1,14 +1,12 @@
 #!/usr/bin/env python3
-"""CellOracle-inspired single-cell in-silico knockout analysis.
+"""Single-cell virtual knockout analysis with optional real scTenifoldKnk.
 
-The implementation is deliberately lightweight: it uses the same building
-blocks as CellOracle (KNN-imputed expression, a GRN coefficient matrix, and
-iterative signal propagation), but builds candidate regulator edges from
-expression-correlation unless a regulator CSV is supplied. It also combines
-scTenifoldKnk-style differential-regulation summaries and optional GO/KEGG
-enrichment into one report.
-
-This is a screening/prediction heuristic, not a real knockout experiment.
+The module can call the official scTenifoldpy implementation of
+scTenifoldKnk when the input is a raw count matrix. It also keeps the
+CellOracle-style local GRN propagation used for expression-shift and UMAP
+vector-field visualisation, plus optional DrugReflector compound ranking and
+GO/KEGG enrichment. The knockout itself is a network prediction, not a
+wet-lab experiment.
 """
 
 from __future__ import annotations
@@ -17,6 +15,7 @@ import math
 import re
 import shutil
 import subprocess
+import warnings
 from pathlib import Path
 
 import numpy as np
@@ -147,6 +146,38 @@ def run_insilico_knockout(
     log_mat = _to_log_normalized(matrix)
     selected = _select_genes(log_mat, gene, int(isko.get("max_genes", 1800)))
     log_mat = log_mat.loc[selected]
+    sc_diff: pd.DataFrame | None = None
+    sc_meta: dict | None = None
+    engine = str(isko.get("engine") or "auto").strip().lower()
+    use_sc = _use_scTenifold(matrix, isko)
+    force_raw = isko.get("raw_count_input")
+    if use_sc and not _looks_like_raw_counts(matrix) and not force_raw:
+        if engine in ("scTenifold", "scTenifoldknk", "triple"):
+            raise DockingError(
+                "scTenifold engine requires a raw count matrix; pass raw "
+                "counts or set insilico_knockout.raw_count_input=true"
+            )
+        use_sc = False
+    if use_sc and _scTenifold_available():
+        raw_counts = matrix.loc[selected].copy()
+        raw_counts.index.name = None
+        raw_counts.columns.name = None
+        try:
+            sc_diff, sc_meta = _run_scTenifoldKnk(
+                raw_counts,
+                gene,
+                isko,
+                log,
+            )
+        except Exception as exc:
+            log.warning("official scTenifoldKnk failed; using CellOracle path: %s", exc)
+            sc_diff = None
+            sc_meta = None
+    elif use_sc:
+        log.warning(
+            "scTenifoldpy is not installed; using the built-in CellOracle "
+            "style path"
+        )
     if cell_types is not None:
         cell_types = cell_types.reindex(log_mat.columns)
     log_mat = log_mat.T
@@ -214,6 +245,9 @@ def run_insilico_knockout(
     changes = changes.sort_values(
         ["abs_delta", "gene"], ascending=[False, True]
     ).reset_index(drop=True)
+    sc_results = None
+    if sc_diff is not None:
+        changes, sc_results = _merge_scTenifold(changes, sc_diff)
 
     out_dir = cfg.knockout_dir() / "in_silico"
     data_dir = out_dir / "data"
@@ -249,6 +283,22 @@ def run_insilico_knockout(
         embedding_coords,
         shift,
     )
+    if sc_results is not None and not sc_results.empty:
+        sc_csv = data_dir / "insilico_scTenifold_results.csv"
+        sc_results.to_csv(sc_csv, index=False)
+        data_files["scTenifold_results_csv"] = sc_csv
+
+    drugreflector = _run_drugreflector(
+        cfg,
+        isko,
+        changes,
+        data_dir / "drugreflector_predictions.csv",
+        log,
+    )
+    if drugreflector.get("status") == "completed":
+        data_files["drugreflector_predictions_csv"] = (
+            data_dir / "drugreflector_predictions.csv"
+        )
 
     enrichment = _run_enrichment(
         cfg,
@@ -266,6 +316,11 @@ def run_insilico_knockout(
             if path.exists():
                 data_files[f"{Path(name).stem}_csv"] = path
 
+    engine_label = (
+        "scTenifoldKnk + CellOracle-style"
+        if sc_diff is not None
+        else "CellOracle-style GRN propagation"
+    )
     report_path = _write_html_report(
         out_dir,
         fig_dir,
@@ -277,10 +332,12 @@ def run_insilico_knockout(
         changes,
         enrichment,
         isko,
+        engine_label=engine_label,
     )
     summary = {
         "status": "completed",
         "ko_gene": gene,
+        "engine": engine_label,
         "cells": int(len(gem)),
         "genes_modeled": int(gem.shape[1]),
         "regulators": [str(g) for g in regulators],
@@ -294,8 +351,11 @@ def run_insilico_knockout(
         "figures": figures,
         "report": str(report_path),
         "enrichment": enrichment or {},
+        "scTenifoldKnk": sc_meta,
+        "drugreflector": drugreflector,
         "warning": (
-            "Prediction is a network heuristic; wet-lab validation is required."
+            "Prediction is a network model, not a wet-lab experiment; "
+            "wet-lab validation is required."
         ),
     }
     write_json(out_dir / "insilico_summary.json", summary)
@@ -311,6 +371,252 @@ def _first_gene(*values) -> str | None:
             if text and str(text).lower() not in ("nan", "none", "auto"):
                 return text
     return None
+
+
+def _scTenifold_available() -> bool:
+    try:
+        import scTenifold  # noqa: F401
+
+        return True
+    except Exception:
+        return False
+
+
+def _looks_like_raw_counts(matrix: pd.DataFrame) -> bool:
+    """Return True when the matrix is mostly integer count-like values."""
+    data = matrix.to_numpy(dtype=float)
+    finite = np.isfinite(data)
+    if finite.sum() == 0:
+        return False
+    if np.nanmin(data) < 0:
+        return False
+    integer_like = finite & (data == np.round(data))
+    return (
+        float(integer_like.sum() / finite.sum()) > 0.6
+        and float(np.nanmax(data)) > 20
+    )
+
+
+def _use_scTenifold(matrix: pd.DataFrame, isko: dict) -> bool:
+    engine = str(isko.get("engine") or "auto").strip().lower()
+    if engine == "celloracle":
+        return False
+    force_raw = isko.get("raw_count_input")
+    if force_raw is not None:
+        return bool(force_raw)
+    if engine in ("scTenifold", "scTenifoldknk", "triple"):
+        return True
+    return _looks_like_raw_counts(matrix)
+
+
+def _run_scTenifoldKnk(
+    raw_counts: pd.DataFrame,
+    gene: str,
+    isko: dict,
+    log,
+) -> tuple[pd.DataFrame, dict]:
+    """Run the official scTenifoldpy virtual knockout workflow."""
+    import matplotlib
+
+    matplotlib.use("Agg")
+    from scTenifold import virtual_knockout
+
+    if gene not in raw_counts.index:
+        raise DockingError(
+            f"scTenifold knockout gene {gene} is not in the raw count matrix"
+        )
+    seed = int(isko.get("seed", 123))
+    n_networks = int(isko.get("scTenifold_n_networks", 5))
+    n_cells = int(isko.get("scTenifold_n_cells", 500))
+    n_cells = min(n_cells, max(2, raw_counts.shape[1]))
+    qc_kws = {
+        "min_lib_size": float(isko.get("scTenifold_min_lib_size", 1000)),
+        "remove_outlier_cells": bool(
+            isko.get("scTenifold_remove_outlier_cells", True)
+        ),
+        "min_percent": float(isko.get("scTenifold_min_percent", 0.05)),
+        "max_mito_ratio": float(isko.get("scTenifold_max_mito_ratio", 0.1)),
+        "min_exp_avg": float(isko.get("scTenifold_min_exp_avg", 0.05)),
+        "min_exp_sum": float(isko.get("scTenifold_min_exp_sum", 25)),
+    }
+    network_kws = {
+        "n_nets": n_networks,
+        "n_samp_cells": n_cells,
+        "n_comp": int(isko.get("scTenifold_n_comp", 3)),
+        "q": float(isko.get("scTenifold_q", 0.95)),
+        "backend": str(isko.get("scTenifold_backend", "serial")),
+        "n_jobs": int(isko.get("scTenifold_jobs", 1)),
+        "random_state": seed,
+    }
+    td_kws = {
+        "K": int(isko.get("scTenifold_K", 3)),
+        "random_state": seed,
+    }
+    ma_kws = {"d": int(isko.get("scTenifold_ma_dim", 2))}
+    log.info(
+        "running official scTenifoldKnk on %s cells x %s genes "
+        "(networks=%s, cells/network=%s)",
+        raw_counts.shape[1],
+        raw_counts.shape[0],
+        n_networks,
+        n_cells,
+    )
+    with warnings.catch_warnings():
+        warnings.filterwarnings(
+            "ignore",
+            message="Mitochondrial genes were not found.*",
+        )
+        warnings.filterwarnings(
+            "ignore",
+            message="FigureCanvasAgg is non-interactive.*",
+        )
+        diff = virtual_knockout(
+            raw_counts,
+            ko_genes=gene,
+            qc_kws=qc_kws,
+            network_kws=network_kws,
+            td_kws=td_kws,
+            ma_kws=ma_kws,
+            random_state=seed,
+        )
+    if diff is None or diff.empty:
+        raise DockingError(
+            "scTenifoldKnk returned no differential regulation result"
+        )
+    diff = diff.copy()
+    diff.columns = [
+        str(c).lower().replace(" ", "_").replace("p-value", "pvalue")
+        for c in diff.columns
+    ]
+    if "gene" not in diff.columns:
+        raise DockingError("scTenifoldKnk result has no gene column")
+    meta = {
+        "engine": "scTenifoldKnk (scTenifoldpy)",
+        "genes_scored": int(len(diff)),
+        "n_networks": n_networks,
+        "n_cells_per_network": n_cells,
+    }
+    log.info(
+        "scTenifoldKnk scored %s genes for %s",
+        len(diff),
+        gene,
+    )
+    return diff, meta
+
+
+def _merge_scTenifold(
+    changes: pd.DataFrame,
+    diff: pd.DataFrame | None,
+) -> tuple[pd.DataFrame, pd.DataFrame | None]:
+    """Merge scTenifold differential regulation into target changes."""
+    if diff is None or diff.empty:
+        return changes, None
+    rename = {
+        "distance": "sctenifold_distance",
+        "z": "sctenifold_z",
+        "fc": "sctenifold_fc",
+        "pvalue": "sctenifold_pvalue",
+        "adjusted_p-value": "sctenifold_padj",
+        "adjusted p-value": "sctenifold_padj",
+        "p.adj": "sctenifold_padj",
+        "adjusted_pvalue": "sctenifold_padj",
+    }
+    diff = diff.rename(columns=rename)
+    keep = [
+        c
+        for c in [
+            "gene",
+            "sctenifold_distance",
+            "sctenifold_z",
+            "sctenifold_fc",
+            "sctenifold_pvalue",
+            "sctenifold_padj",
+        ]
+        if c in diff.columns
+    ]
+    if "gene" not in keep:
+        return changes, None
+    out = changes.merge(
+        diff[keep],
+        on="gene",
+        how="left",
+    )
+    if out["sctenifold_padj"].notna().sum() == 0:
+        return changes, None
+    out["sctenifold_padj"] = pd.to_numeric(
+        out["sctenifold_padj"], errors="coerce"
+    )
+    out["sctenifold_distance"] = pd.to_numeric(
+        out["sctenifold_distance"], errors="coerce"
+    )
+    p_rank = (-np.log10(out["sctenifold_padj"].clip(lower=1e-300))).rank(
+        pct=True
+    )
+    distance_rank = out["sctenifold_distance"].rank(pct=True)
+    delta_rank = out["abs_delta"].rank(pct=True)
+    out["sctenifold_score"] = (
+        0.6 * p_rank.fillna(0.0) + 0.4 * distance_rank.fillna(0.0)
+    )
+    out["combined_impact"] = (
+        0.6 * out["sctenifold_score"].fillna(delta_rank)
+        + 0.4 * delta_rank
+    )
+    out = out.sort_values(
+        ["combined_impact", "gene"], ascending=[False, True]
+    ).reset_index(drop=True)
+    return out, diff
+
+
+def _run_drugreflector(
+    cfg: ResolvedConfig,
+    isko: dict,
+    changes: pd.DataFrame,
+    output_path: Path,
+    log,
+) -> dict:
+    """Rank compounds with DrugReflector when official checkpoints exist."""
+    raw_dir = isko.get("drugreflector_checkpoint_dir")
+    if not raw_dir:
+        return {
+            "status": "skipped",
+            "reason": "drugreflector_checkpoint_dir is not configured",
+        }
+    ckpt_dir = _resolve_path(cfg, raw_dir)
+    checkpoints = sorted(
+        p
+        for p in ckpt_dir.glob("*.pt")
+        if p.is_file()
+    )
+    if not checkpoints:
+        return {
+            "status": "skipped",
+            "reason": f"no .pt checkpoints found in {ckpt_dir}",
+        }
+    try:
+        import drugreflector as dr
+    except Exception as exc:
+        return {
+            "status": "skipped",
+            "reason": f"drugreflector import failed: {exc}",
+        }
+    signature = pd.Series(
+        changes["delta"].to_numpy(dtype=float),
+        index=changes["gene"].astype(str),
+        name=f"{isko.get('ko_gene') or 'knockout'}:WT->KO",
+    )
+    model = dr.DrugReflector(checkpoint_paths=[str(p) for p in checkpoints])
+    predictions = model.predict(
+        signature,
+        n_top=int(isko.get("drugreflector_top_n", 50)),
+    )
+    output_path.parent.mkdir(parents=True, exist_ok=True)
+    predictions.to_csv(output_path)
+    log.info("DrugReflector predicted compounds written to %s", output_path)
+    return {
+        "status": "completed",
+        "checkpoints": len(checkpoints),
+        "output_csv": str(output_path),
+    }
 
 
 def _resolve_path(cfg: ResolvedConfig, value) -> Path | None:
@@ -1508,18 +1814,27 @@ def _write_html_report(
     changes: pd.DataFrame,
     enrichment: dict,
     isko: dict,
+    engine_label: str = "CellOracle-style GRN propagation",
 ) -> Path:
     from datetime import datetime
 
     top = _display_changes(changes).head(15)
+    has_sc = "sctenifold_padj" in changes.columns
+    sc_header = "<th>scTenifold FDR</th>" if has_sc else ""
     rows = "".join(
         "<tr><td>{gene}</td><td>{wt:.4f}</td><td>{ko:.4f}</td><td>{d:.4f}</td>"
-        "<td>{direction}</td></tr>".format(
+        "<td>{direction}</td>{sc}</tr>".format(
             gene=row.gene,
             wt=row.wt_mean,
             ko=row.ko_mean,
             d=row.delta,
             direction="up" if row.delta > 0 else "down",
+            sc=(
+                f"<td>{row.sctenifold_padj:.3g}</td>"
+                if has_sc
+                and pd.notna(getattr(row, "sctenifold_padj", None))
+                else "<td>NA</td>" if has_sc else ""
+            ),
         )
         for row in top.itertuples(index=False)
     )
@@ -1542,6 +1857,13 @@ def _write_html_report(
         "fig_68_ko_kegg_enrichment.png",
         "图5：敲除后改变靶基因 KEGG 通路富集气泡图",
     )
+    sc_method_note = (
+        "<p>本次输入为原始计数矩阵，核心敲除由官方 scTenifoldKnk 完成；"
+        "完整 differential regulation 表见 "
+        "<code>data/insilico_scTenifold_results.csv</code>。</p>"
+        if has_sc
+        else ""
+    )
     html = f"""<!doctype html>
 <html lang="zh-CN">
 <head><meta charset="utf-8">
@@ -1561,8 +1883,8 @@ th{{background:#f1f5f6}}
 </style></head>
 <body>
 <h1>{ko_gene} 虚拟敲除分析报告 <small>(In Silico Knockout)</small></h1>
-<div class="meta">分析时间：{datetime.now():%Y-%m-%d %H:%M}；物种：{species}；分析方式：单细胞调控网络扰动模拟</div>
-<div class="alert">本报告为基于表达共调控网络的预测性结果，不等同于真实敲除实验；下游结论需经湿实验验证。</div>
+<div class="meta">分析时间：{datetime.now():%Y-%m-%d %H:%M}；物种：{species}；分析方式：{engine_label}</div>
+<div class="alert">本报告为基于单细胞基因调控网络的预测性结果，不等同于真实敲除实验；下游结论需经湿实验验证。</div>
 <h2>1. 数据集来源与分析规模</h2>
 <p>本次模拟使用输入表达矩阵中的 <b>{matrix.shape[1]}</b> 个细胞和 <b>{matrix.shape[0]}</b> 个基因。经高变基因筛选后，模型纳入 <b>{len(changes)}</b> 个基因；若提供细胞类型注释，UMAP 向量场按注释着色。</p>
 <h2>2. 敲除基因生物学背景</h2>
@@ -1575,9 +1897,10 @@ th{{background:#f1f5f6}}
 <figure><img src="figures/fig_65_ko_regulatory_network.png"><figcaption>图2：{ko_gene} 局部转录调控网络拓扑图。</figcaption></figure>
 <h2>5. 下游靶基因定量变化 (Expression Changes)</h2>
 <p>下图展示受敲除影响最明显的靶基因在野生型 (WT) 与敲除型 (KO) 条件下的平均表达量变化预测。</p>
+{sc_method_note}
 <figure><img src="figures/fig_64_ko_target_expression_bar.png"><figcaption>图3：野生型与 {ko_gene} 虚拟敲除型细胞中关键靶基因表达水平的对比柱状图。</figcaption></figure>
 <h3>靶基因表达定量变化数据表 (Top 15)</h3>
-<table><tr><th>靶基因</th><th>野生型表达均值</th><th>敲除型表达均值</th><th>表达变化值</th><th>调控倾向</th></tr>{rows}</table>
+<table><tr><th>靶基因</th><th>野生型表达均值</th><th>敲除型表达均值</th><th>表达变化值</th><th>调控倾向</th>{sc_header}</tr>{rows}</table>
 <h2>6. GO / KEGG 富集分析</h2>
 {go_fig}
 {kegg_fig}

@@ -170,6 +170,8 @@ DEFAULTS = {
     "insilico_knockout": {
         "enabled": False,
         "ko_gene": None,
+        "engine": "auto",
+        "raw_count_input": None,
         "species": "auto",
         "embedding_csv": None,
         "regulators_csv": None,
@@ -188,6 +190,22 @@ DEFAULTS = {
         "gene_note": None,
         "photo_output_dir": None,
         "figures": True,
+        "scTenifold_min_lib_size": 1000,
+        "scTenifold_remove_outlier_cells": True,
+        "scTenifold_min_percent": 0.05,
+        "scTenifold_max_mito_ratio": 0.1,
+        "scTenifold_min_exp_avg": 0.05,
+        "scTenifold_min_exp_sum": 25,
+        "scTenifold_n_networks": 5,
+        "scTenifold_n_cells": 500,
+        "scTenifold_n_comp": 3,
+        "scTenifold_q": 0.95,
+        "scTenifold_K": 3,
+        "scTenifold_ma_dim": 2,
+        "scTenifold_backend": "serial",
+        "scTenifold_jobs": 1,
+        "drugreflector_checkpoint_dir": None,
+        "drugreflector_top_n": 50,
     },
     "network_toxicology": {
         "compound_name": None,
@@ -434,6 +452,11 @@ def apply_overrides(cfg: ResolvedConfig, overrides: dict) -> ResolvedConfig:
         "ko_top_n": ("knockout", "top_n"),
         "validation_top_n": ("validation", "top_n"),
         "insilico_gene": ("insilico_knockout", "ko_gene"),
+        "insilico_engine": ("insilico_knockout", "engine"),
+        "insilico_raw_count_input": (
+            "insilico_knockout",
+            "raw_count_input",
+        ),
         "insilico_species": ("insilico_knockout", "species"),
         "insilico_embedding_csv": ("insilico_knockout", "embedding_csv"),
         "insilico_regulators_csv": ("insilico_knockout", "regulators_csv"),
@@ -659,6 +682,10 @@ def save_config(cfg: ResolvedConfig, path: Path) -> None:
         "insilico_knockout": {
             "enabled": cfg.get("insilico_knockout", "enabled", False),
             "ko_gene": cfg.get("insilico_knockout", "ko_gene"),
+            "engine": cfg.get("insilico_knockout", "engine", "auto"),
+            "raw_count_input": cfg.get(
+                "insilico_knockout", "raw_count_input"
+            ),
             "species": cfg.get("insilico_knockout", "species", "auto"),
             "embedding_csv": cfg.get("insilico_knockout", "embedding_csv"),
             "regulators_csv": cfg.get("insilico_knockout", "regulators_csv"),
@@ -684,6 +711,50 @@ def save_config(cfg: ResolvedConfig, path: Path) -> None:
                 "insilico_knockout", "photo_output_dir"
             ),
             "figures": cfg.get("insilico_knockout", "figures", True),
+            "scTenifold_min_lib_size": cfg.get(
+                "insilico_knockout", "scTenifold_min_lib_size", 1000
+            ),
+            "scTenifold_remove_outlier_cells": cfg.get(
+                "insilico_knockout", "scTenifold_remove_outlier_cells", True
+            ),
+            "scTenifold_min_percent": cfg.get(
+                "insilico_knockout", "scTenifold_min_percent", 0.05
+            ),
+            "scTenifold_max_mito_ratio": cfg.get(
+                "insilico_knockout", "scTenifold_max_mito_ratio", 0.1
+            ),
+            "scTenifold_min_exp_avg": cfg.get(
+                "insilico_knockout", "scTenifold_min_exp_avg", 0.05
+            ),
+            "scTenifold_min_exp_sum": cfg.get(
+                "insilico_knockout", "scTenifold_min_exp_sum", 25
+            ),
+            "scTenifold_n_networks": cfg.get(
+                "insilico_knockout", "scTenifold_n_networks", 5
+            ),
+            "scTenifold_n_cells": cfg.get(
+                "insilico_knockout", "scTenifold_n_cells", 500
+            ),
+            "scTenifold_n_comp": cfg.get(
+                "insilico_knockout", "scTenifold_n_comp", 3
+            ),
+            "scTenifold_q": cfg.get("insilico_knockout", "scTenifold_q", 0.95),
+            "scTenifold_K": cfg.get("insilico_knockout", "scTenifold_K", 3),
+            "scTenifold_ma_dim": cfg.get(
+                "insilico_knockout", "scTenifold_ma_dim", 2
+            ),
+            "scTenifold_backend": cfg.get(
+                "insilico_knockout", "scTenifold_backend", "serial"
+            ),
+            "scTenifold_jobs": cfg.get(
+                "insilico_knockout", "scTenifold_jobs", 1
+            ),
+            "drugreflector_checkpoint_dir": cfg.get(
+                "insilico_knockout", "drugreflector_checkpoint_dir"
+            ),
+            "drugreflector_top_n": cfg.get(
+                "insilico_knockout", "drugreflector_top_n", 50
+            ),
         },
         "network_toxicology": {
             "compound_name": cfg.get("network_toxicology", "compound_name"),

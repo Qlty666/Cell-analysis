@@ -9,3 +9,6 @@ h5py
 scipy
 scikit-learn
 umap-learn
+scTenifoldpy>=0.3.0
+# drugreflector is optional; it needs model checkpoints from Zenodo
+# pip install drugreflector
