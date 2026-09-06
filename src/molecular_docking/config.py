@@ -68,6 +68,7 @@ def save_config(cfg: ResolvedConfig, path: Path) -> None:
         },
         "analysis": {
             "cutoff": cfg.get("analysis", "cutoff", -7.0),
+            "moderate_cutoff": cfg.get("analysis", "moderate_cutoff", -5.0),
             "top_n": cfg.get("analysis", "top_n", 100),
             "figures": cfg.get("analysis", "figures", True),
             "diversity": cfg.get("analysis", "diversity", True),

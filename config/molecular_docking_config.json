@@ -40,6 +40,7 @@
   },
   "analysis": {
     "cutoff": -7.0,
+    "moderate_cutoff": -5.0,
     "top_n": 100,
     "figures": true,
     "diversity": true,

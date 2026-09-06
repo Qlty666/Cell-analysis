@@ -545,7 +545,7 @@ footer { color: #64748b; font-size: 12px; margin: 30px 0 8px; }
       <tr><td><code>results/01_analysis/figures/fig_46_affinity_distribution.png</code></td><td>对接亲和力分布图</td><td><span class="badge fig">结果图</span></td><td>查看打分分布</td></tr>
       <tr><td><code>results/01_analysis/figures/fig_47_top_hits.png</code></td><td>Top 命中图</td><td><span class="badge fig">结果图</span></td><td>查看最优命中</td></tr>
       <tr><td><code>results/01_analysis/figures/fig_48_diverse_hits.png</code></td><td>多样性命中图</td><td><span class="badge fig">结果图</span></td><td>查看结构多样候选</td></tr>
-      <tr><td><code>results/01_analysis/data/fig_46_47_ranked_results.csv</code></td><td>按亲和力排序结果</td><td><span class="badge data">结果数据</span></td><td>全部对接排序</td></tr>
+      <tr><td><code>results/01_analysis/data/fig_46_47_ranked_results.csv</code></td><td>按亲和力排序结果</td><td><span class="badge data">结果数据</span></td><td>含 strong/moderate/weak 分级</td></tr>
       <tr><td><code>results/01_analysis/data/fig_47_top_hits.csv</code></td><td>命中配体表</td><td><span class="badge data">结果数据</span></td><td>低于阈值候选</td></tr>
       <tr><td><code>results/01_analysis/data/fig_48_diverse_hits.csv</code></td><td>多样性命中表</td><td><span class="badge data">结果数据</span></td><td>Tanimoto 选择结果</td></tr>
       <tr><td><code>results/01_analysis/data/docking_results.xlsx</code></td><td>多工作表 Excel</td><td><span class="badge data">结果数据</span></td><td>all / hits / top / diverse 表</td></tr>
@@ -558,7 +558,8 @@ footer { color: #64748b; font-size: 12px; margin: 30px 0 8px; }
       <tr><td><code>results/03_ml/data/fig_51_ml_roc.csv</code></td><td>ML ROC 数据</td><td><span class="badge data">结果数据</span></td><td>绘制 ROC 的数据 <span class="badge opt">ml-train 且二分类</span></td></tr>
       <tr><td><code>results/03_ml/data/ml_ranked_results.csv</code></td><td>ML 重打分排序结果</td><td><span class="badge data">结果数据</span></td><td>融合亲和力与 ML 排名 <span class="badge opt">ml-train</span></td></tr>
       <tr><td><code>results/06_md/&lt;ligand&gt;/md_rmsd_rmsf.png</code></td><td>MD 蛋白/配体 RMSD 与配体 RMSF</td><td><span class="badge fig">结果图</span></td><td>检查复合物稳定性和构象收敛 <span class="badge opt">md-simulation auto</span></td></tr>
-      <tr><td><code>results/06_md/md_simulation_results.csv</code></td><td>MD 每配体状态与均值指标</td><td><span class="badge data">结果数据</span></td><td>查看时长、RMSD、RMSF <span class="badge opt">md-simulation</span></td></tr>
+      <tr><td><code>results/06_md/&lt;ligand&gt;/md_stability_dynamics.png</code></td><td>MD Rg/SASA/氢键/残基 RMSF 动态图</td><td><span class="badge fig">结果图</span></td><td>结合口袋残基高亮 <span class="badge opt">md-simulation auto</span></td></tr>
+      <tr><td><code>results/06_md/md_simulation_results.csv</code></td><td>MD 每配体状态与动态均值指标</td><td><span class="badge data">结果数据</span></td><td>查看时长、RMSD、Rg、SASA、氢键、口袋 RMSF <span class="badge opt">md-simulation</span></td></tr>
     </tbody>
   </table>
 </div>

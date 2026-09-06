@@ -12,6 +12,23 @@ from .config import ResolvedConfig
 from .utils import DockingError, write_json
 
 
+def affinity_class(
+    affinity,
+    moderate_cutoff: float = -5.0,
+    strong_cutoff: float = -7.0,
+) -> str:
+    """Return the conventional docking affinity tier used in publications."""
+    try:
+        value = float(affinity)
+    except (TypeError, ValueError):
+        return ""
+    if value <= strong_cutoff:
+        return "strong"
+    if value <= moderate_cutoff:
+        return "moderate"
+    return "weak"
+
+
 def analyze_results(cfg: ResolvedConfig, log):
     results_path = cfg.results_path()
     if not results_path.exists():
@@ -29,7 +46,11 @@ def analyze_results(cfg: ResolvedConfig, log):
     ok["rank"] = np.arange(1, len(ok) + 1)
 
     cutoff = float(cfg.get("analysis", "cutoff", -7.0))
+    moderate_cutoff = float(cfg.get("analysis", "moderate_cutoff", -5.0))
     top_n = int(cfg.get("analysis", "top_n", 100))
+    ok["affinity_class"] = ok["affinity"].apply(
+        lambda value: affinity_class(value, moderate_cutoff, cutoff)
+    )
     hits = ok[ok["affinity"] <= cutoff].copy()
     top = hits.head(top_n) if not hits.empty else ok.head(top_n)
 
@@ -49,7 +70,15 @@ def analyze_results(cfg: ResolvedConfig, log):
 
     if cfg.get("analysis", "figures", True):
         try:
-            make_figures(ok, hits, top, diverse, figures_dir, cutoff)
+            make_figures(
+                ok,
+                hits,
+                top,
+                diverse,
+                figures_dir,
+                cutoff,
+                moderate_cutoff,
+            )
         except Exception as exc:
             log.warning("figure generation failed: %s", exc)
 
@@ -72,6 +101,15 @@ def analyze_results(cfg: ResolvedConfig, log):
         "top_n": int(len(top)),
         "diverse": int(len(diverse)),
         "cutoff": cutoff,
+        "moderate_cutoff": moderate_cutoff,
+        "strong_hits": int(len(hits)),
+        "moderate_hits": int(
+            (
+                (ok["affinity"] > cutoff)
+                & (ok["affinity"] <= moderate_cutoff)
+            ).sum()
+        ),
+        "weak_hits": int((ok["affinity"] > moderate_cutoff).sum()),
         "best_affinity": float(ok["affinity"].min()) if len(ok) else None,
         "median_affinity": float(ok["affinity"].median()) if len(ok) else None,
         "reports_dir": str(reports_dir),
@@ -126,6 +164,7 @@ def make_figures(
     diverse: pd.DataFrame,
     figures_dir: Path,
     cutoff: float,
+    moderate_cutoff: float = -5.0,
 ) -> None:
     import matplotlib
 
@@ -134,20 +173,45 @@ def make_figures(
 
     fig, ax = plt.subplots(figsize=(8, 4.5))
     ax.hist(ok["affinity"], bins=40, color="#4c7bb8", edgecolor="white")
-    ax.axvline(cutoff, color="#c0392b", linestyle="--", linewidth=1.5)
+    ax.axvline(
+        moderate_cutoff,
+        color="#e67e22",
+        linestyle=":",
+        linewidth=1.5,
+        label=f"moderate <= {moderate_cutoff}",
+    )
+    ax.axvline(
+        cutoff,
+        color="#c0392b",
+        linestyle="--",
+        linewidth=1.5,
+        label=f"strong <= {cutoff}",
+    )
     ax.set_xlabel("Affinity (kcal/mol)")
     ax.set_ylabel("Ligand count")
     ax.set_title("Docking affinity distribution")
+    ax.legend(frameon=False)
     fig.tight_layout()
     fig.savefig(figures_dir / "fig_46_affinity_distribution.png", dpi=150)
     plt.close(fig)
 
     top20 = top.head(20).iloc[::-1]
     if not top20.empty:
+        class_colors = {
+            "strong": "#c0392b",
+            "moderate": "#e67e22",
+            "weak": "#64748b",
+        }
         fig, ax = plt.subplots(
             figsize=(8, max(3.0, len(top20) * 0.32))
         )
-        ax.barh(top20["id"].astype(str), top20["affinity"], color="#2e7d32")
+        tier = (
+            top20["affinity_class"]
+            if "affinity_class" in top20.columns
+            else pd.Series("", index=top20.index)
+        )
+        colors = tier.map(class_colors).fillna("#2e7d32").tolist()
+        ax.barh(top20["id"].astype(str), top20["affinity"], color=colors)
         ax.set_xlabel("Affinity (kcal/mol)")
         ax.set_title("Top ranked docking hits")
         fig.tight_layout()
@@ -155,11 +219,22 @@ def make_figures(
         plt.close(fig)
 
     if not diverse.empty:
+        class_colors = {
+            "strong": "#c0392b",
+            "moderate": "#e67e22",
+            "weak": "#64748b",
+        }
         fig, ax = plt.subplots(figsize=(8, max(3.0, len(diverse) * 0.32)))
+        tier = (
+            diverse["affinity_class"]
+            if "affinity_class" in diverse.columns
+            else pd.Series("", index=diverse.index)
+        )
+        colors = tier.map(class_colors).fillna("#8e44ad").tolist()
         ax.barh(
             diverse["id"].astype(str),
             diverse["affinity"],
-            color="#8e44ad",
+            color=colors,
         )
         ax.set_xlabel("Affinity (kcal/mol)")
         ax.set_title("Diverse hit selection")

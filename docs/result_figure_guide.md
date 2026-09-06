@@ -746,24 +746,24 @@
 
 对应状态和数据文件：
 
-- `01_analysis/summary.json`：成功对接数、命中数、Top N、最佳亲和力、中位亲和力。
-- `01_analysis/data/fig_46_47_ranked_results.csv`：全部成功对接排序结果。
+- `01_analysis/summary.json`：成功对接数、强/中/弱结合命中数、Top N、最佳亲和力、中位亲和力。
+- `01_analysis/data/fig_46_47_ranked_results.csv`：全部成功对接排序结果，含 `affinity_class`（`strong`/`moderate`/`weak`）。
 - `01_analysis/data/fig_47_top_hits.csv`：低于 `analysis.cutoff` 的命中。
 - `01_analysis/data/fig_48_diverse_hits.csv`：Tanimoto 多样性选择结果。
 - `02_redock/data/fig_49_redock_results.csv` 和 `fig_49_redock_comparison.csv`：重对接结果。
 - `03_ml/data/ml_model_info.json`：模型类型、任务类型、模型文件。
 - `04_knockout/data/fig_52_53_ranked_knockout.csv`：敲除评分和靶点评分表。
-- `06_md/md_simulation_results.csv`：每个参与 MD 的配体状态、生产时长、蛋白/配体 RMSD 与配体 RMSF。
+- `06_md/md_simulation_results.csv`：每个参与 MD 的配体状态、生产时长、蛋白/配体 RMSD、Rg、SASA、蛋白-配体氢键、结合口袋 RMSF 与稳定性标记。
 - `06_md/md_simulation_summary.json`：MD 模式、请求/完成/失败数量与输出目录。
 - `docking_report.html`：HTML 报告，会汇总该报告目录下所有 PNG。
 
-默认参数参考 `config/docking_config.json`：命中阈值为 -7.0 kcal/mol，Top N 为 100，多样性 Tanimoto 阈值为 0.7，重对接 Top 20，重对接 exhaustiveness 默认 32。
+默认参数参考 `config/docking_config.json`：强结合阈值为 -7.0 kcal/mol，中等结合阈值为 -5.0 kcal/mol，Top N 为 100，多样性 Tanimoto 阈值为 0.7，重对接 Top 20，重对接 exhaustiveness 默认 32。
 
 ### 5.2 对接分析与命中
 
 | 文件 | 内容与用途 | 合格判据 | 不可用或警示 |
 | --- | --- | --- | --- |
-| `fig_46_affinity_distribution.png` | 所有成功对接配体的亲和力分布，叠加命中阈值线，用于查看整体分数和命中分布 | `summary.json` 中 `total_docked > 0`，直方图非空，阈值线可见，亲和力为负值 | 无成功对接、图为空或 `best_affinity` 缺失时不可用；有命中才能说明命中分布 |
+| `fig_46_affinity_distribution.png` | 所有成功对接配体的亲和力分布，叠加 moderate/strong 分级阈值线，用于查看整体分数和命中分布 | `summary.json` 中 `total_docked > 0`，直方图非空，分级阈值线可见，亲和力为负值 | 无成功对接、图为空或 `best_affinity` 缺失时不可用；有命中才能说明命中分布 |
 | `fig_47_top_hits.png` | 排序后的 Top 命中条形图，用于查看排名靠前配体 | 至少 1 个配体，ID 和亲和力可读，顺序与 CSV 一致 | 若 `hits=0`，图中只是“Top 排序”而不是“Top 命中”，不能写成命中结果 |
 | `fig_48_diverse_hits.png` | 多样性选择后的命中条形图，用于减少同一化学骨架重复 | `fig_48_diverse_hits.csv` 非空，ID/SMILES 不重复，与 Top 命中可对应 | RDKit 不可用、有效分子少于 2 个或多样性选择未运行时可能不生成；只有一个骨架时不能称为多样 |
 
@@ -817,12 +817,16 @@ GROMACS 输入文件；`auto` 模式需要 GROMACS，并通过 ACPYPE 或
 | --- | --- | --- | --- |
 | `<id>/complex.pdb` | 受体与 Top 对接姿态组成的复合物 | PDB 可打开，配体与受体坐标都存在 | 受体 PDB 或姿态缺失时不生成；`prepare` 模式没有该文件的力场验证 |
 | `<id>/md_rmsd_rmsf.png` | 蛋白骨架 RMSD、配体 RMSD 与配体原子 RMSF 图 | 生产轨迹存在且分析成功，曲线非空 | `auto` 未完成、轨迹为空或 GROMACS 分析失败时不生成 |
-| `md_simulation_results.csv` | 每个配体的模拟状态与均值指标 | `status=completed` 的行有时间和 RMSD 数值 | `prepare` 模式或失败行为空状态，不能当作已完成的模拟结论 |
+| `<id>/md_stability_dynamics.png` | Rg、SASA、蛋白-配体氢键与蛋白残基 RMSF 图，结合口袋残基高亮 | Rg/SASA/氢键轨迹非空，RMSF 与残基索引可读 | 扩展分析命令失败或文件缺失时不生成；不代表常规 `md_rmsd_rmsf.png` 缺失 |
+| `md_simulation_results.csv` | 每个配体的模拟状态与均值/后段波动指标 | `status=completed` 的行有时间、RMSD 与扩展指标数值 | `prepare` 模式或失败行为空状态，不能当作已完成的模拟结论 |
 | `md_simulation_summary.json` | 模式与完成/失败统计 | 数值与结果 CSV 一致 | 全部失败时命令会返回非零退出码并记录原因 |
 
-`auto` 模式按“最小化 → NVT → NPT → 生产模拟”运行，生产时长由
+`auto` 模式按“最小化 → NVT → NPT → 生产模拟”运行，并在生产轨迹上自动追加 Rg、SASA、
+氢键与结合口袋 RMSF 分析，便于按“RMSD 收敛、Rg/SASA 平稳、氢键持续、口袋残基低波动”
+共同判断复合物的动态稳定性。生产时长由
 `md_simulation.prod_steps` 控制；默认 250000 步为快速验证值，正式研究应
 根据体系和采样需要调大，并核对力场、溶剂盒子、离子浓度与轨迹收敛后再下结论。
+`stability_label` 是启发式标记，不等同于实验验证；任何计算预测仍需湿实验确认。
 
 ## 6. 全自动集成流水线与细胞反馈结果图
 

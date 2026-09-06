@@ -55,6 +55,7 @@ DEFAULTS = {
     },
     "analysis": {
         "cutoff": -7.0,
+        "moderate_cutoff": -5.0,
         "top_n": 100,
         "figures": True,
         "diversity": True,
@@ -108,6 +109,11 @@ DEFAULTS = {
         "gpu": False,
         "figures": True,
         "maxwarn": 20,
+        "contact_cutoff_nm": 0.6,
+        "equilibrate_fraction": 0.5,
+        "rmsd_stable_std_nm": 0.15,
+        "rg_stable_std_nm": 0.05,
+        "sasa_stable_std_nm2": 1.0,
     },
     "redock": {
         "enabled": True,
@@ -383,6 +389,7 @@ def apply_overrides(cfg: ResolvedConfig, overrides: dict) -> ResolvedConfig:
         "ligand_engine": ("ligand", "engine"),
         "conformers": ("ligand", "conformers"),
         "cutoff": ("analysis", "cutoff"),
+        "moderate_cutoff": ("analysis", "moderate_cutoff"),
         "top_n": ("analysis", "top_n"),
         "figures": ("analysis", "figures"),
         "diversity": ("analysis", "diversity"),
@@ -507,6 +514,7 @@ def save_config(cfg: ResolvedConfig, path: Path) -> None:
         },
         "analysis": {
             "cutoff": cfg.get("analysis", "cutoff", -7.0),
+            "moderate_cutoff": cfg.get("analysis", "moderate_cutoff", -5.0),
             "top_n": cfg.get("analysis", "top_n", 100),
             "figures": cfg.get("analysis", "figures", True),
             "diversity": cfg.get("analysis", "diversity", True),
@@ -570,6 +578,21 @@ def save_config(cfg: ResolvedConfig, path: Path) -> None:
             "gpu": cfg.get("md_simulation", "gpu", False),
             "figures": cfg.get("md_simulation", "figures", True),
             "maxwarn": cfg.get("md_simulation", "maxwarn", 20),
+            "contact_cutoff_nm": cfg.get(
+                "md_simulation", "contact_cutoff_nm", 0.6
+            ),
+            "equilibrate_fraction": cfg.get(
+                "md_simulation", "equilibrate_fraction", 0.5
+            ),
+            "rmsd_stable_std_nm": cfg.get(
+                "md_simulation", "rmsd_stable_std_nm", 0.15
+            ),
+            "rg_stable_std_nm": cfg.get(
+                "md_simulation", "rg_stable_std_nm", 0.05
+            ),
+            "sasa_stable_std_nm2": cfg.get(
+                "md_simulation", "sasa_stable_std_nm2", 1.0
+            ),
         },
         "redock": {
             "enabled": cfg.get("redock", "enabled", True),
