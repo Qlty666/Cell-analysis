@@ -18,6 +18,9 @@ if str(APP_ROOT / "src") not in sys.path:
 
 from docking.config import load_config  # noqa: E402
 from docking.insilico import run_insilico_knockout  # noqa: E402
+from docking.insilico import _looks_like_raw_counts  # noqa: E402
+from docking.insilico import _merge_scTenifold  # noqa: E402
+from docking.insilico import _scTenifold_available  # noqa: E402
 from docking.insilico import _plot_enrichment_bubble  # noqa: E402
 from docking.insilico import _plot_umap_shift  # noqa: E402
 
@@ -80,7 +83,7 @@ class TestInSilicoKnockout(unittest.TestCase):
             self.assertTrue(out.exists())
             self.assertGreater(out.stat().st_size, 10_000)
 
-    def _write_inputs(self, workdir: Path) -> Path:
+    def _write_inputs(self, workdir: Path, raw: bool = False) -> Path:
         data_dir = workdir / "data" / "knockout"
         data_dir.mkdir(parents=True, exist_ok=True)
         rng = np.random.default_rng(42)
@@ -99,7 +102,8 @@ class TestInSilicoKnockout(unittest.TestCase):
             frame.loc[gene] = driver * (0.6 + 0.2 * rng.random()) + rng.normal(
                 0, 0.12, len(cells)
             )
-        frame = np.log1p(np.clip(frame, 0, None))
+        if not raw:
+            frame = np.log1p(np.clip(frame, 0, None))
         frame = frame.reset_index().rename(columns={"index": "gene"})
         frame.to_csv(data_dir / "expression.csv", index=False)
 
@@ -119,6 +123,96 @@ class TestInSilicoKnockout(unittest.TestCase):
             data_dir / "regulators.csv", index=False
         )
         return data_dir
+
+    def test_looks_like_raw_counts_detects_count_matrix(self):
+        counts = pd.DataFrame(
+            {
+                "C1": [0, 4, 100, 5],
+                "C2": [1, 0, 60, 3],
+                "C3": [2, 7, 120, 0],
+            },
+            index=["A", "B", "C", "D"],
+        )
+        self.assertTrue(_looks_like_raw_counts(counts))
+        logged = np.log1p(counts)
+        self.assertFalse(_looks_like_raw_counts(logged))
+
+    def test_merge_scTenifold_adds_combined_rank(self):
+        changes = pd.DataFrame(
+            {
+                "gene": ["A", "B", "C", "D"],
+                "wt_mean": [1.0, 1.0, 1.0, 1.0],
+                "ko_mean": [0.7, 0.8, 0.9, 1.0],
+                "delta": [-0.3, -0.2, -0.1, 0.0],
+                "abs_delta": [0.3, 0.2, 0.1, 0.0],
+            }
+        )
+        diff = pd.DataFrame(
+            {
+                "gene": ["D", "A", "B", "C"],
+                "sctenifold_distance": [0.5, 0.2, 0.1, 0.05],
+                "sctenifold_padj": [0.001, 0.01, 0.02, 0.1],
+            }
+        )
+        merged, kept = _merge_scTenifold(changes, diff)
+        self.assertIsNotNone(kept)
+        self.assertIn("sctenifold_score", merged.columns)
+        self.assertIn("combined_impact", merged.columns)
+        self.assertEqual(merged["gene"].iloc[0], "A")
+
+    @unittest.skipUnless(
+        _scTenifold_available(),
+        "scTenifoldpy not installed",
+    )
+    def test_run_uses_real_scTenifold_engine_on_raw_counts(self):
+        with tempfile.TemporaryDirectory() as tmp:
+            workdir = Path(tmp) / "work"
+            workdir.mkdir()
+            data_dir = self._write_inputs(workdir, raw=True)
+            cfg = load_config(
+                DEFAULT_CONFIG,
+                {
+                    "workdir": str(workdir),
+                    "expression_csv": "data/knockout/expression.csv",
+                    "metadata_csv": "data/knockout/metadata.csv",
+                    "insilico_gene": "TF1",
+                    "insilico_engine": "triple",
+                    "insilico_raw_count_input": True,
+                    "insilico_regulators_csv": "data/knockout/regulators.csv",
+                },
+            )
+            cfg.data["insilico_knockout"].update(
+                {
+                    "enabled": True,
+                    "run_enrichment": False,
+                    "max_genes": 50,
+                    "min_cells": 10,
+                    "n_propagation": 3,
+                    "network_edges_per_regulator": 20,
+                    "scTenifold_min_lib_size": 1,
+                    "scTenifold_min_percent": 0.01,
+                    "scTenifold_min_exp_sum": 1,
+                    "scTenifold_remove_outlier_cells": False,
+                    "scTenifold_n_networks": 1,
+                    "scTenifold_n_cells": 50,
+                    "scTenifold_q": 0.5,
+                    "scTenifold_K": 2,
+                }
+            )
+            summary = run_insilico_knockout(cfg, LOG, ko_gene="TF1")
+            self.assertEqual(summary["status"], "completed")
+            self.assertIn("scTenifoldKnk", summary["engine"])
+            self.assertIsNotNone(summary["scTenifoldKnk"])
+            self.assertEqual(summary["drugreflector"]["status"], "skipped")
+            in_silico = cfg.knockout_dir() / "in_silico"
+            sc_csv = in_silico / "data" / "insilico_scTenifold_results.csv"
+            self.assertTrue(sc_csv.exists())
+            changes = pd.read_csv(
+                in_silico / "data" / "insilico_target_changes.csv"
+            )
+            self.assertIn("sctenifold_padj", changes.columns)
+            self.assertIn("combined_impact", changes.columns)
+            self.assertTrue((data_dir / "expression.csv").exists())
 
     def test_run_generates_report_and_figures(self):
         with tempfile.TemporaryDirectory() as tmp:

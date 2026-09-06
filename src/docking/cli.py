@@ -54,7 +54,10 @@ def main(argv: list[str] | None = None) -> int:
         ("export-external", "export UniDock/HDOCK/HADDOCK templates"),
         ("redock", "re-dock top hits with higher exhaustiveness"),
         ("report", "generate HTML summary report"),
-        ("virtual-knockout", "score virtual gene knockouts from expression/DepMap data"),
+        (
+            "virtual-knockout",
+            "score candidates and run real single-cell virtual knockout",
+        ),
         ("network", "compound-disease overlap, PPI hub and C-T-P-D network"),
         ("faers", "FAERS-style disproportionality signal detection"),
         ("export-validation", "export wet-lab validation plan for top targets"),
@@ -127,6 +130,12 @@ def main(argv: list[str] | None = None) -> int:
         "normal_label": args.normal_label,
         "ko_top_n": args.ko_top_n,
         "insilico_gene": args.insilico_gene,
+        "insilico_engine": args.insilico_engine,
+        "insilico_raw_count_input": (
+            None
+            if args.insilico_raw_count_input is None
+            else args.insilico_raw_count_input == "true"
+        ),
         "insilico_species": args.insilico_species,
         "insilico_embedding_csv": args.insilico_embedding_csv,
         "insilico_regulators_csv": args.insilico_regulators_csv,
@@ -329,6 +338,18 @@ def _add_common(sub: argparse.ArgumentParser) -> None:
     sub.add_argument(
         "--insilico-gene",
         help="gene to perturb in the single-cell in-silico knockout analysis",
+    )
+    sub.add_argument(
+        "--insilico-engine",
+        choices=["auto", "celloracle", "scTenifoldKnk", "triple"],
+        default=None,
+        help="virtual knockout engine (default: auto raw-count detection)",
+    )
+    sub.add_argument(
+        "--insilico-raw-count-input",
+        choices=["true", "false"],
+        default=None,
+        help="force raw-count interpretation for the scTenifold engine",
     )
     sub.add_argument(
         "--insilico-species",

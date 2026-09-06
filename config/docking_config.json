@@ -112,6 +112,8 @@
   "insilico_knockout": {
     "enabled": false,
     "ko_gene": null,
+    "engine": "auto",
+    "raw_count_input": null,
     "species": "auto",
     "embedding_csv": null,
     "regulators_csv": null,
@@ -129,7 +131,23 @@
     "enrichment_timeout": 900,
     "gene_note": null,
     "photo_output_dir": null,
-    "figures": true
+    "figures": true,
+    "scTenifold_min_lib_size": 1000,
+    "scTenifold_remove_outlier_cells": true,
+    "scTenifold_min_percent": 0.05,
+    "scTenifold_max_mito_ratio": 0.1,
+    "scTenifold_min_exp_avg": 0.05,
+    "scTenifold_min_exp_sum": 25,
+    "scTenifold_n_networks": 5,
+    "scTenifold_n_cells": 500,
+    "scTenifold_n_comp": 3,
+    "scTenifold_q": 0.95,
+    "scTenifold_K": 3,
+    "scTenifold_ma_dim": 2,
+    "scTenifold_backend": "serial",
+    "scTenifold_jobs": 1,
+    "drugreflector_checkpoint_dir": null,
+    "drugreflector_top_n": 50
   },
   "network_toxicology": {
     "compound_name": null,
