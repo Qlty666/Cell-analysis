@@ -47,6 +47,7 @@ from web_ui import (  # noqa: E402
     run_network_request,
     start_dock_job,
     start_full_job,
+    start_validation_job,
     unregister_heartbeat,
 )
 
@@ -125,6 +126,20 @@ class TestJobRecordPersistence(unittest.TestCase):
 
 
 class TestNetworkAndFaersWeb(unittest.TestCase):
+    def test_validation_run_passes_count_and_seed(self):
+        with (
+            mock.patch("web_ui.subprocess.Popen") as popen,
+        ):
+            try:
+                start_validation_job({"count": ["3"], "seed": ["20260820"]})
+            finally:
+                web_ui_module.VALIDATION_JOB.clear()
+            cmd = popen.call_args.args[0]
+            self.assertIn("--count", cmd)
+            self.assertEqual(cmd[cmd.index("--count") + 1], "3")
+            self.assertIn("--seed", cmd)
+            self.assertEqual(cmd[cmd.index("--seed") + 1], "20260820")
+
     def test_network_request_runs_and_lists_files(self):
         with tempfile.TemporaryDirectory() as tmp:
             workdir = Path(tmp) / "work"
@@ -303,6 +318,15 @@ class TestRecentWebIntegration(unittest.TestCase):
         knockout = (
             APP_ROOT / "web" / "templates" / "knockout_page_template.html"
         ).read_text(encoding="utf-8")
+        network = (
+            APP_ROOT / "web" / "templates" / "network_page_template.html"
+        ).read_text(encoding="utf-8")
+        faers = (
+            APP_ROOT / "web" / "templates" / "faers_page_template.html"
+        ).read_text(encoding="utf-8")
+        validation = (
+            APP_ROOT / "web" / "templates" / "validation_page_template.html"
+        ).read_text(encoding="utf-8")
         self.assertIn('name="LIVER_ML_MODEL"', single)
         self.assertIn('name="ml_model"', full)
         self.assertIn('name="ppi_network_csv"', full)
@@ -310,9 +334,18 @@ class TestRecentWebIntegration(unittest.TestCase):
         self.assertIn('name="model"', dock)
         self.assertIn('name="training_csv"', dock)
         self.assertIn('name="moderate_cutoff"', dock)
+        self.assertIn("saveModuleForm('form', 'liver_ui_dock_form'", dock)
         self.assertIn('name="ko_ppi"', knockout)
         self.assertIn('name="ko_insilico_engine"', knockout)
         self.assertIn('name="ko_insilico_raw_count_input"', knockout)
+        self.assertIn('name="ko_validation_top_n"', knockout)
+        self.assertIn('name="ko_insilico_max_genes"', knockout)
+        self.assertIn("saveModuleForm('koForm'", knockout)
+        self.assertIn('name="net_disease_gene_column"', network)
+        self.assertIn('name="net_venn"', network)
+        self.assertIn("saveModuleForm('netForm'", network)
+        self.assertIn("saveModuleForm('faersForm'", faers)
+        self.assertIn('id="validationStatus"', validation)
         molecular = (
             APP_ROOT
             / "web"

@@ -163,6 +163,13 @@ a.file-link { color: #1665c0; text-decoration: none; margin-right: 12px; }
 
 <div class="card" id="dock-run">
   <form id="form">
+    <div class="page-actions" style="margin-bottom:8px;">
+      <button type="button" class="secondary" onclick="saveModuleForm('form', 'liver_ui_dock_form', 'message')">保存设置</button>
+      <button type="button" class="secondary" onclick="restoreModuleForm('form', 'liver_ui_dock_form', 'message')">恢复设置</button>
+      <button type="button" class="secondary" onclick="resetModuleForm('form', 'liver_ui_dock_form', 'message')">恢复默认</button>
+    </div>
+    <details class="form-section" open>
+      <summary>输入文件</summary>
     <div class="grid wide">
       <label>工作目录
         <input name="workdir" placeholder="请输入保存路径" required>
@@ -174,6 +181,9 @@ a.file-link { color: #1665c0; text-decoration: none; margin-right: 12px; }
         <input name="ligand" placeholder="请输入配体文件路径">
       </label>
     </div>
+    </details>
+    <details class="form-section" open>
+      <summary>运行参数</summary>
     <div class="grid wide">
       <label>执行步骤
         <select name="stage">
@@ -251,6 +261,7 @@ a.file-link { color: #1665c0; text-decoration: none; margin-right: 12px; }
       </label>
     </div>
     <label class="toggle"><input type="checkbox" name="force" value="1"> 强制从第一阶段重跑</label>
+    </details>
     <div class="actions">
       <button id="startBtn" type="button" data-primary onclick="startRun()">开始任务</button>
     </div>

@@ -23,6 +23,13 @@
 
   <div class="card">
     <form id="mdForm">
+      <div class="page-actions" style="margin-bottom:8px;">
+        <button type="button" class="secondary" onclick="saveModuleForm('mdForm', 'liver_ui_md_form', 'mdMessage')">保存设置</button>
+        <button type="button" class="secondary" onclick="restoreModuleForm('mdForm', 'liver_ui_md_form', 'mdMessage')">恢复设置</button>
+        <button type="button" class="secondary" onclick="resetModuleForm('mdForm', 'liver_ui_md_form', 'mdMessage')">恢复默认</button>
+      </div>
+      <details class="form-section" open>
+        <summary>模拟参数</summary>
       <div class="grid wide">
         <label>工作目录
           <input name="workdir" placeholder="默认 dock">
@@ -71,6 +78,7 @@
         </label>
         <label class="toggle"><input type="checkbox" name="md_gpu" value="1"> GPU</label>
       </div>
+      </details>
       <div class="actions">
         <button id="mdStartBtn" type="button" onclick="startMdSimulation(this)">开始分子动力学模拟</button>
       </div>
@@ -95,10 +103,27 @@
     <div class="tablebox"><table id="resultTable"></table></div>
     <div id="gallery" class="gallery"></div>
   </div>
+
+  <div class="card">
+    <h2 style="margin-top:0;">分析历史</h2>
+    <div id="dockHistory">正在加载历史记录...</div>
+  </div>
+
+  <div class="card">
+    <h2 style="margin-top:0;">环境状态与自动补全</h2>
+    <label for="dockInstallPath">安装地址</label>
+    <input id="dockInstallPath" name="install_path" placeholder="可选">
+    <div class="actions" style="margin-top:10px;">
+      <button type="button" onclick="checkEnv(this)">检查环境</button>
+      <button type="button" class="secondary" onclick="installEnv(this)">补全环境</button>
+    </div>
+    <pre id="dockEnvOutput">点击“检查环境”查看依赖状态。</pre>
+    <div id="dockEnv">正在获取环境信息...</div>
+  </div>
 </div>
 
 <script src="/static/dock_app.js"></script>
-<script>restoreJobRecord();</script>
+<script>initDockPage();</script>
 <div id="jobToast" class="job-toast" hidden>
   <div class="job-toast-title" id="jobToastTitle"></div>
   <div class="job-toast-body" id="jobToastBody"></div>

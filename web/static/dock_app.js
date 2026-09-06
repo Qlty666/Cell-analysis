@@ -58,6 +58,81 @@ function msg(text, cls) {
   el.textContent = text;
 }
 
+function moduleMsg(messageId, text, cls) {
+  const el = document.getElementById(messageId);
+  if (!el) return;
+  el.className = cls || '';
+  el.textContent = text;
+}
+
+function collectModuleForm(formId) {
+  const form = document.getElementById(formId);
+  const state = {};
+  if (!form) return state;
+  new FormData(form).forEach((value, key) => {
+    state[key] = value;
+  });
+  return state;
+}
+
+function restoreModuleState(formId, state) {
+  const form = document.getElementById(formId);
+  if (!form || !state) return;
+  form.querySelectorAll('input[type="checkbox"]').forEach((box) => {
+    box.checked = false;
+  });
+  Object.entries(state).forEach(([name, value]) => {
+    const el = form.querySelector('[name="' + name + '"]');
+    if (!el) return;
+    if (el.type === 'checkbox') {
+      el.checked = ['1', 'true', 'on', 'yes'].indexOf(
+        String(value).toLowerCase()
+      ) !== -1;
+    } else {
+      el.value = value;
+    }
+  });
+}
+
+function saveModuleForm(formId, storageKey, messageId) {
+  try {
+    sessionStorage.setItem(storageKey, JSON.stringify(collectModuleForm(formId)));
+    moduleMsg(messageId, '设置已保存到当前浏览器标签页。', 'ok');
+  } catch (e) {
+    moduleMsg(messageId, '保存设置失败：' + String(e.message || e), 'error');
+  }
+}
+
+function autoSaveModuleForm(formId, storageKey) {
+  try {
+    sessionStorage.setItem(storageKey, JSON.stringify(collectModuleForm(formId)));
+  } catch (e) {}
+}
+
+function restoreModuleForm(formId, storageKey, messageId) {
+  let saved = null;
+  try {
+    saved = JSON.parse(sessionStorage.getItem(storageKey) || 'null');
+  } catch (e) {
+    saved = null;
+  }
+  if (!saved) {
+    moduleMsg(messageId, '没有已保存的设置。', 'error');
+    return;
+  }
+  restoreModuleState(formId, saved);
+  moduleMsg(messageId, '设置已恢复。', 'ok');
+}
+
+function resetModuleForm(formId, storageKey, messageId) {
+  try {
+    sessionStorage.removeItem(storageKey);
+  } catch (e) {}
+  const form = document.getElementById(formId);
+  if (form) form.reset();
+  moduleMsg(messageId, '已恢复默认设置。', 'ok');
+}
+
 function formValue(name) {
   const form = document.getElementById('form');
   if (!form) return '';
@@ -138,6 +213,7 @@ async function launchDock(data, btn) {
 function startRun() {
   const form = document.getElementById('form');
   const data = new URLSearchParams(new FormData(form));
+  autoSaveModuleForm('form', 'liver_ui_dock_form');
   launchDock(data, document.getElementById('startBtn'));
 }
 
@@ -146,6 +222,7 @@ async function startMdSimulation(btn) {
   const data = new URLSearchParams(new FormData(form));
   data.set('stage', 'md-simulation');
   if (!data.get('md_mode')) data.set('md_mode', 'prepare');
+  autoSaveModuleForm('mdForm', 'liver_ui_md_form');
   await launchDock(data, btn || document.getElementById('mdStartBtn'));
 }
 
@@ -421,6 +498,7 @@ function koMsg(text, cls) {
 async function runKnockout(btn) {
   const form = document.getElementById('koForm');
   const data = new URLSearchParams(new FormData(form));
+  autoSaveModuleForm('koForm', 'liver_ui_ko_form');
   btn.disabled = true;
   koMsg('正在运行虚拟敲除...');
   try {
@@ -439,7 +517,11 @@ async function runKnockout(btn) {
 async function exportValidation(btn) {
   const form = document.getElementById('koForm');
   const data = new URLSearchParams(new FormData(form));
-  if (!data.get('validation_top_n')) data.set('validation_top_n', '10');
+  if (data.get('ko_validation_top_n')) {
+    data.set('validation_top_n', data.get('ko_validation_top_n'));
+  } else if (!data.get('validation_top_n')) {
+    data.set('validation_top_n', '10');
+  }
   btn.disabled = true;
   const box = document.getElementById('koValidation');
   box.textContent = '正在导出湿实验验证方案...';
@@ -473,12 +555,35 @@ async function loadValidationReport() {
   }
 }
 
+async function refreshValidationStatus() {
+  const box = document.getElementById('validationStatus');
+  if (!box) return;
+  try {
+    const resp = await fetch('/dock/validation-status');
+    const status = await resp.json();
+    if (!status.started) {
+      box.textContent = '当前没有运行中的验证任务。';
+      return;
+    }
+    box.innerHTML = '<p class="' + (status.running ? 'ok' : status.ok ? 'ok' : 'error') + '">' +
+      (status.running ? '验证运行中，请稍候...' : status.ok ? '最近一次验证已完成。' : '最近一次验证运行失败。') +
+      '</p><pre style="height:180px;">' + esc(status.log || '') + '</pre>';
+  } catch (e) {
+    box.textContent = '验证状态读取失败：' + String(e.message || e);
+  }
+}
+
 async function runValidationJob(btn) {
   const box = document.getElementById('validationReport');
   btn.disabled = true;
-  box.textContent = '正在启动随机真实 GSE 验证（10 个数据集，耗时较长）...';
+  const form = document.getElementById('validationForm');
+  const payload = form ? new URLSearchParams(new FormData(form)) : new URLSearchParams();
+  box.textContent = '正在启动随机真实 GSE 验证，耗时较长...';
   try {
-    const resp = await fetch('/dock/validation/run', {method: 'POST'});
+    const resp = await fetch('/dock/validation/run', {
+      method: 'POST',
+      body: payload,
+    });
     const data = await resp.json();
     if (!resp.ok) throw new Error(data.error || '启动失败');
     const timer = setInterval(async () => {
@@ -488,11 +593,13 @@ async function runValidationJob(btn) {
         if (!status.running) {
           clearInterval(timer);
           btn.disabled = false;
+          await refreshValidationStatus();
           box.textContent = (status.ok ? '验证完成。' : '验证运行失败。') +
             '\n' + (status.log || '');
           if (status.ok) await loadValidationReport();
         } else {
           box.textContent = '验证运行中...\n' + (status.log || '');
+          await refreshValidationStatus();
         }
       } catch (e) {
         clearInterval(timer);
@@ -573,6 +680,7 @@ function netMsg(text, cls) {
 async function runNetwork(btn) {
   const form = document.getElementById('netForm');
   const data = new URLSearchParams(new FormData(form));
+  autoSaveModuleForm('netForm', 'liver_ui_network_form');
   btn.disabled = true;
   netMsg('正在运行网络毒理学分析...');
   try {
@@ -637,6 +745,7 @@ function faersMsg(text, cls) {
 async function runFaers(btn) {
   const form = document.getElementById('faersForm');
   const data = new URLSearchParams(new FormData(form));
+  autoSaveModuleForm('faersForm', 'liver_ui_faers_form');
   btn.disabled = true;
   faersMsg('正在运行 FAERS 信号检测...');
   try {
@@ -701,4 +810,6 @@ function initDockPage() {
 
 function initValidationPage() {
   loadValidationReport();
+  refreshValidationStatus();
+  window.setInterval(refreshValidationStatus, 3000);
 }

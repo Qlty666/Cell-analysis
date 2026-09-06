@@ -23,6 +23,13 @@
 
   <div class="card" id="network-card">
     <form id="netForm">
+      <div class="page-actions" style="margin-bottom:8px;">
+        <button type="button" class="secondary" onclick="saveModuleForm('netForm', 'liver_ui_network_form', 'netMessage')">保存设置</button>
+        <button type="button" class="secondary" onclick="restoreModuleForm('netForm', 'liver_ui_network_form', 'netMessage')">恢复设置</button>
+        <button type="button" class="secondary" onclick="resetModuleForm('netForm', 'liver_ui_network_form', 'netMessage')">恢复默认</button>
+      </div>
+      <details class="form-section" open>
+        <summary>交集与网络参数</summary>
       <div class="grid wide">
         <label>工作目录
           <input name="net_workdir" placeholder="默认 dock">
@@ -39,10 +46,15 @@
         <label>疾病基因 CSV（相对工作目录）
           <input name="net_disease_genes" placeholder="data/network/disease_genes.csv" required>
         </label>
+        <label>疾病基因列（可选）
+          <input name="net_disease_gene_column" placeholder="gene">
+        </label>
         <label>PPI 边表（可选）
           <input name="net_ppi" placeholder="data/network/string_edges.tsv">
         </label>
+        <label class="toggle"><input type="checkbox" name="net_venn" value="1" checked> 输出 Venn 图</label>
       </div>
+      </details>
       <div class="actions">
         <button type="button" data-primary onclick="runNetwork(this)">运行网络毒理学</button>
       </div>

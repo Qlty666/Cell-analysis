@@ -23,6 +23,13 @@
 
   <div class="card" id="faers-card">
     <form id="faersForm">
+      <div class="page-actions" style="margin-bottom:8px;">
+        <button type="button" class="secondary" onclick="saveModuleForm('faersForm', 'liver_ui_faers_form', 'faersMessage')">保存设置</button>
+        <button type="button" class="secondary" onclick="restoreModuleForm('faersForm', 'liver_ui_faers_form', 'faersMessage')">恢复设置</button>
+        <button type="button" class="secondary" onclick="resetModuleForm('faersForm', 'liver_ui_faers_form', 'faersMessage')">恢复默认</button>
+      </div>
+      <details class="form-section" open>
+        <summary>信号检测参数</summary>
       <div class="grid wide">
         <label>工作目录
           <input name="faers_workdir" placeholder="默认 dock">
@@ -43,6 +50,7 @@
           <input name="faers_min_count" type="number" min="1" value="3">
         </label>
       </div>
+      </details>
       <div class="actions">
         <button type="button" data-primary onclick="runFaers(this)">运行 FAERS 信号检测</button>
       </div>
