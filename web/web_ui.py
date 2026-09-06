@@ -55,6 +55,11 @@ if str(SCRIPTS_DIR) not in sys.path:
 from common.env import require_rscript  # noqa: E402
 
 DOCK_TEMPLATE_PATH = TEMPLATE_DIR / "dock_page_template.html"
+MD_TEMPLATE_PATH = TEMPLATE_DIR / "md_simulation_page_template.html"
+KNOCKOUT_TEMPLATE_PATH = TEMPLATE_DIR / "knockout_page_template.html"
+NETWORK_TEMPLATE_PATH = TEMPLATE_DIR / "network_page_template.html"
+FAERS_TEMPLATE_PATH = TEMPLATE_DIR / "faers_page_template.html"
+VALIDATION_TEMPLATE_PATH = TEMPLATE_DIR / "validation_page_template.html"
 DOCK_JOBS = {}
 DOCK_QUEUE = []
 DOCK_QUEUE_LOCK = threading.RLock()
@@ -91,7 +96,12 @@ NAV_HTML = (
     '<a href="/">表达分析</a>'
     '<a href="/datasets">数据集搜索</a>'
     '<a href="/dock">虚拟筛选</a>'
+    '<a href="/md-simulation">分子动力学</a>'
     '<a href="/molecular-docking">分子对接</a>'
+    '<a href="/knockout">虚拟敲除</a>'
+    '<a href="/network">网络毒理学</a>'
+    '<a href="/faers">FAERS</a>'
+    '<a href="/validation">真实数据验证</a>'
     '<a href="/results">结果清单</a>'
     '<a href="/tasks" class="nav-right">任务进度</a>'
     '</div>'
@@ -941,39 +951,85 @@ def get_page() -> str:
     return render_page()
 
 
+def _with_shared_nav(html: str) -> str:
+    """Replace a page's local nav block with the shared navigation."""
+    return re.sub(
+        r'<div class="topnav">.*?</div>',
+        lambda _: NAV_HTML,
+        html,
+        count=1,
+        flags=re.S,
+    )
+
+
 def render_dock_page() -> str:
     if DOCK_TEMPLATE_PATH.exists():
-        return DOCK_TEMPLATE_PATH.read_text(encoding="utf-8")
+        return _with_shared_nav(DOCK_TEMPLATE_PATH.read_text(encoding="utf-8"))
     return (
         "<html><body><h1>dock template missing</h1>"
         "<p>web/templates/dock_page_template.html not found</p></body></html>"
     )
 
 
+def _render_template(path: Path, missing: str) -> str:
+    if path.exists():
+        return _with_shared_nav(path.read_text(encoding="utf-8"))
+    return f"<html><body><h1>{missing}</h1></body></html>"
+
+
+def render_md_simulation_page() -> str:
+    return _render_template(
+        MD_TEMPLATE_PATH,
+        "md simulation template missing",
+    )
+
+
+def render_knockout_page() -> str:
+    return _render_template(
+        KNOCKOUT_TEMPLATE_PATH,
+        "knockout template missing",
+    )
+
+
+def render_network_page() -> str:
+    return _render_template(
+        NETWORK_TEMPLATE_PATH,
+        "network toxicology template missing",
+    )
+
+
+def render_faers_page() -> str:
+    return _render_template(
+        FAERS_TEMPLATE_PATH,
+        "faers template missing",
+    )
+
+
+def render_validation_page() -> str:
+    return _render_template(
+        VALIDATION_TEMPLATE_PATH,
+        "validation template missing",
+    )
+
+
 def render_molecular_docking_page() -> str:
-    if MOLECULAR_DOCK_TEMPLATE_PATH.exists():
-        return MOLECULAR_DOCK_TEMPLATE_PATH.read_text(encoding="utf-8")
-    return (
-        "<html><body><h1>molecular docking template missing</h1>"
-        "<p>web/templates/molecular_docking_template.html not found</p></body></html>"
+    return _render_template(
+        MOLECULAR_DOCK_TEMPLATE_PATH,
+        "molecular docking template missing",
     )
 
 
 def render_full_page() -> str:
-    if FULL_TEMPLATE_PATH.exists():
-        return FULL_TEMPLATE_PATH.read_text(encoding="utf-8")
-    return (
-        "<html><body><h1>full pipeline template missing</h1>"
-        "<p>web/templates/full_page_template.html not found</p></body></html>"
+    return _render_template(
+        FULL_TEMPLATE_PATH,
+        "full pipeline template missing",
     )
 
 
 def render_results_page() -> str:
-    if RESULTS_TEMPLATE_PATH.exists():
-        return RESULTS_TEMPLATE_PATH.read_text(encoding="utf-8")
-    return (
-        "<html><body><h1>results template missing</h1>"
-        "<p>web/templates/results_manifest_optimized.html not found</p></body></html>"
+    return _render_template(
+        RESULTS_TEMPLATE_PATH,
+        "results template missing",
     )
 
 
@@ -1049,20 +1105,16 @@ def result_details_data() -> dict:
 
 
 def render_tasks_page() -> str:
-    if TASKS_TEMPLATE_PATH.exists():
-        return TASKS_TEMPLATE_PATH.read_text(encoding="utf-8")
-    return (
-        "<html><body><h1>tasks template missing</h1>"
-        "<p>web/templates/tasks_template.html not found</p></body></html>"
+    return _render_template(
+        TASKS_TEMPLATE_PATH,
+        "tasks template missing",
     )
 
 
 def render_datasets_page() -> str:
-    if DATASET_TEMPLATE_PATH.exists():
-        return DATASET_TEMPLATE_PATH.read_text(encoding="utf-8")
-    return (
-        "<html><body><h1>datasets template missing</h1>"
-        "<p>web/templates/datasets_template.html not found</p></body></html>"
+    return _render_template(
+        DATASET_TEMPLATE_PATH,
+        "datasets template missing",
     )
 
 
@@ -3349,6 +3401,41 @@ class Handler(BaseHTTPRequestHandler):
         if parsed.path == "/dock":
             self._send(200, render_dock_page().encode("utf-8"), "text/html; charset=utf-8")
             return
+        if parsed.path == "/md-simulation":
+            self._send(
+                200,
+                render_md_simulation_page().encode("utf-8"),
+                "text/html; charset=utf-8",
+            )
+            return
+        if parsed.path == "/knockout":
+            self._send(
+                200,
+                render_knockout_page().encode("utf-8"),
+                "text/html; charset=utf-8",
+            )
+            return
+        if parsed.path == "/network":
+            self._send(
+                200,
+                render_network_page().encode("utf-8"),
+                "text/html; charset=utf-8",
+            )
+            return
+        if parsed.path == "/faers":
+            self._send(
+                200,
+                render_faers_page().encode("utf-8"),
+                "text/html; charset=utf-8",
+            )
+            return
+        if parsed.path == "/validation":
+            self._send(
+                200,
+                render_validation_page().encode("utf-8"),
+                "text/html; charset=utf-8",
+            )
+            return
         if parsed.path == "/molecular-docking":
             self._send(
                 200,
@@ -4537,7 +4624,12 @@ def main() -> int:
         choices=[
             "single",
             "dock",
+            "md-simulation",
             "molecular-docking",
+            "knockout",
+            "network",
+            "faers",
+            "validation",
             "full",
             "results",
             "tasks",
@@ -4581,8 +4673,18 @@ def main() -> int:
     ).start()
     if args.page == "dock":
         open_url = url + "/dock"
+    elif args.page == "md-simulation":
+        open_url = url + "/md-simulation"
     elif args.page == "molecular-docking":
         open_url = url + "/molecular-docking"
+    elif args.page == "knockout":
+        open_url = url + "/knockout"
+    elif args.page == "network":
+        open_url = url + "/network"
+    elif args.page == "faers":
+        open_url = url + "/faers"
+    elif args.page == "validation":
+        open_url = url + "/validation"
     elif args.page == "full":
         open_url = url + "/full"
     elif args.page == "results":

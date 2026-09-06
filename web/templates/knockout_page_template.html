@@ -1,0 +1,107 @@
+<!DOCTYPE html>
+<html lang="zh-CN">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1">
+<link rel="stylesheet" href="/static/app.css">
+<script src="/static/nav.js" defer></script>
+<title>虚拟敲除</title>
+</head>
+<body>
+<div class="topnav"></div>
+<div class="wrap">
+  <div class="page-head">
+    <div class="page-title">
+      <h1>虚拟敲除与靶点评分</h1>
+      <p class="page-sub">基因优先级评分、多维靶点评分和单细胞 scTenifoldKnk / CellOracle 风格虚拟敲除，并导出湿实验验证方案。</p>
+    </div>
+    <div class="page-actions">
+      <a class="link-button" href="/full">全自动流水线</a>
+      <a class="link-button" href="/results">结果清单</a>
+    </div>
+  </div>
+
+  <div class="card" id="knockout-card">
+    <form id="koForm">
+      <div class="grid wide">
+        <label>工作目录
+          <input name="ko_workdir" placeholder="请输工作目录，默认 dock">
+        </label>
+        <label>表达矩阵 CSV（相对工作目录）
+          <input name="ko_expression" placeholder="data/knockout/expression.csv" required>
+        </label>
+        <label>样本元数据 CSV（可选）
+          <input name="ko_metadata" placeholder="data/knockout/metadata.csv">
+        </label>
+        <label>DepMap 依赖 CSV（可选）
+          <input name="ko_depmap" placeholder="data/knockout/depmap_gene_effect.csv">
+        </label>
+        <label>PPI 网络边表 CSV/TSV（可选）
+          <input name="ko_ppi" placeholder="data/network/string_edges.tsv">
+        </label>
+        <label>肿瘤/病例标签（可选）
+          <input name="ko_case" placeholder="Tumor">
+        </label>
+        <label>正常标签（可选）
+          <input name="ko_normal" placeholder="Normal">
+        </label>
+        <label>Top N
+          <input name="ko_top_n" type="number" min="1" value="50">
+        </label>
+        <label>单细胞虚拟敲除基因（可选）
+          <input name="ko_insilico_gene" placeholder="如 Gata1，填写后运行 GRN 虚拟敲除">
+        </label>
+        <label>敲除引擎
+          <select name="ko_insilico_engine">
+            <option value="auto" selected>auto - 自动检测</option>
+            <option value="celloracle">celloracle - 内置 GRN 传播</option>
+            <option value="scTenifoldKnk">scTenifoldKnk - 官方引擎</option>
+            <option value="triple">triple - scTenifold + CellOracle</option>
+          </select>
+        </label>
+        <label>原始计数输入
+          <select name="ko_insilico_raw_count_input">
+            <option value="" selected>auto</option>
+            <option value="true">是（按原始计数处理）</option>
+            <option value="false">否（按 log 表达处理）</option>
+          </select>
+        </label>
+        <label>物种（可选，富集用）
+          <select name="ko_insilico_species">
+            <option value="">auto</option>
+            <option value="hs">hs</option>
+            <option value="mm">mm</option>
+          </select>
+        </label>
+        <label>UMAP 坐标 CSV（可选）
+          <input name="ko_insilico_embedding" placeholder="data/knockout/umap_coordinates.csv">
+        </label>
+        <label>候选调控因子 CSV（可选）
+          <input name="ko_insilico_regulators" placeholder="data/knockout/regulators.csv">
+        </label>
+        <label>图片/报告输出目录（可选）
+          <input name="ko_insilico_photo" placeholder="如 <PHOTO_DIR>">
+        </label>
+      </div>
+      <div class="actions">
+        <button type="button" data-primary onclick="runKnockout(this)">运行虚拟敲除</button>
+        <button type="button" class="secondary" onclick="exportValidation(this)">导出湿实验验证方案</button>
+      </div>
+    </form>
+    <div id="koMessage"></div>
+    <div id="koSummary"></div>
+    <div id="koFiles"></div>
+    <div id="koValidation"></div>
+    <div class="tablebox"><table id="koTable"></table></div>
+    <div id="koGallery" class="gallery"></div>
+  </div>
+</div>
+
+<script src="/static/dock_app.js"></script>
+<div id="jobToast" class="job-toast" hidden>
+  <div class="job-toast-title" id="jobToastTitle"></div>
+  <div class="job-toast-body" id="jobToastBody"></div>
+  <button type="button" class="job-toast-close" onclick="closeJobToast()">知道了</button>
+</div>
+</body>
+</html>

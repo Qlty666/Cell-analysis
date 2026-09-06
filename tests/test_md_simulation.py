@@ -342,12 +342,12 @@ class TestMdWeb(unittest.TestCase):
             self.assertEqual(data["md"]["summary"]["prepared"], 1)
             self.assertTrue(any("complex.pdb" not in name for name in data["files"]))
 
-    def test_dock_page_exposes_md_controls(self):
+    def test_md_page_exposes_md_controls(self):
         template = (
             APP_ROOT
             / "web"
             / "templates"
-            / "dock_page_template.html"
+            / "md_simulation_page_template.html"
         ).read_text(encoding="utf-8")
         for token in (
             "分子动力学模拟",
@@ -356,6 +356,10 @@ class TestMdWeb(unittest.TestCase):
             "startMdSimulation",
         ):
             self.assertIn(token, template)
+        dock = (
+            APP_ROOT / "web" / "templates" / "dock_page_template.html"
+        ).read_text(encoding="utf-8")
+        self.assertNotIn('id="mdForm"', dock)
 
 
 if __name__ == "__main__":

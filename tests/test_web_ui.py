@@ -207,14 +207,26 @@ class TestNetworkAndFaersWeb(unittest.TestCase):
         dock = (APP_ROOT / "web" / "templates" / "dock_page_template.html").read_text(
             encoding="utf-8"
         )
+        knockout = (
+            APP_ROOT / "web" / "templates" / "knockout_page_template.html"
+        ).read_text(encoding="utf-8")
+        network = (
+            APP_ROOT / "web" / "templates" / "network_page_template.html"
+        ).read_text(encoding="utf-8")
+        faers = (
+            APP_ROOT / "web" / "templates" / "faers_page_template.html"
+        ).read_text(encoding="utf-8")
         results = (
             APP_ROOT / "web" / "templates" / "results_manifest_optimized.html"
         ).read_text(encoding="utf-8")
         guide = (APP_ROOT / "docs" / "result_figure_guide.md").read_text(
             encoding="utf-8"
         )
-        self.assertIn("网络毒理学分析", dock)
-        self.assertIn("FAERS 不相称性信号检测", dock)
+        self.assertNotIn("网络毒理学分析", dock)
+        self.assertNotIn("FAERS 不相称性信号检测", dock)
+        self.assertIn("虚拟敲除与靶点评分", knockout)
+        self.assertIn("网络毒理学分析", network)
+        self.assertIn("FAERS 不相称性信号检测", faers)
         self.assertIn("网络毒理学与 FAERS 信号", results)
         self.assertIn("### 6.3 网络毒理学与 FAERS 信号", guide)
 
@@ -288,16 +300,19 @@ class TestRecentWebIntegration(unittest.TestCase):
         dock = (APP_ROOT / "web" / "templates" / "dock_page_template.html").read_text(
             encoding="utf-8"
         )
+        knockout = (
+            APP_ROOT / "web" / "templates" / "knockout_page_template.html"
+        ).read_text(encoding="utf-8")
         self.assertIn('name="LIVER_ML_MODEL"', single)
         self.assertIn('name="ml_model"', full)
         self.assertIn('name="ppi_network_csv"', full)
         self.assertIn('name="depmap_csv"', full)
         self.assertIn('name="model"', dock)
         self.assertIn('name="training_csv"', dock)
-        self.assertIn('name="ko_ppi"', dock)
         self.assertIn('name="moderate_cutoff"', dock)
-        self.assertIn('name="ko_insilico_engine"', dock)
-        self.assertIn('name="ko_insilico_raw_count_input"', dock)
+        self.assertIn('name="ko_ppi"', knockout)
+        self.assertIn('name="ko_insilico_engine"', knockout)
+        self.assertIn('name="ko_insilico_raw_count_input"', knockout)
         molecular = (
             APP_ROOT
             / "web"
@@ -978,6 +993,11 @@ class TestTemplatePolish(unittest.TestCase):
             "results_manifest_optimized.html",
             "tasks_template.html",
             "datasets_template.html",
+            "md_simulation_page_template.html",
+            "knockout_page_template.html",
+            "network_page_template.html",
+            "faers_page_template.html",
+            "validation_page_template.html",
         ):
             html = self._read(name)
             self.assertIn(
@@ -994,6 +1014,28 @@ class TestTemplatePolish(unittest.TestCase):
         ).read_text(encoding="utf-8")
         self.assertIn(".topnav a .nav-count", css)
         self.assertIn(".topnav a .nav-count[hidden]", css)
+
+    def test_split_tool_pages_render_independently(self):
+        for path, marker in (
+            ("/md-simulation", "分子动力学模拟"),
+            ("/knockout", "虚拟敲除与靶点评分"),
+            ("/network", "网络毒理学分析"),
+            ("/faers", "FAERS 不相称性信号检测"),
+            ("/validation", "随机真实 GSE 验证报告"),
+        ):
+            self.assertIn(path, web_ui_module.NAV_HTML)
+        dock_html = web_ui_module.render_dock_page()
+        self.assertNotIn('id="koForm"', dock_html)
+        self.assertNotIn('id="netForm"', dock_html)
+        self.assertNotIn('id="faersForm"', dock_html)
+        self.assertNotIn('id="mdForm"', dock_html)
+        self.assertIn("虚拟敲除与靶点评分", web_ui_module.render_knockout_page())
+        self.assertIn("网络毒理学分析", web_ui_module.render_network_page())
+        self.assertIn("FAERS 不相称性信号检测", web_ui_module.render_faers_page())
+        self.assertIn(
+            "随机真实 GSE 验证报告",
+            web_ui_module.render_validation_page(),
+        )
 
     def test_running_task_counts_empty_stores(self):
         with (

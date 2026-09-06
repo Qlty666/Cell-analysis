@@ -1,0 +1,41 @@
+<!DOCTYPE html>
+<html lang="zh-CN">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1">
+<link rel="stylesheet" href="/static/app.css">
+<script src="/static/nav.js" defer></script>
+<title>真实数据验证</title>
+</head>
+<body>
+<div class="topnav"></div>
+<div class="wrap">
+  <div class="page-head">
+    <div class="page-title">
+      <h1>随机真实 GSE 验证报告</h1>
+      <p class="page-sub">用随机真实 GEO 数据集验证全流程，查看最近一次验证摘要或重新运行验证。</p>
+    </div>
+    <div class="page-actions">
+      <a class="link-button" href="/full">全自动流水线</a>
+      <a class="link-button" href="/results">结果清单</a>
+    </div>
+  </div>
+
+  <div class="card">
+    <div class="actions" style="margin-top:0;">
+      <button type="button" onclick="loadValidationReport()">查看验证报告</button>
+      <button type="button" class="secondary" onclick="runValidationJob(this)">重新运行随机真实 GSE 验证</button>
+    </div>
+    <pre id="validationReport">点击“查看验证报告”加载结果。</pre>
+  </div>
+</div>
+
+<script src="/static/dock_app.js"></script>
+<script>initValidationPage();</script>
+<div id="jobToast" class="job-toast" hidden>
+  <div class="job-toast-title" id="jobToastTitle"></div>
+  <div class="job-toast-body" id="jobToastBody"></div>
+  <button type="button" class="job-toast-close" onclick="closeJobToast()">知道了</button>
+</div>
+</body>
+</html>

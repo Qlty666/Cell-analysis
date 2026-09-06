@@ -1,0 +1,65 @@
+<!DOCTYPE html>
+<html lang="zh-CN">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1">
+<link rel="stylesheet" href="/static/app.css">
+<script src="/static/nav.js" defer></script>
+<title>网络毒理学</title>
+</head>
+<body>
+<div class="topnav"></div>
+<div class="wrap">
+  <div class="page-head">
+    <div class="page-title">
+      <h1>网络毒理学分析</h1>
+      <p class="page-sub">化合物-疾病靶点交集、多来源计数、STRING PPI hub 评分、Venn 图与 C-T-P-D 网络导出。</p>
+    </div>
+    <div class="page-actions">
+      <a class="link-button" href="/faers">FAERS</a>
+      <a class="link-button" href="/results">结果清单</a>
+    </div>
+  </div>
+
+  <div class="card" id="network-card">
+    <form id="netForm">
+      <div class="grid wide">
+        <label>工作目录
+          <input name="net_workdir" placeholder="默认 dock">
+        </label>
+        <label>化合物名称
+          <input name="net_compound_name" placeholder="Bisphenol A">
+        </label>
+        <label>疾病名称
+          <input name="net_disease_name" placeholder="Hepatocellular Carcinoma">
+        </label>
+        <label>化合物靶点 CSV（相对工作目录）
+          <input name="net_compound_targets" placeholder="data/network/compound_targets.csv" required>
+        </label>
+        <label>疾病基因 CSV（相对工作目录）
+          <input name="net_disease_genes" placeholder="data/network/disease_genes.csv" required>
+        </label>
+        <label>PPI 边表（可选）
+          <input name="net_ppi" placeholder="data/network/string_edges.tsv">
+        </label>
+      </div>
+      <div class="actions">
+        <button type="button" data-primary onclick="runNetwork(this)">运行网络毒理学</button>
+      </div>
+    </form>
+    <div id="netMessage"></div>
+    <div id="netSummary"></div>
+    <div id="netFiles"></div>
+    <div class="tablebox"><table id="netTable"></table></div>
+    <div id="netGallery" class="gallery"></div>
+  </div>
+</div>
+
+<script src="/static/dock_app.js"></script>
+<div id="jobToast" class="job-toast" hidden>
+  <div class="job-toast-title" id="jobToastTitle"></div>
+  <div class="job-toast-body" id="jobToastBody"></div>
+  <button type="button" class="job-toast-close" onclick="closeJobToast()">知道了</button>
+</div>
+</body>
+</html>

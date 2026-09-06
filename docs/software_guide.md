@@ -41,7 +41,10 @@ python scripts\search_datasets.py --help
 liverbio web
 ```
 
-默认打开 `http://127.0.0.1:8000/full`。可使用 `liverbio web --page dock`、`--page datasets`、`--page results`、`--page tasks` 等打开对应页面。
+默认打开 `http://127.0.0.1:8000/full`。可使用 `--page dock`、
+`--page md-simulation`、`--page knockout`、`--page network`、
+`--page faers`、`--page validation`、`--page molecular-docking`、
+`--page datasets`、`--page results`、`--page tasks` 等打开对应页面。
 
 ### 检查运行环境
 
