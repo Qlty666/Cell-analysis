@@ -9,6 +9,8 @@ The module can run in two modes:
 - ``auto``: run minimization, NVT/NPT equilibration and a short production
   simulation with GROMACS. Ligand parameters are generated with ACPYPE
   (GAFF2/AM1-BCC) when available, or taken from ``md_simulation.topology_dir``.
+  The production trajectory is summarized with RMSD, Rg, SASA,
+  protein-ligand hydrogen bonds, residue RMSF and binding-pocket RMSF.
 """
 
 from __future__ import annotations
@@ -33,6 +35,34 @@ from .utils import (
 )
 
 MD_DIR_NAME = "06_md"
+
+
+def _empty_md_metrics() -> dict:
+    """Return blank row metrics so prepare and auto mode share one schema."""
+    return {
+        "time_ns": "",
+        "rmsd_protein_mean_nm": "",
+        "rmsd_protein_tail_mean_nm": "",
+        "rmsd_protein_tail_std_nm": "",
+        "rmsd_ligand_mean_nm": "",
+        "rmsd_ligand_tail_mean_nm": "",
+        "rmsd_ligand_tail_std_nm": "",
+        "rmsf_ligand_mean_nm": "",
+        "rmsf_ligand_tail_mean_nm": "",
+        "rmsf_ligand_tail_std_nm": "",
+        "rg_protein_mean_nm": "",
+        "rg_protein_tail_mean_nm": "",
+        "rg_protein_tail_std_nm": "",
+        "sasa_protein_mean_nm2": "",
+        "sasa_protein_tail_mean_nm2": "",
+        "sasa_protein_tail_std_nm2": "",
+        "hbonds_protein_ligand_mean": "",
+        "hbonds_protein_ligand_tail_mean": "",
+        "hbonds_protein_ligand_tail_std": "",
+        "rmsf_contact_residue_mean_nm": "",
+        "binding_site_residues": "",
+        "stability_label": "",
+    }
 
 
 def run_md_simulation(
@@ -75,11 +105,8 @@ def run_md_simulation(
             "mode": mode,
             "status": "prepared",
             "error": "",
-            "time_ns": "",
-            "rmsd_protein_mean_nm": "",
-            "rmsd_ligand_mean_nm": "",
-            "rmsf_ligand_mean_nm": "",
         }
+        entry.update(_empty_md_metrics())
         try:
             entry.update(_prepare_hit_dir(cfg, row, run_dir, log))
             if mode == "auto":
@@ -316,7 +343,7 @@ def _run_gromacs_hit(
     _write_index(run_dir)
     log.info("GROMACS: running em/nvt/npt/production for %s", row.get("id"))
     _run_stages(gmx, cfg, run_dir)
-    log.info("GROMACS: analyzing RMSD/RMSF for %s", row.get("id"))
+    log.info("GROMACS: analyzing RMSD/Rg/SASA/H-bonds/RMSF for %s", row.get("id"))
     return _analyze_gromacs_output(cfg, run_dir)
 
 
@@ -747,7 +774,7 @@ def _make_whole_trajectory(gmx: str, cfg: ResolvedConfig, run_dir: Path) -> None
 
 
 def _analyze_gromacs_output(cfg: ResolvedConfig, run_dir: Path) -> dict:
-    metrics = {"time_ns": "", "rmsd_protein_mean_nm": "", "rmsd_ligand_mean_nm": "", "rmsf_ligand_mean_nm": ""}
+    metrics = _empty_md_metrics()
     tpr = run_dir / "md.tpr"
     xtc = run_dir / "md_nojump.xtc"
     if not tpr.exists() or not xtc.exists():
@@ -756,6 +783,9 @@ def _analyze_gromacs_output(cfg: ResolvedConfig, run_dir: Path) -> dict:
     if not gmx:
         return metrics
     timeout = _timeout(cfg)
+    fraction = float(
+        cfg.get("md_simulation", "equilibrate_fraction", 0.5) or 0.5
+    )
     ndx = run_dir / "index.ndx"
     protein_last_time: float | None = None
     if ndx.exists():
@@ -785,7 +815,13 @@ def _analyze_gromacs_output(cfg: ResolvedConfig, run_dir: Path) -> dict:
             if result.returncode == 0:
                 data = parse_xvg(out_xvg)
                 if data is not None and len(data):
-                    metrics[f"rmsd_{label}_mean_nm"] = float(np.mean(data[:, 1]))
+                    _store_mean_tail(
+                        metrics,
+                        out_xvg,
+                        f"rmsd_{label}",
+                        "_nm",
+                        fraction,
+                    )
                     if label == "protein":
                         protein_last_time = float(data[-1, 0])
                     if label == "ligand" and metrics.get("time_ns") == "":
@@ -812,7 +848,145 @@ def _analyze_gromacs_output(cfg: ResolvedConfig, run_dir: Path) -> dict:
         if result.returncode == 0:
             data = parse_xvg(out_rmsf)
             if data is not None and len(data):
-                metrics["rmsf_ligand_mean_nm"] = float(np.mean(data[:, 1]))
+                _store_mean_tail(
+                    metrics,
+                    out_rmsf,
+                    "rmsf_ligand",
+                    "_nm",
+                    fraction,
+                )
+        rg_path = _run_gmx_metric(
+            gmx,
+            cfg,
+            run_dir,
+            [
+                "gyrate",
+                "-s",
+                str(tpr),
+                "-f",
+                str(xtc),
+                "-n",
+                str(ndx),
+                "-tu",
+                "ns",
+            ],
+            "gyrate_protein.xvg",
+            "Protein\n",
+        )
+        if rg_path is not None:
+            _store_mean_tail(
+                metrics,
+                rg_path,
+                "rg_protein",
+                "_nm",
+                fraction,
+            )
+        sasa_path = _run_gmx_metric(
+            gmx,
+            cfg,
+            run_dir,
+            [
+                "sasa",
+                "-s",
+                str(tpr),
+                "-f",
+                str(xtc),
+                "-n",
+                str(ndx),
+                "-tu",
+                "ns",
+            ],
+            "sasa_protein.xvg",
+            "Protein\n",
+        )
+        if sasa_path is not None:
+            _store_mean_tail(
+                metrics,
+                sasa_path,
+                "sasa_protein",
+                "_nm2",
+                fraction,
+            )
+        hbond_paths: list[Path] = []
+        for donor, acceptor, out_name in [
+            ("Protein", "LIG", "hbond_protein_donor.xvg"),
+            ("LIG", "Protein", "hbond_ligand_donor.xvg"),
+        ]:
+            path = _run_gmx_metric(
+                gmx,
+                cfg,
+                run_dir,
+                [
+                    "hbond",
+                    "-s",
+                    str(tpr),
+                    "-f",
+                    str(xtc),
+                    "-n",
+                    str(ndx),
+                ],
+                out_name,
+                f"{donor}\n{acceptor}\n",
+                out_flag="-num",
+            )
+            if path is not None:
+                hbond_paths.append(path)
+        if hbond_paths:
+            combined_hbond = _combine_hbond_series(
+                run_dir,
+                [path.name for path in hbond_paths],
+                "hbond_protein_ligand.xvg",
+            )
+            if combined_hbond is not None:
+                _store_mean_tail(
+                    metrics,
+                    combined_hbond,
+                    "hbonds_protein_ligand",
+                    "",
+                    fraction,
+                )
+        residue_rmsf = _run_gmx_metric(
+            gmx,
+            cfg,
+            run_dir,
+            [
+                "rmsf",
+                "-s",
+                str(tpr),
+                "-f",
+                str(xtc),
+                "-n",
+                str(ndx),
+                "-res",
+            ],
+            "rmsf_protein_residue.xvg",
+            "Protein\n",
+        )
+        if residue_rmsf is not None:
+            contacts = _binding_contact_residues(
+                run_dir / "protein.gro",
+                run_dir / "ligand.gro",
+                float(
+                    cfg.get("md_simulation", "contact_cutoff_nm", 0.6) or 0.6
+                ),
+            )
+            metrics["binding_site_residues"] = ";".join(
+                str(residue) for residue in contacts
+            )
+            (run_dir / "binding_site_residues.txt").write_text(
+                "\n".join(str(residue) for residue in contacts),
+                encoding="utf-8",
+            )
+            residue_data = parse_xvg(residue_rmsf)
+            contact_mean = _mean_rmsf_for_contact_residues(
+                residue_data,
+                contacts,
+            )
+            if contact_mean is not None:
+                metrics["rmsf_contact_residue_mean_nm"] = round(
+                    float(contact_mean), 6
+                )
+        metrics["stability_label"] = _stability_label(metrics, cfg)
     if metrics.get("time_ns") == "" and protein_last_time is not None:
         metrics["time_ns"] = protein_last_time
     if cfg.get("md_simulation", "figures", True):
@@ -821,6 +995,198 @@ def _analyze_gromacs_output(cfg: ResolvedConfig, run_dir: Path) -> dict:
         except Exception:
             pass
     return metrics
+
+
+def _store_mean_tail(
+    metrics: dict,
+    path: Path,
+    key: str,
+    unit: str,
+    fraction: float = 0.5,
+) -> None:
+    """Store full-run and last-half mean/std values from an XVG series."""
+    data = parse_xvg(path)
+    if data is None or not len(data):
+        return
+    values = data[:, 1].astype(float)
+    start = max(1, int(len(values) * (1.0 - min(max(fraction, 0.0), 1.0))))
+    tail = values[start:]
+    metrics[f"{key}_mean{unit}"] = float(np.mean(values))
+    if len(tail):
+        metrics[f"{key}_tail_mean{unit}"] = float(np.mean(tail))
+        metrics[f"{key}_tail_std{unit}"] = float(np.std(tail))
+
+
+def _run_gmx_metric(
+    gmx: str,
+    cfg: ResolvedConfig,
+    run_dir: Path,
+    args: list[str],
+    out_name: str,
+    stdin_text: str,
+    out_flag: str = "-o",
+) -> Path | None:
+    """Run an optional GROMACS analysis and return its XVG path when valid."""
+    out = run_dir / out_name
+    try:
+        result = run_command(
+            [gmx, *args, out_flag, str(out)],
+            timeout=_timeout(cfg),
+            cwd=run_dir,
+            env=_gmx_env(gmx, cfg),
+            stdin_text=stdin_text,
+        )
+    except Exception:
+        return None
+    if result.returncode != 0 or not out.exists():
+        return None
+    return out
+
+
+def _combine_hbond_series(
+    run_dir: Path,
+    names: list[str],
+    out_name: str,
+) -> Path | None:
+    """Sum donor/acceptor hydrogen-bond series onto a shared time axis."""
+    series = [
+        data
+        for name in names
+        if (data := parse_xvg(run_dir / name)) is not None and len(data)
+    ]
+    if not series:
+        return None
+    n = min(len(data) for data in series)
+    time = series[0][:n, 0]
+    total = np.zeros(n)
+    for data in series:
+        total += data[:n, 1]
+    out = run_dir / out_name
+    lines = [
+        "@ title Protein-ligand hydrogen bonds",
+        "@ xaxis label Time (ns)",
+        "@ yaxis label Count",
+    ]
+    lines += [f"{t:.6f} {count:.6f}" for t, count in zip(time, total)]
+    out.write_text("\n".join(lines) + "\n", encoding="utf-8")
+    return out
+
+
+def _gro_atom_records(path: Path) -> list[tuple[int, np.ndarray]]:
+    """Return (residue_number, coordinate) rows from a GROMACS GRO file."""
+    if not path.exists():
+        return []
+    lines = path.read_text(encoding="utf-8", errors="replace").splitlines()
+    if len(lines) < 3:
+        return []
+    try:
+        total = int(lines[1].strip())
+    except ValueError:
+        return []
+    records: list[tuple[int, np.ndarray]] = []
+    fallback = 0
+    for raw in lines[2 : 2 + total]:
+        fallback += 1
+        try:
+            x = float(raw[20:28])
+            y = float(raw[28:36])
+            z = float(raw[36:44])
+            coords = np.asarray([x, y, z], dtype=float)
+        except (ValueError, IndexError):
+            parts = raw.split()
+            if len(parts) >= 7:
+                try:
+                    coords = np.asarray(
+                        [float(parts[-3]), float(parts[-2]), float(parts[-1])],
+                        dtype=float,
+                    )
+                except ValueError:
+                    continue
+            else:
+                continue
+        residue = fallback
+        if raw[:5].strip():
+            try:
+                residue = int(raw[:5].strip())
+            except ValueError:
+                pass
+        records.append((residue, coords))
+    return records
+
+
+def _binding_contact_residues(
+    protein_gro: Path,
+    ligand_gro: Path,
+    cutoff_nm: float = 0.6,
+) -> list[int]:
+    """Find protein residues within the contact distance of the ligand."""
+    protein_atoms = _gro_atom_records(protein_gro)
+    ligand_atoms = _gro_atom_records(ligand_gro)
+    contacts: set[int] = set()
+    for residue, protein_xyz in protein_atoms:
+        for _, ligand_xyz in ligand_atoms:
+            if float(np.linalg.norm(protein_xyz - ligand_xyz)) <= cutoff_nm:
+                contacts.add(residue)
+                break
+    return sorted(contacts)
+
+
+def _mean_rmsf_for_contact_residues(
+    data: np.ndarray | None,
+    residues: list[int],
+) -> float | None:
+    """Return mean residue RMSF for binding-site residues when available."""
+    if data is None or not len(data) or not residues:
+        return None
+    wanted = np.asarray(sorted(set(residues)), dtype=int)
+    observed = np.rint(data[:, 0]).astype(int)
+    mask = np.isin(observed, wanted)
+    if not mask.any():
+        return None
+    return float(np.mean(data[mask, 1]))
+
+
+def _filled(value) -> bool:
+    return value is not None and str(value).strip() != ""
+
+
+def _stability_label(metrics: dict, cfg: ResolvedConfig | None = None) -> str:
+    """Return a heuristic stability label based on last-half trajectory noise."""
+    required = [
+        "time_ns",
+        "rmsd_protein_tail_std_nm",
+        "rmsd_ligand_tail_std_nm",
+        "rg_protein_tail_std_nm",
+        "sasa_protein_tail_std_nm2",
+    ]
+    if not all(_filled(metrics.get(key)) for key in required):
+        return "insufficient"
+    limits = {
+        "rmsd_protein_tail_std_nm": float(
+            cfg.get("md_simulation", "rmsd_stable_std_nm", 0.15)
+            if cfg is not None
+            else 0.15
+        ),
+        "rmsd_ligand_tail_std_nm": float(
+            cfg.get("md_simulation", "rmsd_stable_std_nm", 0.15)
+            if cfg is not None
+            else 0.15
+        ),
+        "rg_protein_tail_std_nm": float(
+            cfg.get("md_simulation", "rg_stable_std_nm", 0.05)
+            if cfg is not None
+            else 0.05
+        ),
+        "sasa_protein_tail_std_nm2": float(
+            cfg.get("md_simulation", "sasa_stable_std_nm2", 1.0)
+            if cfg is not None
+            else 1.0
+        ),
+    }
+    for key, limit in limits.items():
+        if float(metrics[key]) > limit:
+            return "review"
+    return "stable"
 
 
 def parse_xvg(path: Path) -> np.ndarray | None:
@@ -867,6 +1233,90 @@ def make_figures(run_dir: Path) -> None:
     fig.tight_layout()
     out = run_dir / "md_rmsd_rmsf.png"
     fig.savefig(out, dpi=150)
+    plt.close(fig)
+    _make_dynamics_figure(run_dir)
+
+
+def _make_dynamics_figure(run_dir: Path) -> None:
+    try:
+        import matplotlib
+
+        matplotlib.use("Agg")
+        import matplotlib.pyplot as plt
+    except Exception:
+        return
+    panels = [
+        (
+            "gyrate_protein.xvg",
+            "Protein radius of gyration (Rg)",
+            "#1665c0",
+            10.0,
+            "Angstrom",
+        ),
+        (
+            "sasa_protein.xvg",
+            "Protein solvent accessible surface area (SASA)",
+            "#2e7d32",
+            1.0,
+            "nm^2",
+        ),
+        (
+            "hbond_protein_ligand.xvg",
+            "Protein-ligand hydrogen bonds",
+            "#c0392b",
+            1.0,
+            "count",
+        ),
+        (
+            "rmsf_protein_residue.xvg",
+            "Protein residue RMSF",
+            "#7d3c98",
+            10.0,
+            "Angstrom",
+        ),
+    ]
+    fig, axes = plt.subplots(len(panels), 1, figsize=(9, 12), sharex=False)
+    for ax, (name, title, color, scale, unit) in zip(axes, panels):
+        data = parse_xvg(run_dir / name)
+        if data is None or not len(data):
+            ax.text(0.5, 0.5, "no data", transform=ax.transAxes, ha="center")
+            ax.set_title(title)
+            ax.set_ylabel(unit)
+            continue
+        ax.plot(data[:, 0], data[:, 1] * scale, color=color, linewidth=1.1)
+        if name == "rmsf_protein_residue.xvg":
+            contact_path = run_dir / "binding_site_residues.txt"
+            if contact_path.exists():
+                try:
+                    residues = [
+                        int(line)
+                        for line in contact_path.read_text(
+                            encoding="utf-8", errors="replace"
+                        ).splitlines()
+                        if line.strip()
+                    ]
+                except ValueError:
+                    residues = []
+                if residues:
+                    wanted = np.asarray(residues, dtype=int)
+                    observed = np.rint(data[:, 0]).astype(int)
+                    mask = np.isin(observed, wanted)
+                    if mask.any():
+                        ax.scatter(
+                            data[mask, 0],
+                            data[mask, 1] * scale,
+                            color="#c0392b",
+                            s=12,
+                            zorder=3,
+                            label="binding pocket",
+                        )
+                        ax.legend(frameon=False)
+        ax.set_title(title)
+        ax.set_ylabel(unit)
+        ax.grid(alpha=0.3)
+    axes[-1].set_xlabel("Time (ns) or residue index")
+    fig.tight_layout()
+    fig.savefig(run_dir / "md_stability_dynamics.png", dpi=150)
     plt.close(fig)
 
 
@@ -1005,7 +1455,13 @@ def _write_report(out_dir: Path, rows: list[dict], summary: dict) -> None:
         f"<td>{html.escape(str(row.get('id', '')))}</td>"
         f"<td>{html.escape(str(row.get('status', '')))}</td>"
         f"<td>{html.escape(str(row.get('time_ns', '')))}</td>"
+        f"<td>{html.escape(str(row.get('rmsd_protein_mean_nm', '')))}</td>"
         f"<td>{html.escape(str(row.get('rmsd_ligand_mean_nm', '')))}</td>"
+        f"<td>{html.escape(str(row.get('rmsf_contact_residue_mean_nm', '')))}</td>"
+        f"<td>{html.escape(str(row.get('rg_protein_mean_nm', '')))}</td>"
+        f"<td>{html.escape(str(row.get('sasa_protein_mean_nm2', '')))}</td>"
+        f"<td>{html.escape(str(row.get('hbonds_protein_ligand_mean', '')))}</td>"
+        f"<td>{html.escape(str(row.get('stability_label', '')))}</td>"
         f"<td>{html.escape(str(row.get('error', '')))}</td>"
         "</tr>"
         for row in rows
@@ -1037,7 +1493,8 @@ img {{ width: 100%; border: 1px solid #e5e7eb; border-radius: 6px; }}
 <body>
 <h1>MD Simulation Report</h1>
 <div class="card"><p>{html.escape(str(summary))}</p></div>
-<div class="card"><h2>Results</h2><table><thead><tr><th>ID</th><th>Status</th><th>Time (ns)</th><th>Ligand RMSD mean (nm)</th><th>Error</th></tr></thead><tbody>{table}</tbody></table></div>
+<div class="card"><h2>Results</h2><table><thead><tr><th>ID</th><th>Status</th><th>Time (ns)</th><th>Protein RMSD mean (nm)</th><th>Ligand RMSD mean (nm)</th><th>Contact RMSF mean (nm)</th><th>Rg mean (nm)</th><th>SASA mean (nm^2)</th><th>H-bonds mean</th><th>Stability</th><th>Error</th></tr></thead><tbody>{table}</tbody></table></div>
+<div class="card"><h2>How to read the dynamics</h2><p>Read RMSD for equilibrium and drift, Rg for protein compactness, SASA for conformational exposure, H-bonds for persistent protein-ligand contacts, and residue RMSF for local flexibility. A plateau in RMSD/Rg/SASA and a stable hydrogen-bond count support the docking prediction. The label is a heuristic only; wet-lab validation is required before drawing biological conclusions.</p></div>
 <div class="card"><h2>Figures</h2><div class="gallery">{images or '<p>No figures</p>'}</div></div>
 </body>
 </html>

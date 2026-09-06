@@ -63,10 +63,10 @@
 | `prepare-receptor` | 通过 Meeko/Open Babel/MGLTools 准备受体 PDBQT |
 | `prepare-ligands` | RDKit 标准化、3D 构象生成并输出 PDBQT |
 | `dock` | AutoDock Vina 并行对接，按配体写入结果，支持断点续跑 |
-| `analyze` | 按亲和力排序、阈值筛选、Tanimoto 多样性选择 |
+| `analyze` | 按亲和力排序并输出 strong/moderate/weak 分级、阈值筛选、Tanimoto 多样性选择 |
 | `redock` | 对 Top 命中用更高 exhaustiveness 精细重对接 |
 | `ml-train` / `ml-predict` | 随机森林、GBDT、MLP、LASSO+SVM-RFE 或 PyTorch MLP 重打分 |
-| `md-simulation` | 把 Top 命中准备为 GROMACS 蛋白-配体复合物，执行 EM/NVT/NPT/生产模拟并输出 RMSD/RMSF |
+| `md-simulation` | 把 Top 命中准备为 GROMACS 蛋白-配体复合物，执行 EM/NVT/NPT/生产模拟并输出 RMSD/RMSF、Rg、SASA、氢键与结合口袋 RMSF |
 | `export-md` / `export-external` | 导出 Amber/GROMACS 和 UniDock-Pro/HDOCK/HADDOCK 模板 |
 | `report` | 生成 HTML 汇总报告 |
 | `virtual-knockout` | 基因敲除优先级和多维靶点评分；传入 `--insilico-gene` 后追加单细胞 GRN 虚拟敲除、UMAP 命运偏转、调控网络、GO/KEGG 与 HTML 报告 |

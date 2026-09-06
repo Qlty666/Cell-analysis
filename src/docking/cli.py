@@ -84,6 +84,7 @@ def main(argv: list[str] | None = None) -> int:
         "seed": args.seed,
         "max_ligands": args.max_ligands,
         "cutoff": args.cutoff,
+        "moderate_cutoff": args.moderate_cutoff,
         "top_n": args.top_n,
         "executable": args.executable,
         "scoring": args.scoring,
@@ -251,6 +252,7 @@ def _add_common(sub: argparse.ArgumentParser) -> None:
     sub.add_argument("--seed", type=int)
     sub.add_argument("--max-ligands", type=int)
     sub.add_argument("--cutoff", type=float)
+    sub.add_argument("--moderate-cutoff", type=float)
     sub.add_argument("--top-n", type=int)
     sub.add_argument("--executable", help="Vina executable or script path")
     sub.add_argument("--scoring", help="Vina scoring function, e.g. vina/vinardo")

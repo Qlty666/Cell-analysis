@@ -320,6 +320,11 @@
 类型: 折线图（三面板）。
 用途: 检查蛋白-配体复合物在 MD 中的收敛与配体构象稳定性。
 
+61_md_stability_dynamics.png
+内容: Rg、SASA、蛋白-配体氢键与蛋白残基 RMSF，结合口袋残基高亮。
+类型: 折线图（四面板）。
+用途: 结合 RMSD 曲线判断蛋白紧凑性、溶剂暴露、氢键持续性与口袋局部柔性。
+
 ## 三、集成与细胞反馈结果图
 
 对应目录：`<workdir>/outputs/integration/cell_feedback/figures/`。

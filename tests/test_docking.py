@@ -11,11 +11,13 @@ import unittest
 from unittest import mock
 from pathlib import Path
 
+import pandas as pd
+
 APP_ROOT = Path(__file__).resolve().parent.parent
 if str(APP_ROOT / "src") not in sys.path:
     sys.path.insert(0, str(APP_ROOT / "src"))
 
-from docking.analysis import analyze_results  # noqa: E402
+from docking.analysis import affinity_class, analyze_results  # noqa: E402
 from docking.config import load_config, save_config  # noqa: E402
 from docking.docking import build_vina_command, run_docking  # noqa: E402
 from docking import ml as docking_ml  # noqa: E402
@@ -58,6 +60,17 @@ class TestUtils(unittest.TestCase):
         self.assertEqual(safe_name("ABC_123"), "ABC_123")
         self.assertEqual(safe_name("x/y z"), "x_y_z")
         self.assertEqual(safe_name(""), "ligand")
+
+
+class TestAffinityClass(unittest.TestCase):
+    def test_tiers_follow_common_docking_convention(self):
+        self.assertEqual(affinity_class(-8.2), "strong")
+        self.assertEqual(affinity_class(-7.0), "strong")
+        self.assertEqual(affinity_class(-5.5), "moderate")
+        self.assertEqual(affinity_class(-5.0), "moderate")
+        self.assertEqual(affinity_class(-2.1), "weak")
+        self.assertEqual(affinity_class(None), "")
+        self.assertEqual(affinity_class("invalid"), "")
 
 
 class TestCommandBuild(unittest.TestCase):
@@ -166,6 +179,16 @@ class TestEndToEndDockAndAnalyze(unittest.TestCase):
             hits = cfg.analysis_dir() / "data" / "fig_47_top_hits.csv"
             self.assertTrue(hits.exists())
             self.assertTrue((cfg.analysis_dir() / "summary.json").exists())
+            ranked_frame = pd.read_csv(ranked)
+            self.assertEqual(ranked_frame.iloc[0]["affinity_class"], "strong")
+            import json as json_module
+
+            summary = json_module.loads(
+                (cfg.analysis_dir() / "summary.json").read_text(encoding="utf-8")
+            )
+            self.assertEqual(summary["strong_hits"], 1)
+            self.assertEqual(summary["moderate_hits"], 0)
+            self.assertEqual(summary["weak_hits"], 0)
 
 
 class TestDockResumeFresh(unittest.TestCase):

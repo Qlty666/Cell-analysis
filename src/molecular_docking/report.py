@@ -38,6 +38,7 @@ def generate_report(cfg: ResolvedConfig, log) -> Path:
         f"<td>{_esc(row.get('rank', ''))}</td>"
         f"<td>{_esc(row.get('id', ''))}</td>"
         f"<td>{_esc(row.get('affinity', ''))}</td>"
+        f"<td>{_esc(row.get('affinity_class', ''))}</td>"
         f"<td>{_esc(row.get('smiles', ''))}</td>"
         "</tr>"
         for _, row in frame.iterrows()
@@ -77,19 +78,23 @@ th {{ background: #eef2f7; }}
   <p>配体库：{_esc(str(cfg.ligand_input()))}</p>
   <p>对接盒中心：{_esc(str(cfg.receptor_center()))}</p>
   <p>对接盒尺寸：{_esc(str(cfg.receptor_size()))}</p>
-  <p>命中阈值：{_esc(str(cfg.get('analysis', 'cutoff', -7.0)))} kcal/mol</p>
+  <p>命中阈值：{_esc(str(cfg.get('analysis', 'cutoff', -7.0)))} kcal/mol（强结合）</p>
+  <p>亲和力分级：≤ {_esc(str(cfg.get('analysis', 'moderate_cutoff', -5.0)))} 为 moderate；≤ {_esc(str(cfg.get('analysis', 'cutoff', -7.0)))} 为 strong</p>
 </div>
 <div class="card">
   <h2>统计</h2>
   <p>成功对接：{_esc(str(summary.get('total_docked', '')))}</p>
   <p>命中数：{_esc(str(summary.get('hits', '')))}</p>
+  <p>强结合命中：{_esc(str(summary.get('strong_hits', '')))}</p>
+  <p>中结合命中：{_esc(str(summary.get('moderate_hits', '')))}</p>
+  <p>弱结合命中：{_esc(str(summary.get('weak_hits', '')))}</p>
   <p>最佳亲和力：{_esc(str(summary.get('best_affinity', '')))}</p>
   <p>重对接完成：{_esc(str(redock_summary.get('ok', '未运行')))}</p>
 </div>
 <div class="card">
   <h2>Top {top_n} 结果</h2>
   <table>
-    <thead><tr><th>排名</th><th>ID</th><th>亲和力</th><th>SMILES</th></tr></thead>
+    <thead><tr><th>排名</th><th>ID</th><th>亲和力</th><th>分级</th><th>SMILES</th></tr></thead>
     <tbody>{rows_html}</tbody>
   </table>
 </div>

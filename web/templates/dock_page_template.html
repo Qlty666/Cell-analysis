@@ -750,7 +750,10 @@ async function loadResults(job) {
     const summaryRow = document.getElementById('summaryRow');
     summaryRow.innerHTML = '<p class="muted">成功对接 ' + esc(summary.total_docked || 0) +
       ' 个配体，命中 ' + esc(summary.hits || 0) +
-      ' 个，最佳亲和力 ' + esc(summary.best_affinity === null || summary.best_affinity === undefined ? '-' : summary.best_affinity) +
+      ' 个（强 ' + esc(summary.strong_hits || 0) +
+      ' / 中 ' + esc(summary.moderate_hits || 0) +
+      ' / 弱 ' + esc(summary.weak_hits || 0) +
+      '），最佳亲和力 ' + esc(summary.best_affinity === null || summary.best_affinity === undefined ? '-' : summary.best_affinity) +
       ' kcal/mol。输出目录：' + esc(data.output_dir) + '</p>';
 
     const links = document.getElementById('fileLinks');
@@ -760,10 +763,10 @@ async function loadResults(job) {
 
     const table = document.getElementById('resultTable');
     if (data.rows && data.rows.length) {
-      table.innerHTML = '<thead><tr><th>排名</th><th>ID</th><th>亲和力</th><th>模式</th><th>SMILES</th></tr></thead><tbody>' +
+      table.innerHTML = '<thead><tr><th>排名</th><th>ID</th><th>亲和力</th><th>分级</th><th>模式</th><th>SMILES</th></tr></thead><tbody>' +
         data.rows.map(r =>
           '<tr><td>' + esc(r.rank || '') + '</td><td>' + esc(r.id) + '</td><td>' +
-          esc(r.affinity) + '</td><td>' + esc(r.mode || '') + '</td><td style="max-width:280px;word-break:break-all;">' +
+          esc(r.affinity) + '</td><td>' + esc(r.affinity_class || '') + '</td><td>' + esc(r.mode || '') + '</td><td style="max-width:280px;word-break:break-all;">' +
           esc(r.smiles || '') + '</td></tr>'
         ).join('') + '</tbody>';
     } else {
@@ -796,13 +799,14 @@ function renderMdResults(job, data) {
   ).join('');
 
   const table = document.getElementById('resultTable');
-  const headers = ['ID', '状态', '时间 (ns)', '蛋白 RMSD 均值 (nm)', '配体 RMSD 均值 (nm)', '配体 RMSF 均值 (nm)', '错误'];
-  const keys = ['id', 'status', 'time_ns', 'rmsd_protein_mean_nm', 'rmsd_ligand_mean_nm', 'rmsf_ligand_mean_nm', 'error'];
+  const headers = ['ID', '状态', '时间 (ns)', '蛋白 RMSD 均值 (nm)', '配体 RMSD 均值 (nm)', '配体 RMSF 均值 (nm)', '结合口袋 RMSF 均值 (nm)', 'Rg 均值 (nm)', 'SASA 均值 (nm²)', '氢键均值', '稳定性', '错误'];
+  const keys = ['id', 'status', 'time_ns', 'rmsd_protein_mean_nm', 'rmsd_ligand_mean_nm', 'rmsf_ligand_mean_nm', 'rmsf_contact_residue_mean_nm', 'rg_protein_mean_nm', 'sasa_protein_mean_nm2', 'hbonds_protein_ligand_mean', 'stability_label', 'error'];
   if (md.rows && md.rows.length) {
     table.innerHTML = '<thead><tr>' + headers.map(h => '<th>' + h + '</th>').join('') + '</tr></thead><tbody>' +
       md.rows.map(row => '<tr>' + keys.map(key => {
         let value = row[key];
-        if ((key.indexOf('rmsd') === 0 || key.indexOf('rmsf') === 0) &&
+        const numeric = ['rmsd_protein_mean_nm', 'rmsd_ligand_mean_nm', 'rmsf_ligand_mean_nm', 'rmsf_contact_residue_mean_nm', 'rg_protein_mean_nm', 'sasa_protein_mean_nm2', 'hbonds_protein_ligand_mean'];
+        if (numeric.includes(key) &&
             value !== '' && value !== undefined && value !== null) {
           value = Number(value).toFixed(3);
         }
