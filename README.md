@@ -1,6 +1,6 @@
 # Liver Cancer Bioinformatics Workflow
 
-> 当前版本：1.3.0
+> 当前版本：1.4.0
 
 面向肝癌研究的本地生信自动化工作流，整合三条可实际运行的流水线：
 
@@ -832,6 +832,18 @@ GSE165816 和 TCGA PanCancer Atlas 仅用于真实数据验证。
 MIT License. See `LICENSE` for details.
 
 ## 9. 更新日志
+
+### v1.4.0
+
+- `virtual-knockout` 默认检测原始计数矩阵并调用官方 scTenifoldpy/scTenifoldKnk 引擎，同时保留 CellOracle 风格的 GRN 传播；新增 scTenifold QC/网络/流形配置与 DrugReflector checkpoint 化合物排序。
+- 对接结果增加 strong / moderate / weak 亲和力分级并写入 CSV、图片与报告；GROMACS MD 扩展 Rg、SASA、蛋白-配体氢键、结合口袋残基 RMSF 与 last-half 稳定性标签，网页端与结果清单同步展示。
+- 单细胞 QC 新增 UMI-基因数 log-log 关系图和统计表，marker 图新增 RidgePlot 与堆叠小提琴视图；报告、结果清单和结果图指南同步更新。
+- GO 富集气泡图按 BP / CC / MF 分面展示，并优化 colorbar 与图例布局。
+- 报告主函数改为显式接收输出目录，避免 pytest 参数被误当成报告目录，并补充回归测试。
+- 网页版把原“虚拟筛选”页拆成独立功能页面：虚拟筛选、分子动力学、虚拟敲除、网络毒理学、FAERS 和真实数据验证；导航全站统一，CADD 页面脚本抽到 `web/static/dock_app.js`，不再在单个页面堆叠全部模块。
+- 各功能板块使用优化：参数分组折叠、设置保存/恢复/重置与启动自动保存；虚拟敲除支持建模基因数/细胞数/传播轮数/DrugReflector 等高级参数；网络毒理学可指定疾病基因列并控制 Venn；真实数据验证可设置数据集数与种子并实时查看运行状态。
+- 补充 `docs/project_structure.md` 代码结构说明和全站网页模板、测试与文档同步。
+- 全量测试通过：252 个测试用例 + 10 个 subtests。
 
 ### v1.3.0
 
