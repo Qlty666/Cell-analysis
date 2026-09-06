@@ -1160,9 +1160,10 @@ def render_overall_conclusion(
     return "".join(f"<li>{esc(item)}</li>" for item in items)
 
 
-def main() -> int:
-    if len(sys.argv) > 1:
-        target = Path(sys.argv[1]).expanduser().resolve()
+def main(output_dir: str | Path | None = None) -> int:
+    """Generate reports under RES, optionally targeting a pipeline results dir."""
+    if output_dir is not None:
+        target = Path(output_dir).expanduser().resolve()
         if target.is_dir():
             if (target / "results").is_dir():
                 target = target / "results"
@@ -1438,4 +1439,4 @@ summary {{ cursor: pointer; color: #1665c0; font-size: 13px; }}
 
 
 if __name__ == "__main__":
-    sys.exit(main())
+    sys.exit(main(sys.argv[1] if len(sys.argv) > 1 else None))

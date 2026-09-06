@@ -29,6 +29,25 @@ def affinity_class(
     return "weak"
 
 
+AFFINITY_CLASS_COLORS = {
+    "strong": "#c0392b",
+    "moderate": "#e67e22",
+    "weak": "#64748b",
+}
+
+
+def _tier_colors(frame: pd.DataFrame, fallback: str) -> list[str]:
+    if "affinity_class" not in frame.columns:
+        return [fallback] * len(frame)
+    return (
+        frame["affinity_class"]
+        .map(AFFINITY_CLASS_COLORS)
+        .fillna(fallback)
+        .astype(str)
+        .tolist()
+    )
+
+
 def analyze_results(cfg: ResolvedConfig, log):
     results_path = cfg.results_path()
     if not results_path.exists():
@@ -197,20 +216,10 @@ def make_figures(
 
     top20 = top.head(20).iloc[::-1]
     if not top20.empty:
-        class_colors = {
-            "strong": "#c0392b",
-            "moderate": "#e67e22",
-            "weak": "#64748b",
-        }
         fig, ax = plt.subplots(
             figsize=(8, max(3.0, len(top20) * 0.32))
         )
-        tier = (
-            top20["affinity_class"]
-            if "affinity_class" in top20.columns
-            else pd.Series("", index=top20.index)
-        )
-        colors = tier.map(class_colors).fillna("#2e7d32").tolist()
+        colors = _tier_colors(top20, "#2e7d32")
         ax.barh(top20["id"].astype(str), top20["affinity"], color=colors)
         ax.set_xlabel("Affinity (kcal/mol)")
         ax.set_title("Top ranked docking hits")
@@ -219,18 +228,8 @@ def make_figures(
         plt.close(fig)
 
     if not diverse.empty:
-        class_colors = {
-            "strong": "#c0392b",
-            "moderate": "#e67e22",
-            "weak": "#64748b",
-        }
         fig, ax = plt.subplots(figsize=(8, max(3.0, len(diverse) * 0.32)))
-        tier = (
-            diverse["affinity_class"]
-            if "affinity_class" in diverse.columns
-            else pd.Series("", index=diverse.index)
-        )
-        colors = tier.map(class_colors).fillna("#8e44ad").tolist()
+        colors = _tier_colors(diverse, "#8e44ad")
         ax.barh(
             diverse["id"].astype(str),
             diverse["affinity"],

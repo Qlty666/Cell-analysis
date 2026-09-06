@@ -259,6 +259,7 @@ class TestRecentWebIntegration(unittest.TestCase):
                         "model": ["lasso_svm"],
                         "training_csv": ["data/ml/training.csv"],
                         "label_column": ["active"],
+                        "moderate_cutoff": ["-5.5"],
                     }
                 )
             job_id = result["job"]
@@ -272,6 +273,7 @@ class TestRecentWebIntegration(unittest.TestCase):
                     "data/ml/training.csv",
                 )
                 self.assertEqual(cfg["ml"]["label_column"], "active")
+                self.assertEqual(cfg["analysis"]["moderate_cutoff"], -5.5)
                 self.assertEqual(info["stage"], "ml-train")
             finally:
                 DOCK_JOBS.pop(job_id, None)
@@ -293,6 +295,16 @@ class TestRecentWebIntegration(unittest.TestCase):
         self.assertIn('name="model"', dock)
         self.assertIn('name="training_csv"', dock)
         self.assertIn('name="ko_ppi"', dock)
+        self.assertIn('name="moderate_cutoff"', dock)
+        self.assertIn('name="ko_insilico_engine"', dock)
+        self.assertIn('name="ko_insilico_raw_count_input"', dock)
+        molecular = (
+            APP_ROOT
+            / "web"
+            / "templates"
+            / "molecular_docking_template.html"
+        ).read_text(encoding="utf-8")
+        self.assertIn('name="moderate_cutoff"', molecular)
 
     def test_figures_and_manifest_include_calibration(self):
         self.assertIn(

@@ -7,6 +7,7 @@ import sys
 import tempfile
 import unittest
 from pathlib import Path
+from unittest import mock
 
 APP_ROOT = Path(__file__).resolve().parent.parent
 if str(APP_ROOT / "src") not in sys.path:
@@ -85,6 +86,17 @@ class TestJointAnalysisReport(unittest.TestCase):
         self.assertEqual(payload["figures"][0]["file"], "figures/fig_08_volcano.png")
         self.assertEqual(payload["figures"][0]["companion_data"][0]["file"],
                          "data/fig_08_deg_all.csv")
+
+    def test_main_ignores_pytest_argv_without_explicit_target(self):
+        with mock.patch.object(
+            sys,
+            "argv",
+            ["pytest", "tests"],
+        ):
+            self.assertEqual(generate_report.main(), 0)
+        self.assertTrue(
+            (self.results / "result_analysis_report.md").exists()
+        )
 
     def test_companion_matching_uses_actual_data_files(self):
         analyses = [

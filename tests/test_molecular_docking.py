@@ -268,12 +268,15 @@ class TestMolecularDockingWeb(unittest.TestCase):
                         "workdir": [str(workdir)],
                         "receptor": ["data/receptors/receptor.pdb"],
                         "stage": ["pipeline"],
+                        "moderate_cutoff": ["-5.8"],
                     }
                 )
             job_id = result["job"]
             self.assertIn(job_id, MOLECULAR_DOCK_JOBS)
             cfg_path = workdir / "config" / f"molecular_docking_web_{job_id}.json"
             self.assertTrue(cfg_path.exists())
+            cfg_data = json.loads(cfg_path.read_text(encoding="utf-8"))
+            self.assertEqual(cfg_data["analysis"]["moderate_cutoff"], -5.8)
             MOLECULAR_DOCK_JOBS.clear()
             MOLECULAR_DOCK_QUEUE.clear()
 

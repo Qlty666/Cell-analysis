@@ -1098,6 +1098,13 @@ def _float_field(data: dict, key: str):
     return float(value)
 
 
+def _raw_count_flag(value: str) -> bool | None:
+    text = str(value or "").strip().lower()
+    if text in ("", "auto"):
+        return None
+    return text in ("1", "true", "yes", "on")
+
+
 def dataset_search_request(data: dict) -> dict:
     disease = _first(data, "disease", "").strip()
     research_direction = _first(data, "research_direction", "").strip()
@@ -1388,6 +1395,7 @@ def start_dock_job(data: dict) -> dict:
         "energy_range": _float_field(data, "energy_range"),
         "max_workers": _int_field(data, "max_workers"),
         "cutoff": _float_field(data, "cutoff"),
+        "moderate_cutoff": _float_field(data, "moderate_cutoff"),
         "top_n": _int_field(data, "top_n"),
         "model": _first(data, "model", "") or None,
         "training_csv": _first(data, "training_csv", "") or None,
@@ -1560,6 +1568,7 @@ def start_molecular_docking_job(data: dict) -> dict:
         "energy_range": _float_field(data, "energy_range"),
         "max_workers": _int_field(data, "max_workers"),
         "cutoff": _float_field(data, "cutoff"),
+        "moderate_cutoff": _float_field(data, "moderate_cutoff"),
         "top_n": _int_field(data, "top_n"),
         "executable": _first(data, "executable", "") or None,
     }
@@ -2981,6 +2990,10 @@ def run_knockout_request(data: dict) -> dict:
         "normal_label": _first(data, "ko_normal", "") or None,
         "ko_top_n": _int_field(data, "ko_top_n"),
         "insilico_gene": _first(data, "ko_insilico_gene", "") or None,
+        "insilico_engine": _first(data, "ko_insilico_engine", "") or None,
+        "insilico_raw_count_input": _raw_count_flag(
+            _first(data, "ko_insilico_raw_count_input", "")
+        ),
         "insilico_species": _first(data, "ko_insilico_species", "") or None,
         "insilico_embedding_csv": _first(
             data, "ko_insilico_embedding", ""

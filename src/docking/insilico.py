@@ -46,6 +46,7 @@ _CELL_TYPE_COLS = {
     "cell_type_annotation",
     "louvain_annot",
 }
+_SC_TENIFOLD_ENGINES = frozenset({"scTenifold", "scTenifoldknk", "triple"})
 _TARGET_EXCLUDE = re.compile(
     r"^(MT-|MTRNR|RPL|RPS|MRPL|MRPS|SNORD|SNORA|SCGB|IGH|IGK|IGL|TRA|TRB|TRG|"
     r"HLA-D|LINC|RP[0-9]|AC[0-9]|AL[0-9])",
@@ -148,11 +149,11 @@ def run_insilico_knockout(
     log_mat = log_mat.loc[selected]
     sc_diff: pd.DataFrame | None = None
     sc_meta: dict | None = None
-    engine = str(isko.get("engine") or "auto").strip().lower()
-    use_sc = _use_scTenifold(matrix, isko)
+    engine = _insilico_engine(isko)
+    use_sc = _use_scTenifold(matrix, isko, engine)
     force_raw = isko.get("raw_count_input")
     if use_sc and not _looks_like_raw_counts(matrix) and not force_raw:
-        if engine in ("scTenifold", "scTenifoldknk", "triple"):
+        if engine in _SC_TENIFOLD_ENGINES:
             raise DockingError(
                 "scTenifold engine requires a raw count matrix; pass raw "
                 "counts or set insilico_knockout.raw_count_input=true"
@@ -382,6 +383,10 @@ def _scTenifold_available() -> bool:
         return False
 
 
+def _insilico_engine(isko: dict) -> str:
+    return str(isko.get("engine") or "auto").strip().lower()
+
+
 def _looks_like_raw_counts(matrix: pd.DataFrame) -> bool:
     """Return True when the matrix is mostly integer count-like values."""
     data = matrix.to_numpy(dtype=float)
@@ -397,14 +402,18 @@ def _looks_like_raw_counts(matrix: pd.DataFrame) -> bool:
     )
 
 
-def _use_scTenifold(matrix: pd.DataFrame, isko: dict) -> bool:
-    engine = str(isko.get("engine") or "auto").strip().lower()
+def _use_scTenifold(
+    matrix: pd.DataFrame,
+    isko: dict,
+    engine: str | None = None,
+) -> bool:
+    engine = _insilico_engine(isko) if engine is None else engine
     if engine == "celloracle":
         return False
     force_raw = isko.get("raw_count_input")
     if force_raw is not None:
         return bool(force_raw)
-    if engine in ("scTenifold", "scTenifoldknk", "triple"):
+    if engine in _SC_TENIFOLD_ENGINES:
         return True
     return _looks_like_raw_counts(matrix)
 
