@@ -30,6 +30,7 @@ from web_ui import (  # noqa: E402
     _dock_file_path,
     _fetch_site_allowed,
     _full_file_path,
+    _full_workdir_for_query,
     _full_status,
     _has_active_jobs,
     _single_status,
@@ -44,6 +45,7 @@ from web_ui import (  # noqa: E402
     register_heartbeat,
     running_task_counts,
     run_faers_request,
+    run_knockout_request,
     run_network_request,
     start_dock_job,
     start_full_job,
@@ -244,6 +246,94 @@ class TestNetworkAndFaersWeb(unittest.TestCase):
         self.assertIn("FAERS 不相称性信号检测", faers)
         self.assertIn("网络毒理学与 FAERS 信号", results)
         self.assertIn("### 6.3 网络毒理学与 FAERS 信号", guide)
+
+
+class TestWebRealWorkdirAndKnockout(unittest.TestCase):
+    def test_full_workdir_resolution_prefers_explicit_workdir(self):
+        with tempfile.TemporaryDirectory() as tmp:
+            job_dir = Path(tmp) / "job"
+            real_dir = Path(tmp) / "real"
+            job_dir.mkdir()
+            real_dir.mkdir()
+            with mock.patch.dict(
+                web_ui_module.FULL_JOBS,
+                {"j1": {"workdir": job_dir}},
+            ):
+                self.assertEqual(
+                    _full_workdir_for_query("j1", str(real_dir)),
+                    str(real_dir),
+                )
+                self.assertEqual(
+                    _full_workdir_for_query("j1", ""),
+                    str(job_dir),
+                )
+                self.assertEqual(
+                    _full_workdir_for_query("missing", str(real_dir)),
+                    str(real_dir),
+                )
+                self.assertEqual(
+                    _full_workdir_for_query("missing", ""),
+                    "",
+                )
+
+    def test_run_knockout_request_enables_insilico_when_gene_is_set(self):
+        with tempfile.TemporaryDirectory() as tmp:
+            workdir = Path(tmp) / "work"
+            workdir.mkdir()
+            with mock.patch("docking.knockout.run_knockout") as run:
+                result = run_knockout_request(
+                    {
+                        "ko_workdir": [str(workdir)],
+                        "ko_expression": ["data/expression.csv"],
+                        "ko_insilico_gene": ["JUNB"],
+                    }
+                )
+            run.assert_called_once()
+            cfg = run.call_args.args[0]
+            self.assertTrue(cfg.data["insilico_knockout"]["enabled"])
+            self.assertEqual(
+                cfg.data["insilico_knockout"]["ko_gene"],
+                "JUNB",
+            )
+            self.assertEqual(result["workdir"], str(workdir))
+
+    def test_run_knockout_request_leaves_insilico_disabled_without_gene(self):
+        with tempfile.TemporaryDirectory() as tmp:
+            workdir = Path(tmp) / "work"
+            workdir.mkdir()
+            with mock.patch("docking.knockout.run_knockout") as run:
+                run_knockout_request(
+                    {
+                        "ko_workdir": [str(workdir)],
+                        "ko_expression": ["data/expression.csv"],
+                    }
+                )
+            cfg = run.call_args.args[0]
+            self.assertFalse(cfg.data["insilico_knockout"]["enabled"])
+
+    def test_full_results_caps_knockout_rows(self):
+        with tempfile.TemporaryDirectory() as tmp:
+            workdir = Path(tmp) / "work"
+            integration = workdir / "outputs" / "integration"
+            integration.mkdir(parents=True)
+            ranked = (
+                workdir
+                / "outputs"
+                / "run_001"
+                / "results"
+                / "04_knockout"
+                / "data"
+                / "fig_52_53_ranked_knockout.csv"
+            )
+            ranked.parent.mkdir(parents=True)
+            lines = ["rank,gene,target_score"]
+            lines.extend(
+                f"{i},GENE{i},0.5"
+                for i in range(1, 301)
+            )
+            ranked.write_text("\n".join(lines), encoding="utf-8")
+            data = full_results(workdir)
+            self.assertEqual(len(data["knockout"]), 200)
 
 
 class TestResultDetails(unittest.TestCase):
