@@ -1,0 +1,108 @@
+<!DOCTYPE html>
+<html lang="zh-CN">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1">
+<link rel="stylesheet" href="/static/app.css">
+<script src="/static/nav.js" defer></script>
+<title>分子动力学模拟</title>
+</head>
+<body>
+<div class="topnav"></div>
+<div class="wrap">
+  <div class="page-head">
+    <div class="page-title">
+      <h1>分子动力学模拟</h1>
+      <p class="page-sub">把虚拟筛选 Top 命中准备为 GROMACS 复合物，运行能量最小化、NVT/NPT 平衡与生产模拟，并输出 RMSD、Rg、SASA、氢键和口袋残基 RMSF。</p>
+    </div>
+    <div class="page-actions">
+      <a class="link-button" href="/dock">虚拟筛选</a>
+      <a class="link-button" href="/results">结果清单</a>
+    </div>
+  </div>
+
+  <div class="card">
+    <form id="mdForm">
+      <div class="grid wide">
+        <label>工作目录
+          <input name="workdir" placeholder="默认 dock">
+        </label>
+        <label>执行模式
+          <select name="md_mode">
+            <option value="prepare">prepare（准备输入）</option>
+            <option value="auto">auto（运行 GROMACS）</option>
+          </select>
+        </label>
+        <label>受体 PDB（相对工作目录）
+          <input name="md_receptor_pdb" placeholder="data/receptors/receptor.pdb">
+        </label>
+        <label>GROMACS 数据目录（可选）
+          <input name="md_gmx_data" placeholder="如 <GROMACS_DATA_DIR>">
+        </label>
+        <label>Top N 配体
+          <input name="md_top_n" type="number" min="1" value="1">
+        </label>
+        <label>蛋白力场
+          <input name="md_protein_ff" value="amber99sb-ildn">
+        </label>
+        <label>水模型
+          <input name="md_water" value="tip3p">
+        </label>
+        <label>能量最小化步数
+          <input name="md_em_steps" type="number" min="1" value="5000">
+        </label>
+        <label>NVT/NPT 平衡步数
+          <input name="md_equil_steps" type="number" min="1" value="5000">
+        </label>
+        <label>生产模拟步数
+          <input name="md_prod_steps" type="number" min="1" value="250000">
+        </label>
+        <label>温度 (K)
+          <input name="md_temperature" type="number" step="1" value="300">
+        </label>
+        <label>配体净电荷
+          <input name="md_ligand_charge" type="number" step="1" value="0">
+        </label>
+        <label>CPU 线程
+          <input name="md_cpu" type="number" min="1" value="4">
+        </label>
+        <label>配体拓扑目录（可选）
+          <input name="md_topology_dir" placeholder="data/md/topologies">
+        </label>
+        <label class="toggle"><input type="checkbox" name="md_gpu" value="1"> GPU</label>
+      </div>
+      <div class="actions">
+        <button id="mdStartBtn" type="button" onclick="startMdSimulation(this)">开始分子动力学模拟</button>
+      </div>
+    </form>
+    <div id="message"></div>
+    <div id="mdMessage"></div>
+  </div>
+
+  <div class="card">
+    <h2 style="margin-top:0;">实时进度</h2>
+    <div class="actions" style="margin-top:0;">
+      <button id="pauseBtn" class="secondary" type="button" onclick="pauseDockJob()" disabled>暂停任务</button>
+      <button id="resumeBtn" class="secondary" type="button" onclick="resumeDockJob()" disabled>继续任务</button>
+    </div>
+    <pre id="log">等待开始...</pre>
+  </div>
+
+  <div class="card">
+    <h2 style="margin-top:0;">模拟结果</h2>
+    <div id="summaryRow"></div>
+    <div id="fileLinks"></div>
+    <div class="tablebox"><table id="resultTable"></table></div>
+    <div id="gallery" class="gallery"></div>
+  </div>
+</div>
+
+<script src="/static/dock_app.js"></script>
+<script>restoreJobRecord();</script>
+<div id="jobToast" class="job-toast" hidden>
+  <div class="job-toast-title" id="jobToastTitle"></div>
+  <div class="job-toast-body" id="jobToastBody"></div>
+  <button type="button" class="job-toast-close" onclick="closeJobToast()">知道了</button>
+</div>
+</body>
+</html>

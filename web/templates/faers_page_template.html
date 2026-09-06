@@ -1,0 +1,64 @@
+<!DOCTYPE html>
+<html lang="zh-CN">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1">
+<link rel="stylesheet" href="/static/app.css">
+<script src="/static/nav.js" defer></script>
+<title>FAERS 信号检测</title>
+</head>
+<body>
+<div class="topnav"></div>
+<div class="wrap">
+  <div class="page-head">
+    <div class="page-title">
+      <h1>FAERS 不相称性信号检测</h1>
+      <p class="page-sub">对药物-事件表运行 ROR、PRR、BCPNN IC 与 EBGM 四类不相称性指标并输出组合信号表。</p>
+    </div>
+    <div class="page-actions">
+      <a class="link-button" href="/network">网络毒理学</a>
+      <a class="link-button" href="/results">结果清单</a>
+    </div>
+  </div>
+
+  <div class="card" id="faers-card">
+    <form id="faersForm">
+      <div class="grid wide">
+        <label>工作目录
+          <input name="faers_workdir" placeholder="默认 dock">
+        </label>
+        <label>事件表 CSV（相对工作目录）
+          <input name="faers_input" placeholder="data/faers/events.csv" required>
+        </label>
+        <label>药物列
+          <input name="faers_drug_column" value="drug">
+        </label>
+        <label>事件列
+          <input name="faers_event_column" value="event">
+        </label>
+        <label>计数列（可选）
+          <input name="faers_count_column" value="count">
+        </label>
+        <label>最小计数
+          <input name="faers_min_count" type="number" min="1" value="3">
+        </label>
+      </div>
+      <div class="actions">
+        <button type="button" data-primary onclick="runFaers(this)">运行 FAERS 信号检测</button>
+      </div>
+    </form>
+    <div id="faersMessage"></div>
+    <div id="faersSummary"></div>
+    <div id="faersFiles"></div>
+    <div class="tablebox"><table id="faersTable"></table></div>
+  </div>
+</div>
+
+<script src="/static/dock_app.js"></script>
+<div id="jobToast" class="job-toast" hidden>
+  <div class="job-toast-title" id="jobToastTitle"></div>
+  <div class="job-toast-body" id="jobToastBody"></div>
+  <button type="button" class="job-toast-close" onclick="closeJobToast()">知道了</button>
+</div>
+</body>
+</html>

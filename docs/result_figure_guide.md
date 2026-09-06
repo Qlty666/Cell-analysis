@@ -808,8 +808,8 @@
 
 ### 5.6 分子动力学模拟（`06_md`）
 
-该板块由 `python scripts\run_docking.py md-simulation` 或虚拟筛选页
-“分子动力学模拟”卡片生成，不属于默认 `pipeline` 阶段。`prepare` 模式只需
+该板块由 `python scripts\run_docking.py md-simulation` 或网页“分子动力学”
+页面生成，不属于默认 `pipeline` 阶段。`prepare` 模式只需
 GROMACS 输入文件；`auto` 模式需要 GROMACS，并通过 ACPYPE 或
 `md_simulation.topology_dir` 提供配体拓扑。
 
@@ -895,7 +895,8 @@ GROMACS 输入文件；`auto` 模式需要 GROMACS，并通过 ACPYPE 或
 
 ### 6.3 网络毒理学与 FAERS 信号
 
-这两个分析由虚拟筛选页或独立命令运行，不属于全自动流水线阶段，输出位于：
+这两个分析由网页“网络毒理学”/“FAERS”页面或独立命令运行，
+不属于全自动流水线阶段，输出位于：
 
 ```text
 <workdir>/outputs/run_001/network_toxicology/
