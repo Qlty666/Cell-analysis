@@ -247,6 +247,9 @@ a.file-link { color: #1665c0; text-decoration: none; margin-right: 12px; }
       <label>命中阈值 (kcal/mol)
         <input name="cutoff" type="number" step="0.1" value="-7.0">
       </label>
+      <label>中结合阈值 (kcal/mol)
+        <input name="moderate_cutoff" type="number" step="0.1" value="-5.0">
+      </label>
       <label>Top N
         <input name="top_n" type="number" min="1" value="100">
       </label>
@@ -348,6 +351,21 @@ a.file-link { color: #1665c0; text-decoration: none; margin-right: 12px; }
       </label>
       <label>单细胞虚拟敲除基因（可选）
         <input name="ko_insilico_gene" placeholder="如 Gata1，填写后运行 GRN 虚拟敲除">
+      </label>
+      <label>敲除引擎
+        <select name="ko_insilico_engine">
+          <option value="auto" selected>auto - 自动检测</option>
+          <option value="celloracle">celloracle - 内置 GRN 传播</option>
+          <option value="scTenifoldKnk">scTenifoldKnk - 官方引擎</option>
+          <option value="triple">triple - scTenifold + CellOracle</option>
+        </select>
+      </label>
+      <label>原始计数输入
+        <select name="ko_insilico_raw_count_input">
+          <option value="" selected>auto</option>
+          <option value="true">是（按原始计数处理）</option>
+          <option value="false">否（按 log 表达处理）</option>
+        </select>
       </label>
       <label>物种（可选，富集用）
         <select name="ko_insilico_species">

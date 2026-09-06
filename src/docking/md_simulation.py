@@ -783,9 +783,7 @@ def _analyze_gromacs_output(cfg: ResolvedConfig, run_dir: Path) -> dict:
     if not gmx:
         return metrics
     timeout = _timeout(cfg)
-    fraction = float(
-        cfg.get("md_simulation", "equilibrate_fraction", 0.5) or 0.5
-    )
+    fraction = _md_float(cfg, "equilibrate_fraction", 0.5)
     ndx = run_dir / "index.ndx"
     protein_last_time: float | None = None
     if ndx.exists():
@@ -966,9 +964,7 @@ def _analyze_gromacs_output(cfg: ResolvedConfig, run_dir: Path) -> dict:
             contacts = _binding_contact_residues(
                 run_dir / "protein.gro",
                 run_dir / "ligand.gro",
-                float(
-                    cfg.get("md_simulation", "contact_cutoff_nm", 0.6) or 0.6
-                ),
+                _md_float(cfg, "contact_cutoff_nm", 0.6),
             )
             metrics["binding_site_residues"] = ";".join(
                 str(residue) for residue in contacts
@@ -1150,6 +1146,12 @@ def _filled(value) -> bool:
     return value is not None and str(value).strip() != ""
 
 
+def _md_float(cfg: ResolvedConfig | None, key: str, default: float) -> float:
+    if cfg is None:
+        return default
+    return float(cfg.get("md_simulation", key, default) or default)
+
+
 def _stability_label(metrics: dict, cfg: ResolvedConfig | None = None) -> str:
     """Return a heuristic stability label based on last-half trajectory noise."""
     required = [
@@ -1162,25 +1164,17 @@ def _stability_label(metrics: dict, cfg: ResolvedConfig | None = None) -> str:
     if not all(_filled(metrics.get(key)) for key in required):
         return "insufficient"
     limits = {
-        "rmsd_protein_tail_std_nm": float(
-            cfg.get("md_simulation", "rmsd_stable_std_nm", 0.15)
-            if cfg is not None
-            else 0.15
+        "rmsd_protein_tail_std_nm": _md_float(
+            cfg, "rmsd_stable_std_nm", 0.15
         ),
-        "rmsd_ligand_tail_std_nm": float(
-            cfg.get("md_simulation", "rmsd_stable_std_nm", 0.15)
-            if cfg is not None
-            else 0.15
+        "rmsd_ligand_tail_std_nm": _md_float(
+            cfg, "rmsd_stable_std_nm", 0.15
         ),
-        "rg_protein_tail_std_nm": float(
-            cfg.get("md_simulation", "rg_stable_std_nm", 0.05)
-            if cfg is not None
-            else 0.05
+        "rg_protein_tail_std_nm": _md_float(
+            cfg, "rg_stable_std_nm", 0.05
         ),
-        "sasa_protein_tail_std_nm2": float(
-            cfg.get("md_simulation", "sasa_stable_std_nm2", 1.0)
-            if cfg is not None
-            else 1.0
+        "sasa_protein_tail_std_nm2": _md_float(
+            cfg, "sasa_stable_std_nm2", 1.0
         ),
     }
     for key, limit in limits.items():
