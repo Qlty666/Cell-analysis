@@ -23,6 +23,13 @@
 
   <div class="card" id="knockout-card">
     <form id="koForm">
+      <div class="page-actions" style="margin-bottom:8px;">
+        <button type="button" class="secondary" onclick="saveModuleForm('koForm', 'liver_ui_ko_form', 'koMessage')">保存设置</button>
+        <button type="button" class="secondary" onclick="restoreModuleForm('koForm', 'liver_ui_ko_form', 'koMessage')">恢复设置</button>
+        <button type="button" class="secondary" onclick="resetModuleForm('koForm', 'liver_ui_ko_form', 'koMessage')">恢复默认</button>
+      </div>
+      <details class="form-section" open>
+        <summary>靶点评分输入</summary>
       <div class="grid wide">
         <label>工作目录
           <input name="ko_workdir" placeholder="请输工作目录，默认 dock">
@@ -48,6 +55,20 @@
         <label>Top N
           <input name="ko_top_n" type="number" min="1" value="50">
         </label>
+        <label>验证方案 Top N
+          <input name="ko_validation_top_n" type="number" min="1" value="10">
+        </label>
+        <label>分组列（可选）
+          <input name="ko_group_column" placeholder="condition">
+        </label>
+        <label>细胞类型列（可选）
+          <input name="ko_cell_type_column" placeholder="cell_type">
+        </label>
+      </div>
+      </details>
+      <details class="form-section" open>
+        <summary>单细胞虚拟敲除</summary>
+      <div class="grid wide">
         <label>单细胞虚拟敲除基因（可选）
           <input name="ko_insilico_gene" placeholder="如 Gata1，填写后运行 GRN 虚拟敲除">
         </label>
@@ -83,6 +104,28 @@
           <input name="ko_insilico_photo" placeholder="如 <PHOTO_DIR>">
         </label>
       </div>
+      </details>
+      <details class="form-section">
+        <summary>单细胞高级参数</summary>
+        <div class="grid wide">
+          <label>最大建模基因数
+            <input name="ko_insilico_max_genes" type="number" min="50" max="10000" value="1800">
+          </label>
+          <label>最大细胞数
+            <input name="ko_insilico_max_cells" type="number" min="100" max="50000" value="5000">
+          </label>
+          <label>信号传播轮数
+            <input name="ko_insilico_n_propagation" type="number" min="1" max="20" value="3">
+          </label>
+          <label>DrugReflector checkpoint 目录（可选）
+            <input name="ko_drugreflector_checkpoint_dir" placeholder="含 model_fold_*.pt 的目录">
+          </label>
+          <label>DrugReflector Top N
+            <input name="ko_drugreflector_top_n" type="number" min="1" max="500" value="50">
+          </label>
+          <label class="toggle"><input type="checkbox" name="ko_run_enrichment" value="1" checked> 运行 GO/KEGG 富集</label>
+        </div>
+      </details>
       <div class="actions">
         <button type="button" data-primary onclick="runKnockout(this)">运行虚拟敲除</button>
         <button type="button" class="secondary" onclick="exportValidation(this)">导出湿实验验证方案</button>

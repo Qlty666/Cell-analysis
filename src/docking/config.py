@@ -467,6 +467,7 @@ def apply_overrides(cfg: ResolvedConfig, overrides: dict) -> ResolvedConfig:
         "disease_genes_csv": ("network_toxicology", "disease_genes_csv"),
         "disease_gene_column": ("network_toxicology", "disease_gene_column"),
         "network_output_dir": ("network_toxicology", "output_dir"),
+        "venn": ("network_toxicology", "venn"),
         "faers_input": ("faers", "input_csv"),
         "faers_drug_column": ("faers", "drug_column"),
         "faers_event_column": ("faers", "event_column"),

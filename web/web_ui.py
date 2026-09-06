@@ -2762,10 +2762,17 @@ def validation_report_text() -> str:
     )
 
 
-def start_validation_job() -> dict:
+def start_validation_job(data: dict | None = None) -> dict:
     proc = VALIDATION_JOB.get("proc")
     if proc is not None and proc.poll() is None:
         return {"running": True, "message": "验证任务已在运行"}
+    count = _int_field(data or {}, "count") or 10
+    count = max(1, min(30, count))
+    raw_seed = _first(data or {}, "seed", "20260813") or "20260813"
+    try:
+        seed = int(raw_seed)
+    except (TypeError, ValueError):
+        seed = 20260813
     VALIDATION_LOG.parent.mkdir(parents=True, exist_ok=True)
     handle = VALIDATION_LOG.open("w", encoding="utf-8", errors="replace")
     proc = subprocess.Popen(
@@ -2775,9 +2782,9 @@ def start_validation_job() -> dict:
             "--result-root",
             str(APP_ROOT.parent / "y3"),
             "--count",
-            "10",
+            str(count),
             "--seed",
-            "20260813",
+            str(seed),
         ],
         cwd=APP_ROOT,
         stdout=handle,
@@ -3040,6 +3047,8 @@ def run_knockout_request(data: dict) -> dict:
         "ppi_network_csv": _first(data, "ko_ppi", "") or None,
         "case_label": _first(data, "ko_case", "") or None,
         "normal_label": _first(data, "ko_normal", "") or None,
+        "group_column": _first(data, "ko_group_column", "") or None,
+        "cell_type_column": _first(data, "ko_cell_type_column", "") or None,
         "ko_top_n": _int_field(data, "ko_top_n"),
         "insilico_gene": _first(data, "ko_insilico_gene", "") or None,
         "insilico_engine": _first(data, "ko_insilico_engine", "") or None,
@@ -3058,6 +3067,24 @@ def run_knockout_request(data: dict) -> dict:
         ) or None,
     }
     cfg = load_config(APP_ROOT / "config" / "docking_config.json", overrides)
+    insilico = cfg.data.setdefault("insilico_knockout", {})
+    for field, config_key, cast in (
+        ("ko_insilico_max_genes", "max_genes", int),
+        ("ko_insilico_max_cells", "max_cells", int),
+        ("ko_insilico_n_propagation", "n_propagation", int),
+        ("ko_drugreflector_top_n", "drugreflector_top_n", int),
+    ):
+        value = _first(data, field, "")
+        if str(value).strip():
+            try:
+                insilico[config_key] = cast(value)
+            except (TypeError, ValueError):
+                pass
+    checkpoint = _first(data, "ko_drugreflector_checkpoint_dir", "").strip()
+    if checkpoint:
+        insilico["drugreflector_checkpoint_dir"] = checkpoint
+    enrichment_value = _first(data, "ko_run_enrichment", "0").strip().lower()
+    insilico["run_enrichment"] = enrichment_value in ("1", "true", "on", "yes")
     import logging
 
     summary = run_knockout(cfg, logging.getLogger("docking.web_knockout"))
@@ -3129,7 +3156,12 @@ def run_network_request(data: dict) -> dict:
             _first(data, "net_compound_targets", "") or None
         ),
         "disease_genes_csv": _first(data, "net_disease_genes", "") or None,
+        "disease_gene_column": (
+            _first(data, "net_disease_gene_column", "") or None
+        ),
         "ppi_network_csv": _first(data, "net_ppi", "") or None,
+        "venn": _first(data, "net_venn", "1")
+        in ("1", "true", "on", "yes"),
     }
     cfg = load_config(
         APP_ROOT / "config" / "docking_config.json",
@@ -4481,7 +4513,7 @@ class Handler(BaseHTTPRequestHandler):
 
         if parsed.path == "/dock/validation/run":
             try:
-                result = start_validation_job()
+                result = start_validation_job(data)
                 body = json.dumps(result, ensure_ascii=False).encode("utf-8")
                 self._send(200, body, "application/json")
             except Exception as exc:

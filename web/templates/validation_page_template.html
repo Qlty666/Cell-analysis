@@ -22,11 +22,22 @@
   </div>
 
   <div class="card">
-    <div class="actions" style="margin-top:0;">
-      <button type="button" onclick="loadValidationReport()">查看验证报告</button>
-      <button type="button" class="secondary" onclick="runValidationJob(this)">重新运行随机真实 GSE 验证</button>
-    </div>
+    <form id="validationForm">
+      <div class="grid wide">
+        <label>随机验证数据集数
+          <input name="count" type="number" min="1" max="30" value="10">
+        </label>
+        <label>随机种子
+          <input name="seed" type="number" value="20260813">
+        </label>
+      </div>
+      <div class="actions" style="margin-top:10px;">
+        <button type="button" onclick="loadValidationReport()">查看验证报告</button>
+        <button type="button" class="secondary" onclick="runValidationJob(this)">重新运行随机真实 GSE 验证</button>
+      </div>
+    </form>
     <pre id="validationReport">点击“查看验证报告”加载结果。</pre>
+    <div id="validationStatus">正在读取验证任务状态...</div>
   </div>
 </div>
 
