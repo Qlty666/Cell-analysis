@@ -230,6 +230,12 @@ class TestNetworkAndFaersWeb(unittest.TestCase):
         network = (
             APP_ROOT / "web" / "templates" / "network_page_template.html"
         ).read_text(encoding="utf-8")
+        full = (APP_ROOT / "web" / "templates" / "full_page_template.html").read_text(
+            encoding="utf-8"
+        )
+        web_guide = (
+            APP_ROOT / "web" / "templates" / "guide_page_template.html"
+        ).read_text(encoding="utf-8")
         faers = (
             APP_ROOT / "web" / "templates" / "faers_page_template.html"
         ).read_text(encoding="utf-8")
@@ -243,8 +249,13 @@ class TestNetworkAndFaersWeb(unittest.TestCase):
         self.assertNotIn("FAERS 不相称性信号检测", dock)
         self.assertIn("虚拟敲除与靶点评分", knockout)
         self.assertIn("网络毒理学分析", network)
+        self.assertIn('name="net_cytoscape"', network)
+        self.assertIn('name="net_cytoscape_url"', network)
+        self.assertIn('name="network_cytoscape"', full)
+        self.assertIn("ctpd_network.xgmml", web_guide)
         self.assertIn("FAERS 不相称性信号检测", faers)
         self.assertIn("网络毒理学与 FAERS 信号", results)
+        self.assertIn("ctpd_network.xgmml", results)
         self.assertIn("### 6.3 网络毒理学与 FAERS 信号", guide)
 
 
@@ -1152,6 +1163,8 @@ class TestTemplatePolish(unittest.TestCase):
         self.assertIn("/environment", guide)
         env = web_ui_module.render_environment_page()
         self.assertIn("环境补全中心", env)
+        self.assertIn("py4cytoscape", env)
+        self.assertIn("Cytoscape 桌面版", env)
         self.assertIn("/environment/check", env)
         self.assertIn('data-module="expression"', env)
         self.assertIn('data-module="full"', env)

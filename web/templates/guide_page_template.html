@@ -232,9 +232,11 @@ launchers\run_web_ui.bat</pre>
         <h3>敲除、网络毒理学与 FAERS</h3>
         <ul>
           <li>“虚拟敲除”页需要表达/计数输入；填写目标基因后可按需启用 scTenifoldKnk 或 CellOracle 风格分析。</li>
-          <li>“网络毒理学”页用化合物-靶点表与疾病基因表计算交集、PPI hub 与 Venn/C-T-P-D 网络。</li>
+          <li>“网络毒理学”页用化合物-靶点表与疾病基因表计算交集、PPI hub 与 Venn/C-T-P-D 网络；可设置 Cytoscape 模式、CyREST 地址、布局和 PPI 最大边数。</li>
+          <li>Cytoscape CyREST 运行时会自动推送网络并导出 PNG，否则仍会下载可直接导入的 <code>ctpd_network.xgmml</code>。</li>
           <li>“FAERS”页使用药物-事件计数表输出 ROR、PRR、BCPNN IC 与 EBGM 组合信号。</li>
         </ul>
+        <span class="guide-tip">Cytoscape 桌面版安装后，可在安装目录执行 <code>cytoscape.bat -R 1234</code> 启动 REST 服务；网络毒理学页默认使用 <code>http://127.0.0.1:1234</code>。</span>
       </div>
     </div>
   </section>

@@ -853,6 +853,11 @@ function renderStats(data) {
       value: network.overlap_genes !== undefined ? network.overlap_genes : 0,
     },
     {
+      label: 'Cytoscape 网络',
+      value: networkCytoscapeLabel(network.cytoscape || {}),
+      cls: (network.cytoscape || {}).status === 'live' ? 'ok' : '',
+    },
+    {
       label: 'FAERS 信号',
       value: faers.signals !== undefined ? faers.signals : 0,
     },
@@ -897,6 +902,7 @@ function renderResults(data) {
     '；MD 完成：' + esc(cadd.md_completed !== undefined ? cadd.md_completed : 0) +
     '；准备：' + esc(cadd.md_prepared !== undefined ? cadd.md_prepared : 0) +
     '；网络交集：' + esc(network.overlap_genes !== undefined ? network.overlap_genes : 0) +
+    '；Cytoscape：' + esc(networkCytoscapeLabel(network.cytoscape || {})) +
     '；FAERS 信号：' + esc(faers.signals !== undefined ? faers.signals : 0) +
     '；细胞反馈匹配基因：' + esc(fb.genes_matched !== undefined ? fb.genes_matched : 0) +
     '；QC 门控：' + esc(qcGate.status || 'skipped') + '</p>';
@@ -937,6 +943,14 @@ function renderResults(data) {
   renderTable('feedbackDegTable', data.cell_feedback_deg, ['gene', 'avg_log2FC', 'p_val_adj', 'direction', 'significant']);
   renderTable('feedbackGoTable', data.cell_feedback_enrichment_go, ['ID', 'Description', 'p.adjust', 'Count', 'geneID']);
   renderTable('feedbackKeggTable', data.cell_feedback_enrichment_kegg, ['ID', 'Description', 'p.adjust', 'Count', 'geneID']);
+}
+
+function networkCytoscapeLabel(cyto) {
+  if (!cyto || !cyto.status) return '未运行';
+  if (cyto.status === 'live') return '已推送';
+  if (cyto.status === 'xgmml_only') return 'XGMML';
+  if (cyto.status === 'off') return '已关闭';
+  return cyto.status;
 }
 
 async function pauseFullJob() {

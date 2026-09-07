@@ -152,13 +152,20 @@ ENV_MODULES = {
     },
     "docking": {
         "title": "虚拟筛选 / 对接",
-        "summary": "AutoDock Vina 虚拟筛选环境：RDKit、Meeko、Open Babel、AutoDockTools 与 Vina。",
+        "summary": (
+            "AutoDock Vina 虚拟筛选环境：RDKit、Meeko、Open Babel、"
+            "AutoDockTools、Vina，以及网络毒理学 Cytoscape 推送依赖 "
+            "py4cytoscape。"
+        ),
         "r_deps": False,
         "dock_tools": True,
         "skills": False,
         "install_bat": "launchers/install_docking_environment.bat",
         "check_bat": "launchers/check_docking_environment.bat",
-        "note": "缺失的 AutoDockTools / AutoDock Vina 会下载到 dock/tools/。",
+        "note": (
+            "缺失的 AutoDockTools / AutoDock Vina 会下载到 dock/tools/；"
+            "Cytoscape 桌面版需单独安装并用 -R 1234 启动 CyREST。"
+        ),
     },
     "molecular-docking": {
         "title": "独立分子对接",
