@@ -135,6 +135,78 @@ def detect_run_kind(source: Path) -> str:
     return "other"
 
 
+def _as_list(value) -> list:
+    if isinstance(value, list):
+        return value
+    if isinstance(value, dict):
+        return [value]
+    return []
+
+
+def _output_root_infos(analysis_root: Path) -> list[dict]:
+    """Collect output roots from analysis-workspace registry files."""
+    infos: list[dict] = []
+    registry = analysis_root / "config" / "local_projects.json"
+    if registry.exists():
+        data = _read_json(registry)
+        for project in _as_list(data.get("projects") or data.get("project")):
+            infos.extend(_as_list(project.get("output_roots")))
+        infos.extend(_as_list(data.get("output_roots")))
+
+    config = resolve_analysis_config()
+    infos.extend(_as_list(config.get("output_roots")))
+
+    env_root = os.environ.get("LIVER_OUTPUT_ROOT")
+    if env_root:
+        infos.append({"path": env_root, "status": "environment"})
+    return infos
+
+
+def _source_score(path: Path) -> int:
+    score = 0
+    if (path / "outputs" / "integration").is_dir():
+        score += 10
+    if (path / "outputs" / "integration" / "integration_summary.json").exists():
+        score += 5
+    if (path / "outputs" / "results" / "pipeline_complete.json").exists():
+        score += 3
+    if (path / "results" / "pipeline_complete.json").exists():
+        score += 2
+    return score
+
+
+def locate_run_source(accession: str, analysis_root: Path) -> Path | None:
+    """Find a run directory for an accession under known output roots."""
+    accession = accession.upper()
+    candidates: list[tuple[int, float, Path]] = []
+    for info in _output_root_infos(analysis_root):
+        root_value = info.get("path") if isinstance(info, dict) else None
+        if not root_value:
+            continue
+        root = Path(str(root_value)).expanduser()
+        if not root.is_dir():
+            continue
+        accessions = info.get("accessions") if isinstance(info, dict) else []
+        matches = (
+            accession in {str(item).upper() for item in _as_list(accessions)}
+            if isinstance(accessions, (list, tuple, set))
+            else False
+        )
+        subdir = root / accession
+        possible = [subdir] if subdir.is_dir() else []
+        if not possible and matches:
+            possible.append(root)
+        for path in possible:
+            if path.is_dir() and _source_score(path) > 0:
+                age = path.stat().st_mtime
+                candidates.append((_source_score(path), age, path))
+
+    if not candidates:
+        return None
+    candidates.sort(key=lambda item: (item[0], item[1]), reverse=True)
+    return candidates[0][2]
+
+
 def resolve_analysis_config() -> dict:
     data: dict = {}
     if LOCAL_ANALYSIS_CONFIG.exists():
@@ -247,8 +319,18 @@ def build_parser() -> argparse.ArgumentParser:
             "data/imported_results and refresh its inventory"
         ),
     )
-    parser.add_argument("--source", required=True, help="finished run root")
+    parser.add_argument(
+        "run",
+        nargs="?",
+        help="finished run root or dataset accession (for example GSE235863)",
+    )
+    parser.add_argument("--source", help="finished run root")
     parser.add_argument("--analysis-root", help="analysis workspace root")
+    parser.add_argument(
+        "--remember-analysis-root",
+        action="store_true",
+        help="save --analysis-root into config/analysis_workspace.json",
+    )
     parser.add_argument("--name", help="destination folder name")
     parser.add_argument(
         "--inventory-script",
@@ -269,10 +351,14 @@ def build_parser() -> argparse.ArgumentParser:
 
 def main(argv: list[str] | None = None) -> int:
     args = build_parser().parse_args(argv)
-    source = Path(args.source).expanduser().resolve()
-    if not source.is_dir():
-        print(f"source directory not found: {source}", file=sys.stderr)
-        return 1
+    run_value = (args.source or args.run or "").strip()
+    if not run_value:
+        print(
+            "a run directory or dataset accession is required "
+            "(for example: analysis-export GSE235863)",
+            file=sys.stderr,
+        )
+        return 2
 
     config = resolve_analysis_config()
     analysis_root_value = (
@@ -291,10 +377,37 @@ def main(argv: list[str] | None = None) -> int:
     if not analysis_root.is_dir():
         print(f"analysis workspace not found: {analysis_root}", file=sys.stderr)
         return 1
+
+    if args.remember_analysis_root:
+        saved = {
+            "analysis_root": str(analysis_root),
+        }
+        if args.inventory_script:
+            saved["inventory_script"] = args.inventory_script
+        LOCAL_ANALYSIS_CONFIG.parent.mkdir(parents=True, exist_ok=True)
+        LOCAL_ANALYSIS_CONFIG.write_text(
+            json.dumps(saved, ensure_ascii=False, indent=2),
+            encoding="utf-8",
+        )
+        print("remembered analysis root: %s" % LOCAL_ANALYSIS_CONFIG)
+
+    source_candidate = Path(run_value)
+    if source_candidate.is_dir():
+        source = source_candidate.expanduser().resolve()
+    else:
+        source = locate_run_source(run_value, analysis_root)
+        if source is None:
+            print(
+                "could not locate a run for %s; pass an existing run "
+                "directory or register its output root" % run_value,
+                file=sys.stderr,
+            )
+            return 2
     inventory_script = args.inventory_script or config.get("inventory_script")
 
     accession = detect_accession(source)
-    name = (args.name or accession or source.name).strip().replace("/", "_")
+    fallback = run_value.upper() if not Path(run_value).is_dir() else accession
+    name = (args.name or accession or fallback or source.name).strip().replace("/", "_")
     destination = analysis_root / "data" / "imported_results" / name
     kind = detect_run_kind(source)
 

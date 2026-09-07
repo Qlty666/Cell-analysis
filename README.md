@@ -204,9 +204,26 @@ liverbio analysis-export ^
   --analysis-root D:\AAA analysis
 ```
 
+如果 `D:\AAA analysis\config\local_projects.json` 已登记该数据集的输出根目录，
+可直接用数据集编号：
+
+```text
+liverbio analysis-export GSE125449
+launchers\export_to_analysis.bat GSE125449
+```
+
 若本机固定使用同一分析工作区，可在 `config/analysis_workspace.json` 中写入
 `analysis_root`；该文件不入库，也可改用 `LIVER_ANALYSIS_ROOT` 环境变量。
 命令只做增量同步，不删除分析工作区里已经生成的 `analysis_report.md` 等说明文件。
+
+第一次使用时可直接记住分析工作区，之后只填数据集编号：
+
+```text
+liverbio analysis-export GSE125449 ^
+  --analysis-root D:\AAA analysis ^
+  --remember-analysis-root
+liverbio analysis-export GSE125449
+```
 
 ## 3. 安装方法
 
@@ -659,11 +676,15 @@ python scripts\install_codex_skills.py --list
 ```bash
 python scripts\export_to_analysis.py --source ../y2/GSE125449 --analysis-root <LOCAL_ROOT> analysis
 liverbio analysis-export --source ../y2/GSE125449 --analysis-root <LOCAL_ROOT> analysis
+liverbio analysis-export GSE125449
 ```
 
 导出前可用 `--dry-run` 查看文件数量，使用 `--no-inventory` 跳过清单刷新；
+加 `--remember-analysis-root` 会把 `--analysis-root` 保存到本机
+`config/analysis_workspace.json`，之后无需再传该参数。
 导出成功后会在目标目录写入 `_source.json`，记录来源目录、数据集、运行类型、
-导出时间、项目版本和 Git revision。
+导出时间、项目版本和 Git revision。只填数据集编号时，命令会读取分析工作区
+`config/local_projects.json` 中登记的 `output_roots` 自动定位运行目录。
 
 ## 5. 输入输出示例
 
@@ -772,6 +793,7 @@ liverbio analysis-export --source ../y2/GSE125449 --analysis-root <LOCAL_ROOT> a
 | `launchers/run_docking.bat` | 虚拟筛选快捷入口 |
 | `launchers/run_full_pipeline.bat` | 全自动流水线快捷入口 |
 | `launchers/run_molecular_docking.bat` | 独立分子对接快捷入口 |
+| `launchers/export_to_analysis.bat` | 本地分析工作区导出快捷入口 |
 | `launchers/run_GSE125449.bat` | GSE125449 表达分析快捷入口 |
 | `launchers/run_pipeline_prompt.bat` | 交互式表达分析入口 |
 | `liverbio.bat` | 根目录统一 CLI 入口 |

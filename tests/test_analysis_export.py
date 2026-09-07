@@ -50,7 +50,6 @@ class TestAnalysisExport(unittest.TestCase):
 
             code = analysis_export.main(
                 [
-                    "--source",
                     str(source),
                     "--analysis-root",
                     str(analysis),
@@ -66,6 +65,42 @@ class TestAnalysisExport(unittest.TestCase):
             self.assertEqual(metadata["dataset"], "GSE123456")
             self.assertEqual(metadata["run_kind"], "full_pipeline")
 
+    def test_locates_run_by_accession_from_registry(self):
+        with tempfile.TemporaryDirectory() as tmp:
+            base = Path(tmp)
+            output_root = base / "roots" / "y2"
+            source = output_root / "GSE123456"
+            _write_fake_run(source)
+            analysis = base / "analysis"
+            registry_dir = analysis / "config"
+            registry_dir.mkdir(parents=True)
+            (registry_dir / "local_projects.json").write_text(
+                json.dumps(
+                    {
+                        "projects": [
+                            {
+                                "output_roots": [
+                                    {
+                                        "path": str(output_root),
+                                        "accessions": ["GSE123456"],
+                                        "status": "completed",
+                                    }
+                                ]
+                            }
+                        ]
+                    }
+                ),
+                encoding="utf-8",
+            )
+            (analysis / "data").mkdir(parents=True)
+
+            code = analysis_export.main(
+                ["GSE123456", "--analysis-root", str(analysis), "--dry-run"]
+            )
+            self.assertEqual(code, 0)
+            destination = analysis / "data" / "imported_results" / "GSE123456"
+            self.assertIn("GSE123456", destination.name)
+
     def test_dry_run_does_not_copy(self):
         with tempfile.TemporaryDirectory() as tmp:
             base = Path(tmp)
@@ -76,7 +111,6 @@ class TestAnalysisExport(unittest.TestCase):
 
             code = analysis_export.main(
                 [
-                    "--source",
                     str(source),
                     "--analysis-root",
                     str(analysis),
@@ -96,8 +130,44 @@ class TestAnalysisExport(unittest.TestCase):
                 "LOCAL_ANALYSIS_CONFIG",
                 Path(tmp) / "analysis_workspace.json",
             ):
-                code = analysis_export.main(["--source", str(source)])
+                code = analysis_export.main([str(source)])
             self.assertEqual(code, 2)
+
+    def test_requires_run_or_accession(self):
+        with mock.patch.object(
+            analysis_export,
+            "LOCAL_ANALYSIS_CONFIG",
+            Path("missing_analysis_workspace.json"),
+        ):
+            code = analysis_export.main(["--dry-run"])
+        self.assertEqual(code, 2)
+
+    def test_remembers_analysis_root(self):
+        with tempfile.TemporaryDirectory() as tmp:
+            base = Path(tmp)
+            source = base / "run"
+            _write_fake_run(source)
+            analysis = base / "analysis"
+            (analysis / "data").mkdir(parents=True)
+            config_path = base / "config" / "analysis_workspace.json"
+
+            with mock.patch.object(
+                analysis_export,
+                "LOCAL_ANALYSIS_CONFIG",
+                config_path,
+            ):
+                code = analysis_export.main(
+                    [
+                        str(source),
+                        "--analysis-root",
+                        str(analysis),
+                        "--remember-analysis-root",
+                        "--no-inventory",
+                    ]
+                )
+            self.assertEqual(code, 0)
+            saved = json.loads(config_path.read_text(encoding="utf-8"))
+            self.assertEqual(saved["analysis_root"], str(analysis.resolve()))
 
 
 if __name__ == "__main__":

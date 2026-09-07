@@ -77,6 +77,7 @@ Script/
 | 运行 | `run_docking.bat` | 虚拟筛选快捷入口 |
 | 运行 | `run_molecular_docking.bat` | 独立分子对接快捷入口 |
 | 运行 | `run_full_pipeline.bat` | 全自动流水线快捷入口 |
+| 运行 | `export_to_analysis.bat` | 导出运行结果到本地 Codex 分析工作区 |
 | 运行 | `run_GSE125449.bat` | GSE125449 快捷入口 |
 | 运行 | `run_pipeline_prompt.bat` | 交互式表达分析入口 |
 | 环境 | `check_dock_environment.bat/.py` | 对接环境检查 |
