@@ -28,7 +28,12 @@ if str(ROOT / "src") not in sys.path:
 
 from common.env import find_rscript as _common_find_rscript  # noqa: E402
 
-DEFAULT_RESULT_ROOT = ROOT.parent / "y3"
+DEFAULT_RESULT_ROOT = Path(
+    os.environ.get(
+        "LIVER_VALIDATION_ROOT",
+        str(ROOT / "data_cache" / "validation_runs"),
+    )
+).resolve()
 
 # Real GEO expression datasets with public count matrices small enough for
 # automated validation. The pool is deliberately conservative: only datasets

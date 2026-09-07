@@ -189,6 +189,8 @@ liverbio full --accession GSE125449 --output ../liver_cancer --workdir ../liver_
 liverbio datasets --disease "liver cancer" --max-results 20
 liverbio web --page full
 liverbio doctor
+liverbio setup
+liverbio package
 ```
 
 `skills/` 目录按功能拆分为四个 Codex skill 源文件：表达分析、虚拟筛选、全自动流水线和数据集搜索。Skill 只指导 Codex 调用本项目现有脚本，不复制核心分析代码；完整说明见 `docs/software_guide.md`。
@@ -203,6 +205,27 @@ liverbio doctor
 - 结果目录：`molecular_docking/outputs/run_001/results/`，报告文件为 `molecular_docking_report.html`。
 
 ## 3. 安装方法
+
+### 新电脑快速部署
+
+新电脑推荐直接使用根目录的三个入口：
+
+```bat
+setup_new_computer.bat
+check_new_computer.bat
+liverbio.bat help
+```
+
+`setup_new_computer.bat` 等价于 `liverbio setup`，会安装表达分析 Python/R 依赖、
+虚拟筛选/对接依赖、ML/DL 包与项目 Codex skills；`check_new_computer.bat` 做整体检查。
+需要把源码带到另一台电脑时，先在当前电脑运行：
+
+```bat
+liverbio package
+```
+
+生成干净的源码 zip（不含本机结果、缓存、日志和下载工具），输出到
+`portable/`。详细步骤见 `NEW_COMPUTER_SETUP.md`。
 
 ### 环境要求
 
@@ -236,6 +259,13 @@ python launchers\install_environment.py install expression
 python launchers\install_environment.py install docking --with-ml
 python launchers\install_environment.py check full
 python launchers\install_environment.py list
+```
+
+`liverbio` 统一入口也支持 `setup` 与 `package`：
+
+```text
+liverbio setup
+liverbio package
 ```
 
 说明：
@@ -807,7 +837,10 @@ python scripts\install_codex_skills.py --list
 | `launchers/run_molecular_docking.bat` | 独立分子对接快捷入口 |
 | `launchers/run_GSE125449.bat` | GSE125449 表达分析快捷入口 |
 | `launchers/run_pipeline_prompt.bat` | 交互式表达分析入口 |
+| `launchers/package_portable.py` | 生成干净源码 zip |
 | `liverbio.bat` | 根目录统一 CLI 入口 |
+| `setup_new_computer.bat` / `check_new_computer.bat` | 新电脑安装与检查 |
+| `package_for_new_computer.bat` | 新电脑源码包生成入口 |
 | `src/analysis/*` | R/Python 分析实现（QC、聚类、DEG、富集、CellChat、ML） |
 | `src/common/*` | Rscript/工具路径与环境探测 |
 | `src/data/*` | GEO/ArrayExpress/BioStudies 下载、格式转换、合成数据生成 |
@@ -831,6 +864,13 @@ python scripts\install_codex_skills.py --list
 ```text
 Script/
 ├── liverbio.bat
+├── setup_new_computer.bat
+├── check_new_computer.bat
+├── package_for_new_computer.bat
+├── setup_new_computer.sh
+├── check_new_computer.sh
+├── package_for_new_computer.sh
+├── NEW_COMPUTER_SETUP.md
 ├── README.md
 ├── AGENTS.md            # Codex 项目执行规则
 ├── VIRTUAL_SCREENING_REQUIREMENTS.md

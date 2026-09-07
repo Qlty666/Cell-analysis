@@ -10,6 +10,7 @@ from __future__ import annotations
 
 import argparse
 import json
+import os
 import subprocess
 import sys
 import time
@@ -19,7 +20,12 @@ from pathlib import Path
 
 APP_ROOT = Path(__file__).resolve().parent.parent
 WEB_UI = APP_ROOT / "web" / "web_ui.py"
-OUTPUT_ROOT = Path(r"D:\AAA Liver cancer\y2")
+OUTPUT_ROOT = Path(
+    os.environ.get(
+        "LIVER_WEB_FULL_OUTPUT_ROOT",
+        str(APP_ROOT / "data_cache" / "web_full_runs"),
+    )
+).resolve()
 
 DATASETS = [
     {
@@ -95,12 +101,20 @@ def submit(base: str, accession: str, species: str) -> str:
 
 
 def main() -> int:
+    global OUTPUT_ROOT
     parser = argparse.ArgumentParser()
     parser.add_argument("--host", default="127.0.0.1")
     parser.add_argument("--port", type=int, default=8000)
     parser.add_argument("--poll-interval", type=float, default=POLL_INTERVAL)
     parser.add_argument("--max-hours", type=float, default=20)
+    parser.add_argument(
+        "--output-root",
+        default=str(OUTPUT_ROOT),
+        help="parent folder for per-accession full pipeline workdirs",
+    )
     args = parser.parse_args()
+    OUTPUT_ROOT = Path(args.output_root).expanduser().resolve()
+    OUTPUT_ROOT.mkdir(parents=True, exist_ok=True)
 
     log_dir = APP_ROOT / "logs"
     log_dir.mkdir(exist_ok=True)

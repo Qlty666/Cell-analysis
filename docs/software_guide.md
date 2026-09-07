@@ -2,6 +2,24 @@
 
 本目录不仅提供命令行脚本，也可以通过一个统一的入口使用。`liverbio` 只负责转发参数，不会改变任何原有脚本的实际行为；原有 `launchers`、网页端和 `scripts/run_*.py` 仍可直接使用。
 
+## 新电脑部署
+
+Windows 新电脑建议从项目根目录运行：
+
+```text
+setup_new_computer.bat
+check_new_computer.bat
+```
+
+Linux/macOS 使用同名的 `.sh`。需要携带干净源码时，在当前电脑运行：
+
+```text
+liverbio package
+```
+
+生成的 zip 位于 `portable/`，只包含 git 跟踪的源码文件，不含本机结果、
+缓存、日志和下载工具。详细说明见根目录 `NEW_COMPUTER_SETUP.md`。
+
 ## 统一入口
 
 Windows 下在项目根目录打开命令提示符或 PowerShell：
@@ -22,6 +40,8 @@ liverbio docking pipeline --config config/docking_config.json
 liverbio datasets --disease "liver cancer" --max-results 20
 liverbio web --page full
 liverbio doctor
+liverbio setup
+liverbio package
 ```
 
 每条命令后面的参数与原脚本完全一致。对某个功能需要查看详细参数时，先查看原脚本帮助：

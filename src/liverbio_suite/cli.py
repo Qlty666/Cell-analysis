@@ -22,6 +22,7 @@ ENTRYPOINTS = {
     "datasets": ROOT / "scripts" / "search_datasets.py",
     "web": ROOT / "web" / "web_ui.py",
     "install-skills": ROOT / "scripts" / "install_codex_skills.py",
+    "package": ROOT / "launchers" / "package_portable.py",
 }
 
 ENV_CHECKS = {
@@ -38,6 +39,8 @@ FEATURE_SUMMARY = (
     "web:        local web console for the whole suite\n"
     "doctor:     environment check (pipeline, docking, or all)\n"
     "install-skills: copy project Codex skills into the user skill root\n"
+    "setup:      install the full environment for a new computer\n"
+    "package:    create a clean source zip for another computer\n"
 )
 
 USAGE = """Liver Cancer Bioinformatics Suite
@@ -57,6 +60,8 @@ Examples:
   liverbio web --page full
   liverbio doctor
   liverbio install-skills
+  liverbio setup
+  liverbio package
 """ % FEATURE_SUMMARY
 
 
@@ -112,6 +117,12 @@ def main(argv: list[str] | None = None) -> int:
     if args[0] == "doctor":
         kind = args[1] if len(args) > 1 else "all"
         return run_doctor(kind)
+    if args[0] == "setup":
+        installer = ROOT / "launchers" / "install_environment.py"
+        return run_script(
+            installer,
+            ["install", "full", "--with-ml", *args[1:]],
+        )
     script = ENTRYPOINTS.get(args[0])
     if script is None:
         print(f"ERROR: unknown command: {args[0]}", file=sys.stderr)

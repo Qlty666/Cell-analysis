@@ -66,6 +66,9 @@ dock/config/docking_web_*.json
 dock/tools/
 dock/work/
 
+# Portable source packages
+portable/
+
 # Standalone molecular docking board
 /molecular_docking/
 

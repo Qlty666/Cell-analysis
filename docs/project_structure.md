@@ -7,6 +7,13 @@
 ```text
 Script/
 ├── liverbio.bat                     # 统一 CLI 根入口
+├── setup_new_computer.bat           # 新电脑一键安装（Windows）
+├── check_new_computer.bat           # 新电脑环境检查（Windows）
+├── setup_new_computer.sh            # 新电脑一键安装（Linux/macOS）
+├── check_new_computer.sh            # 新电脑环境检查（Linux/macOS）
+├── package_for_new_computer.bat     # 生成干净源码包（Windows）
+├── package_for_new_computer.sh      # 生成干净源码包（Linux/macOS）
+├── NEW_COMPUTER_SETUP.md            # 新电脑部署说明
 ├── README.md                        # 总说明、使用方法和更新日志
 ├── AGENTS.md                        # Codex 项目执行规则
 ├── VIRTUAL_SCREENING_REQUIREMENTS.md
@@ -40,6 +47,8 @@ Script/
 | 文件 | 作用 |
 | --- | --- |
 | `liverbio.bat` | 根目录统一入口，把参数转发给 `scripts/liverbio.py` |
+| `setup_new_computer.bat` / `check_new_computer.bat` | 新电脑完整安装与环境检查 |
+| `package_for_new_computer.bat` | 生成可拷贝的干净源码 zip |
 
 ### 2.2 scripts 运行入口
 
@@ -85,6 +94,7 @@ Script/
 | 安装 | `install_dock_dependencies.bat/.py` | 对接依赖安装 |
 | 安装 | `install_pipeline_dependencies.bat/.py` | 流水线依赖安装 |
 | 安装 | `install_*_environment.bat` / `setup_environment.bat` | 各功能板块一键补全与选择式安装 |
+| 打包 | `package_portable.py` | 用 git 跟踪文件生成干净源码包 |
 
 ## 3. 实现层
 

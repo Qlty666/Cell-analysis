@@ -86,7 +86,13 @@ DATASET_DOWNLOAD_LOCK = threading.Lock()
 FULL_JOBS = {}
 FULL_QUEUE = []
 FULL_QUEUE_LOCK = threading.RLock()
-VALIDATION_REPORT_DIR = APP_ROOT.parent / "y3" / "validation"
+VALIDATION_ROOT = Path(
+    os.environ.get(
+        "LIVER_VALIDATION_ROOT",
+        str(APP_ROOT / "data_cache" / "validation_runs"),
+    )
+).resolve()
+VALIDATION_REPORT_DIR = VALIDATION_ROOT / "validation"
 VALIDATION_REPORT_PATH = VALIDATION_REPORT_DIR / "validation_summary.json"
 VALIDATION_LOG = WEB_DIR / "validation_run.log"
 VALIDATION_JOB = {"proc": None, "log": None, "handle": None, "started": None}
@@ -3149,7 +3155,7 @@ def start_validation_job(data: dict | None = None) -> dict:
             sys.executable,
             str(SCRIPTS_DIR / "validate_random_real_full_pipeline.py"),
             "--result-root",
-            str(APP_ROOT.parent / "y3"),
+            str(VALIDATION_ROOT),
             "--count",
             str(count),
             "--seed",

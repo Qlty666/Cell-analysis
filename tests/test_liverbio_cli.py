@@ -75,6 +75,19 @@ class TestLiverbioCli(unittest.TestCase):
         self.assertEqual(code, 0)
         run.assert_called_once_with(cli.ENV_CHECKS["pipeline"], [])
 
+    def test_setup_forwards_to_full_installer(self):
+        with mock.patch.object(cli, "run_script", return_value=0) as run:
+            code = cli.main(["setup"])
+        self.assertEqual(code, 0)
+        self.assertEqual(
+            run.call_args.args[0],
+            cli.ROOT / "launchers" / "install_environment.py",
+        )
+        self.assertEqual(
+            run.call_args.args[1],
+            ["install", "full", "--with-ml"],
+        )
+
 
 if __name__ == "__main__":
     unittest.main()
