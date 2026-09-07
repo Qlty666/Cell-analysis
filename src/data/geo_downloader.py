@@ -359,6 +359,56 @@ def _refresh_manifest_mode(manifest: dict, base_dir: Path | None = None) -> dict
     return manifest
 
 
+def _single_cell_matrix_relatives(base_dir: Path) -> list[str]:
+    """Find raw single-cell matrix files in a download directory."""
+    if base_dir is None or not base_dir.exists():
+        return []
+    found: list[str] = []
+    suffixes = (".h5ad", ".h5ad.gz", ".h5", ".loom", ".rds")
+    for path in sorted(base_dir.rglob("*")):
+        if not path.is_file():
+            continue
+        name = path.name.lower()
+        if not name.endswith(suffixes):
+            continue
+        if re.search(r"bulk[-_ ]?rna|bulk[-_ ]?seq|_bulk_", name):
+            continue
+        rel = path.relative_to(base_dir).as_posix()
+        if rel not in found:
+            found.append(rel)
+    return found
+
+
+def _prefer_single_cell_matrices(manifest: dict, base_dir: Path | None) -> dict:
+    """Keep .h5ad/.h5/.loom matrices when a series is single-cell hinted.
+
+    A GEO series may bundle bulk count tables and single-cell matrices. The
+    old downloader deliberately picked bulk tables first, which caused
+    datasets such as GSE235863 to be analyzed as a handful of pseudo-cells.
+    When the series metadata clearly says single-cell, retain the actual
+    single-cell matrices so downstream code can use their cell metadata.
+    """
+    files = manifest.get("files")
+    if not isinstance(files, dict) or not manifest.get("single_cell_hint"):
+        return manifest
+    suffixes = (".h5ad", ".h5ad.gz", ".h5", ".loom", ".rds")
+    listed = [
+        name
+        for name in files.get("matrix") or []
+        if name.lower().endswith(suffixes)
+        and not re.search(r"bulk[-_ ]?rna|bulk[-_ ]?seq|_bulk_", name, re.IGNORECASE)
+    ]
+    sc_from_disk = _single_cell_matrix_relatives(base_dir)
+    sc_names = list(dict.fromkeys(listed + sc_from_disk))
+    if not sc_names:
+        return manifest
+    files["matrix"] = sc_names
+    files["barcodes"] = []
+    files["genes"] = []
+    manifest["mode"] = "single_cell"
+    return manifest
+
+
 def _download_files(urls: dict, raw_dir: Path, log) -> dict:
     downloaded = {}
     for category in ["matrix", "barcodes", "genes", "metadata"]:
@@ -533,6 +583,7 @@ def ensure_geo_dataset(accession: str, root: Path, log) -> dict:
             log,
         )
         cached = _refresh_manifest_mode(cached, cache_dir)
+        cached = _prefer_single_cell_matrices(cached, cache_dir)
         all_files = []
         for group in ["matrix", "barcodes", "genes", "metadata", "series_matrices"]:
             all_files.extend(cached.get("files", {}).get(group, []))
@@ -563,6 +614,7 @@ def ensure_geo_dataset(accession: str, root: Path, log) -> dict:
             log,
         )
         manifest = _refresh_manifest_mode(manifest, raw_dir)
+        manifest = _prefer_single_cell_matrices(manifest, raw_dir)
         all_files = []
         for group in ["matrix", "barcodes", "genes", "metadata", "series_matrices"]:
             all_files.extend(manifest.get("files", {}).get(group, []))
@@ -689,6 +741,7 @@ def ensure_geo_dataset(accession: str, root: Path, log) -> dict:
         },
     }
     manifest = _refresh_manifest_mode(manifest, raw_dir)
+    manifest = _prefer_single_cell_matrices(manifest, raw_dir)
     manifest_path.write_text(
         json.dumps(manifest, indent=2, ensure_ascii=False),
         encoding="utf-8",

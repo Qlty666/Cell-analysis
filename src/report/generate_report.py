@@ -879,6 +879,10 @@ def top_deg_line(summary: dict) -> str:
     return "Top 差异基因：" + "；".join(parts)
 
 
+def sample_level_mode(summary: dict) -> bool:
+    return str(summary.get("dataset_mode", "single_cell")) != "single_cell"
+
+
 def joint_conclusions(
     fig_name: str,
     companions: list[dict],
@@ -889,17 +893,25 @@ def joint_conclusions(
         raw = summary.get("n_cells_raw")
         qc = summary.get("n_cells_after_qc")
         if isinstance(raw, (int, float)) and isinstance(qc, (int, float)) and raw:
+            unit = "样本" if sample_level_mode(summary) else "细胞"
             items.append(
-                f"与 QC 汇总一致：原始 {raw} 细胞，QC 后保留 {qc} 细胞"
+                f"与 QC 汇总一致：原始 {raw} {unit}，QC 后保留 {qc} {unit}"
                 f"（{qc / raw * 100:.1f}%）。"
             )
     if fig_name == "fig_02_doublet_scores.png":
         qc = summary.get("n_cells_after_qc")
         dbl = summary.get("n_cells_after_doublet_removal")
         if isinstance(qc, (int, float)) and isinstance(dbl, (int, float)) and qc:
-            items.append(
-                f"去双细胞后保留 {dbl} / {qc} 细胞（{dbl / qc * 100:.1f}%）。"
-            )
+            if sample_level_mode(summary):
+                items.append(
+                    "样本级表达数据不执行细胞级双细胞检测；"
+                    "该图及保留数不能作为单细胞双细胞结论。"
+                )
+            else:
+                items.append(
+                    f"去双细胞后保留 {dbl} / {qc} 细胞"
+                    f"（{dbl / qc * 100:.1f}%）。"
+                )
     if fig_name == "fig_08_volcano.png" and summary.get("deg_total") is not None:
         items.append(
             f"差异表达汇总：共 {summary.get('deg_total')} 个，"
@@ -1133,14 +1145,24 @@ def render_overall_conclusion(
     after_qc = summary.get("n_cells_after_qc")
     after_doublet = summary.get("n_cells_after_doublet_removal")
     if isinstance(raw, (int, float)) and isinstance(after_qc, (int, float)):
-        items.append(f"QC 保留率：{after_qc} / {raw} = {after_qc / raw * 100:.1f}%。")
-    if isinstance(after_qc, (int, float)) and isinstance(after_doublet, (int, float)):
+        unit = "样本" if sample_level_mode(summary) else "细胞"
         items.append(
-            f"去双细胞后保留：{after_doublet} / {after_qc} = "
-            f"{after_doublet / after_qc * 100:.1f}%。"
+            f"QC 保留率：{after_qc} / {raw} {unit} = "
+            f"{after_qc / raw * 100:.1f}%。"
         )
-    if summary.get("n_clusters") is not None:
-        items.append(f"共识别 {summary.get('n_clusters')} 个聚类、{summary.get('n_celltypes', 'NA')} 类细胞。")
+    if sample_level_mode(summary):
+        items.append("分析按样本级表达矩阵运行；UMAP/PCA 仅代表样本间表达结构。")
+    else:
+        if isinstance(after_qc, (int, float)) and isinstance(after_doublet, (int, float)):
+            items.append(
+                f"去双细胞后保留：{after_doublet} / {after_qc} = "
+                f"{after_doublet / after_qc * 100:.1f}%。"
+            )
+        if summary.get("n_clusters") is not None:
+            items.append(
+                f"共识别 {summary.get('n_clusters')} 个聚类、"
+                f"{summary.get('n_celltypes', 'NA')} 类细胞。"
+            )
     if summary.get("deg_total") is not None:
         items.append(
             f"差异表达：共 {summary.get('deg_total')} 个，上调 "
@@ -1186,6 +1208,50 @@ def main(output_dir: str | Path | None = None) -> int:
     condition_html = "".join(
         f"<span class='chip'>{esc(k)}: {esc(v)}</span>"
         for k, v in condition_counts.items()
+    )
+    sample_level = str(summary.get("dataset_mode", "single_cell")) != "single_cell"
+    if sample_level:
+        raw_count = esc(summary.get("n_samples", summary.get("n_cells_raw", "NA")))
+        qc_count = esc(summary.get("n_cells_after_qc", "NA"))
+        cards_html = (
+            "<div class='card'><div class='num'>"
+            f"{raw_count}</div><div class='label'>样本数</div></div>"
+            "<div class='card'><div class='num'>"
+            f"{qc_count}</div><div class='label'>QC 后样本</div></div>"
+            "<div class='card'><div class='num'>"
+            f"{esc(summary.get('n_genes', 'NA'))}</div><div class='label'>基因数</div></div>"
+            "<div class='card'><div class='num'>"
+            f"{esc(summary.get('deg_up', 'NA'))}</div><div class='label'>上调 DEG</div></div>"
+            "<div class='card'><div class='num'>"
+            f"{esc(summary.get('deg_down', 'NA'))}</div><div class='label'>下调 DEG</div></div>"
+        )
+    else:
+        cards_html = "".join(
+            "<div class='card'><div class='num'>"
+            f"{esc(summary.get(key, 'NA'))}</div><div class='label'>{label}</div></div>"
+            for key, label in (
+                ("n_cells_raw", "原始细胞"),
+                ("n_cells_after_qc", "QC 后细胞"),
+                ("n_cells_after_doublet_removal", "去双细胞后"),
+                ("n_genes", "基因数"),
+                ("n_clusters", "聚类数"),
+                ("n_celltypes", "细胞类型"),
+                ("deg_up", "上调 DEG"),
+                ("deg_down", "下调 DEG"),
+            )
+        )
+    report_title = (
+        "样本级表达分析总报告"
+        if sample_level
+        else "肝癌单细胞分析总报告"
+    )
+    report_body_title = (
+        "样本级表达分析总报告"
+        if sample_level
+        else "单细胞分析总报告"
+    )
+    umap_condition_title = (
+        f"{esc(summary.get('title', 'HCC vs iCCA'))} UMAP"
     )
 
     top_degs = summary.get("top_degs", [])
@@ -1272,7 +1338,7 @@ def main(output_dir: str | Path | None = None) -> int:
 <head>
 <meta charset="utf-8">
 <meta name="viewport" content="width=device-width, initial-scale=1">
-<title>肝癌单细胞分析总报告</title>
+<title>{report_title}</title>
 <style>
 body {{ font-family: "Segoe UI", Arial, sans-serif; margin: 0; background: #f5f7fa; color: #1f2933; }}
 .wrap {{ max-width: 1180px; margin: 0 auto; padding: 24px; }}
@@ -1317,18 +1383,11 @@ summary {{ cursor: pointer; color: #1665c0; font-size: 13px; }}
 </head>
 <body>
 <div class="wrap">
-<h1>单细胞分析总报告</h1>
+<h1>{report_body_title}</h1>
 <p class="sub">{esc(summary.get('title', 'single-cell analysis'))} | {esc(dataset)}</p>
 
 <div class="cards">
-  <div class="card"><div class="num">{esc(summary.get('n_cells_raw', 'NA'))}</div><div class="label">原始细胞</div></div>
-  <div class="card"><div class="num">{esc(summary.get('n_cells_after_qc', 'NA'))}</div><div class="label">QC 后细胞</div></div>
-  <div class="card"><div class="num">{esc(summary.get('n_cells_after_doublet_removal', 'NA'))}</div><div class="label">去双细胞后</div></div>
-  <div class="card"><div class="num">{esc(summary.get('n_genes', 'NA'))}</div><div class="label">基因数</div></div>
-  <div class="card"><div class="num">{esc(summary.get('n_clusters', 'NA'))}</div><div class="label">聚类数</div></div>
-  <div class="card"><div class="num">{esc(summary.get('n_celltypes', 'NA'))}</div><div class="label">细胞类型</div></div>
-  <div class="card"><div class="num">{esc(summary.get('deg_up', 'NA'))}</div><div class="label">HCC 上调 DEG</div></div>
-  <div class="card"><div class="num">{esc(summary.get('deg_down', 'NA'))}</div><div class="label">HCC 下调 DEG</div></div>
+{cards_html}
 </div>
 
 <p>样本分组：{condition_html}</p>
@@ -1344,7 +1403,7 @@ summary {{ cursor: pointer; color: #1665c0; font-size: 13px; }}
 
 <h2>3. 聚类与 UMAP</h2>
 {image_card('fig_03_umap_clusters.png', 'Seurat 聚类 UMAP')}
-{image_card('fig_04_umap_condition.png', 'HCC vs iCCA UMAP')}
+{image_card('fig_04_umap_condition.png', umap_condition_title)}
 
 <h2>4. 细胞注释</h2>
 {image_card('fig_05_umap_annotation.png', '注释与发表细胞类型 UMAP')}

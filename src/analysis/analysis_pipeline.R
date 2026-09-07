@@ -207,11 +207,15 @@ cluster_resolution <- param_num("LIVER_CLUSTER_RESOLUTION")
 cluster_algorithm <- param_num("LIVER_CLUSTER_ALGORITHM")
 de_logfc <- param_num("LIVER_DE_LOGFc")
 de_padj <- param_num("LIVER_DE_PADJ")
+de_min_base_mean <- param_num("LIVER_DE_MIN_BASEMEAN")
+de_max_logfc <- param_num("LIVER_DE_MAX_LOGFC")
 deg_violin_top_n <- param_num("LIVER_DE_VIOLIN_TOP_N")
 deg_violin_max_cells <- param_num("LIVER_DE_VIOLIN_MAX_CELLS")
 if (is.na(cluster_resolution)) cluster_resolution <- 0.6
 if (is.na(de_logfc)) de_logfc <- 0.25
 if (is.na(de_padj)) de_padj <- 0.05
+if (is.na(de_min_base_mean)) de_min_base_mean <- 0
+if (is.na(de_max_logfc)) de_max_logfc <- 20
 if (is.na(deg_violin_top_n)) deg_violin_top_n <- 12
 if (is.na(deg_violin_max_cells)) deg_violin_max_cells <- 1000
 
@@ -553,6 +557,190 @@ read_mtx_fallback <- function(path) {
   as(m, "CsparseMatrix")
 }
 
+normalize_ensembl_ids <- function(ids) {
+  ids <- as.character(ids)
+  hit <- grepl("^(ENSG|ENSMUSG|ENST|ENSMUST)", ids)
+  ids[hit] <- sub("\\.[0-9]+$", "", ids[hit])
+  ids
+}
+
+h5_vector <- function(item) {
+  if (is.null(item)) return(NULL)
+  value <- item$read()
+  if (is.data.frame(value)) {
+    value <- value[[1]]
+  }
+  if (is.character(value)) return(value)
+  if (is.factor(value)) return(as.character(value))
+  if (is.raw(value)) return(rawToChar(value))
+  as.vector(value)
+}
+
+h5_obs_column <- function(obs_group, name) {
+  item <- obs_group[[name]]
+  if (inherits(item, "H5D")) {
+    value <- h5_vector(item)
+    if (is.integer(value) &&
+        length(unique(value[!is.na(value)])) <= 2 &&
+        all(unique(value[!is.na(value)]) %in% c(0L, 1L))) {
+      value <- as.logical(value)
+    }
+    return(value)
+  }
+  if (inherits(item, "H5Group")) {
+    categories <- h5_vector(item[["categories"]])
+    codes <- as.integer(h5_vector(item[["codes"]]))
+    if (length(categories) == 0 || length(codes) == 0) {
+      return(rep(NA_character_, length(codes)))
+    }
+    out <- rep(NA_character_, length(codes))
+    valid <- !is.na(codes) & codes >= 0 & codes < length(categories)
+    out[valid] <- categories[codes[valid] + 1L]
+    return(out)
+  }
+  NULL
+}
+
+h5_index_name <- function(group) {
+  if (is.null(group)) return(NULL)
+  if ("_index" %in% names(group)) return("_index")
+  attr_names <- tryCatch(hdf5r::h5attr_names(group), error = function(e) character())
+  if ("_index" %in% attr_names) {
+    value <- tryCatch(group$attr_open("_index")$read(), error = function(e) NULL)
+    if (!is.null(value) && length(value) == 1 && nzchar(as.character(value))) {
+      return(as.character(value))
+    }
+  }
+  NULL
+}
+
+read_h5ad_matrix <- function(path) {
+  if (!requireNamespace("hdf5r", quietly = TRUE)) {
+    stop("hdf5r is required to read .h5ad inputs; run install_deps.R")
+  }
+  plain_path <- path
+  temp_plain <- NULL
+  if (grepl("\\.gz$", path, ignore.case = TRUE)) {
+    if (!requireNamespace("R.utils", quietly = TRUE)) {
+      stop("R.utils is required to decompress .h5ad.gz inputs")
+    }
+    temp_plain <- tempfile(fileext = ".h5ad")
+    R.utils::gunzip(
+      filename = path,
+      destname = temp_plain,
+      remove = FALSE,
+      overwrite = TRUE
+    )
+    plain_path <- temp_plain
+  }
+
+  h5 <- hdf5r::h5file(plain_path, mode = "r")
+  on.exit({
+    try(h5$close_all(), silent = TRUE)
+    if (!is.null(temp_plain) && file.exists(temp_plain)) {
+      unlink(temp_plain)
+    }
+  }, add = TRUE)
+
+  x_group <- h5[["X"]]
+  layers <- h5[["layers"]]
+  if (inherits(layers, "H5Group") &&
+      any(c("counts", "raw_counts", "count") %in% names(layers))) {
+    layer_name <- c("counts", "raw_counts", "count")[
+      c("counts", "raw_counts", "count") %in% names(layers)
+    ][1]
+    log_msg("h5ad: using layer ", layer_name, " from ", basename(path))
+    x_group <- layers[[layer_name]]
+  }
+
+  shape <- as.integer(x_group$attr_open("shape")$read())
+  if (length(shape) != 2) {
+    stop("h5ad X does not have a 2D shape: ", path)
+  }
+  if ("data" %in% names(x_group)) {
+    data <- h5_vector(x_group[["data"]])
+    indices <- as.integer(h5_vector(x_group[["indices"]]))
+    indptr <- as.integer(h5_vector(x_group[["indptr"]]))
+    matrix_r <- new(
+      "dgRMatrix",
+      p = indptr,
+      j = indices,
+      x = as.numeric(data),
+      Dim = c(shape[1], shape[2])
+    )
+    rm(data, indices, indptr)
+    gc(FALSE)
+    counts <- t(matrix_r)
+    rm(matrix_r)
+    gc(FALSE)
+  } else {
+    dense <- h5_vector(x_group)
+    counts <- as(
+      Matrix::Matrix(dense, nrow = shape[1], ncol = shape[2], sparse = TRUE),
+      "CsparseMatrix"
+    )
+  }
+
+  obs <- h5[["obs"]]
+  index_name <- h5_index_name(obs)
+  cells <- if (is.null(index_name)) {
+    rep("", shape[1])
+  } else {
+    h5_vector(obs[[index_name]])
+  }
+  if (length(cells) == 0 || all(!nzchar(cells))) {
+    cells <- paste0("Cell", seq_len(shape[1]))
+  }
+  cells <- make.unique(as.character(cells))
+
+  meta <- data.frame(row.names = cells, stringsAsFactors = FALSE)
+  if (!is.null(obs)) {
+    for (name in names(obs)) {
+      if (identical(name, index_name)) next
+      value <- h5_obs_column(obs, name)
+      if (is.null(value)) next
+      if (length(value) == length(cells)) {
+        meta[[name]] <- value
+      }
+    }
+  }
+
+  var <- h5[["var"]]
+  var_index <- h5_index_name(var)
+  genes <- if (is.null(var_index)) {
+    h5_vector(var[["gene_ids"]])
+  } else {
+    h5_vector(var[[var_index]])
+  }
+  if (length(genes) != nrow(counts)) {
+    genes <- h5_vector(var[["gene_ids"]])
+  }
+  if (length(genes) != nrow(counts)) {
+    genes <- paste0("Gene", seq_len(nrow(counts)))
+  }
+  if (length(genes) != 0 && length(genes) == nrow(counts) && "exclude" %in% names(var)) {
+    exclude <- as.logical(h5_vector(var[["exclude"]]))
+    exclude[is.na(exclude)] <- FALSE
+    if (any(exclude)) {
+      counts <- counts[!exclude, , drop = FALSE]
+      genes <- genes[!exclude]
+      log_msg("h5ad: dropped ", sum(exclude), " genes flagged exclude in ", basename(path))
+    }
+  }
+  genes <- normalize_ensembl_ids(genes)
+  rownames(counts) <- make.unique(as.character(genes))
+  colnames(counts) <- cells
+  if (ncol(counts) > 0 && length(rownames(counts)) > 0) {
+    counts@x <- round(counts@x)
+  }
+
+  log_msg(
+    "h5ad loaded: ", basename(path), " cells=", ncol(counts),
+    " genes=", nrow(counts)
+  )
+  list(counts = counts, meta = meta)
+}
+
 read_generic_counts <- function(manifest) {
   files <- manifest$files
   matrices <- as.character(files$matrix)
@@ -561,10 +749,28 @@ read_generic_counts <- function(manifest) {
   if (length(matrices) == 0) {
     stop("No count matrix files found in dataset manifest.")
   }
+  if (identical(manifest$mode, "single_cell") && length(matrices) > 1) {
+    h5_suffixes <- grepl(
+      "\\.(h5ad(\\.gz)?|h5|loom|rds)$",
+      matrices,
+      ignore.case = TRUE
+    )
+    if (any(h5_suffixes) && any(!h5_suffixes)) {
+      dropped <- matrices[!h5_suffixes]
+      matrices <- matrices[h5_suffixes]
+      barcodes <- character()
+      genes <- character()
+      log_msg(
+        "single-cell mode: dropped sample-level matrix files ",
+        paste(dropped, collapse = ", ")
+      )
+    }
+  }
 
   count_list_all <- list()
   sample_list <- list()
   group_list <- list()
+  meta_list <- list()
   bc <- character()
   infer_cell_samples <- function(labels) {
     labels <- as.character(labels)
@@ -580,11 +786,18 @@ read_generic_counts <- function(manifest) {
   for (i in seq_along(matrices)) {
     mat_file <- matrices[i]
     mat_path <- file.path(raw_dir, mat_file)
+    embedded_meta <- NULL
     if (exists("sample_label", inherits = FALSE)) {
       rm(sample_label)
     }
 
-    if (grepl("\\.rds$", mat_file, ignore.case = TRUE)) {
+    if (grepl("\\.h5ad(\\.gz)?$", mat_file, ignore.case = TRUE)) {
+      h5_loaded <- read_h5ad_matrix(mat_path)
+      m <- h5_loaded$counts
+      embedded_meta <- h5_loaded$meta
+      sample_label <- "Sample1"
+      sample_labels <- rep("Sample1", ncol(m))
+    } else if (grepl("\\.rds$", mat_file, ignore.case = TRUE)) {
       obj <- readRDS(mat_path)
       if (inherits(obj, "Seurat")) {
         m <- GetAssayData(obj, layer = "counts")
@@ -593,6 +806,7 @@ read_generic_counts <- function(manifest) {
       } else {
         m <- as(as.matrix(obj), "CsparseMatrix")
       }
+      embedded_meta <- if (inherits(obj, "Seurat")) obj[[]] else NULL
     } else if (grepl("\\.h5$", mat_file, ignore.case = TRUE)) {
       m <- Read10X_h5(mat_path)
       if (is.list(m) && !inherits(m, "Matrix")) {
@@ -681,7 +895,7 @@ read_generic_counts <- function(manifest) {
         if (ncol(tab) < 2) {
           stop("Matrix file does not look like a gene x cell table: ", mat_file)
         }
-        g <- tab[[1]]
+        g <- normalize_ensembl_ids(as.character(tab[[1]]))
         m <- as.matrix(tab[, -1, with = FALSE])
         if (is.character(m)) storage.mode(m) <- "double"
         rownames(m) <- make.unique(as.character(g))
@@ -695,7 +909,7 @@ read_generic_counts <- function(manifest) {
         if (ncol(tab) < 2) {
           stop("Matrix file does not look like a gene x cell table: ", mat_file)
         }
-        g <- tab[[1]]
+        g <- normalize_ensembl_ids(as.character(tab[[1]]))
         drop_cols <- 1
         if (
           ncol(tab) > 2 &&
@@ -781,6 +995,7 @@ read_generic_counts <- function(manifest) {
     count_list_all[[i]] <- m
     sample_list[[i]] <- sample_labels
     group_list[[i]] <- rep(infer_group_from_filename(mat_file), ncol(m))
+    meta_list[[i]] <- embedded_meta
   }
 
   keep <- rep(TRUE, length(count_list_all))
@@ -796,6 +1011,7 @@ read_generic_counts <- function(manifest) {
   count_list <- count_list_all[keep]
   cell_sample <- unlist(sample_list[keep], use.names = FALSE)
   cell_group <- unlist(group_list[keep], use.names = FALSE)
+  kept_meta <- meta_list[keep]
   common <- Reduce(intersect, lapply(count_list, rownames))
   counts <- do.call(
     cbind,
@@ -804,7 +1020,8 @@ read_generic_counts <- function(manifest) {
   list(
     counts = counts,
     cell_sample = cell_sample,
-    cell_group = cell_group
+    cell_group = cell_group,
+    meta_list = kept_meta
   )
 }
 
@@ -882,8 +1099,23 @@ infer_group_from_filename <- function(mat_file) {
   ""
 }
 
-read_generic_metadata <- function(manifest, cells, cell_sample = NULL) {
+read_generic_metadata <- function(
+  manifest,
+  cells,
+  cell_sample = NULL,
+  embedded_meta = NULL
+) {
   meta <- data.frame(row.names = cells)
+  if (!is.null(embedded_meta) && length(embedded_meta) > 0) {
+    for (frame in embedded_meta) {
+      if (is.null(frame) || nrow(frame) == 0 || ncol(frame) == 0) next
+      frame_cells <- make.unique(as.character(rownames(frame)))
+      idx <- match(cells, frame_cells)
+      for (col in colnames(frame)) {
+        meta[[col]] <- frame[[col]][idx]
+      }
+    }
+  }
   files <- as.character(manifest$files$metadata)
   if (length(files) == 0) {
     return(meta)
@@ -1024,7 +1256,8 @@ read_generic_metadata <- function(manifest, cells, cell_sample = NULL) {
 
   type_candidates <- c(
     "Type", "celltype", "cell_type", "celltype_global", "celltype_sub",
-    "CellType", "Cell.type", "cell.type", "cell_type_annot"
+    "CellType", "Cell.type", "cell.type", "cell_type_annot",
+    "major_cluster", "sub_cluster"
   )
   type_col <- type_candidates[type_candidates %in% colnames(meta)][1]
   if (length(type_col) == 1 && !is.na(type_col)) {
@@ -1305,13 +1538,30 @@ normalize_condition <- function(meta) {
   meta
 }
 
+decode_condition_labels <- function(vals, accession) {
+  vals <- as.character(vals)
+  unique_vals <- unique(vals[!is.na(vals) & nzchar(trimws(vals))])
+  if (length(unique_vals) == 0 || !all(unique_vals %in% c("P", "T", "N"))) {
+    return(vals)
+  }
+  mapping <- c(
+    P = if (identical(accession, "GSE235863")) "blood" else "PB",
+    T = if (identical(accession, "GSE235863")) "liver tumor" else "Tumor",
+    N = "Normal"
+  )
+  mapped <- unname(mapping[vals])
+  mapped[is.na(mapped)] <- vals[is.na(mapped)]
+  mapped
+}
+
 read_generic_dataset <- function(manifest) {
   loaded <- read_generic_counts(manifest)
   counts <- loaded$counts
   meta <- read_generic_metadata(
     manifest,
     colnames(counts),
-    loaded$cell_sample
+    loaded$cell_sample,
+    loaded$meta_list
   )
   ann <- parse_series_generic(manifest)
 
@@ -1435,6 +1685,7 @@ read_generic_dataset <- function(manifest) {
     paste(names(table(cond)), table(cond), sep = "=", collapse = ", ")
   )
   meta$condition <- cond
+  meta$condition <- decode_condition_labels(meta$condition, accession)
   meta <- normalize_condition(meta)
   counts <- counts[, rownames(meta), drop = FALSE]
   for (col in c("nCount_RNA", "nFeature_RNA", "percentMt", "percent.mt", "percent_mito")) {
@@ -1918,6 +2169,16 @@ if (stage_allowed("03")) run_stage("03_doublets", {
     log_msg("sample-level mode: skipping doublet detection")
     sce$scDblFinder.score <- rep(0, ncol(sce))
     sce$scDblFinder.class <- rep("singlet", ncol(sce))
+  } else if (
+    all(c("doublet_scores", "predicted_doublets") %in% colnames(seurat_qc[[]]))
+  ) {
+    log_msg("using doublet calls supplied in the h5ad obs metadata")
+    sce$scDblFinder.score <- as.numeric(seurat_qc$doublet_scores)
+    sce$scDblFinder.class <- ifelse(
+      as.logical(seurat_qc$predicted_doublets) %in% TRUE,
+      "doublet",
+      "singlet"
+    )
   } else {
     sce <- tryCatch(
       scDblFinder(sce, BPPARAM = BiocParallel::SerialParam()),
@@ -1970,7 +2231,44 @@ if (stage_allowed("04")) run_stage("04_cluster", {
     seurat <- readRDS(ckpt_path("seurat_singlet.rds"))
   }
   seurat <- NormalizeData(seurat, verbose = FALSE)
-  if (dataset_mode == "sample_level") {
+  has_author_embed <- dataset_mode == "single_cell" &&
+    all(c("UMAP_1", "UMAP_2", "sub_cluster", "major_cluster") %in%
+          colnames(seurat[[]]))
+  if (has_author_embed) {
+    log_msg("h5ad obs has UMAP/sub_cluster; reusing author annotations")
+    seurat$seurat_clusters <- as.character(seurat$sub_cluster)
+    emb_umap <- cbind(
+      UMAP_1 = as.numeric(as.character(seurat$UMAP_1)),
+      UMAP_2 = as.numeric(as.character(seurat$UMAP_2))
+    )
+    rownames(emb_umap) <- colnames(seurat)
+    seurat[["umap"]] <- CreateDimReducObject(
+      embeddings = emb_umap,
+      key = "umap_",
+      assay = "RNA"
+    )
+    umap_tbl <- as.data.frame(emb_umap)
+    umap_tbl$cell <- rownames(emb_umap)
+    umap_tbl$seurat_clusters <- as.character(seurat$seurat_clusters)
+    umap_tbl$condition <- seurat$condition
+    umap_tbl$sample <- seurat$sample
+    write.csv(
+      umap_tbl,
+      stage_data_file("fig_03_04_05_umap_coordinates.csv"),
+      row.names = FALSE
+    )
+    cluster_counts <- as.data.frame(table(
+      seurat_clusters = seurat$seurat_clusters,
+      condition = seurat$condition,
+      sample = seurat$sample
+    ))
+    write.csv(
+      cluster_counts,
+      stage_data_file("fig_18_19_30_cluster_composition.csv"),
+      row.names = FALSE
+    )
+    log_msg("number of clusters (author sub_cluster): ", length(unique(seurat$seurat_clusters)))
+  } else if (dataset_mode == "sample_level") {
     log_msg("sample-level mode: assigning sample-level clusters and embeddings")
     seurat$seurat_clusters <- as.character(seurat$sample)
     npcs <- min(30, max(1, ncol(seurat) - 1))
@@ -2264,6 +2562,14 @@ if (stage_allowed("05")) run_stage("05_annotation", {
   ]
 
   seurat$celltype_annot <- seurat$celltype_annot_cell
+  if (
+    dataset_mode == "single_cell" &&
+    all(c("major_cluster", "sub_cluster") %in% colnames(seurat[[]]))
+  ) {
+    log_msg("using h5ad major_cluster as cell type annotation")
+    seurat$celltype_annot <- as.character(seurat$major_cluster)
+    seurat$celltype_annot_cell <- as.character(seurat$sub_cluster)
+  }
 
   cluster_ids <- unique(as.character(seurat$seurat_clusters))
   if (all(grepl("^[0-9]+$", cluster_ids))) {
@@ -2663,7 +2969,12 @@ if (stage_allowed("06")) run_stage("06_differential_expression", {
       }
     )
     if (!is.null(dds)) {
-      res <- results(dds, contrast = c("condition", cond_levels[1], cond_levels[2]))
+      res <- results(
+        dds,
+        contrast = c("condition", cond_levels[1], cond_levels[2]),
+        alpha = de_padj,
+        independentFiltering = TRUE
+      )
       deg <- as.data.frame(res)
       deg$gene <- rownames(deg)
       deg$avg_log2FC <- deg$log2FoldChange
@@ -2752,7 +3063,12 @@ if (stage_allowed("06")) run_stage("06_differential_expression", {
     }
 
     if (use_pseudobulk) {
-      res <- results(dds, contrast = c("condition", cond_levels[1], cond_levels[2]))
+      res <- results(
+        dds,
+        contrast = c("condition", cond_levels[1], cond_levels[2]),
+        alpha = de_padj,
+        independentFiltering = TRUE
+      )
       deg <- as.data.frame(res)
       deg$gene <- rownames(deg)
       deg$avg_log2FC <- deg$log2FoldChange
@@ -2803,7 +3119,22 @@ if (stage_allowed("06")) run_stage("06_differential_expression", {
     }
   }
   deg <- ensure_deg_columns(deg)
-  deg$significant <- deg$p_val_adj < de_padj & abs(deg$avg_log2FC) > de_logfc
+  if (
+    !nzchar(Sys.getenv("LIVER_DE_MIN_BASEMEAN", unset = "")) &&
+    de_min_base_mean == 0
+  ) {
+    de_min_base_mean <- if (dataset_mode == "sample_level") 10 else 1
+  }
+  if (!"baseMean" %in% colnames(deg)) {
+    deg$baseMean <- NA_real_
+  }
+  deg$significant <-
+    !is.na(deg$p_val_adj) &
+    !is.na(deg$avg_log2FC) &
+    deg$p_val_adj < de_padj &
+    abs(deg$avg_log2FC) > de_logfc &
+    abs(deg$avg_log2FC) <= de_max_logfc &
+    (is.na(deg$baseMean) | deg$baseMean >= de_min_base_mean)
   deg$direction <- ifelse(
     deg$significant,
     ifelse(deg$avg_log2FC > 0, "Up", "Down"),
@@ -3037,6 +3368,7 @@ if (stage_allowed("07")) run_stage("07_enrichment", {
 
   gene_id_type <- function(ids) {
     ids <- na.omit(ids)
+    ids <- normalize_ensembl_ids(ids)
     if (length(ids) == 0) return("SYMBOL")
     if (grepl("^ENSG\\d+", ids[1]) || grepl("^ENSMUSG\\d+", ids[1])) {
       "ENSEMBL"
@@ -3062,9 +3394,10 @@ if (stage_allowed("07")) run_stage("07_enrichment", {
     }
 
     id_type <- gene_id_type(deg_sub$gene)
+    query_ids <- unique(normalize_ensembl_ids(deg_sub$gene))
     eg <- tryCatch(
       bitr(
-        deg_sub$gene,
+        query_ids,
         fromType = id_type,
         toType = "ENTREZID",
         OrgDb = org_db
@@ -3151,13 +3484,14 @@ if (stage_allowed("07")) run_stage("07_enrichment", {
   plot_res(down_res$kegg, file.path(fig_dir, "fig_13_kegg_down.png"), "KEGG: down-regulated genes")
 
   rank_vec <- deg$avg_log2FC
-  names(rank_vec) <- deg$gene
+  names(rank_vec) <- normalize_ensembl_ids(deg$gene)
   rank_vec <- sort(rank_vec[!is.na(rank_vec) & is.finite(rank_vec)], decreasing = TRUE)
   id_type <- gene_id_type(names(rank_vec))
   mapped_col <- if (id_type == "SYMBOL") "SYMBOL" else "ENSEMBL"
+  gsea_query <- unique(normalize_ensembl_ids(names(rank_vec)))
   eg_all <- tryCatch(
     bitr(
-      names(rank_vec),
+      gsea_query,
       fromType = id_type,
       toType = "ENTREZID",
       OrgDb = org_db
@@ -4097,7 +4431,11 @@ if (stage_allowed("09")) run_stage("09_summary_outputs", {
   summary_list <- list(
     dataset = accession,
     dataset_mode = dataset_mode,
-    n_samples = ncol(seurat),
+    n_samples = if (dataset_mode == "single_cell") {
+      length(unique(as.character(seurat$sample)))
+    } else {
+      ncol(seurat)
+    },
     title = paste(
       sort(unique(as.character(seurat$condition))),
       collapse = " vs "
@@ -4110,7 +4448,7 @@ if (stage_allowed("09")) run_stage("09_summary_outputs", {
     n_clusters = length(unique(seurat$seurat_clusters)),
     n_celltypes = length(unique(seurat$celltype_annot)),
     condition_counts = as.list(table(seurat$condition)),
-    deg_total = nrow(deg),
+    deg_total = sum(!is.na(deg$p_val_adj), na.rm = TRUE),
     deg_up = sum(
       deg$significant & deg$avg_log2FC > 0,
       na.rm = TRUE
@@ -4119,7 +4457,13 @@ if (stage_allowed("09")) run_stage("09_summary_outputs", {
       deg$significant & deg$avg_log2FC < 0,
       na.rm = TRUE
     ),
-    top_degs = head(deg[, c("gene", "avg_log2FC", "p_val_adj")], 20),
+    top_degs = {
+      sig <- deg[deg$significant %in% TRUE, , drop = FALSE]
+      head(
+        if (nrow(sig) > 0) sig else deg,
+        min(20, nrow(if (nrow(sig) > 0) sig else deg))
+      )[, c("gene", "avg_log2FC", "p_val_adj"), drop = FALSE]
+    },
     go_up_top = if (
       nrow(go_up) > 0 &&
       all(c("ID", "Description", "pvalue", "p.adjust") %in% colnames(go_up))
