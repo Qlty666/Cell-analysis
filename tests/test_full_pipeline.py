@@ -19,14 +19,19 @@ if str(APP_ROOT / "src") not in sys.path:
     sys.path.insert(0, str(APP_ROOT / "src"))
 
 from pipeline.integration import (  # noqa: E402
+    IntegrationError,
     STAGES,
     _clear_downstream_markers,
     _dataset_mode_from_root,
     _download_pdb,
     _extract_cocrystal_ligands,
     _invalidate_markers_for_changed_root,
+    _prune_stale_stage_markers,
     _resolve_feedback_species,
+    _stage_cadd_downstream,
     _stage_cell_feedback,
+    _stage_faers,
+    _stage_network,
     _stage_outdated,
     _stage_output_paths,
     _stage_outputs_ready,
@@ -47,6 +52,7 @@ from pipeline.cell_feedback import (  # noqa: E402
     run_cell_feedback,
 )
 from pipeline import orchestrator  # noqa: E402
+import pipeline.integration as integration_module  # noqa: E402
 
 
 def _write_deg(root: Path) -> None:
@@ -449,6 +455,22 @@ class TestFullPipelineMarkers(unittest.TestCase):
             remaining = {path.stem for path in stage_dir.glob("*.done")}
             self.assertEqual(remaining, {"01_single_cell"})
 
+    def test_prune_removes_legacy_stage_markers(self):
+        with tempfile.TemporaryDirectory() as tmp:
+            workdir = Path(tmp) / "work"
+            stage_dir = workdir / "outputs" / "integration" / ".stages"
+            stage_dir.mkdir(parents=True)
+            (stage_dir / "07_cell_feedback.done").write_text(
+                "old",
+                encoding="utf-8",
+            )
+            (stage_dir / "08_report.done").write_text(
+                "old",
+                encoding="utf-8",
+            )
+            self.assertEqual(_prune_stale_stage_markers(workdir), 2)
+            self.assertEqual(list(stage_dir.glob("*.done")), [])
+
 
 class TestFullPipeline(unittest.TestCase):
     def test_bulk_manifest_is_supported_by_pipeline(self):
@@ -770,7 +792,10 @@ class TestFullPipeline(unittest.TestCase):
             )
             self.assertTrue((out / "integration_report.html").exists())
             self.assertTrue((out / "integration_summary.json").exists())
-            self.assertTrue((out / ".stages" / "08_report.done").exists())
+            self.assertTrue((out / ".stages" / "11_report.done").exists())
+            self.assertTrue((out / "cadd_downstream_summary.json").exists())
+            self.assertTrue((out / "network_summary.json").exists())
+            self.assertTrue((out / "faers_summary.json").exists())
             evidence = pd.read_csv(out / "gene_evidence.csv")
             for column in [
                 "string_partners",
@@ -1098,6 +1123,264 @@ class TestStageOutputVerification(unittest.TestCase):
             paths[0].parent.mkdir(parents=True, exist_ok=True)
             paths[0].write_text("evidence", encoding="utf-8")
             self.assertTrue(_stage_outputs_ready("03", workdir, ctx, args))
+
+
+class TestIntegratedSafetyStages(unittest.TestCase):
+    def test_cadd_downstream_skips_without_docking_targets(self):
+        with tempfile.TemporaryDirectory() as tmp:
+            workdir = Path(tmp) / "work"
+            ctx = {
+                "docking_config": Path(tmp) / "docking_config.json",
+            }
+            args = argparse.Namespace(
+                md_simulation={"enabled": True, "mode": "prepare", "top_n": 1},
+                handoff={"enabled": True},
+                docking_ml={"enabled": True, "model": "rf"},
+                docking_ml_training_csv=None,
+            )
+            _stage_cadd_downstream(args, workdir, ctx)
+            out = workdir / "outputs" / "integration"
+            summary = json.loads(
+                (out / "cadd_downstream_summary.json").read_text(
+                    encoding="utf-8"
+                )
+            )
+            self.assertEqual(summary["status"], "skipped")
+            self.assertTrue((out / "cadd_targets.csv").exists())
+
+    def test_cadd_downstream_runs_md_and_handoff_for_ok_target(self):
+        with tempfile.TemporaryDirectory() as tmp:
+            workdir = Path(tmp) / "work"
+            integration = workdir / "outputs" / "integration"
+            integration.mkdir(parents=True)
+            (integration / "docking_targets.csv").write_text(
+                "gene,status\nGENE1,ok\n",
+                encoding="utf-8",
+            )
+            target = workdir / "work" / "GENE1"
+            (target / "config").mkdir(parents=True)
+            (target / "config" / "docking_config.json").write_text(
+                "{}",
+                encoding="utf-8",
+            )
+            ctx = {
+                "docking_config": Path(tmp) / "docking_config.json",
+            }
+            args = argparse.Namespace(
+                md_simulation={"enabled": True, "mode": "prepare", "top_n": 1},
+                handoff={"enabled": True},
+                docking_ml={"enabled": True, "model": "rf"},
+                docking_ml_training_csv=None,
+            )
+            with (
+                mock.patch.object(
+                    integration_module.md_simulation,
+                    "run_md_simulation",
+                    return_value={
+                        "requested": 1,
+                        "completed": 1,
+                        "prepared": 0,
+                        "failed": 0,
+                    },
+                ) as mock_md,
+                mock.patch.object(
+                    integration_module.handoff,
+                    "export_md",
+                ),
+                mock.patch.object(
+                    integration_module.handoff,
+                    "export_external",
+                ),
+                mock.patch.object(
+                    integration_module.docking_ml,
+                    "train_ml",
+                ) as mock_train,
+            ):
+                _stage_cadd_downstream(args, workdir, ctx)
+            mock_md.assert_called_once()
+            mock_train.assert_not_called()
+            summary = json.loads(
+                (integration / "cadd_downstream_summary.json").read_text(
+                    encoding="utf-8"
+                )
+            )
+            self.assertEqual(summary["status"], "completed")
+            self.assertEqual(summary["md_completed"], 1)
+            self.assertEqual(summary["handoff_ok"], 1)
+            rows = pd.read_csv(integration / "cadd_targets.csv")
+            self.assertEqual(rows.iloc[0]["gene"], "GENE1")
+
+    def test_cadd_downstream_raises_when_all_md_fail(self):
+        with tempfile.TemporaryDirectory() as tmp:
+            workdir = Path(tmp) / "work"
+            integration = workdir / "outputs" / "integration"
+            integration.mkdir(parents=True)
+            (integration / "docking_targets.csv").write_text(
+                "gene,status\nGENE1,ok\n",
+                encoding="utf-8",
+            )
+            target = workdir / "work" / "GENE1"
+            (target / "config").mkdir(parents=True)
+            (target / "config" / "docking_config.json").write_text(
+                "{}",
+                encoding="utf-8",
+            )
+            args = argparse.Namespace(
+                md_simulation={"enabled": True, "mode": "auto", "top_n": 1},
+                handoff={"enabled": False},
+                docking_ml={"enabled": False, "model": "rf"},
+                docking_ml_training_csv=None,
+            )
+            with mock.patch.object(
+                integration_module.md_simulation,
+                "run_md_simulation",
+                side_effect=RuntimeError("GROMACS not found"),
+            ):
+                with self.assertRaises(IntegrationError):
+                    _stage_cadd_downstream(
+                        args,
+                        workdir,
+                        {"docking_config": Path(tmp) / "docking_config.json"},
+                    )
+            summary = json.loads(
+                (integration / "cadd_downstream_summary.json").read_text(
+                    encoding="utf-8"
+                )
+            )
+            self.assertEqual(summary["status"], "failed")
+
+    def test_network_stage_skips_without_compound_target_table(self):
+        with tempfile.TemporaryDirectory() as tmp:
+            workdir = Path(tmp) / "work"
+            integration = workdir / "outputs" / "integration"
+            integration.mkdir(parents=True)
+            (integration / "key_genes.csv").write_text(
+                "gene\nGENE1\n",
+                encoding="utf-8",
+            )
+            args = argparse.Namespace(
+                network_toxicology={
+                    "enabled": True,
+                    "compound_targets_csv": None,
+                    "target_sources": None,
+                    "disease_genes_csv": None,
+                    "disease_gene_column": None,
+                    "ppi_network_csv": None,
+                    "venn": False,
+                    "output_dir": "outputs/run_001/network_toxicology",
+                }
+            )
+            _stage_network(
+                args,
+                workdir,
+                {"docking_config": Path(tmp) / "docking_config.json"},
+            )
+            summary = json.loads(
+                (integration / "network_summary.json").read_text(
+                    encoding="utf-8"
+                )
+            )
+            self.assertEqual(summary["status"], "skipped")
+
+    def test_network_stage_raises_on_invalid_input(self):
+        with tempfile.TemporaryDirectory() as tmp:
+            workdir = Path(tmp) / "work"
+            integration = workdir / "outputs" / "integration"
+            integration.mkdir(parents=True)
+            (integration / "key_genes.csv").write_text(
+                "gene\nGENE1\n",
+                encoding="utf-8",
+            )
+            compound = Path(tmp) / "empty.csv"
+            compound.write_text("", encoding="utf-8")
+            args = argparse.Namespace(
+                network_toxicology={
+                    "enabled": True,
+                    "compound_targets_csv": str(compound),
+                    "target_sources": None,
+                    "disease_genes_csv": None,
+                    "disease_gene_column": None,
+                    "ppi_network_csv": None,
+                    "venn": True,
+                    "output_dir": "outputs/run_001/network_toxicology",
+                }
+            )
+            with self.assertRaises(IntegrationError):
+                _stage_network(
+                    args,
+                    workdir,
+                    {
+                        "docking_config": str(
+                            Path(tmp) / "docking_config.json"
+                        )
+                    },
+                )
+            summary = json.loads(
+                (integration / "network_summary.json").read_text(
+                    encoding="utf-8"
+                )
+            )
+            self.assertEqual(summary["status"], "failed")
+
+    def test_faers_stage_skips_without_event_table(self):
+        with tempfile.TemporaryDirectory() as tmp:
+            workdir = Path(tmp) / "work"
+            args = argparse.Namespace(
+                faers={
+                    "enabled": True,
+                    "input_csv": None,
+                    "drug_column": "drug",
+                    "event_column": "event",
+                    "count_column": None,
+                    "min_count": 3,
+                    "output_dir": "outputs/run_001/faers",
+                }
+            )
+            _stage_faers(
+                args,
+                workdir,
+                {"docking_config": Path(tmp) / "docking_config.json"},
+            )
+            out = workdir / "outputs" / "integration"
+            summary = json.loads(
+                (out / "faers_summary.json").read_text(encoding="utf-8")
+            )
+            self.assertEqual(summary["status"], "skipped")
+
+    def test_faers_stage_raises_on_invalid_input(self):
+        with tempfile.TemporaryDirectory() as tmp:
+            workdir = Path(tmp) / "work"
+            integration = workdir / "outputs" / "integration"
+            integration.mkdir(parents=True)
+            events = Path(tmp) / "events.csv"
+            events.write_text("foo\nbar\n", encoding="utf-8")
+            args = argparse.Namespace(
+                faers={
+                    "enabled": True,
+                    "input_csv": str(events),
+                    "drug_column": "drug",
+                    "event_column": "event",
+                    "count_column": None,
+                    "min_count": 3,
+                    "output_dir": "outputs/run_001/faers",
+                }
+            )
+            with self.assertRaises(IntegrationError):
+                _stage_faers(
+                    args,
+                    workdir,
+                    {
+                        "docking_config": str(
+                            Path(tmp) / "docking_config.json"
+                        )
+                    },
+                )
+            summary = json.loads(
+                (integration / "faers_summary.json").read_text(
+                    encoding="utf-8"
+                )
+            )
+            self.assertEqual(summary["status"], "failed")
 
 
 if __name__ == "__main__":

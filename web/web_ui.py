@@ -1857,6 +1857,11 @@ def start_full_job(data: dict) -> dict:
         "skip_pseudobulk",
         "skip_knockout",
         "skip_docking",
+        "skip_md",
+        "skip_handoff",
+        "skip_docking_ml",
+        "skip_network",
+        "skip_faers",
         "skip_cell_feedback",
         "skip_qc_gate",
         "skip_differential_abundance",
@@ -1866,6 +1871,52 @@ def start_full_job(data: dict) -> dict:
     ]:
         if _first(data, flag, "") in ("1", "true", "on", "yes"):
             cmd.append("--" + flag.replace("_", "-"))
+
+    md_mode = _first(data, "md_mode", "").strip()
+    if md_mode:
+        cmd += ["--md-mode", md_mode]
+    md_top_n = _int_field(data, "md_top_n")
+    if md_top_n:
+        cmd += ["--md-top-n", str(md_top_n)]
+    docking_ml_model = _first(data, "docking_ml_model", "").strip()
+    if docking_ml_model:
+        cmd += ["--docking-ml-model", docking_ml_model]
+    docking_ml_training_csv = _first(
+        data, "docking_ml_training_csv", ""
+    ).strip()
+    if docking_ml_training_csv:
+        cmd += ["--docking-ml-training-csv", docking_ml_training_csv]
+    docking_ml_label_column = _first(
+        data, "docking_ml_label_column", ""
+    ).strip()
+    if docking_ml_label_column:
+        cmd += ["--docking-ml-label-column", docking_ml_label_column]
+    for attr in [
+        "network_compound_targets_csv",
+        "network_disease_genes_csv",
+        "network_ppi_network_csv",
+    ]:
+        value = _first(data, attr, "").strip()
+        if value:
+            cmd += ["--" + attr.replace("_", "-"), value]
+    network_disease_gene_column = _first(
+        data, "network_disease_gene_column", ""
+    ).strip()
+    if network_disease_gene_column:
+        cmd += ["--network-disease-gene-column", network_disease_gene_column]
+    faers_input = _first(data, "faers_input", "").strip()
+    if faers_input:
+        cmd += ["--faers-input", faers_input]
+    for attr in ["faers_drug_column", "faers_event_column"]:
+        value = _first(data, attr, "").strip()
+        if value:
+            cmd += ["--" + attr.replace("_", "-"), value]
+    faers_count_column = _first(data, "faers_count_column", "").strip()
+    if faers_count_column:
+        cmd += ["--faers-count-column", faers_count_column]
+    faers_min_count = _int_field(data, "faers_min_count")
+    if faers_min_count:
+        cmd += ["--faers-min-count", str(faers_min_count)]
 
     env = os.environ.copy()
     env["PYTHONIOENCODING"] = "utf-8"
@@ -2086,8 +2137,11 @@ FULL_STAGE_LABELS = {
     "04": "敲除输入",
     "05": "虚拟敲除",
     "06": "分子对接",
-    "07": "细胞反馈",
-    "08": "集成报告",
+    "07": "CADD 下游",
+    "08": "网络毒理学",
+    "09": "FAERS",
+    "10": "细胞反馈",
+    "11": "集成报告",
 }
 
 
@@ -2448,7 +2502,7 @@ def running_tasks_data(include_logs: bool = True) -> dict:
             else "running"
         )
         marker_dir = info["workdir"] / "outputs" / "integration" / ".stages"
-        progress = 0 if state == "queued" else _marker_progress(marker_dir, 8)
+        progress = 0 if state == "queued" else _marker_progress(marker_dir, 11)
         stage_label = (
             "排队中" if state == "queued"
             else "已暂停" if state == "paused"
@@ -2552,6 +2606,10 @@ def _full_result_files(workdir: Path) -> list[str]:
         (workdir / "outputs" / "run_001" / "results", "outputs/run_001/results"),
         (workdir / "outputs" / "run_001" / "docked", "outputs/run_001/docked"),
         (
+            workdir / "outputs" / "run_001" / "external",
+            "outputs/run_001/external",
+        ),
+        (
             workdir / "outputs" / "run_001" / "network_toxicology",
             "outputs/run_001/network_toxicology",
         ),
@@ -2586,6 +2644,12 @@ def _full_result_files(workdir: Path) -> list[str]:
             roots.append(
                 (gene_dir / "outputs" / "run_001" / "results", f"{base}/results")
             )
+            roots.append(
+                (
+                    gene_dir / "outputs" / "md",
+                    f"work/{gene_dir.name}/outputs/md",
+                )
+            )
     for root, prefix in roots:
         for rel in _list_result_files(root):
             files.append(f"{prefix}/{rel}" if prefix else rel)
@@ -2605,6 +2669,12 @@ def full_results(workdir: Path) -> dict:
         "key_genes": [],
         "knockout": [],
         "docking": [],
+        "cadd_downstream_summary": {},
+        "cadd_downstream": [],
+        "network_summary": {},
+        "network": [],
+        "faers_summary": {},
+        "faers": [],
         "cell_feedback": [],
         "cell_feedback_deg": [],
         "cell_feedback_enrichment_go": [],
@@ -2645,6 +2715,41 @@ def full_results(workdir: Path) -> dict:
         )
     except Exception:
         result["docking"] = []
+    result["cadd_downstream_summary"] = _read_json(
+        out / "cadd_downstream_summary.json"
+    )
+    try:
+        result["cadd_downstream"] = json.loads(
+            pd_read_csv(out / "cadd_targets.csv").to_json(orient="records")
+        )
+    except Exception:
+        result["cadd_downstream"] = []
+    result["network_summary"] = _read_json(out / "network_summary.json")
+    network_csv = (
+        (result["network_summary"].get("outputs") or {}).get("overlap_csv")
+        or result["network_summary"].get("overlap_csv")
+        or ""
+    )
+    if network_csv:
+        try:
+            result["network"] = json.loads(
+                pd_read_csv(Path(str(network_csv)))
+                .head(200)
+                .to_json(orient="records")
+            )
+        except Exception:
+            result["network"] = []
+    result["faers_summary"] = _read_json(out / "faers_summary.json")
+    faers_csv = result["faers_summary"].get("output_csv") or ""
+    if faers_csv:
+        try:
+            result["faers"] = json.loads(
+                pd_read_csv(Path(str(faers_csv)))
+                .head(200)
+                .to_json(orient="records")
+            )
+        except Exception:
+            result["faers"] = []
     try:
         result["cell_feedback"] = json.loads(
             pd_read_csv(
@@ -2717,6 +2822,7 @@ def _full_file_path(workdir: Path, name: str) -> Path | None:
         (workdir / "outputs" / "integration").resolve(),
         (workdir / "outputs" / "run_001" / "results").resolve(),
         (workdir / "outputs" / "run_001" / "docked").resolve(),
+        (workdir / "outputs" / "run_001" / "external").resolve(),
         (workdir / "outputs" / "run_001" / "network_toxicology").resolve(),
         (workdir / "outputs" / "run_001" / "faers").resolve(),
         (workdir / "work").resolve(),

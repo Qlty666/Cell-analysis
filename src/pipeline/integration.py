@@ -9,7 +9,10 @@ The module wires the existing pieces together:
 4. build the virtual-knockout inputs and run multidimensional target scoring;
 5. for genes with a PDB structure, collect known ligands and run the full
    AutoDock Vina pipeline in an isolated per-target workdir;
-6. export the wet-lab validation plan and an integrated HTML report.
+6. prepare GROMACS MD inputs, rescore with ML when trained data exists and
+   export MD/external tool handoffs for each successful target;
+7. run network toxicology and FAERS screening when the user provides inputs;
+8. close the loop through cell feedback and write the integrated report.
 
 Every stage writes a marker file so a rerun resumes where it stopped.
 """
@@ -40,7 +43,16 @@ SRC = APP_ROOT / "src"
 if str(SRC) not in sys.path:
     sys.path.insert(0, str(SRC))
 
-from docking import box, evidence as evidence_mod, pipeline as docking_pipeline  # noqa: E402
+from docking import (  # noqa: E402
+    box,
+    evidence as evidence_mod,
+    handoff,
+    md_simulation,
+    ml as docking_ml,
+    network_toxicology,
+    pipeline as docking_pipeline,
+    signal_detection,
+)
 from docking.config import load_config, save_config  # noqa: E402
 from docking.knockout import run_knockout  # noqa: E402
 from docking.provenance import write_run_manifest  # noqa: E402
@@ -59,8 +71,11 @@ STAGES = [
     ("04", "knockout_inputs", "build pseudobulk expression and knockout inputs"),
     ("05", "knockout", "virtual knockout and multidimensional target scoring"),
     ("06", "docking", "per-target virtual screening with AutoDock Vina"),
-    ("07", "cell_feedback", "re-score single-cell targets from knockout/docking results"),
-    ("08", "report", "integrated HTML report and provenance manifest"),
+    ("07", "cadd_downstream", "MD preparation, ML rescoring and MD/external handoff"),
+    ("08", "network", "compound-disease network toxicology on optional user evidence"),
+    ("09", "faers", "FAERS-style disproportionality signal screening on optional event table"),
+    ("10", "cell_feedback", "re-score single-cell targets from knockout/docking results"),
+    ("11", "report", "integrated HTML report and provenance manifest"),
 ]
 
 # Required outputs per stage. Paths are relative to the full-pipeline workdir.
@@ -85,8 +100,14 @@ STAGE_OUTPUTS = {
         "outputs/integration/docking_summary.json",
         "outputs/integration/docking_targets.csv",
     ),
-    "07": ("outputs/integration/cell_feedback/cell_feedback_summary.json",),
-    "08": (
+    "07": (
+        "outputs/integration/cadd_downstream_summary.json",
+        "outputs/integration/cadd_targets.csv",
+    ),
+    "08": ("outputs/integration/network_summary.json",),
+    "09": ("outputs/integration/faers_summary.json",),
+    "10": ("outputs/integration/cell_feedback/cell_feedback_summary.json",),
+    "11": (
         "outputs/integration/integration_report.html",
         "outputs/integration/integration_summary.json",
         "outputs/integration/run_manifest.json",
@@ -130,6 +151,46 @@ DEFAULT_GENE_BLACKLIST = [
     r"^AC[0-9]",
     r"^AL[0-9]",
 ]
+
+DEFAULT_MD_SIMULATION = {
+    "enabled": True,
+    "mode": "prepare",
+    "top_n": 1,
+}
+
+DEFAULT_HANDOFF = {
+    "enabled": True,
+}
+
+DEFAULT_DOCKING_ML = {
+    "enabled": True,
+    "model": "rf",
+    "training_csv": None,
+    "label_column": "active",
+}
+
+DEFAULT_NETWORK_TOXICOLOGY = {
+    "enabled": True,
+    "compound_name": None,
+    "disease_name": None,
+    "compound_targets_csv": None,
+    "target_sources": None,
+    "disease_genes_csv": None,
+    "disease_gene_column": None,
+    "ppi_network_csv": None,
+    "venn": True,
+    "output_dir": "outputs/run_001/network_toxicology",
+}
+
+DEFAULT_FAERS = {
+    "enabled": True,
+    "input_csv": None,
+    "drug_column": "drug",
+    "event_column": "event",
+    "count_column": None,
+    "min_count": 3,
+    "output_dir": "outputs/run_001/faers",
+}
 
 EVIDENCE_COLUMNS = [
     "gene",
@@ -323,6 +384,53 @@ def _stage_signature(code: str, args, workdir: Path, ctx: dict) -> str:
     elif code == "07":
         payload.update(
             {
+                "docking_config": str(docking_config),
+                "docking_config_sha256": _sha256_file(docking_config),
+                "md": _json_sorted(
+                    getattr(args, "md_simulation", DEFAULT_MD_SIMULATION) or {}
+                ),
+                "handoff": _json_sorted(
+                    getattr(args, "handoff", DEFAULT_HANDOFF) or {}
+                ),
+                "docking_ml": _json_sorted(
+                    getattr(args, "docking_ml", DEFAULT_DOCKING_ML) or {}
+                ),
+                "training_csv": getattr(args, "docking_ml_training_csv", None),
+                "training_csv_sha256": _sha256_file(
+                    Path(
+                        str(getattr(args, "docking_ml_training_csv", "") or "")
+                    )
+                ),
+            }
+        )
+    elif code == "08":
+        payload.update(
+            {
+                "docking_config": str(docking_config),
+                "docking_config_sha256": _sha256_file(docking_config),
+                "network_toxicology": _json_sorted(
+                    getattr(
+                        args,
+                        "network_toxicology",
+                        DEFAULT_NETWORK_TOXICOLOGY,
+                    )
+                    or {}
+                ),
+            }
+        )
+    elif code == "09":
+        payload.update(
+            {
+                "docking_config": str(docking_config),
+                "docking_config_sha256": _sha256_file(docking_config),
+                "faers": _json_sorted(
+                    getattr(args, "faers", DEFAULT_FAERS) or {}
+                ),
+            }
+        )
+    elif code == "10":
+        payload.update(
+            {
                 "workdir": str(workdir),
                 "single_cell_root": str(ctx.get("single_cell_root") or ""),
                 "top_n": int(getattr(args, "feedback_top_n", 12) or 12),
@@ -333,7 +441,7 @@ def _stage_signature(code: str, args, workdir: Path, ctx: dict) -> str:
                 ),
             }
         )
-    elif code == "08":
+    elif code == "11":
         payload.update(
             {
                 "workdir": str(workdir),
@@ -441,6 +549,26 @@ def _clear_downstream_markers(workdir: Path, from_index: int = 1) -> None:
             )
 
 
+def _prune_stale_stage_markers(workdir: Path) -> int:
+    """Remove legacy markers that no longer match the current stage list."""
+    stage_dir = _stage_dir(workdir)
+    if not stage_dir.exists():
+        return 0
+    current = {f"{code}_{name}" for code, name, _description in STAGES}
+    removed = 0
+    for marker in stage_dir.glob("*.done"):
+        if marker.stem not in current:
+            marker.unlink(missing_ok=True)
+            removed += 1
+    if removed:
+        log.warning(
+            "removed %s stale stage marker(s) from %s",
+            removed,
+            stage_dir,
+        )
+    return removed
+
+
 def _single_cell_outputs_ready(root: Path) -> bool:
     """True when the single-cell stage produced the files later stages need."""
     return (
@@ -480,7 +608,7 @@ def _stage_output_paths(
         rels = ("outputs/integration/knockout_summary.json",)
     elif code == "06" and getattr(args, "skip_docking", False):
         rels = ("outputs/integration/docking_summary.json",)
-    elif code == "07" and getattr(args, "skip_cell_feedback", False):
+    elif code == "10" and getattr(args, "skip_cell_feedback", False):
         rels = ("outputs/integration/cell_feedback/cell_feedback_summary.json",)
     return [workdir / rel for rel in rels]
 
@@ -1958,6 +2086,32 @@ def generate_integrated_report(
     docking_summary = _read_json(out_dir / "docking_summary.json")
     docking = pd.read_csv(out_dir / "docking_targets.csv") if (out_dir / "docking_targets.csv").exists() else pd.DataFrame()
     evidence = pd.read_csv(out_dir / "gene_evidence.csv") if (out_dir / "gene_evidence.csv").exists() else pd.DataFrame()
+    cadd_summary = _read_json(out_dir / "cadd_downstream_summary.json")
+    cadd_targets = (
+        pd.read_csv(out_dir / "cadd_targets.csv")
+        if (out_dir / "cadd_targets.csv").exists()
+        else pd.DataFrame()
+    )
+    network_summary = _read_json(out_dir / "network_summary.json")
+    network_overlap = pd.DataFrame()
+    network_overlap_csv = (
+        (network_summary.get("outputs") or {}).get("overlap_csv")
+        or network_summary.get("overlap_csv")
+        or ""
+    )
+    if network_overlap_csv and Path(str(network_overlap_csv)).exists():
+        try:
+            network_overlap = pd.read_csv(network_overlap_csv)
+        except Exception:
+            network_overlap = pd.DataFrame()
+    faers_summary = _read_json(out_dir / "faers_summary.json")
+    faers_signals = pd.DataFrame()
+    faers_csv = faers_summary.get("output_csv") or ""
+    if faers_csv and Path(str(faers_csv)).exists():
+        try:
+            faers_signals = pd.read_csv(faers_csv)
+        except Exception:
+            faers_signals = pd.DataFrame()
     feedback_summary = _read_json(out_dir / "cell_feedback" / "cell_feedback_summary.json")
     feedback_targets = (
         pd.read_csv(out_dir / "cell_feedback" / "data" / "feedback_targets.csv")
@@ -2141,6 +2295,49 @@ def generate_integrated_report(
         ]
         if c in differential_abundance.columns
     ]
+    cadd_cols = [
+        c
+        for c in [
+            "gene",
+            "md_status",
+            "md_mode",
+            "md_requested",
+            "md_completed",
+            "md_prepared",
+            "md_failed",
+            "handoff_status",
+            "ml_status",
+            "ml_scored",
+            "error",
+        ]
+        if c in cadd_targets.columns
+    ]
+    network_cols = [
+        c
+        for c in [
+            "gene",
+            "n_sources",
+            "sources",
+            "ppi_degree",
+            "ppi_hub_score",
+        ]
+        if c in network_overlap.columns
+    ]
+    faers_cols = [
+        c
+        for c in [
+            "drug",
+            "event",
+            "a",
+            "ror",
+            "ror_lower",
+            "prr",
+            "ic",
+            "ebgm",
+            "signal",
+        ]
+        if c in faers_signals.columns
+    ]
 
     def rel(path):
         try:
@@ -2219,6 +2416,21 @@ a {{ color: #1d4ed8; }}
   {_render_table(docking, dock_cols)}
 </div>
 <div class="card">
+  <h2>CADD downstream ({_esc(cadd_summary.get("status", "skipped"))})</h2>
+  <p class="muted">{_esc(cadd_summary)}</p>
+  {_render_table(cadd_targets, cadd_cols)}
+</div>
+<div class="card">
+  <h2>Network toxicology ({_esc(network_summary.get("status", "skipped"))})</h2>
+  <p class="muted">{_esc(network_summary.get("reason", ""))}</p>
+  {_render_table(network_overlap, network_cols)}
+</div>
+<div class="card">
+  <h2>FAERS signals ({_esc(faers_summary.get("status", "skipped"))})</h2>
+  <p class="muted">{_esc(faers_summary.get("reason", ""))}</p>
+  {_render_table(faers_signals, faers_cols)}
+</div>
+<div class="card">
   <h2>Cell feedback targets</h2>
   {_render_table(feedback_targets, feedback_cols)}
 </div>
@@ -2250,6 +2462,9 @@ a {{ color: #1d4ed8; }}
     <li><a href="{rel(out_dir / 'qc_metrics.json')}">qc_metrics.json</a></li>
     <li><a href="{rel(ko_ranked) if ko_ranked.exists() else '#'}">fig_52_53_ranked_knockout.csv</a></li>
     <li><a href="{rel(out_dir / 'docking_targets.csv') if (out_dir / 'docking_targets.csv').exists() else '#'}">docking_targets.csv</a></li>
+    <li><a href="{rel(out_dir / 'cadd_targets.csv') if (out_dir / 'cadd_targets.csv').exists() else '#'}">cadd_targets.csv</a></li>
+    <li><a href="{rel(out_dir / 'network_summary.json') if (out_dir / 'network_summary.json').exists() else '#'}">network_summary.json</a></li>
+    <li><a href="{rel(out_dir / 'faers_summary.json') if (out_dir / 'faers_summary.json').exists() else '#'}">faers_summary.json</a></li>
     <li><a href="{rel(out_dir / 'cell_feedback' / 'data' / 'feedback_targets.csv') if (out_dir / 'cell_feedback' / 'data' / 'feedback_targets.csv').exists() else '#'}">cell_feedback_targets.csv</a></li>
     <li><a href="{rel(out_dir / 'cell_feedback' / 'data' / 'feedback_deg.csv') if (out_dir / 'cell_feedback' / 'data' / 'feedback_deg.csv').exists() else '#'}">feedback_deg.csv</a></li>
     <li><a href="{rel(out_dir / 'cell_feedback' / 'data' / 'feedback_enrichment_go.csv') if (out_dir / 'cell_feedback' / 'data' / 'feedback_enrichment_go.csv').exists() else '#'}">feedback_enrichment_go.csv</a></li>
@@ -2277,6 +2492,9 @@ a {{ color: #1d4ed8; }}
             "validation_candidates": (ko_summary.get("validation") or {}).get("candidates", 0),
         },
         "docking": display_paths(docking_summary),
+        "cadd_downstream": display_paths(cadd_summary),
+        "network": display_paths(network_summary),
+        "faers": display_paths(faers_summary),
         "cell_feedback": {
             "status": feedback_summary.get("status", "skipped"),
             "genes_matched": feedback_summary.get("genes_matched", 0),
@@ -2505,6 +2723,406 @@ def _stage_docking(args, workdir: Path, ctx: dict) -> None:
     )
 
 
+def _target_dir(workdir: Path, gene: str) -> Path:
+    return workdir / "work" / safe_name(str(gene), str(gene))
+
+
+def _load_target_cfg(workdir: Path, gene: str, docking_config: Path):
+    target = _target_dir(workdir, gene)
+    config_path = target / "config" / "docking_config.json"
+    if config_path.exists():
+        return load_config(config_path)
+    return load_config(
+        docking_config,
+        {"workdir": str(target), "target_name": str(gene)},
+    )
+
+
+def _run_target_cadd(
+    gene: str,
+    workdir: Path,
+    docking_config: Path,
+    md_settings: dict,
+    handoff_settings: dict,
+    docking_ml_settings: dict,
+    training_csv: str | None,
+) -> dict:
+    """Run MD preparation, handoff and optional ML rescoring for one target."""
+    rec = {
+        "gene": str(gene),
+        "md_status": "skipped",
+        "md_mode": md_settings.get("mode", "prepare"),
+        "md_requested": 0,
+        "md_completed": 0,
+        "md_prepared": 0,
+        "md_failed": 0,
+        "handoff_status": "skipped",
+        "ml_status": "skipped",
+        "ml_scored": 0,
+        "error": "",
+    }
+    target = _target_dir(workdir, gene)
+    try:
+        cfg = _load_target_cfg(workdir, gene, docking_config)
+    except Exception as exc:  # noqa: BLE001
+        rec["handoff_status"] = "failed"
+        rec["error"] = f"target config could not be loaded: {exc}"
+        return rec
+
+    if md_settings.get("enabled", True):
+        try:
+            mode = str(md_settings.get("mode") or "prepare")
+            cfg.data.setdefault("md_simulation", {})["mode"] = mode
+            if md_settings.get("top_n"):
+                cfg.data["md_simulation"]["top_n"] = int(md_settings["top_n"])
+            md_summary = md_simulation.run_md_simulation(cfg, log, mode=mode)
+            rec["md_mode"] = mode
+            rec["md_requested"] = int(md_summary.get("requested", 0))
+            rec["md_completed"] = int(md_summary.get("completed", 0))
+            rec["md_prepared"] = int(md_summary.get("prepared", 0))
+            requested = rec["md_requested"]
+            rec["md_failed"] = int(md_summary.get("failed", 0))
+            failed = rec["md_failed"]
+            if requested == 0:
+                rec["md_status"] = "skipped"
+                rec["error"] = "no top docking poses selected for MD"
+            elif failed == requested:
+                rec["md_status"] = "failed"
+            elif failed > 0:
+                rec["md_status"] = "partial"
+            elif rec["md_completed"]:
+                rec["md_status"] = "completed"
+            else:
+                rec["md_status"] = "prepared"
+        except Exception as exc:  # noqa: BLE001
+            rec["md_status"] = "failed"
+            rec["md_failed"] = max(1, int(rec.get("md_failed", 0)))
+            rec["error"] = f"MD simulation failed: {exc}"
+            log.error("target %s MD failed: %s", gene, exc)
+
+    if handoff_settings.get("enabled", True):
+        try:
+            handoff.export_md(cfg, log)
+            handoff.export_external(cfg, log)
+            rec["handoff_status"] = "completed"
+        except Exception as exc:  # noqa: BLE001
+            rec["handoff_status"] = "failed"
+            if rec["error"]:
+                rec["error"] += f"; handoff failed: {exc}"
+            else:
+                rec["error"] = f"handoff failed: {exc}"
+            log.error("target %s handoff failed: %s", gene, exc)
+
+    if docking_ml_settings.get("enabled", True):
+        try:
+            model_file = cfg.ml_dir() / "data" / "ml_model_info.json"
+            training_value = str(training_csv or "").strip()
+            train_path = (
+                Path(training_value).expanduser() if training_value else None
+            )
+            if train_path is not None and train_path.is_file():
+                docking_ml.train_ml(
+                    cfg,
+                    log,
+                    model_type=str(
+                        docking_ml_settings.get("model")
+                        or cfg.get("ml", "model", "rf")
+                        or "rf"
+                    ),
+                    label_column=str(
+                        docking_ml_settings.get("label_column")
+                        or cfg.get("ml", "label_column", "active")
+                        or "active"
+                    ),
+                    training_csv=str(train_path),
+                )
+            if not model_file.exists():
+                rec["ml_status"] = "skipped"
+                rec["ml_scored"] = 0
+            else:
+                summary = docking_ml.predict_ml(cfg, log)
+                rec["ml_status"] = "completed"
+                rec["ml_scored"] = int(summary.get("scored", 0))
+        except Exception as exc:  # noqa: BLE001
+            rec["ml_status"] = "failed"
+            if rec["error"]:
+                rec["error"] += f"; ML rescoring failed: {exc}"
+            else:
+                rec["error"] = f"ML rescoring failed: {exc}"
+            log.error("target %s ML rescoring failed: %s", gene, exc)
+
+    write_json(
+        target / "outputs" / "integration" / "cadd_target_summary.json",
+        rec,
+    )
+    return rec
+
+
+def _stage_cadd_downstream(args, workdir: Path, ctx: dict) -> None:
+    docking_csv = _integration_dir(workdir) / "docking_targets.csv"
+    rows: list[dict] = []
+    if docking_csv.exists():
+        docking = pd.read_csv(docking_csv)
+        ok_genes = docking.loc[
+            docking.get("status", pd.Series(dtype=str)).astype(str) == "ok",
+            "gene",
+        ].astype(str).tolist()
+        for gene in ok_genes:
+            rows.append(
+                _run_target_cadd(
+                    gene,
+                    workdir,
+                    ctx["docking_config"],
+                    getattr(args, "md_simulation", DEFAULT_MD_SIMULATION),
+                    getattr(args, "handoff", DEFAULT_HANDOFF),
+                    getattr(args, "docking_ml", DEFAULT_DOCKING_ML),
+                    getattr(args, "docking_ml_training_csv", None),
+                )
+            )
+    if not rows:
+        summary = {
+            "status": "skipped",
+            "reason": "no successful docking targets",
+            "targets": 0,
+        }
+        _integration_dir(workdir).mkdir(parents=True, exist_ok=True)
+        empty = pd.DataFrame(
+            columns=[
+                "gene",
+                "md_status",
+                "md_mode",
+                "md_requested",
+                "md_completed",
+                "md_prepared",
+                "md_failed",
+                "handoff_status",
+                "ml_status",
+                "ml_scored",
+                "error",
+            ]
+        )
+        empty.to_csv(
+            _integration_dir(workdir) / "cadd_targets.csv",
+            index=False,
+        )
+    else:
+        frame = pd.DataFrame(rows)
+        frame.to_csv(
+            _integration_dir(workdir) / "cadd_targets.csv",
+            index=False,
+        )
+        md_failed = int((frame["md_status"] == "failed").sum())
+        md_completed = int(frame["md_completed"].sum())
+        md_prepared = int(frame["md_prepared"].sum())
+        handoff_ok = int((frame["handoff_status"] == "completed").sum())
+        handoff_failed = int((frame["handoff_status"] == "failed").sum())
+        ml_failed = int((frame["ml_status"] == "failed").sum())
+        ml_scored = int(frame["ml_scored"].sum())
+        md_enabled = bool(
+            (
+                getattr(args, "md_simulation", DEFAULT_MD_SIMULATION) or {}
+            ).get("enabled", True)
+        )
+        handoff_enabled = bool(
+            (getattr(args, "handoff", DEFAULT_HANDOFF) or {}).get(
+                "enabled",
+                True,
+            )
+        )
+        docking_ml_enabled = bool(
+            (getattr(args, "docking_ml", DEFAULT_DOCKING_ML) or {}).get(
+                "enabled",
+                True,
+            )
+        )
+        all_md_failed = (
+            md_enabled
+            and md_failed
+            and not (md_completed or md_prepared)
+        )
+        all_handoff_failed = (
+            handoff_enabled
+            and handoff_failed == len(rows)
+            and handoff_ok == 0
+        )
+        all_ml_failed = (
+            docking_ml_enabled
+            and ml_failed == len(rows)
+            and len(rows) > 0
+        )
+        if all_md_failed or all_handoff_failed or all_ml_failed:
+            status = "failed"
+            details = []
+            if all_md_failed:
+                details.append("MD failed for all target(s)")
+            if all_handoff_failed:
+                details.append("handoff failed for all target(s)")
+            if all_ml_failed:
+                details.append("ML rescoring failed for all target(s)")
+            reason = "; ".join(details)
+        elif md_failed or handoff_failed or ml_failed:
+            status = "partial"
+            reason = (
+                f"MD failed for {md_failed}, handoff failed for "
+                f"{handoff_failed}, ML rescoring failed for {ml_failed} "
+                f"of {len(rows)} target(s)"
+            )
+        else:
+            status = "completed"
+            reason = ""
+        summary = {
+            "status": status,
+            "reason": reason,
+            "targets": len(rows),
+            "md_failed": md_failed,
+            "md_completed": md_completed,
+            "md_prepared": md_prepared,
+            "handoff_ok": handoff_ok,
+            "ml_scored": ml_scored,
+            "output_csv": str(
+                _integration_dir(workdir) / "cadd_targets.csv"
+            ),
+        }
+    write_json(
+        _integration_dir(workdir) / "cadd_downstream_summary.json",
+        summary,
+    )
+    ctx["cadd_downstream"] = summary
+    if summary.get("status") == "failed":
+        raise IntegrationError(summary.get("reason") or "CADD downstream failed")
+
+
+def _resolved_section_paths(section: dict, base: Path) -> dict:
+    section = dict(section or {})
+    for key in (
+        "compound_targets_csv",
+        "disease_genes_csv",
+        "ppi_network_csv",
+        "input_csv",
+    ):
+        value = section.get(key)
+        if value:
+            section[key] = str(_resolve_path(value, base))
+    targets = section.get("target_sources")
+    if isinstance(targets, dict):
+        section["target_sources"] = {
+            str(source): str(_resolve_path(path, base))
+            for source, path in targets.items()
+            if path
+        }
+    output_dir = section.get("output_dir")
+    if output_dir:
+        section["output_dir"] = str(_resolve_path(output_dir, base))
+    return section
+
+
+def _stage_network(args, workdir: Path, ctx: dict) -> None:
+    section = _resolved_section_paths(
+        getattr(args, "network_toxicology", DEFAULT_NETWORK_TOXICOLOGY),
+        workdir,
+    )
+    summary_path = _integration_dir(workdir) / "network_summary.json"
+    if not section.get("enabled", True):
+        write_json(
+            summary_path,
+            {"status": "skipped", "reason": "network toxicology disabled"},
+        )
+        return
+
+    disease_csv = section.get("disease_genes_csv")
+    if not disease_csv:
+        key_genes = _integration_dir(workdir) / "key_genes.csv"
+        if key_genes.exists():
+            disease_csv = str(key_genes)
+            section["disease_genes_csv"] = disease_csv
+    if not section.get("compound_targets_csv") and not section.get(
+        "target_sources"
+    ):
+        write_json(
+            summary_path,
+            {
+                "status": "skipped",
+                "reason": (
+                    "no compound-target evidence provided "
+                    "(network_toxicology.compound_targets_csv or "
+                    "target_sources)"
+                ),
+            },
+        )
+        return
+
+    cfg = load_config(
+        ctx["docking_config"],
+        {"workdir": str(workdir)},
+    )
+    cfg.data["network_toxicology"] = section
+    try:
+        result = network_toxicology.run_network_toxicology(cfg, log)
+    except Exception as exc:  # noqa: BLE001
+        summary = {
+            "status": "failed",
+            "reason": str(exc),
+            "output_dir": section.get("output_dir", ""),
+        }
+        write_json(summary_path, summary)
+        log.error("network toxicology failed: %s", exc)
+        raise IntegrationError(
+            "network toxicology stage failed: " + str(exc)
+        ) from exc
+    summary = {"status": "completed", **result}
+    summary["output_dir"] = section.get("output_dir", "")
+    write_json(summary_path, summary)
+    ctx["network"] = summary
+
+
+def _stage_faers(args, workdir: Path, ctx: dict) -> None:
+    section = _resolved_section_paths(
+        getattr(args, "faers", DEFAULT_FAERS),
+        workdir,
+    )
+    summary_path = _integration_dir(workdir) / "faers_summary.json"
+    if not section.get("enabled", True):
+        write_json(
+            summary_path,
+            {"status": "skipped", "reason": "FAERS screening disabled"},
+        )
+        return
+    if not section.get("input_csv"):
+        write_json(
+            summary_path,
+            {
+                "status": "skipped",
+                "reason": (
+                    "no FAERS event table provided (faers.input_csv)"
+                ),
+            },
+        )
+        return
+
+    cfg = load_config(
+        ctx["docking_config"],
+        {"workdir": str(workdir)},
+    )
+    cfg.data["faers"] = section
+    try:
+        result = signal_detection.run_faers(cfg, log)
+    except Exception as exc:  # noqa: BLE001
+        summary = {
+            "status": "failed",
+            "reason": str(exc),
+            "output_dir": section.get("output_dir", ""),
+        }
+        write_json(summary_path, summary)
+        log.error("FAERS signal detection failed: %s", exc)
+        raise IntegrationError(
+            "FAERS signal detection stage failed: " + str(exc)
+        ) from exc
+    summary = {"status": "completed", **result}
+    summary["output_dir"] = section.get("output_dir", "")
+    write_json(summary_path, summary)
+    ctx["faers"] = summary
+
+
 def _stage_cell_feedback(args, workdir: Path, ctx: dict) -> None:
     if ctx.get("dataset_mode") is None:
         ctx["dataset_mode"] = _dataset_mode_from_root(ctx["single_cell_root"])
@@ -2621,6 +3239,7 @@ def run_full_pipeline(args) -> int:
         _invalidate_markers_for_changed_root(workdir, ctx["single_cell_root"])
     if args.dry_run:
         return _dry_run_stages(args, workdir, ctx)
+    _prune_stale_stage_markers(workdir)
 
     stage_fns = {
         "01": _stage_single_cell,
@@ -2629,8 +3248,11 @@ def run_full_pipeline(args) -> int:
         "04": _stage_knockout_inputs,
         "05": _stage_knockout,
         "06": _stage_docking,
-        "07": _stage_cell_feedback,
-        "08": _stage_report,
+        "07": _stage_cadd_downstream,
+        "08": _stage_network,
+        "09": _stage_faers,
+        "10": _stage_cell_feedback,
+        "11": _stage_report,
     }
 
     for index, (code, name, _description) in enumerate(STAGES):
@@ -2703,6 +3325,12 @@ def load_full_config(path: Path) -> dict:
         "ko_top_n": None,
         "depmap_csv": None,
         "ppi_network_csv": None,
+        "md_simulation": DEFAULT_MD_SIMULATION,
+        "handoff": DEFAULT_HANDOFF,
+        "docking_ml": DEFAULT_DOCKING_ML,
+        "docking_ml_training_csv": None,
+        "network_toxicology": DEFAULT_NETWORK_TOXICOLOGY,
+        "faers": DEFAULT_FAERS,
         "cell_feedback": {
             "enabled": True,
             "top_n": 12,
@@ -2734,6 +3362,16 @@ def load_full_config(path: Path) -> dict:
     config["gene_blacklist"] = (
         raw.get("gene_blacklist") or defaults["gene_blacklist"]
     )
+    for key, default in [
+        ("md_simulation", DEFAULT_MD_SIMULATION),
+        ("handoff", DEFAULT_HANDOFF),
+        ("docking_ml", DEFAULT_DOCKING_ML),
+        ("network_toxicology", DEFAULT_NETWORK_TOXICOLOGY),
+        ("faers", DEFAULT_FAERS),
+    ]:
+        merged = dict(default)
+        merged.update((raw.get(key) or {}))
+        config[key] = merged
     return config
 
 
@@ -2764,6 +3402,84 @@ def _apply_defaults(args, config: dict) -> None:
         args.depmap_csv = config.get("depmap_csv")
     if args.ppi_network_csv is None:
         args.ppi_network_csv = config.get("ppi_network_csv")
+
+    if getattr(args, "skip_md", None) is None:
+        args.skip_md = not bool(
+            config.get("md_simulation", {}).get("enabled", True)
+        )
+    if getattr(args, "md_mode", None) is None:
+        args.md_mode = config.get("md_simulation", {}).get("mode", "prepare")
+    if getattr(args, "md_top_n", None) is None:
+        args.md_top_n = config.get("md_simulation", {}).get("top_n", 1)
+    args.md_simulation = {
+        "enabled": not bool(args.skip_md),
+        "mode": str(args.md_mode or "prepare"),
+        "top_n": int(args.md_top_n or 1),
+    }
+    if getattr(args, "skip_handoff", None) is None:
+        args.skip_handoff = not bool(
+            config.get("handoff", {}).get("enabled", True)
+        )
+    args.handoff = {"enabled": not bool(args.skip_handoff)}
+    if getattr(args, "skip_docking_ml", None) is None:
+        args.skip_docking_ml = not bool(
+            config.get("docking_ml", {}).get("enabled", True)
+        )
+    if getattr(args, "docking_ml_model", None) is None:
+        args.docking_ml_model = config.get("docking_ml", {}).get("model", "rf")
+    if getattr(args, "docking_ml_label_column", None) is None:
+        args.docking_ml_label_column = config.get("docking_ml", {}).get(
+            "label_column",
+            "active",
+        )
+    if getattr(args, "docking_ml_training_csv", None) is None:
+        args.docking_ml_training_csv = config.get(
+            "docking_ml_training_csv"
+        ) or config.get("docking_ml", {}).get("training_csv")
+    args.docking_ml = {
+        "enabled": not bool(args.skip_docking_ml),
+        "model": str(args.docking_ml_model or "rf"),
+        "label_column": str(args.docking_ml_label_column or "active"),
+    }
+
+    network_section = dict(DEFAULT_NETWORK_TOXICOLOGY)
+    network_section.update(config.get("network_toxicology") or {})
+    if getattr(args, "skip_network", None) is None:
+        args.skip_network = not bool(network_section.get("enabled", True))
+    network_section["enabled"] = not bool(args.skip_network)
+    for attr, key in [
+        ("network_compound_targets_csv", "compound_targets_csv"),
+        ("network_disease_genes_csv", "disease_genes_csv"),
+        ("network_disease_gene_column", "disease_gene_column"),
+        ("network_ppi_network_csv", "ppi_network_csv"),
+        ("network_output_dir", "output_dir"),
+    ]:
+        value = getattr(args, attr, None)
+        if value is None:
+            value = network_section.get(key)
+        if value is not None:
+            network_section[key] = value
+    args.network_toxicology = network_section
+
+    faers_section = dict(DEFAULT_FAERS)
+    faers_section.update(config.get("faers") or {})
+    if getattr(args, "skip_faers", None) is None:
+        args.skip_faers = not bool(faers_section.get("enabled", True))
+    faers_section["enabled"] = not bool(args.skip_faers)
+    for attr, key in [
+        ("faers_input", "input_csv"),
+        ("faers_drug_column", "drug_column"),
+        ("faers_event_column", "event_column"),
+        ("faers_count_column", "count_column"),
+        ("faers_min_count", "min_count"),
+    ]:
+        value = getattr(args, attr, None)
+        if value is None:
+            value = faers_section.get(key)
+        if value is not None:
+            faers_section[key] = value
+    args.faers = faers_section
+
     if args.skip_cell_feedback is None:
         args.skip_cell_feedback = not bool(
             config.get("cell_feedback", {}).get("enabled", True)
@@ -2832,6 +3548,55 @@ def _apply_defaults(args, config: dict) -> None:
         args.ppi_network_csv = str(
             _resolve_path(args.ppi_network_csv, Path.cwd())
         )
+    for attr in [
+        "docking_ml_training_csv",
+        "network_compound_targets_csv",
+        "network_disease_genes_csv",
+        "network_ppi_network_csv",
+        "faers_input",
+    ]:
+        value = getattr(args, attr, None)
+        if value:
+            setattr(args, attr, str(_resolve_path(value, Path.cwd())))
+    section_updates = {
+        "network_toxicology": {
+            "compound_targets_csv": "network_compound_targets_csv",
+            "disease_genes_csv": "network_disease_genes_csv",
+            "ppi_network_csv": "network_ppi_network_csv",
+        },
+        "faers": {"input_csv": "faers_input"},
+    }
+    for section_name, mapping in section_updates.items():
+        section = getattr(args, section_name, {})
+        if not isinstance(section, dict):
+            continue
+        for section_key, attr_name in mapping.items():
+            value = getattr(args, attr_name, None)
+            if value is not None:
+                section[section_key] = value
+    config_path_keys = {
+        "network_toxicology": [
+            "compound_targets_csv",
+            "disease_genes_csv",
+            "ppi_network_csv",
+        ],
+        "faers": ["input_csv"],
+    }
+    for section_name, keys in config_path_keys.items():
+        section = getattr(args, section_name, {})
+        if not isinstance(section, dict):
+            continue
+        for key in keys:
+            value = section.get(key)
+            if value and not Path(str(value)).is_absolute():
+                section[key] = str(_resolve_path(value, Path.cwd()))
+        targets = section.get("target_sources")
+        if isinstance(targets, dict):
+            section["target_sources"] = {
+                str(source): str(_resolve_path(path, Path.cwd()))
+                for source, path in targets.items()
+                if path
+            }
 
 
 def build_parser() -> argparse.ArgumentParser:
@@ -2876,6 +3641,36 @@ def build_parser() -> argparse.ArgumentParser:
         "--ppi-network-csv",
         help="STRING-style PPI edge table for knockout PPI hub scoring",
     )
+    parser.add_argument("--skip-md", action="store_true", default=None)
+    parser.add_argument(
+        "--md-mode",
+        choices=["prepare", "auto"],
+        default=None,
+        help="GROMACS MD mode used by the integrated pipeline (default: prepare)",
+    )
+    parser.add_argument("--md-top-n", type=int, default=None)
+    parser.add_argument("--skip-handoff", action="store_true", default=None)
+    parser.add_argument("--skip-docking-ml", action="store_true", default=None)
+    parser.add_argument(
+        "--docking-ml-model",
+        choices=["rf", "gbm", "mlp", "lasso_svm", "torch"],
+        default=None,
+        help="docking rescoring model when a labeled training CSV is provided",
+    )
+    parser.add_argument("--docking-ml-label-column", default=None)
+    parser.add_argument("--docking-ml-training-csv", default=None)
+    parser.add_argument("--skip-network", action="store_true", default=None)
+    parser.add_argument("--network-compound-targets-csv", default=None)
+    parser.add_argument("--network-disease-genes-csv", default=None)
+    parser.add_argument("--network-disease-gene-column", default=None)
+    parser.add_argument("--network-ppi-network-csv", default=None)
+    parser.add_argument("--network-output-dir", default=None)
+    parser.add_argument("--skip-faers", action="store_true", default=None)
+    parser.add_argument("--faers-input", default=None)
+    parser.add_argument("--faers-drug-column", default=None)
+    parser.add_argument("--faers-event-column", default=None)
+    parser.add_argument("--faers-count-column", default=None)
+    parser.add_argument("--faers-min-count", type=int, default=None)
     parser.add_argument("--evidence-workers", type=int, default=None)
     parser.add_argument("--evidence-timeout", type=int, default=None)
     parser.add_argument("--skip-scrna", action="store_true")

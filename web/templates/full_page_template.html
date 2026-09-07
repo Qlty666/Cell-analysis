@@ -153,7 +153,7 @@ a.file-link { color: #1665c0; text-decoration: none; margin-right: 12px; }
 <div class="page-head">
   <div class="page-title">
     <h1>全自动流水线</h1>
-    <p class="page-sub">单细胞分析 → 关键基因/蛋白筛选 → 证据富集 → 虚拟敲除 → 虚拟筛选 → 细胞反馈 → 集成报告。支持断点续跑、参数指纹失效、QC 门控与 dry-run 预演。</p>
+    <p class="page-sub">单细胞分析 → 关键基因/蛋白筛选 → 证据富集 → 虚拟敲除 → 虚拟筛选 → MD 准备/ML 重打分/工具交接 → 网络毒理学/FAERS → 细胞反馈 → 集成报告。支持断点续跑、参数指纹失效、QC 门控与 dry-run 预演。</p>
   </div>
 </div>
 
@@ -278,6 +278,57 @@ a.file-link { color: #1665c0; text-decoration: none; margin-right: 12px; }
         <label>敲除报告 Top N
           <input name="ko_top_n" type="number" min="1" value="50">
         </label>
+        <label>MD 模式
+          <select name="md_mode">
+            <option value="prepare">prepare - 只准备 GROMACS 输入</option>
+            <option value="auto">auto - 本地运行 GROMACS</option>
+          </select>
+        </label>
+        <label>MD Top 命中数
+          <input name="md_top_n" type="number" min="1" value="1">
+        </label>
+        <label>对接 ML 模型（可选）
+          <select name="docking_ml_model">
+            <option value="rf">rf - Random Forest</option>
+            <option value="gbm">gbm - GBM</option>
+            <option value="mlp">mlp - MLP</option>
+            <option value="lasso_svm">lasso_svm - LASSO+SVM-RFE</option>
+            <option value="torch">torch - PyTorch MLP</option>
+          </select>
+        </label>
+        <label>对接 ML 训练 CSV（可选）
+          <input name="docking_ml_training_csv" placeholder="data/ml/training.csv">
+        </label>
+        <label>对接 ML 标签列
+          <input name="docking_ml_label_column" value="active">
+        </label>
+        <label>网络毒理学：化合物靶点 CSV（可选）
+          <input name="network_compound_targets_csv" placeholder="data/network/compound_targets.csv">
+        </label>
+        <label>网络毒理学：疾病基因 CSV（可选，默认关键基因）
+          <input name="network_disease_genes_csv" placeholder="默认 outputs/integration/key_genes.csv">
+        </label>
+        <label>网络毒理学：疾病基因列
+          <input name="network_disease_gene_column" placeholder="gene">
+        </label>
+        <label>网络毒理学：PPI 边表 CSV/TSV（可选）
+          <input name="network_ppi_network_csv" placeholder="data/network/string_edges.tsv">
+        </label>
+        <label>FAERS 事件表 CSV（可选）
+          <input name="faers_input" placeholder="data/faers/events.csv">
+        </label>
+        <label>FAERS 药物列
+          <input name="faers_drug_column" value="drug">
+        </label>
+        <label>FAERS 事件列
+          <input name="faers_event_column" value="event">
+        </label>
+        <label>FAERS 计数列（可选）
+          <input name="faers_count_column" placeholder="count">
+        </label>
+        <label>FAERS 最小计数
+          <input name="faers_min_count" type="number" min="1" value="3">
+        </label>
         <label>病例标签（可选）
           <input name="case_label" placeholder="Tumor / iCCA">
         </label>
@@ -304,8 +355,11 @@ a.file-link { color: #1665c0; text-decoration: none; margin-right: 12px; }
             <option value="04">04 敲除输入</option>
             <option value="05">05 虚拟敲除</option>
             <option value="06">06 虚拟筛选</option>
-            <option value="07">07 细胞反馈</option>
-            <option value="08">08 集成报告</option>
+            <option value="07">07 MD/ML/工具交接</option>
+            <option value="08">08 网络毒理学</option>
+            <option value="09">09 FAERS</option>
+            <option value="10">10 细胞反馈</option>
+            <option value="11">11 集成报告</option>
           </select>
         </label>
       </div>
@@ -321,6 +375,11 @@ a.file-link { color: #1665c0; text-decoration: none; margin-right: 12px; }
         <label class="toggle"><input type="checkbox" name="skip_pseudobulk" value="1"> 跳过伪 bulk 导出</label>
         <label class="toggle"><input type="checkbox" name="skip_knockout" value="1"> 跳过虚拟敲除</label>
         <label class="toggle"><input type="checkbox" name="skip_docking" value="1"> 跳过虚拟筛选</label>
+        <label class="toggle"><input type="checkbox" name="skip_md" value="1"> 跳过 MD/工具交接</label>
+        <label class="toggle"><input type="checkbox" name="skip_handoff" value="1"> 跳过 MD/外部工具导出</label>
+        <label class="toggle"><input type="checkbox" name="skip_docking_ml" value="1"> 跳过对接 ML 重打分</label>
+        <label class="toggle"><input type="checkbox" name="skip_network" value="1"> 跳过网络毒理学</label>
+        <label class="toggle"><input type="checkbox" name="skip_faers" value="1"> 跳过 FAERS</label>
         <label class="toggle"><input type="checkbox" name="skip_cell_feedback" value="1"> 跳过细胞反馈</label>
         <label class="toggle"><input type="checkbox" name="skip_qc_gate" value="1"> 跳过 QC 门控</label>
         <label class="toggle"><input type="checkbox" name="skip_differential_abundance" value="1"> 跳过差异丰度检验</label>
@@ -367,6 +426,9 @@ a.file-link { color: #1665c0; text-decoration: none; margin-right: 12px; }
   <div class="tablebox"><table id="keyTable"><caption>关键基因</caption></table></div>
   <div class="tablebox"><table id="koTable"><caption>虚拟敲除 Top</caption></table></div>
   <div class="tablebox"><table id="dockTable"><caption>虚拟筛选</caption></table></div>
+  <div class="tablebox"><table id="caddTable"><caption>CADD 下游（MD/ML/工具交接）</caption></table></div>
+  <div class="tablebox"><table id="networkTable"><caption>网络毒理学交集</caption></table></div>
+  <div class="tablebox"><table id="faersTable"><caption>FAERS 信号</caption></table></div>
   <div class="tablebox"><table id="feedbackTable"><caption>细胞反馈靶点</caption></table></div>
   <div class="tablebox"><table id="feedbackDegTable"><caption>细胞反馈差异表达</caption></table></div>
   <div class="tablebox"><table id="feedbackGoTable"><caption>细胞反馈 GO 富集 Top5（通路-基因网络）</caption></table></div>
@@ -743,6 +805,9 @@ function renderStats(data) {
   const summary = data.summary || {};
   const ko = summary.knockout || {};
   const dock = summary.docking || {};
+  const cadd = summary.cadd_downstream || {};
+  const network = summary.network || {};
+  const faers = summary.faers || {};
   const fb = summary.cell_feedback || {};
   const qc = (data.qc_metrics || {}).qc_gate || summary.qc_gate || {};
   const cards = [
@@ -757,6 +822,22 @@ function renderStats(data) {
     {
       label: '对接成功 / 失败',
       value: (dock.ok || 0) + ' / ' + (dock.failed || 0),
+    },
+    {
+      label: 'MD 完成 / 准备 / 失败',
+      value: (cadd.md_completed || 0) + ' / ' + (cadd.md_prepared || 0) + ' / ' + (cadd.md_failed || 0),
+    },
+    {
+      label: '工具交接',
+      value: cadd.handoff_ok !== undefined ? cadd.handoff_ok : 0,
+    },
+    {
+      label: '网络交集基因',
+      value: network.overlap_genes !== undefined ? network.overlap_genes : 0,
+    },
+    {
+      label: 'FAERS 信号',
+      value: faers.signals !== undefined ? faers.signals : 0,
     },
     {
       label: '细胞反馈匹配',
@@ -784,6 +865,9 @@ function renderResults(data) {
   renderStats(data);
   const ko = summary.knockout || {};
   const dock = summary.docking || {};
+  const cadd = summary.cadd_downstream || {};
+  const network = summary.network || {};
+  const faers = summary.faers || {};
   const fb = summary.cell_feedback || {};
   const qc = data.qc_metrics || {};
   const qcGate = qc.qc_gate || summary.qc_gate || {};
@@ -793,6 +877,10 @@ function renderResults(data) {
     '；敲除评分基因数：' + esc(ko.genes_scored !== undefined ? ko.genes_scored : 0) +
     '；对接成功：' + esc(dock.ok !== undefined ? dock.ok : 0) +
     '；失败：' + esc(dock.failed !== undefined ? dock.failed : 0) +
+    '；MD 完成：' + esc(cadd.md_completed !== undefined ? cadd.md_completed : 0) +
+    '；准备：' + esc(cadd.md_prepared !== undefined ? cadd.md_prepared : 0) +
+    '；网络交集：' + esc(network.overlap_genes !== undefined ? network.overlap_genes : 0) +
+    '；FAERS 信号：' + esc(faers.signals !== undefined ? faers.signals : 0) +
     '；细胞反馈匹配基因：' + esc(fb.genes_matched !== undefined ? fb.genes_matched : 0) +
     '；QC 门控：' + esc(qcGate.status || 'skipped') + '</p>';
   const links = document.getElementById('fileLinks');
@@ -825,6 +913,9 @@ function renderResults(data) {
   renderTable('keyTable', data.key_genes, ['rank', 'gene', 'direction', 'avg_log2fc', 'p_val_adj']);
   renderTable('koTable', data.knockout, ['rank', 'gene', 'target_class', 'target_score', 'knockout_score', 'ppi_hub_score']);
   renderTable('dockTable', data.docking, ['gene', 'status', 'pdb_id', 'ligand_count', 'hits', 'best_affinity']);
+  renderTable('caddTable', data.cadd_downstream, ['gene', 'md_status', 'md_mode', 'md_requested', 'md_completed', 'md_prepared', 'md_failed', 'handoff_status', 'ml_status', 'ml_scored', 'error']);
+  renderTable('networkTable', data.network, ['gene', 'n_sources', 'sources', 'ppi_degree', 'ppi_betweenness', 'ppi_clustering', 'ppi_hub_score']);
+  renderTable('faersTable', data.faers, ['drug', 'event', 'a', 'ror', 'ror_lower', 'prr', 'ic', 'ebgm', 'signal']);
   renderTable('feedbackTable', data.cell_feedback, ['gene', 'source', 'feedback_score', 'knockout_score', 'docking_hits', 'cell_detection_rate', 'celltype_specificity', 'cell_support_score', 'top_celltype']);
   renderTable('feedbackDegTable', data.cell_feedback_deg, ['gene', 'avg_log2FC', 'p_val_adj', 'direction', 'significant']);
   renderTable('feedbackGoTable', data.cell_feedback_enrichment_go, ['ID', 'Description', 'p.adjust', 'Count', 'geneID']);

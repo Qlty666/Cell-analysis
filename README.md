@@ -1,13 +1,13 @@
 # Liver Cancer Bioinformatics Workflow
 
-> 当前版本：1.4.0
+> 当前版本：1.5.0
 
 面向肝癌研究的本地生信自动化工作流，整合三条可实际运行的流水线：
 
 - 表达谱分析（单细胞 / bulk RNA-seq / microarray 等）：GEO 数据下载、QC、差异表达、富集分析和 ML 可解释性分析；单细胞数据额外执行双细胞检测、聚类注释。
 - 虚拟筛选（CADD）：靶点证据收集、受体/配体准备、AutoDock Vina 并行对接、命中排序、精细重对接、ML/DL 重打分和 MD/外部工具交接。
 - 独立分子对接：单独运行受体/配体准备、AutoDock Vina 对接、结果分析、精细重对接和 HTML 报告，不依赖虚拟筛选的旁路分析。
-- 全自动集成流水线：从表达分析直接筛选关键基因/蛋白，再自动完成证据富集、虚拟敲除和虚拟筛选，最终输出集成报告和湿实验验证方案。
+- 全自动集成流水线：从表达分析直接筛选关键基因/蛋白，再自动完成证据富集、虚拟敲除、虚拟筛选、MD/ML/工具交接、网络毒理学/FAERS 和细胞反馈，最终输出集成报告和湿实验验证方案。
 
 ## 1. 项目解决什么问题
 
@@ -81,7 +81,7 @@
 
 ### 2.3 全自动集成流水线
 
-`scripts/run_full_pipeline.py` 把表达分析、关键基因筛选、证据富集、虚拟敲除和虚拟筛选串成一条流水线：
+`scripts/run_full_pipeline.py` 把表达分析、关键基因筛选、证据富集、虚拟敲除、虚拟筛选和 CADD/安全性分析串成一条流水线：
 
 ```text
 01 single_cell           GEO 表达分析（下载、QC、注释、差异表达、富集；bulk/microarray 等按样本级运行）
@@ -90,8 +90,11 @@
 04 knockout_inputs       导出样本级伪 bulk 表达矩阵并生成敲除输入
 05 knockout              虚拟敲除 + 多维靶点评分 + 湿实验验证方案
 06 docking               对有 PDB 结构的靶点自动收集已知配体并跑 Vina 对接
-07 cell_feedback         把虚拟敲除/对接结果返回 Seurat 做细胞级反馈分析
-08 report                生成集成 HTML 报告和 run_manifest.json
+07 cadd_downstream       对成功对接靶点自动准备 GROMACS 输入、运行可选 MD、ML 重打分和 MD/外部工具导出
+08 network               网络毒理学（化合物-疾病靶点交集、PPI hub、Venn、C-T-P-D 网络；无输入时自动跳过）
+09 faers                 FAERS 风格 ROR/PRR/BCPNN/EBGM 信号检测（无事件表时自动跳过）
+10 cell_feedback         把虚拟敲除/对接结果返回 Seurat 做细胞级反馈分析
+11 report                生成集成 HTML 报告和 run_manifest.json
 ```
 
 每一阶段写标记文件，重跑时自动断点续跑；`--start-stage` 可从任意阶段开始。标记文件不再只是时间戳：每个阶段会记录配置和输入指纹（`signature`），当 `top_genes`、物种、标签、证据/对接配置、关键基因表或证据表发生变化时，会自动使当前阶段及下游阶段失效，避免“参数改了但结果仍是旧值”的静默错误。每个阶段完成后还会按 `STAGE_OUTPUTS` 校验必需输出，缺失或空文件不会写入完成标记。
@@ -101,6 +104,10 @@
 表达分析阶段完成后会汇总 `qc_metrics.json`，包括样本/细胞数、基因数、双细胞率（仅单细胞）、伪 bulk 使用情况和下游阶段统计，并按 `config/full_pipeline_config.json` 中的 `qc_gate` 阈值给出 `pass/warn/fail` 门控结果；默认阈值不强制拦截，需要拦截时在配置中填写阈值即可。单细胞数据的差异表达阶段同时补做细胞类型组成差异检验（2×2 卡方 + Benjamini-Hochberg FDR），输出 `differential_abundance.csv` 并写入集成报告；非单细胞样本级数据集自动跳过该检验，避免把样本当细胞做比例检验。
 
 虚拟筛选阶段增加对接盒有效性校验：中心/尺寸非有限值或尺寸非正数时跳过该靶点并写明原因；PDB 下载失败会自动重试 3 次，避免单次网络抖动直接丢弃有结构靶点。
+
+`cadd_downstream` 阶段会遍历虚拟筛选成功的靶点：默认对每个靶点的 Top 命中准备 GROMACS 蛋白-配体复合物输入（`prepare` 模式），并把 Amber/GROMACS 模板与 UniDock-Pro/HDOCK/HADDOCK 外部工具模板一起导出；若系统中有 GROMACS 且设置 `--md-mode auto`，也会在本机继续跑 EM/NVT/NPT/生产模拟。全自动流水线还接入对接 ML 重打分：提供带标签的训练 CSV（`--docking-ml-training-csv`）时会对每个靶点训练并预测，已有训练模型时直接预测。单靶点失败不会中断整条流水线，错误会写入 `cadd_targets.csv` 供后续排查。
+
+`network` 与 `faers` 阶段需要用户提供化合物-靶点表和 FAERS 风格事件表。提供 `network_toxicology.compound_targets_csv` / `target_sources` 后，会自动使用 `key_genes.csv` 作为疾病基因集，输出交集、PPI hub、Venn 和 C-T-P-D 网络；提供 `faers.input_csv` 后输出四种不相称性信号。未提供输入时阶段仍会写 `network_summary.json` / `faers_summary.json` 并注明 `skipped`，不会伪造分析结果。
 
 细胞反馈阶段会把虚拟敲除评分和虚拟筛选命中合并成反馈清单，重新读取单细胞 Seurat 对象，为每个候选基因写入细胞级表达、计算筛选靶点模块评分，并输出细胞类型表达汇总、模块富集检验、条件×细胞类型汇总和 UMAP/DotPlot/热图等结果；同时把反馈靶基因放回 Seurat 对象做条件差异表达（火山图、条件小提琴图），并对其做 GO/KEGG 富集分析。富集 Top5 使用与 `fig_22_go_network.png` 相同的 `cnetplot` 通路-基因网络图，不再使用气泡图，可直接查看 Top5 通路与哪些反馈靶基因关联更强；同时生成 `feedback_targets.csv`，把筛选优先级与细胞表达特异性合并为 `cell_support_score`，用于下一轮靶点收敛。bulk RNA-seq、microarray 等样本级数据集没有细胞级对象，此阶段自动跳过并在 `cell_feedback_summary.json` 中注明原因。
 
@@ -498,6 +505,13 @@ python scripts\run_full_pipeline.py \
 - `--skip-download` / `--skip-deps` / `--skip-pseudobulk` / `--skip-knockout` / `--skip-cell-feedback`。
 - `--top-genes`：关键基因数量，默认 50。
 - `--docking-targets`：参与对接的靶点数量，默认 3。
+- `--md-mode prepare|auto`：GROMACS MD 模式；`prepare` 只生成输入，`auto` 在本机运行完整模拟。
+- `--md-top-n`：每个靶点进入 MD 的 Top 命中数，默认 1。
+- `--skip-md` / `--skip-handoff` / `--skip-docking-ml`：分别关闭 MD 阶段、MD/外部工具导出和对接 ML 重打分。
+- `--docking-ml-training-csv` / `--docking-ml-label-column`：提供带标签配体 CSV 后自动训练对接 ML 重打分模型。
+- `--network-compound-targets-csv` / `--network-disease-genes-csv` / `--network-disease-gene-column`：启用并运行网络毒理学；疾病基因缺省使用 `key_genes.csv`。
+- `--faers-input` / `--faers-drug-column` / `--faers-event-column` / `--faers-count-column`：提供 FAERS 风格事件表后自动运行信号检测。
+- `--skip-network` / `--skip-faers`：显式关闭网络毒理学或 FAERS 阶段。
 - `--feedback-top-n`：进入细胞反馈的基因数，默认 12。
 - `--feedback-max-features`：细胞反馈图中展示的基因数，默认 8。
 - `--feedback-timeout`：细胞反馈 R 分析超时秒数，默认 3600。
@@ -506,7 +520,7 @@ python scripts\run_full_pipeline.py \
 - `--ppi-network-csv`：STRING 风格 PPI 边表，用于虚拟敲除的 PPI hub 维度评分。
 - `--depmap-csv`：DepMap CRISPR 基因效应表，用于虚拟敲除依赖评分。
 - `--ml-model`：表达分析 ML 模型，可选 `xgb` / `rf` / `gbm` / `mlp` / `lasso_svm`。
-- `--start-stage 08`：从指定阶段继续，之前阶段自动标记为跳过。
+- `--start-stage 07`：从指定阶段继续，之前阶段自动标记为跳过。
 - `--dry-run`：不执行任何阶段，只打印每个阶段会运行还是跳过及原因。
 - `--skip-qc-gate` / `--skip-differential-abundance`：分别关闭 QC 门控和细胞组成差异检验。
 
@@ -745,11 +759,14 @@ python scripts\install_codex_skills.py --list
 - `gene_evidence.csv`：每个基因的 UniProt、PDB、ChEMBL、STRING、Reactome、PharmGKB、AlphaFold、Open Targets、KEGG 证据与来源覆盖。
 - `knockout_summary.json`：虚拟敲除与验证方案汇总。
 - `docking_targets.csv`：每个靶点的对接状态、命中数和最佳亲和力。
+- `cadd_downstream_summary.json` / `cadd_targets.csv`：MD 准备/运行、ML 重打分和 MD/外部工具导出的逐靶点状态。
+- `network_summary.json`：网络毒理学汇总；`outputs/run_001/network_toxicology/` 下含交集表、Venn 图与 C-T-P-D 节点/边。
+- `faers_summary.json`：FAERS 信号汇总；`outputs/run_001/faers/data/faers_signals.csv` 为信号表。
 - `cell_feedback/`：细胞反馈阶段输出，包括 `data/cell_scores.csv`、`data/feedback_targets.csv`、`data/celltype_summary.csv`、`data/celltype_enrichment.csv`、`data/condition_summary.csv`、`data/feedback_deg.csv`、`data/feedback_enrichment_go.csv`、`data/feedback_enrichment_kegg.csv`，以及 `fig_54` 至 `fig_62` 的结果图；其中 `fig_61/fig_62` 为反馈靶基因 GO/KEGG 富集 Top5 的通路-基因网络图。
 - `integration_report.html`：全流程集成报告。
 - `integration_summary.json` / `run_manifest.json`：本次运行的汇总和溯源信息。
 
-每个靶点的对接在独立目录 `<workdir>/work/<gene>/` 下运行，支持单独断点续跑；配体优先使用 ChEMBL/BindingDB 已知活性分子，无数据库配体时自动提取共晶配体作为对照，最后回退到用户提供的配体库。
+每个靶点的对接在独立目录 `<workdir>/work/<gene>/` 下运行，支持单独断点续跑；MD 与导出产物也写入同一靶点目录（`outputs/run_001/results/06_md/`、`outputs/run_001/results/03_ml/`、`outputs/md/`、`outputs/run_001/external/`）。配体优先使用 ChEMBL/BindingDB 已知活性分子，无数据库配体时自动提取共晶配体作为对照，最后回退到用户提供的配体库。
 
 ## 6. 脚本文件一览
 
@@ -869,6 +886,19 @@ GSE165816 和 TCGA PanCancer Atlas 仅用于真实数据验证。
 MIT License. See `LICENSE` for details.
 
 ## 9. 更新日志
+
+### v1.5.0
+
+- 把现有 CADD 功能全部接入全自动集成流水线：新增 `07_cadd_downstream`（GROMACS MD 准备/运行、对接 ML 重打分、Amber/GROMACS 与 UniDock-Pro/HDOCK/HADDOCK 工具导出）、`08_network`（网络毒理学）和 `09_faers`（FAERS 不相称性信号）阶段；细胞反馈顺延为 `10_cell_feedback`，集成报告顺延为 `11_report`。
+- 每个成功对接靶点在独立工作目录自动完成 MD/导出；MD 无 GROMACS 时默认只准备输入，不会阻断流水线。提供 `--md-mode auto`、`--md-top-n` 后可自动运行 GROMACS 模拟。
+- 对接 ML 重打分支持全流程训练/预测：`--docking-ml-training-csv`、`--docking-ml-label-column`、`--docking-ml-model`；已存在 `ml_model_info.json` 时自动直接重打分。
+- 网络毒理学与 FAERS 作为输入可选的流水线阶段接入：提供 `network_toxicology.compound_targets_csv` / `target_sources` 和 `faers.input_csv` 后自动运行，缺输入时写 `skipped` 汇总而不是中断或伪造结果。
+- 网页全自动流水线页同步增加 MD/ML/导出、网络毒理学与 FAERS 的输入控件、运行开关、阶段显示和结果表；结果清单文件扫描加入 MD 导出目录。
+- 集成报告与 `integration_summary.json` 新增 CADD 下游、网络毒理学和 FAERS 汇总；阶段标记升级后旧运行目录会自然重建新增阶段。
+- 审计修复：网络毒理学/FAERS 用户显式提供输入但运行失败时不再吞错，流水线返回失败；MD 逐靶点记录 `md_requested/md_failed`，全部失败时阶段状态为 failed 并中断。
+- 审计修复：运行前自动清理旧版 `07_cell_feedback` / `08_report` 等不再属于当前阶段表的遗留标记，避免网页进度虚高或阶段显示错误；网络毒理学 Venn 默认改为 true，与独立命令和文档一致。
+- 审计修复：未配置 ML 训练 CSV 时不再把空路径当作训练文件尝试读取；修复后会如实跳过 ML 重打分。
+- 全量测试通过：271 个测试用例 + 18 个 subtests（含新增 4 个审计修复回归测试）。
 
 ### v1.4.0
 

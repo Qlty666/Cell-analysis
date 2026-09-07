@@ -565,7 +565,42 @@ footer { color: #64748b; font-size: 12px; margin: 30px 0 8px; }
 </div>
 
 <div class="card">
-  <h2>07 细胞反馈</h2>
+  <h2>07 CADD 下游（MD / ML / 工具交接）</h2>
+  <p class="muted">位置：<span class="path">&lt;workdir&gt;/outputs/integration/</span>；每靶点：<span class="path">&lt;workdir&gt;/work/&lt;gene&gt;/outputs/</span></p>
+  <table>
+    <thead><tr><th>文件</th><th>内容</th><th>类型</th><th>用途</th></tr></thead>
+    <tbody>
+      <tr><td><code>outputs/integration/cadd_targets.csv</code></td><td>每靶点 MD、ML 重打分与工具交接状态</td><td><span class="badge data">结果数据</span></td><td>查看 CADD 下游逐靶点结果</td></tr>
+      <tr><td><code>outputs/run_001/results/06_md/md_simulation_results.csv</code></td><td>MD 每配体状态与动态指标</td><td><span class="badge data">结果数据</span></td><td>MD 准备/运行汇总 <span class="badge opt">md-simulation</span></td></tr>
+      <tr><td><code>outputs/md/README.md</code></td><td>Amber/GROMACS 交接说明</td><td><span class="badge data">结果数据</span></td><td>外部 MD 工具交接</td></tr>
+      <tr><td><code>outputs/run_001/external/</code></td><td>UniDock-Pro / HDOCK / HADDOCK 模板</td><td><span class="badge data">结果数据</span></td><td>外部对接工具交接</td></tr>
+    </tbody>
+  </table>
+</div>
+
+<div class="card">
+  <h2>08/09 网络毒理学与 FAERS 信号</h2>
+  <p class="muted">位置：<span class="path">&lt;workdir&gt;/outputs/run_001/</span>；已接入全自动流水线 08/09 阶段，提供输入时运行，缺输入时写 skipped 汇总。</p>
+  <table>
+    <thead><tr><th>文件</th><th>内容</th><th>类型</th><th>用途</th></tr></thead>
+    <tbody>
+      <tr><td><code>network_toxicology/data/compound_disease_overlap.csv</code></td><td>化合物靶点与疾病基因交集表</td><td><span class="badge data">结果数据</span></td><td>核心交集靶点及来源数</td></tr>
+      <tr><td><code>network_toxicology/data/ppi_hub_scores.csv</code></td><td>STRING PPI degree/betweenness/clustering 评分</td><td><span class="badge data">结果数据</span></td><td>PPI hub 靶点评分 <span class="badge opt">需 --ppi-network-csv</span></td></tr>
+      <tr><td><code>network_toxicology/data/ctpd_nodes.csv</code></td><td>C-T-P-D 网络节点表</td><td><span class="badge data">结果数据</span></td><td>化合物、靶点、疾病节点</td></tr>
+      <tr><td><code>network_toxicology/data/ctpd_edges.csv</code></td><td>C-T-P-D 网络边表</td><td><span class="badge data">结果数据</span></td><td>化合物-靶点、靶点-疾病、PPI 边</td></tr>
+      <tr><td><code>network_toxicology/data/ctpd_network.html</code></td><td>C-T-P-D 网络可视化页</td><td><span class="badge data">结果数据</span></td><td>快速查看网络关系</td></tr>
+      <tr><td><code>network_toxicology/figures/compound_disease_venn.png</code></td><td>化合物-疾病交集 Venn 图</td><td><span class="badge fig">结果图</span></td><td>展示交集规模与来源分布</td></tr>
+      <tr><td><code>faers/data/faers_signals.csv</code></td><td>ROR/PRR/BCPNN/EBGM 信号表</td><td><span class="badge data">结果数据</span></td><td>药物-事件不相称性信号</td></tr>
+      <tr><td><code>faers/data/faers_signals.html</code></td><td>FAERS 信号结果页</td><td><span class="badge data">结果数据</span></td><td>Top 信号快速浏览</td></tr>
+      <tr><td><code>faers/faers_summary.json</code></td><td>FAERS 汇总统计</td><td><span class="badge data">结果数据</span></td><td>组合数、信号数、Top 药物</td></tr>
+      <tr><td><code>outputs/integration/network_summary.json</code></td><td>全流程网络毒理学阶段汇总</td><td><span class="badge data">结果数据</span></td><td>查看 08 阶段状态与路径</td></tr>
+      <tr><td><code>outputs/integration/faers_summary.json</code></td><td>全流程 FAERS 阶段汇总</td><td><span class="badge data">结果数据</span></td><td>查看 09 阶段状态与路径</td></tr>
+    </tbody>
+  </table>
+</div>
+
+<div class="card">
+  <h2>10 细胞反馈</h2>
   <p class="muted">位置：<span class="path">&lt;workdir&gt;/outputs/integration/cell_feedback/</span></p>
   <table>
     <thead><tr><th>文件</th><th>内容</th><th>类型</th><th>用途</th></tr></thead>
@@ -592,26 +627,7 @@ footer { color: #64748b; font-size: 12px; margin: 30px 0 8px; }
 </div>
 
 <div class="card">
-  <h2>网络毒理学与 FAERS 信号</h2>
-  <p class="muted">位置：<span class="path">&lt;workdir&gt;/outputs/run_001/</span>；网络毒理学与 FAERS 为独立命令，未运行时不生成。</p>
-  <table>
-    <thead><tr><th>文件</th><th>内容</th><th>类型</th><th>用途</th></tr></thead>
-    <tbody>
-      <tr><td><code>network_toxicology/data/compound_disease_overlap.csv</code></td><td>化合物靶点与疾病基因交集表</td><td><span class="badge data">结果数据</span></td><td>核心交集靶点及来源数</td></tr>
-      <tr><td><code>network_toxicology/data/ppi_hub_scores.csv</code></td><td>STRING PPI degree/betweenness/clustering 评分</td><td><span class="badge data">结果数据</span></td><td>PPI hub 靶点评分 <span class="badge opt">需 --ppi-network-csv</span></td></tr>
-      <tr><td><code>network_toxicology/data/ctpd_nodes.csv</code></td><td>C-T-P-D 网络节点表</td><td><span class="badge data">结果数据</span></td><td>化合物、靶点、疾病节点</td></tr>
-      <tr><td><code>network_toxicology/data/ctpd_edges.csv</code></td><td>C-T-P-D 网络边表</td><td><span class="badge data">结果数据</span></td><td>化合物-靶点、靶点-疾病、PPI 边</td></tr>
-      <tr><td><code>network_toxicology/data/ctpd_network.html</code></td><td>C-T-P-D 网络可视化页</td><td><span class="badge data">结果数据</span></td><td>快速查看网络关系</td></tr>
-      <tr><td><code>network_toxicology/figures/compound_disease_venn.png</code></td><td>化合物-疾病交集 Venn 图</td><td><span class="badge fig">结果图</span></td><td>展示交集规模与来源分布</td></tr>
-      <tr><td><code>faers/data/faers_signals.csv</code></td><td>ROR/PRR/BCPNN/EBGM 信号表</td><td><span class="badge data">结果数据</span></td><td>药物-事件不相称性信号</td></tr>
-      <tr><td><code>faers/data/faers_signals.html</code></td><td>FAERS 信号结果页</td><td><span class="badge data">结果数据</span></td><td>Top 信号快速浏览</td></tr>
-      <tr><td><code>faers/faers_summary.json</code></td><td>FAERS 汇总统计</td><td><span class="badge data">结果数据</span></td><td>组合数、信号数、Top 药物</td></tr>
-    </tbody>
-  </table>
-</div>
-
-<div class="card">
-  <h2>08 集成报告与溯源</h2>
+  <h2>11 集成报告与溯源</h2>
   <p class="muted">位置：<span class="path">&lt;workdir&gt;/outputs/integration/</span></p>
   <p class="muted">无结果图/结果数据。本阶段仅生成 HTML 报告、汇总与溯源文件，不列入本清单。</p>
 </div>
@@ -765,8 +781,10 @@ footer { color: #64748b; font-size: 12px; margin: 30px 0 8px; }
     if (title.includes('04 虚拟敲除输入')) return 'ko-input';
     if (title.includes('05 虚拟敲除')) return 'ko';
     if (title.includes('06 分子对接')) return 'dock';
-    if (title.includes('07 细胞反馈')) return 'feedback';
-    if (title.includes('08 集成')) return 'report';
+    if (title.includes('07 CADD')) return 'cadd';
+    if (title.includes('08/09')) return 'safety';
+    if (title.includes('10 细胞反馈')) return 'feedback';
+    if (title.includes('11 集成')) return 'report';
     if (title.includes('条件输出')) return 'conditions';
     return 'other';
   }
