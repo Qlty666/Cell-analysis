@@ -4360,11 +4360,17 @@ class Handler(BaseHTTPRequestHandler):
 
         if parsed.path == "/dock/install":
             try:
+                target = _first(data, "target", "")
+                cmd = [
+                    sys.executable,
+                    str(APP_ROOT / "launchers" / "install_environment.py"),
+                    "install",
+                    "docking",
+                ]
+                if target:
+                    cmd += ["--target", target]
                 proc = subprocess.run(
-                    [
-                        sys.executable,
-                        str(APP_ROOT / "launchers" / "install_dock_dependencies.py"),
-                    ],
+                    cmd,
                     cwd=APP_ROOT,
                     capture_output=True,
                     text=True,
@@ -4399,11 +4405,17 @@ class Handler(BaseHTTPRequestHandler):
 
         if parsed.path == "/molecular-docking/install":
             try:
+                target = _first(data, "target", "")
+                cmd = [
+                    sys.executable,
+                    str(APP_ROOT / "launchers" / "install_environment.py"),
+                    "install",
+                    "molecular-docking",
+                ]
+                if target:
+                    cmd += ["--target", target]
                 proc = subprocess.run(
-                    [
-                        sys.executable,
-                        str(APP_ROOT / "launchers" / "install_dock_dependencies.py"),
-                    ],
+                    cmd,
                     cwd=APP_ROOT,
                     capture_output=True,
                     text=True,
@@ -4573,14 +4585,23 @@ class Handler(BaseHTTPRequestHandler):
                 return
             project = _first(data, "project", "single")
             target = _first(data, "target", "")
-            script_name = (
-                "install_dock_dependencies.py"
-                if project == "dock"
-                else "install_pipeline_dependencies.py"
-            )
+            module = {
+                "single": "expression",
+                "expression": "expression",
+                "dock": "docking",
+                "docking": "docking",
+                "molecular-docking": "molecular-docking",
+                "md": "md",
+                "full": "full",
+                "datasets": "datasets",
+                "web": "web",
+                "skills": "skills",
+            }.get(project, project)
             cmd = [
                 sys.executable,
-                str(APP_ROOT / "launchers" / script_name),
+                str(APP_ROOT / "launchers" / "install_environment.py"),
+                "install",
+                module,
             ]
             if target:
                 cmd += ["--target", target]

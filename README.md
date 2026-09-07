@@ -201,6 +201,41 @@ liverbio doctor
 - 可选 Codex skills（仅证据收集需要）：`uniprot-skill`、`rcsb-pdb-skill`、`chembl-skill`、`bindingdb-skill`、`pubchem-pug-skill`、`chebi-skill`、`string-skill`、`reactome-skill`、`pharmgkb-skill`、`alphafold-skill`、`opentargets-skill`。
 - 可选项目功能 skills：`liver-expression-analysis`、`liver-virtual-screening`、`liver-full-pipeline`、`liver-dataset-search`。
 
+### 按板块一键补全环境
+
+新电脑上只需要运行某个功能板块时，不需要手工装完全部依赖。直接双击对应的
+`.bat`，脚本会安装该板块的 Python 包、R 包或对接工具，并自动做环境检查：
+
+| 功能板块 | 一键补全 | 检查 |
+| --- | --- | --- |
+| 表达分析 | `launchers\install_expression_environment.bat` | `launchers\check_expression_environment.bat` |
+| 数据集搜索 | `launchers\install_datasets_environment.bat` | 无专用检查 |
+| 虚拟筛选 / 对接 | `launchers\install_docking_environment.bat` | `launchers\check_docking_environment.bat` |
+| 独立分子对接 | `launchers\install_molecular_docking_environment.bat` | `launchers\check_molecular_docking_environment.bat` |
+| 分子动力学 | `launchers\install_md_environment.bat` | `launchers\check_md_environment.bat` |
+| 全自动集成流水线 | `launchers\install_full_environment.bat` | `launchers\check_full_environment.bat` |
+| 网页版 | `launchers\install_web_environment.bat` | 页面内检查 |
+| Codex Skills | `launchers\install_codex_skills_environment.bat` | `python scripts\install_codex_skills.py --list` |
+| 选择式安装 | `launchers\setup_environment.bat` | 同上 |
+
+也可以直接调用统一命令：
+
+```bat
+python launchers\install_environment.py install expression
+python launchers\install_environment.py install docking --with-ml
+python launchers\install_environment.py check full
+python launchers\install_environment.py list
+```
+
+说明：
+
+- `expression`：自动执行 `pip install -r requirements.txt`；Windows 上若找不到
+  `Rscript`，会从 CRAN 下载并安装到当前用户目录，再安装表达分析 R 包。
+- `docking` / `molecular-docking` / `md`：自动下载缺失的 AutoDockTools 和
+  AutoDock Vina 到 `dock/tools/`；`md` 的 GROMACS 需要单独安装。
+- `--with-ml` 会额外安装 `joblib` 与 `torch`；不加时只安装核心对接依赖。
+- `--no-auto-install-r` 可关闭 R 自动下载；`--target` 可把包安装到指定目录。
+
 ### 安装步骤
 
 复制整个项目文件夹后，在项目根目录执行：
@@ -737,6 +772,8 @@ python scripts\install_codex_skills.py --list
 | `scripts/validate_new_features.py` | 真实数据靶点评分/验证方案验证 |
 | `scripts/validate_random_real_full_pipeline.py` | 随机真实 GSE 全流程验证 |
 | `scripts/validate_dataset_search.py` | 多数据库数据集搜索随机验证（默认 GEO） |
+| `launchers/install_environment.py` | 按功能板块安装/检查环境 |
+| `launchers/install_*_environment.bat` | 各功能板块一键补全环境 |
 | `launchers/check_*.bat/.py` | 环境检查 |
 | `launchers/install_*.bat/.py` | 环境自动补全 |
 | `launchers/run_web_ui.bat` | 启动网页端 |
