@@ -21,6 +21,7 @@ from pathlib import Path
 import numpy as np
 import pandas as pd
 
+from .cytoscape_network import export_network_to_cytoscape, write_xgmml_network
 from .utils import DockingError, write_json
 
 _GENE_COLS = (
@@ -74,6 +75,77 @@ _EDGE_COL2_ALIASES = (
     "to",
     "target_node",
 )
+_CONFIDENCE_ALIASES = (
+    "combined_score",
+    "combinedscore",
+    "string_combined_score",
+    "combined score",
+    "score",
+    "confidence",
+    "confidence_score",
+    "evidence_score",
+    "experimental_score",
+    "database_score",
+)
+
+
+def _confidence_column(edges: pd.DataFrame) -> str | None:
+    lower = {str(column).strip().lower(): column for column in edges.columns}
+    return next(
+        (lower[alias] for alias in _CONFIDENCE_ALIASES if alias in lower),
+        None,
+    )
+
+
+def _select_ppi_edges(
+    edges: pd.DataFrame,
+    overlap_genes: set[str],
+    max_ppi_edges: int | None = None,
+) -> tuple[pd.DataFrame, str | None]:
+    """Keep deduplicated STRING edges connecting overlap genes."""
+    if edges is None or edges.empty:
+        return edges.copy() if edges is not None else pd.DataFrame(), None
+    col1, col2 = _edge_columns(edges)
+    if col1 is None or col2 is None:
+        col1, col2 = edges.columns[0], edges.columns[1]
+    a = edges[col1].astype(str).str.strip().str.upper()
+    b = edges[col2].astype(str).str.strip().str.upper()
+    mask = (
+        a.isin(overlap_genes)
+        & b.isin(overlap_genes)
+        & (a != "")
+        & (b != "")
+        & (a != b)
+    )
+    selected = edges.loc[mask].copy()
+    if selected.empty:
+        return selected, _confidence_column(selected)
+    a_selected = a.loc[selected.index].to_numpy()
+    b_selected = b.loc[selected.index].to_numpy()
+    left = np.where(a_selected <= b_selected, a_selected, b_selected)
+    right = np.where(a_selected <= b_selected, b_selected, a_selected)
+    selected["_edge_key"] = left + "|" + right
+    score_col = _confidence_column(selected)
+    if score_col is not None:
+        selected["_score"] = pd.to_numeric(
+            selected[score_col],
+            errors="coerce",
+        )
+        selected = selected.sort_values(
+            ["_score", "_edge_key"],
+            ascending=[False, True],
+        )
+    else:
+        selected = selected.sort_values("_edge_key")
+    selected = selected.drop_duplicates(subset="_edge_key", keep="first")
+    if max_ppi_edges is not None and len(selected) > int(max_ppi_edges):
+        selected = selected.head(int(max_ppi_edges))
+    return (
+        selected.drop(columns=["_edge_key", "_score"], errors="ignore").reset_index(
+            drop=True
+        ),
+        score_col,
+    )
 
 
 def _edge_columns(edges: pd.DataFrame) -> tuple[str | None, str | None]:
@@ -438,33 +510,54 @@ def write_ctpd_network(
     compound_name: str,
     disease_name: str,
     out_dir: Path,
+    max_ppi_edges: int | None = None,
 ) -> dict[str, Path]:
-    """Write compound-target-disease nodes and edges as CSV plus HTML."""
+    """Write compound-target-disease nodes/edges as CSV, XGMML and HTML."""
     out_dir.mkdir(parents=True, exist_ok=True)
+    metric_columns = [
+        column
+        for column in (
+            "ppi_degree",
+            "ppi_betweenness",
+            "ppi_clustering",
+            "ppi_hub_score",
+            "n_sources",
+        )
+        if column in overlap.columns
+    ]
+    zero_metrics = {column: 0 for column in metric_columns}
     nodes = [
         {
             "node_id": "compound",
             "label": compound_name or "Compound",
             "node_type": "compound",
+            **zero_metrics,
         },
         {
             "node_id": "disease",
             "label": disease_name or "Disease",
             "node_type": "disease",
+            **zero_metrics,
         },
     ]
     edges = []
     source_map: dict[str, set[str]] = {}
     for source, frame in target_sources.items():
         source_map[source] = set(frame["gene"])
-    for gene in overlap["gene"]:
-        nodes.append(
-            {
-                "node_id": gene,
-                "label": gene,
-                "node_type": "target",
-            }
-        )
+    overlap_genes = set(overlap["gene"])
+    for _, row in overlap.iterrows():
+        gene = str(row["gene"])
+        node = {
+            "node_id": gene,
+            "label": gene,
+            "node_type": "target",
+        }
+        for column in metric_columns:
+            value = row.get(column)
+            if pd.isna(value):
+                value = 0
+            node[column] = value
+        nodes.append(node)
         edges.append(
             {
                 "source": "compound",
@@ -484,26 +577,55 @@ def write_ctpd_network(
             }
         )
     if ppi_edges is not None and not ppi_edges.empty:
-        overlap_genes = set(overlap["gene"])
         col1, col2 = _edge_columns(ppi_edges)
         if col1 is None or col2 is None:
             col1, col2 = ppi_edges.columns[0], ppi_edges.columns[1]
-        for _, row in ppi_edges.iterrows():
+        selected, score_col = _select_ppi_edges(
+            ppi_edges,
+            overlap_genes,
+            max_ppi_edges=max_ppi_edges,
+        )
+        for _, row in selected.iterrows():
             a = str(row[col1]).upper()
             b = str(row[col2]).upper()
-            if a in overlap_genes and b in overlap_genes:
-                edges.append(
-                    {
-                        "source": a,
-                        "target": b,
-                        "edge_type": "ppi",
-                        "sources": "STRING",
-                    }
-                )
+            edge: dict = {
+                "source": a,
+                "target": b,
+                "edge_type": "ppi",
+                "sources": "STRING",
+            }
+            if score_col is not None and not pd.isna(row.get(score_col)):
+                edge["combined_score"] = row[score_col]
+            for column in ppi_edges.columns:
+                if (
+                    column in (col1, col2, score_col)
+                    or column in ("source", "target", "sources", "edge_type")
+                    or str(column).startswith("_")
+                ):
+                    continue
+                if not pd.isna(row.get(column)):
+                    edge[str(column)] = row[column]
+            edges.append(edge)
     node_path = out_dir / "ctpd_nodes.csv"
     edge_path = out_dir / "ctpd_edges.csv"
+    xgmml_path = out_dir / "ctpd_network.xgmml"
     pd.DataFrame(nodes).to_csv(node_path, index=False)
-    pd.DataFrame(edges).to_csv(edge_path, index=False)
+    edge_frame = pd.DataFrame(edges)
+    if edge_frame.empty:
+        edge_frame = pd.DataFrame(
+            columns=["source", "target", "edge_type", "sources"]
+        )
+    edge_frame.to_csv(edge_path, index=False)
+    network_label = (
+        f"{compound_name or 'Compound'} / {disease_name or 'Disease'} "
+        "C-T-P-D Network"
+    )
+    write_xgmml_network(
+        node_path,
+        edge_path,
+        xgmml_path,
+        network_label=network_label,
+    )
 
     html_path = out_dir / "ctpd_network.html"
     rows = "".join(
@@ -529,6 +651,7 @@ def write_ctpd_network(
     return {
         "nodes": node_path,
         "edges": edge_path,
+        "xgmml": xgmml_path,
         "html": html_path,
     }
 
@@ -538,6 +661,18 @@ def run_network_toxicology(cfg, log) -> dict:
     section = cfg.data.get("network_toxicology", {}) or {}
     compound_name = section.get("compound_name") or "Compound"
     disease_name = section.get("disease_name") or "Disease"
+    cytoscape_mode = str(section.get("cytoscape") or "auto").lower()
+    if cytoscape_mode not in ("auto", "on", "off"):
+        cytoscape_mode = "auto"
+    cytoscape_url = section.get("cytoscape_url") or "http://127.0.0.1:1234"
+    cytoscape_layout = section.get("cytoscape_layout") or "cose"
+    cytoscape_session = bool(section.get("cytoscape_save_session", False))
+    max_ppi_edges_value = section.get("max_ppi_edges")
+    max_ppi_edges = (
+        int(max_ppi_edges_value)
+        if max_ppi_edges_value not in (None, "")
+        else None
+    )
     out_dir = cfg._resolve(
         section.get("output_dir") or "outputs/run_001/network_toxicology",
         cfg.workdir,
@@ -603,7 +738,26 @@ def run_network_toxicology(cfg, log) -> dict:
         compound_name,
         disease_name,
         out_dir / "data",
+        max_ppi_edges=max_ppi_edges,
     )
+    cytoscape_result: dict = {"status": "off"}
+    if cytoscape_mode != "off":
+        cytoscape_result = export_network_to_cytoscape(
+            ctpd["nodes"],
+            ctpd["edges"],
+            out_dir,
+            network_title=(
+                f"{compound_name or 'Compound'} / "
+                f"{disease_name or 'Disease'}"
+            ),
+            base_url=str(cytoscape_url),
+            layout=str(cytoscape_layout),
+            save_session=cytoscape_session,
+            mode=cytoscape_mode,
+        )
+        for key, value in list(cytoscape_result.items()):
+            if isinstance(value, Path):
+                cytoscape_result[key] = str(value)
     summary = {
         "compound_name": compound_name,
         "disease_name": disease_name,
@@ -611,6 +765,7 @@ def run_network_toxicology(cfg, log) -> dict:
         "disease_genes": int(len(disease_genes)),
         "overlap_genes": int(len(overlap)),
         "ppi_hub_scored": bool(hub_frame is not None),
+        "cytoscape": cytoscape_result,
         "outputs": {
             "overlap_csv": str(overlap_path),
             "ppi_hub_csv": str(hub_path) if hub_frame is not None else "",

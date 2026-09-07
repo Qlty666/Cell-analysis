@@ -148,6 +148,11 @@ def main(argv: list[str] | None = None) -> int:
         "disease_genes_csv": args.disease_genes_csv,
         "disease_gene_column": args.disease_gene_column,
         "network_output_dir": args.network_output_dir,
+        "network_cytoscape": args.network_cytoscape,
+        "network_cytoscape_url": args.network_cytoscape_url,
+        "network_cytoscape_layout": args.network_cytoscape_layout,
+        "network_cytoscape_session": args.network_cytoscape_session,
+        "network_max_ppi_edges": args.network_max_ppi_edges,
         "faers_input": args.faers_input,
         "faers_drug_column": args.faers_drug_column,
         "faers_event_column": args.faers_event_column,
@@ -393,6 +398,37 @@ def _add_common(sub: argparse.ArgumentParser) -> None:
     sub.add_argument(
         "--network-output-dir",
         help="output directory for network toxicology results",
+    )
+    sub.add_argument(
+        "--network-cytoscape",
+        choices=["auto", "on", "off"],
+        default=None,
+        help=(
+            "Cytoscape live export mode for network toxicology "
+            "(default: auto)"
+        ),
+    )
+    sub.add_argument(
+        "--network-cytoscape-url",
+        default=None,
+        help="Cytoscape CyREST base URL (default: http://127.0.0.1:1234)",
+    )
+    sub.add_argument(
+        "--network-cytoscape-layout",
+        default=None,
+        help="Cytoscape layout, e.g. cose or force-directed",
+    )
+    sub.add_argument(
+        "--network-cytoscape-session",
+        action="store_true",
+        default=None,
+        help="also save a Cytoscape .cys session after live export",
+    )
+    sub.add_argument(
+        "--network-max-ppi-edges",
+        type=int,
+        default=None,
+        help="cap STRING PPI edges included in the C-T-P-D network",
     )
     sub.add_argument(
         "--faers-input",

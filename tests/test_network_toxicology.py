@@ -7,6 +7,7 @@ import logging
 import sys
 import tempfile
 import unittest
+import xml.etree.ElementTree as ET
 from pathlib import Path
 
 import pandas as pd
@@ -18,10 +19,12 @@ if str(APP_ROOT / "src") not in sys.path:
 from docking.config import load_config  # noqa: E402
 from docking.knockout import run_knockout  # noqa: E402
 from docking.network_toxicology import (  # noqa: E402
+    _select_ppi_edges,
     overlap_analysis,
     ppi_hub_scores,
     read_target_table,
     run_network_toxicology,
+    write_ctpd_network,
 )
 
 DEFAULT_CONFIG = APP_ROOT / "config" / "docking_config.json"
@@ -64,6 +67,7 @@ class TestNetworkToxicology(unittest.TestCase):
                     "disease_genes_csv": str(data_dir / "disease.csv"),
                     "ppi_network_csv": str(data_dir / "ppi.tsv"),
                     "network_output_dir": "outputs/network",
+                    "network_cytoscape": "off",
                 },
             )
             summary = run_network_toxicology(cfg, LOG)
@@ -75,6 +79,18 @@ class TestNetworkToxicology(unittest.TestCase):
             self.assertTrue((out_dir / "data" / "ctpd_nodes.csv").exists())
             self.assertTrue((out_dir / "data" / "ctpd_edges.csv").exists())
             self.assertTrue((out_dir / "data" / "ctpd_network.html").exists())
+            xgmml = out_dir / "data" / "ctpd_network.xgmml"
+            self.assertTrue(xgmml.exists())
+            root = ET.parse(xgmml).getroot()
+            local = lambda tag: tag.rsplit("}", 1)[-1]
+            self.assertGreaterEqual(
+                len([child for child in root if local(child.tag) == "node"]),
+                5,
+            )
+            self.assertGreaterEqual(
+                len([child for child in root if local(child.tag) == "edge"]),
+                7,
+            )
             self.assertEqual(summary["overlap_genes"], 3)
             self.assertTrue(summary["ppi_hub_scored"])
 
@@ -132,6 +148,41 @@ class TestNetworkToxicology(unittest.TestCase):
                 frame.loc[frame["gene"] == "A", "ppi_degree"].iloc[0],
                 2,
             )
+
+    def test_select_ppi_edges_caps_and_dedupes_by_score(self):
+        edges = pd.DataFrame(
+            {
+                "protein1": ["A", "A", "A", "B", "B", "C"],
+                "protein2": ["B", "B", "C", "D", "C", "D"],
+                "combined_score": [0.1, 0.99, 0.9, 0.2, 0.8, 0.3],
+            }
+        )
+        selected, score_col = _select_ppi_edges(
+            edges,
+            {"A", "B", "C", "D"},
+            max_ppi_edges=3,
+        )
+        self.assertEqual(score_col, "combined_score")
+        self.assertEqual(len(selected), 3)
+        self.assertEqual(
+            list(selected["combined_score"]),
+            [0.99, 0.9, 0.8],
+        )
+
+    def test_ctpd_export_without_overlap_still_writes_xgmml(self):
+        with tempfile.TemporaryDirectory() as tmp:
+            out_dir = Path(tmp) / "ctpd"
+            paths = write_ctpd_network(
+                pd.DataFrame(columns=["gene"]),
+                {"ctd": pd.DataFrame({"gene": ["A", "B"]})},
+                None,
+                "Compound X",
+                "Disease Y",
+                out_dir,
+            )
+            self.assertTrue(paths["nodes"].exists())
+            self.assertTrue(paths["edges"].exists())
+            self.assertTrue(paths["xgmml"].exists())
 
     def test_knockout_includes_ppi_hub(self):
         with tempfile.TemporaryDirectory() as tmp:

@@ -2120,6 +2120,33 @@ def start_full_job(data: dict) -> dict:
     ).strip()
     if network_disease_gene_column:
         cmd += ["--network-disease-gene-column", network_disease_gene_column]
+    network_cytoscape = _first(data, "network_cytoscape", "").strip()
+    if network_cytoscape in ("auto", "on", "off"):
+        cmd += ["--network-cytoscape", network_cytoscape]
+    network_cytoscape_url = _first(
+        data,
+        "network_cytoscape_url",
+        "",
+    ).strip()
+    if network_cytoscape_url:
+        cmd += ["--network-cytoscape-url", network_cytoscape_url]
+    network_cytoscape_layout = _first(
+        data,
+        "network_cytoscape_layout",
+        "",
+    ).strip()
+    if network_cytoscape_layout:
+        cmd += ["--network-cytoscape-layout", network_cytoscape_layout]
+    if _first(data, "network_cytoscape_session", "") in (
+        "1",
+        "true",
+        "on",
+        "yes",
+    ):
+        cmd += ["--network-cytoscape-session"]
+    network_max_ppi_edges = _int_field(data, "network_max_ppi_edges")
+    if network_max_ppi_edges is not None:
+        cmd += ["--network-max-ppi-edges", str(network_max_ppi_edges)]
     faers_input = _first(data, "faers_input", "").strip()
     if faers_input:
         cmd += ["--faers-input", faers_input]
@@ -2777,7 +2804,7 @@ def _read_json(path: Path) -> dict:
 
 
 RESULT_IMAGE_SUFFIXES = {".png", ".jpg", ".jpeg", ".svg"}
-RESULT_DATA_SUFFIXES = {".csv", ".xlsx", ".rds"}
+RESULT_DATA_SUFFIXES = {".csv", ".xlsx", ".rds", ".xgmml"}
 RESULT_FILE_SUFFIXES = RESULT_IMAGE_SUFFIXES | RESULT_DATA_SUFFIXES
 
 
@@ -3499,6 +3526,21 @@ def run_network_request(data: dict) -> dict:
         "ppi_network_csv": _first(data, "net_ppi", "") or None,
         "venn": _first(data, "net_venn", "1")
         in ("1", "true", "on", "yes"),
+        "network_cytoscape": (
+            _first(data, "net_cytoscape", "auto") or "auto"
+        ),
+        "network_cytoscape_url": (
+            _first(data, "net_cytoscape_url", "http://127.0.0.1:1234")
+            or "http://127.0.0.1:1234"
+        ),
+        "network_cytoscape_layout": _first(data, "net_cytoscape_layout", "") or None,
+        "network_cytoscape_session": _first(
+            data,
+            "net_cytoscape_session",
+            "",
+        )
+        in ("1", "true", "on", "yes"),
+        "network_max_ppi_edges": _int_field(data, "net_max_ppi_edges"),
     }
     cfg = load_config(
         APP_ROOT / "config" / "docking_config.json",
@@ -3627,6 +3669,7 @@ def _analysis_file_path(workdir: str, name: str, kind: str):
         ".json",
         ".md",
         ".xlsx",
+        ".xgmml",
     }
     if (
         target.is_file()

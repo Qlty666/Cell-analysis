@@ -29,6 +29,10 @@ PACKAGE_INFO = {
         "versioneer",
         "https://github.com/python-versioneer/python-versioneer",
     ),
+    "py4cytoscape": (
+        "py4cytoscape",
+        "https://github.com/cytoscape/py4cytoscape",
+    ),
 }
 
 TOOL_INFO = [

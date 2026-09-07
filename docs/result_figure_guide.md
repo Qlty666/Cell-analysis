@@ -907,6 +907,8 @@ GROMACS 输入文件；`auto` 模式需要 GROMACS，并通过 ACPYPE 或
   data/ctpd_nodes.csv
   data/ctpd_edges.csv
   data/ctpd_network.html
+  data/ctpd_network.xgmml
+  figures/ctpd_network_cytoscape.png
 <workdir>/outputs/run_001/faers/
   faers_summary.json
   data/faers_signals.csv
@@ -919,10 +921,18 @@ GROMACS 输入文件；`auto` 模式需要 GROMACS，并通过 ACPYPE 或
 | `compound_disease_overlap.csv` | 核心交集靶点及来源数据库计数 | 至少 1 个交集基因，`n_sources` 可读 | 交集为 0 或输入表不完整时需复核数据库下载 |
 | `ppi_hub_scores.csv` | STRING PPI 的 degree、betweenness、clustering 与 hub 评分 | 提供 PPI 边表时生成，基因名可匹配 | 未提供 `--ppi-network-csv` 时不生成；匹配率过低时 hub 评分代表性不足 |
 | `ctpd_network.html` | C-T-P-D 网络可视化页 | HTML 可打开，节点和边数与 CSV 一致 | 输入不完整时不生成 |
+| `ctpd_network.xgmml` | Cytoscape XGMML 网络文件，节点类型、PPI hub 指标与边类型均已写入 | 可被 Cytoscape 直接导入；节点/边数与 CSV 一致 | 缺少交集基因时只含化合物/疾病节点 |
+| `ctpd_network_cytoscape.png` | Cytoscape 自动布局并套用样式的 C-T-P-D 网络图 | 图片可打开，网络内容与 CSV 一致 | 仅在 Cytoscape CyREST 运行且已安装 `py4cytoscape` 时生成；否则仍可导入 `ctpd_network.xgmml` |
 | `faers_signals.csv` | ROR/PRR/BCPNN/EBGM 信号表 | 组合数 > 0，计数列被正确汇总，信号判定可解释 | 事件表为空、药物/事件列名错误或计数未识别时不生成 |
 | `faers_signals.html` | Top FAERS 信号浏览页 | HTML 可打开，数字与 CSV 一致 | 无信号时只说明当前阈值下未检出 |
 
 注意：FAERS 的 BCPNN IC 与 EBGM 使用常用近似公式，适合筛选，不作为正式药物警戒统计结论。
+
+Cytoscape 集成采用自动降级策略：`network_toxicology.cytoscape` 为 `auto` 时，
+若检测到 `http://127.0.0.1:1234` 的 CyREST 服务且已安装 `py4cytoscape`，
+会自动把 C-T-P-D 网络推送到 Cytoscape，应用节点类型/PPI hub 样式并导出 PNG；
+未检测到服务时不会中断流水线，仍输出可直接导入的 `ctpd_network.xgmml`。
+需要强制校验或保存会话时，可把该参数设为 `on` 并启用 `cytoscape_save_session`。
 
 ## 7. 结果图的主要用途
 

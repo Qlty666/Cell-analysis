@@ -128,7 +128,7 @@ Script/
 | `evidence.py` | 多数据库靶点证据收集 |
 | `knockout.py` / `insilico.py` / `export_single_cell_insilico.R` / `insilico_enrichment.R` | 虚拟敲除与单细胞 GRN 模拟 |
 | `md_simulation.py` | GROMACS 分子动力学模拟 |
-| `network_toxicology.py` / `signal_detection.py` | 网络毒理学与 FAERS 信号 |
+| `network_toxicology.py` / `cytoscape_network.py` / `signal_detection.py` | 网络毒理学、Cytoscape XGMML/推送与 FAERS 信号 |
 | `pipeline.py` / `provenance.py` / `validation.py` | 对接流水线、溯源与校验 |
 | `report.py` | 对接/验证报告 |
 | `ml.py` / `handoff.py` / `environment.py` / `utils.py` | 重打分、工具交接、环境与通用工具 |

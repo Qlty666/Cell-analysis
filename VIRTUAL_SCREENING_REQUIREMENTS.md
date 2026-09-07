@@ -71,6 +71,21 @@ python -m pip install acpype
 python -m pip install scikit-learn joblib torch
 ```
 
+## Cytoscape 网络可视化（网络毒理学可选）
+
+- Cytoscape 3.9+ 桌面版（Cytoscape 3.10 已预装 CyREST）
+- `py4cytoscape>=1.13.0`（已写入 `requirements_dock.txt`）
+
+启动 Cytoscape 并启用 REST 服务后，网络毒理学流程会在 `cytoscape: auto`
+模式下自动推送 C-T-P-D 网络、应用样式并导出 PNG；未启动服务时仍会输出
+可直接导入的 `ctpd_network.xgmml`。
+
+```bash
+# Cytoscape 安装目录示例（Windows）
+"<CYTOSCAPE_INSTALL_DIR>\cytoscape.bat" -R 1234
+python -m pip install py4cytoscape
+```
+
 ## 数据库证据收集（Codex skills）
 
 需要在 `%USERPROFILE%\.codex\skills\` 下存在：

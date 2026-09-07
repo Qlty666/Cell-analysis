@@ -13,7 +13,7 @@
   <div class="page-head">
     <div class="page-title">
       <h1>网络毒理学分析</h1>
-      <p class="page-sub">化合物-疾病靶点交集、多来源计数、STRING PPI hub 评分、Venn 图与 C-T-P-D 网络导出。</p>
+      <p class="page-sub">化合物-疾病靶点交集、多来源计数、STRING PPI hub 评分、Venn 图与 Cytoscape C-T-P-D 网络。</p>
     </div>
     <div class="page-actions">
       <a class="link-button" href="/faers">FAERS</a>
@@ -53,6 +53,23 @@
           <input name="net_ppi" placeholder="data/network/string_edges.tsv">
         </label>
         <label class="toggle"><input type="checkbox" name="net_venn" value="1" checked> 输出 Venn 图</label>
+        <label>Cytoscape 推送模式
+          <select name="net_cytoscape">
+            <option value="auto" selected>auto（可用时推送，否则 XGMML）</option>
+            <option value="on">on（必须推送）</option>
+            <option value="off">off</option>
+          </select>
+        </label>
+        <label>Cytoscape CyREST 地址
+          <input name="net_cytoscape_url" value="http://127.0.0.1:1234">
+        </label>
+        <label>Cytoscape 布局
+          <input name="net_cytoscape_layout" placeholder="cose" value="cose">
+        </label>
+        <label>PPI 网络最大边数
+          <input name="net_max_ppi_edges" type="number" min="0" value="2000">
+        </label>
+        <label class="toggle"><input type="checkbox" name="net_cytoscape_session" value="1"> 同时保存 .cys 会话</label>
       </div>
       </details>
       <div class="actions">

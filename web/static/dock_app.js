@@ -698,11 +698,16 @@ async function runNetwork(btn) {
 
 function renderNetwork(data) {
   const summary = data.summary || {};
+  const cyto = summary.cytoscape || {};
+  const cytoStatus = cyto.status === 'live' ? '已推送 Cytoscape'
+    : cyto.status === 'xgmml_only' ? '已导出 XGMML'
+      : cyto.status === 'off' ? '已关闭' : '未推送';
   document.getElementById('netSummary').innerHTML =
     '<p class="muted">化合物靶点 ' + esc(summary.compound_targets || 0) +
     ' 个，疾病基因 ' + esc(summary.disease_genes || 0) +
     '，交集基因 ' + esc(summary.overlap_genes || 0) +
     '，PPI hub 评分 ' + (summary.ppi_hub_scored ? '已启用' : '未启用') +
+    '，Cytoscape ' + esc(cytoStatus) +
     '。输出目录：' + esc(data.output_dir) + '</p>';
 
   const linkBase = '/dock/network/file?workdir=' +

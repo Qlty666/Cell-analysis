@@ -180,6 +180,11 @@ DEFAULT_NETWORK_TOXICOLOGY = {
     "ppi_network_csv": None,
     "venn": True,
     "output_dir": "outputs/run_001/network_toxicology",
+    "cytoscape": "auto",
+    "cytoscape_url": "http://127.0.0.1:1234",
+    "cytoscape_layout": "cose",
+    "cytoscape_save_session": False,
+    "max_ppi_edges": 2000,
 }
 
 DEFAULT_FAERS = {
@@ -3453,12 +3458,20 @@ def _apply_defaults(args, config: dict) -> None:
         ("network_disease_gene_column", "disease_gene_column"),
         ("network_ppi_network_csv", "ppi_network_csv"),
         ("network_output_dir", "output_dir"),
+        ("network_cytoscape", "cytoscape"),
+        ("network_cytoscape_url", "cytoscape_url"),
+        ("network_cytoscape_layout", "cytoscape_layout"),
+        ("network_max_ppi_edges", "max_ppi_edges"),
     ]:
         value = getattr(args, attr, None)
         if value is None:
             value = network_section.get(key)
         if value is not None:
             network_section[key] = value
+    if getattr(args, "network_cytoscape_session", None) is not None:
+        network_section["cytoscape_save_session"] = bool(
+            args.network_cytoscape_session
+        )
     args.network_toxicology = network_section
 
     faers_section = dict(DEFAULT_FAERS)
@@ -3665,6 +3678,21 @@ def build_parser() -> argparse.ArgumentParser:
     parser.add_argument("--network-disease-gene-column", default=None)
     parser.add_argument("--network-ppi-network-csv", default=None)
     parser.add_argument("--network-output-dir", default=None)
+    parser.add_argument(
+        "--network-cytoscape",
+        choices=["auto", "on", "off"],
+        default=None,
+        help="Cytoscape live export mode for the network stage (default: auto)",
+    )
+    parser.add_argument("--network-cytoscape-url", default=None)
+    parser.add_argument("--network-cytoscape-layout", default=None)
+    parser.add_argument(
+        "--network-cytoscape-session",
+        action="store_true",
+        default=None,
+        help="also save a .cys session when Cytoscape live export runs",
+    )
+    parser.add_argument("--network-max-ppi-edges", type=int, default=None)
     parser.add_argument("--skip-faers", action="store_true", default=None)
     parser.add_argument("--faers-input", default=None)
     parser.add_argument("--faers-drug-column", default=None)

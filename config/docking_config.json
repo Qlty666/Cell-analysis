@@ -164,7 +164,12 @@
     "disease_gene_column": null,
     "ppi_network_csv": null,
     "output_dir": "outputs/run_001/network_toxicology",
-    "venn": true
+    "venn": true,
+    "cytoscape": "auto",
+    "cytoscape_url": "http://127.0.0.1:1234",
+    "cytoscape_layout": "cose",
+    "cytoscape_save_session": false,
+    "max_ppi_edges": 2000
   },
   "faers": {
     "input_csv": null,

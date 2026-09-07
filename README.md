@@ -91,7 +91,7 @@
 05 knockout              虚拟敲除 + 多维靶点评分 + 湿实验验证方案
 06 docking               对有 PDB 结构的靶点自动收集已知配体并跑 Vina 对接
 07 cadd_downstream       对成功对接靶点自动准备 GROMACS 输入、运行可选 MD、ML 重打分和 MD/外部工具导出
-08 network               网络毒理学（化合物-疾病靶点交集、PPI hub、Venn、C-T-P-D 网络；无输入时自动跳过）
+08 network               网络毒理学（化合物-疾病靶点交集、PPI hub、Venn、C-T-P-D 网络与 Cytoscape XGMML/自动推送；无输入时自动跳过）
 09 faers                 FAERS 风格 ROR/PRR/BCPNN/EBGM 信号检测（无事件表时自动跳过）
 10 cell_feedback         把虚拟敲除/对接结果返回 Seurat 做细胞级反馈分析
 11 report                生成集成 HTML 报告和 run_manifest.json
@@ -107,7 +107,7 @@
 
 `cadd_downstream` 阶段会遍历虚拟筛选成功的靶点：默认对每个靶点的 Top 命中准备 GROMACS 蛋白-配体复合物输入（`prepare` 模式），并把 Amber/GROMACS 模板与 UniDock-Pro/HDOCK/HADDOCK 外部工具模板一起导出；若系统中有 GROMACS 且设置 `--md-mode auto`，也会在本机继续跑 EM/NVT/NPT/生产模拟。全自动流水线还接入对接 ML 重打分：提供带标签的训练 CSV（`--docking-ml-training-csv`）时会对每个靶点训练并预测，已有训练模型时直接预测。单靶点失败不会中断整条流水线，错误会写入 `cadd_targets.csv` 供后续排查。
 
-`network` 与 `faers` 阶段需要用户提供化合物-靶点表和 FAERS 风格事件表。提供 `network_toxicology.compound_targets_csv` / `target_sources` 后，会自动使用 `key_genes.csv` 作为疾病基因集，输出交集、PPI hub、Venn 和 C-T-P-D 网络；提供 `faers.input_csv` 后输出四种不相称性信号。未提供输入时阶段仍会写 `network_summary.json` / `faers_summary.json` 并注明 `skipped`，不会伪造分析结果。
+`network` 与 `faers` 阶段需要用户提供化合物-靶点表和 FAERS 风格事件表。提供 `network_toxicology.compound_targets_csv` / `target_sources` 后，会自动使用 `key_genes.csv` 作为疾病基因集，输出交集、PPI hub、Venn 和 C-T-P-D 网络，并始终写出可直接导入 Cytoscape 的 `ctpd_network.xgmml`；若 Cytoscape CyREST（默认 `http://127.0.0.1:1234`）正在运行且已安装 `py4cytoscape`，会自动推送网络、应用节点类型/PPI hub 样式并导出 PNG（`cytoscape: auto/on/off` 控制，`auto` 在无服务时不中断）。提供 `faers.input_csv` 后输出四种不相称性信号。未提供输入时阶段仍会写 `network_summary.json` / `faers_summary.json` 并注明 `skipped`，不会伪造分析结果。
 
 细胞反馈阶段会把虚拟敲除评分和虚拟筛选命中合并成反馈清单，重新读取单细胞 Seurat 对象，为每个候选基因写入细胞级表达、计算筛选靶点模块评分，并输出细胞类型表达汇总、模块富集检验、条件×细胞类型汇总和 UMAP/DotPlot/热图等结果；同时把反馈靶基因放回 Seurat 对象做条件差异表达（火山图、条件小提琴图），并对其做 GO/KEGG 富集分析。富集 Top5 使用与 `fig_22_go_network.png` 相同的 `cnetplot` 通路-基因网络图，不再使用气泡图，可直接查看 Top5 通路与哪些反馈靶基因关联更强；同时生成 `feedback_targets.csv`，把筛选优先级与细胞表达特异性合并为 `cell_support_score`，用于下一轮靶点收敛。bulk RNA-seq、microarray 等样本级数据集没有细胞级对象，此阶段自动跳过并在 `cell_feedback_summary.json` 中注明原因。
 
@@ -167,7 +167,7 @@
 全自动流水线页同步新增 QC 门控与差异丰度检验开关、`dry-run` 仅预演选项；流程结果区新增 QC 门控表和细胞类型差异丰度表，结果清单页补充 `qc_metrics.json` 与 `differential_abundance.csv` 的说明。
 网页版整体布局优化：各页面统一页头与快捷入口、表单按“基础/分析/运行”分组折叠、全自动流水线与表达分析表单支持设置保存/恢复/重置、结果区增加统计卡片、任务页增加数量统计、结果清单页支持按文件名/用途筛选，并可按结果图名或完整本地路径直接定位、只显示命中的清单。
 虚拟筛选页只保留 AutoDock Vina 对接、重打分和结果浏览；分子动力学、虚拟敲除、网络毒理学、FAERS 与真实数据验证分别使用独立页面，避免所有 CADD 模块堆在同一个“虚拟筛选”入口下。结果清单页与结果图指南同步补充这些输出路径、用途与判读标准。
-各功能板块已完成参数分组与使用优化：虚拟筛选、分子动力学、虚拟敲除、网络毒理学和 FAERS 页均支持保存/恢复/重置表单设置；虚拟敲除页可按需调整建模基因数、细胞数、传播轮数、DrugReflector checkpoint 与 GO/KEGG 开关；网络毒理学可指定疾病基因列并控制 Venn 输出；真实数据验证页可设置随机数据集数与种子并实时查看运行状态。
+各功能板块已完成参数分组与使用优化：虚拟筛选、分子动力学、虚拟敲除、网络毒理学和 FAERS 页均支持保存/恢复/重置表单设置；虚拟敲除页可按需调整建模基因数、细胞数、传播轮数、DrugReflector checkpoint 与 GO/KEGG 开关；网络毒理学可指定疾病基因列并控制 Venn 与 Cytoscape 输出；真实数据验证页可设置随机数据集数与种子并实时查看运行状态。
 近期功能已全部接入网页端：表达分析页支持 `xgb` / `rf` / `gbm` / `mlp` / `lasso_svm` ML 模型选择；全自动流水线页新增 ML 模型、DepMap 依赖表和 PPI 网络边表；虚拟筛选页新增重打分 ML 模型/训练 CSV/标签列；虚拟敲除页支持 PPI 边表、scTenifoldKnk 引擎与原始计数开关；结果清单补充 ML 校准曲线与 `lasso_svm` 选定特征表。
 
 ### 2.6 真实数据验证与可复现性
@@ -435,6 +435,9 @@ python scripts\run_docking.py network \
   --compound-targets-csv data/network/compound_targets.csv \
   --disease-genes-csv data/network/disease_genes.csv \
   --ppi-network-csv data/network/string_edges.tsv \
+  --network-cytoscape auto \
+  --network-cytoscape-url http://127.0.0.1:1234 \
+  --network-cytoscape-layout cose \
   --network-output-dir outputs/run_001/network_toxicology
 ```
 
@@ -514,6 +517,7 @@ python scripts\run_full_pipeline.py \
 - `--skip-md` / `--skip-handoff` / `--skip-docking-ml`：分别关闭 MD 阶段、MD/外部工具导出和对接 ML 重打分。
 - `--docking-ml-training-csv` / `--docking-ml-label-column`：提供带标签配体 CSV 后自动训练对接 ML 重打分模型。
 - `--network-compound-targets-csv` / `--network-disease-genes-csv` / `--network-disease-gene-column`：启用并运行网络毒理学；疾病基因缺省使用 `key_genes.csv`。
+- `--network-cytoscape auto|on|off` / `--network-cytoscape-url` / `--network-cytoscape-layout` / `--network-cytoscape-session` / `--network-max-ppi-edges`：控制 Cytoscape 自动推送、CyREST 地址、布局、`.cys` 会话与 PPI 边数上限。
 - `--faers-input` / `--faers-drug-column` / `--faers-event-column` / `--faers-count-column`：提供 FAERS 风格事件表后自动运行信号检测。
 - `--skip-network` / `--skip-faers`：显式关闭网络毒理学或 FAERS 阶段。
 - `--feedback-top-n`：进入细胞反馈的基因数，默认 12。
@@ -764,7 +768,7 @@ python scripts\install_codex_skills.py --list
 - `knockout_summary.json`：虚拟敲除与验证方案汇总。
 - `docking_targets.csv`：每个靶点的对接状态、命中数和最佳亲和力。
 - `cadd_downstream_summary.json` / `cadd_targets.csv`：MD 准备/运行、ML 重打分和 MD/外部工具导出的逐靶点状态。
-- `network_summary.json`：网络毒理学汇总；`outputs/run_001/network_toxicology/` 下含交集表、Venn 图与 C-T-P-D 节点/边。
+- `network_summary.json`：网络毒理学汇总；`outputs/run_001/network_toxicology/` 下含交集表、Venn 图、C-T-P-D 节点/边、XGMML 网络文件，Cytoscape 在线导出时另含 `figures/ctpd_network_cytoscape.png`。
 - `faers_summary.json`：FAERS 信号汇总；`outputs/run_001/faers/data/faers_signals.csv` 为信号表。
 - `cell_feedback/`：细胞反馈阶段输出，包括 `data/cell_scores.csv`、`data/feedback_targets.csv`、`data/celltype_summary.csv`、`data/celltype_enrichment.csv`、`data/condition_summary.csv`、`data/feedback_deg.csv`、`data/feedback_enrichment_go.csv`、`data/feedback_enrichment_kegg.csv`，以及 `fig_54` 至 `fig_62` 的结果图；其中 `fig_61/fig_62` 为反馈靶基因 GO/KEGG 富集 Top5 的通路-基因网络图。
 - `integration_report.html`：全流程集成报告。

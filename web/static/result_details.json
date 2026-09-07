@@ -1306,6 +1306,15 @@
       "optional": false
     },
     {
+      "file": "network_toxicology/data/ctpd_network.xgmml",
+      "name": "ctpd_network.xgmml",
+      "kind": "data",
+      "content": "C-T-P-D Cytoscape XGMML 网络文件",
+      "type": "XGMML 网络文件",
+      "use": "直接导入 Cytoscape（File > Import > Network from File）复核布局、节点属性和边证据；开启 Cytoscape CyREST 后流水线会自动推送并导出 PNG。",
+      "optional": false
+    },
+    {
       "file": "network_toxicology/figures/compound_disease_venn.png",
       "name": "compound_disease_venn.png",
       "kind": "fig",
@@ -1366,7 +1375,7 @@
       "kind": "data",
       "content": "网络毒理学阶段汇总",
       "type": "JSON 汇总文件",
-      "use": "交集基因、PPI hub 和 C-T-P-D 输出路径；该文件用于程序读取状态、汇总指标和门控判定，也可人工复核。",
+      "use": "交集基因、PPI hub、C-T-P-D 与 Cytoscape 输出路径；该文件用于程序读取状态、汇总指标和门控判定，也可人工复核。",
       "optional": true
     },
     {

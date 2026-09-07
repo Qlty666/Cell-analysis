@@ -314,6 +314,23 @@ a.file-link { color: #1665c0; text-decoration: none; margin-right: 12px; }
         <label>网络毒理学：PPI 边表 CSV/TSV（可选）
           <input name="network_ppi_network_csv" placeholder="data/network/string_edges.tsv">
         </label>
+        <label>网络毒理学：Cytoscape 模式
+          <select name="network_cytoscape">
+            <option value="auto" selected>auto（可用时推送，否则 XGMML）</option>
+            <option value="on">on（必须推送）</option>
+            <option value="off">off</option>
+          </select>
+        </label>
+        <label>网络毒理学：Cytoscape CyREST 地址
+          <input name="network_cytoscape_url" value="http://127.0.0.1:1234">
+        </label>
+        <label>网络毒理学：Cytoscape 布局
+          <input name="network_cytoscape_layout" value="cose" placeholder="cose">
+        </label>
+        <label>网络毒理学：PPI 最大边数
+          <input name="network_max_ppi_edges" type="number" min="0" value="2000">
+        </label>
+        <label class="toggle"><input type="checkbox" name="network_cytoscape_session" value="1"> 网络毒理学保存 .cys 会话</label>
         <label>FAERS 事件表 CSV（可选）
           <input name="faers_input" placeholder="data/faers/events.csv">
         </label>

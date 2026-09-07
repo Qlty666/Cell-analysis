@@ -3,6 +3,7 @@ pandas
 matplotlib
 pyyaml
 openpyxl
+py4cytoscape>=1.13.0
 rdkit
 meeko
 gemmi

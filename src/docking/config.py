@@ -217,6 +217,11 @@ DEFAULTS = {
         "ppi_network_csv": None,
         "output_dir": "outputs/run_001/network_toxicology",
         "venn": True,
+        "cytoscape": "auto",
+        "cytoscape_url": "http://127.0.0.1:1234",
+        "cytoscape_layout": "cose",
+        "cytoscape_save_session": False,
+        "max_ppi_edges": 2000,
     },
     "faers": {
         "input_csv": None,
@@ -468,6 +473,14 @@ def apply_overrides(cfg: ResolvedConfig, overrides: dict) -> ResolvedConfig:
         "disease_gene_column": ("network_toxicology", "disease_gene_column"),
         "network_output_dir": ("network_toxicology", "output_dir"),
         "venn": ("network_toxicology", "venn"),
+        "network_cytoscape": ("network_toxicology", "cytoscape"),
+        "network_cytoscape_url": ("network_toxicology", "cytoscape_url"),
+        "network_cytoscape_layout": ("network_toxicology", "cytoscape_layout"),
+        "network_cytoscape_session": (
+            "network_toxicology",
+            "cytoscape_save_session",
+        ),
+        "network_max_ppi_edges": ("network_toxicology", "max_ppi_edges"),
         "faers_input": ("faers", "input_csv"),
         "faers_drug_column": ("faers", "drug_column"),
         "faers_event_column": ("faers", "event_column"),
@@ -777,6 +790,31 @@ def save_config(cfg: ResolvedConfig, path: Path) -> None:
                 "outputs/run_001/network_toxicology",
             ),
             "venn": cfg.get("network_toxicology", "venn", True),
+            "cytoscape": cfg.get(
+                "network_toxicology",
+                "cytoscape",
+                "auto",
+            ),
+            "cytoscape_url": cfg.get(
+                "network_toxicology",
+                "cytoscape_url",
+                "http://127.0.0.1:1234",
+            ),
+            "cytoscape_layout": cfg.get(
+                "network_toxicology",
+                "cytoscape_layout",
+                "cose",
+            ),
+            "cytoscape_save_session": cfg.get(
+                "network_toxicology",
+                "cytoscape_save_session",
+                False,
+            ),
+            "max_ppi_edges": cfg.get(
+                "network_toxicology",
+                "max_ppi_edges",
+                2000,
+            ),
         },
         "faers": {
             "input_csv": cfg.get("faers", "input_csv"),
