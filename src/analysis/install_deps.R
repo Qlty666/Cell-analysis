@@ -14,13 +14,14 @@ if (!requireNamespace("BiocManager", quietly = TRUE)) {
 
 cran_pkgs <- c(
   "Seurat", "dplyr", "ggplot2", "patchwork", "Matrix", "data.table",
-  "jsonlite", "ggrepel", "pheatmap", "RColorBrewer", "harmony"
+  "jsonlite", "ggrepel", "pheatmap", "RColorBrewer", "harmony",
+  "R.utils"
 )
 
 bioc_pkgs <- c(
   "scDblFinder", "SingleCellExperiment", "clusterProfiler",
   "org.Hs.eg.db", "org.Mm.eg.db", "enrichplot", "BiocParallel",
-  "SingleR", "celldex", "DESeq2"
+  "SingleR", "celldex", "DESeq2", "hdf5r"
 )
 
 if (nzchar(r_lib)) {

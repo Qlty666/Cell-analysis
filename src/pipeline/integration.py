@@ -2148,6 +2148,26 @@ def generate_integrated_report(
         except ValueError:
             return str(path)
 
+    def display_paths(value, base=out_dir):
+        if isinstance(value, dict):
+            return {
+                key: display_paths(item, base=base)
+                for key, item in value.items()
+            }
+        if (
+            isinstance(value, str)
+            and value
+            and "\\" in value
+            and Path(value).is_absolute()
+        ):
+            try:
+                return os.path.relpath(value, base).replace("\\", "/")
+            except ValueError:
+                return value
+        return value
+
+    docking_display = display_paths(docking_summary)
+
     html_text = f"""<!DOCTYPE html>
 <html lang="en">
 <head>
@@ -2170,7 +2190,7 @@ a {{ color: #1d4ed8; }}
 <div class="card">
   <p><b>Analysis output:</b> {rel(single_cell_root)}</p>
   <p><b>Integration output:</b> {rel(out_dir)}</p>
-  <p><b>Docking summary:</b> {_esc(docking_summary)}</p>
+  <p><b>Docking summary:</b> {_esc(docking_display)}</p>
 </div>
 <div class="card">
   <h2>Expression analysis summary</h2>
@@ -2256,7 +2276,7 @@ a {{ color: #1d4ed8; }}
             "genes_scored": (ko_summary.get("knockout") or {}).get("genes_scored", 0),
             "validation_candidates": (ko_summary.get("validation") or {}).get("candidates", 0),
         },
-        "docking": docking_summary,
+        "docking": display_paths(docking_summary),
         "cell_feedback": {
             "status": feedback_summary.get("status", "skipped"),
             "genes_matched": feedback_summary.get("genes_matched", 0),
@@ -2292,7 +2312,9 @@ a {{ color: #1d4ed8; }}
             if "database_sources" in evidence.columns
             else ""
         ),
-        "report_html": str(report_path),
+        "report_html": os.path.relpath(
+            report_path, out_dir
+        ).replace("\\", "/"),
         "finished_at": datetime.now().isoformat(timespec="seconds"),
     }
     write_json(out_dir / "integration_summary.json", summary)

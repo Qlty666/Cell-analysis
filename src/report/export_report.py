@@ -90,14 +90,25 @@ def main() -> int:
     if not summary_path.exists():
         return 1
     summary = json.loads(summary_path.read_text(encoding="utf-8"))
+    dataset_mode = str(summary.get("dataset_mode", "single_cell"))
+    unit = "Cells" if dataset_mode == "single_cell" else "Samples"
     lines = [
         f"Dataset: {summary.get('dataset', '')}",
         f"Title: {summary.get('title', '')}",
-        f"Cells raw: {summary.get('n_cells_raw', '')}",
-        f"Cells after QC: {summary.get('n_cells_after_qc', '')}",
-        f"Cells after doublet removal: {summary.get('n_cells_after_doublet_removal', '')}",
+        f"{unit} raw: {summary.get('n_cells_raw', '')}",
+        f"{unit} after QC: {summary.get('n_cells_after_qc', '')}",
+        (
+            f"Cells after doublet removal: "
+            f"{summary.get('n_cells_after_doublet_removal', '')}"
+            if dataset_mode == "single_cell"
+            else "Doublet removal: not applicable (sample-level data)"
+        ),
         f"Genes: {summary.get('n_genes', '')}",
-        f"Clusters: {summary.get('n_clusters', '')}",
+        (
+            f"Clusters: {summary.get('n_clusters', '')}"
+            if dataset_mode == "single_cell"
+            else "Cell clustering: not applicable (sample-level data)"
+        ),
         f"Up DEGs: {summary.get('deg_up', '')}",
         f"Down DEGs: {summary.get('deg_down', '')}",
     ]
@@ -126,8 +137,13 @@ def main() -> int:
     for item in top[:20]:
         rows.append([str(item.get("gene", "")), str(item.get("avg_log2FC", "")), str(item.get("p_val_adj", ""))])
 
-    write_docx(root / "results" / "result_report.docx", "Single-Cell Analysis Report", lines, rows)
-    write_pdf(root / "results" / "result_report.pdf", "Single-Cell Analysis Report", lines)
+    report_title = (
+        "Single-Cell Analysis Report"
+        if dataset_mode == "single_cell"
+        else "Sample-Level Expression Analysis Report"
+    )
+    write_docx(root / "results" / "result_report.docx", report_title, lines, rows)
+    write_pdf(root / "results" / "result_report.pdf", report_title, lines)
     (root / "results" / "export_status.txt").write_text(
         "DOCX/PDF export completed",
         encoding="utf-8",
