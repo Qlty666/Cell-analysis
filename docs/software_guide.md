@@ -56,6 +56,8 @@ liverbio doctor docking
 
 `liverbio doctor` 按顺序执行表达分析和虚拟筛选环境检查；缺少组件时按输出提示运行 `launchers` 下的安装脚本。
 
+按功能板块查看“运行哪个入口、需要哪些软件和脚本”：`docs/environment_requirements.md`。
+
 ## Codex Skills
 
 `skills/` 目录保存按功能拆分的 Codex skill 定义：
