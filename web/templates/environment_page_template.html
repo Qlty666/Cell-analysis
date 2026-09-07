@@ -1,0 +1,375 @@
+<!DOCTYPE html>
+<html lang="zh-CN">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1">
+<link rel="stylesheet" href="/static/app.css">
+<script src="/static/nav.js" defer></script>
+<title>环境补全中心</title>
+<style>
+.env-grid {
+  display: grid;
+  grid-template-columns: repeat(auto-fit, minmax(min(330px, 100%), 1fr));
+  gap: 14px;
+  margin-bottom: 18px;
+}
+.env-module {
+  min-width: 0;
+  margin-bottom: 0;
+}
+.env-head {
+  display: flex;
+  align-items: flex-start;
+  justify-content: space-between;
+  gap: 10px;
+}
+.env-head h2 {
+  margin: 0;
+  font-size: 17px;
+  line-height: 1.3;
+}
+.env-badges {
+  display: flex;
+  flex-wrap: wrap;
+  justify-content: flex-end;
+  gap: 5px;
+  min-width: 0;
+}
+.badge.env-r {
+  background: #dcfce7;
+  color: #166534;
+}
+.badge.env-dock {
+  background: #e0f2fe;
+  color: #075985;
+}
+.badge.env-skills {
+  background: #ede9fe;
+  color: #4c1d95;
+}
+.env-cmd {
+  margin-top: 10px;
+  padding: 8px 10px;
+  border: 1px solid #dbe3ec;
+  border-radius: 6px;
+  background: #f8fafc;
+  color: #475569;
+  font-size: 12px;
+  line-height: 1.6;
+  overflow-wrap: anywhere;
+}
+.env-cmd code {
+  background: #eef2f7;
+  border-radius: 4px;
+  padding: 1px 5px;
+  color: #0f4f96;
+  font-family: Consolas, "Courier New", monospace;
+}
+.env-note {
+  margin: 8px 0 0;
+  color: #6b7280;
+  font-size: 12px;
+  line-height: 1.6;
+}
+.env-actions {
+  margin-top: 12px;
+}
+.env-log {
+  height: 170px;
+  min-height: 120px;
+  margin-top: 12px;
+  font-size: 11px;
+}
+.env-status {
+  min-height: 22px;
+  margin: 12px 0 6px;
+  font-weight: 600;
+}
+.env-status.ok {
+  color: var(--green);
+}
+.env-status.error {
+  color: var(--red);
+}
+.env-option-row {
+  display: grid;
+  grid-template-columns: 1fr 1fr;
+  gap: 14px;
+  align-items: end;
+}
+.toggle-row {
+  display: flex;
+  align-items: center;
+  gap: 8px;
+  min-height: 38px;
+  margin: 8px 0 0;
+  font-weight: 600;
+}
+.toggle-row input {
+  width: auto;
+  min-height: 0;
+  accent-color: var(--blue);
+}
+.env-help {
+  margin: 8px 0 0;
+  color: #64748b;
+  font-size: 13px;
+  line-height: 1.7;
+}
+.env-help code {
+  background: #eef2f7;
+  border-radius: 4px;
+  padding: 1px 5px;
+  color: #0f4f96;
+}
+@media (max-width: 760px) {
+  .env-grid {
+    grid-template-columns: 1fr;
+  }
+  .env-head {
+    display: block;
+  }
+  .env-badges {
+    justify-content: flex-start;
+    margin-top: 8px;
+  }
+  .env-option-row {
+    grid-template-columns: 1fr;
+    gap: 4px;
+  }
+}
+</style>
+</head>
+<body>
+<div class="topnav"></div>
+<div class="wrap">
+  <div class="page-head">
+    <div class="page-title">
+      <h1>环境补全中心</h1>
+      <p class="page-sub">按功能板块检查并一键补全环境，不需要手工安装完整依赖。先“检查环境”，缺少组件时再点“一键补全”。</p>
+    </div>
+    <div class="page-actions">
+      <a class="link-button" href="/guide">使用教程</a>
+      <a class="link-button" href="/full">全自动流水线</a>
+    </div>
+  </div>
+
+  <section class="card">
+    <h2 style="margin-top:0;">补全选项</h2>
+    <div class="env-option-row">
+      <label>安装地址（可选）
+        <input id="envTarget" name="env_target" placeholder="留空使用当前 Python / R 环境">
+      </label>
+      <label class="toggle-row">
+        <input type="checkbox" id="envWithMl">
+        <span>同时安装 ML/DL 依赖（joblib、torch）</span>
+      </label>
+    </div>
+    <div id="envStatus" class="env-status muted">尚未开始环境任务。</div>
+    <pre id="envActiveLog" class="env-log">环境任务日志会显示在这里。</pre>
+  </section>
+
+  <div id="envModuleGrid" class="env-grid">
+<!--ENV_MODULE_CARDS-->
+  </div>
+
+  <section class="card">
+    <h2 style="margin-top:0;">对应命令行</h2>
+    <p class="env-help">网页端调用项目统一的 <code>launchers\install_environment.py</code>。命令行也可以直接执行：</p>
+    <pre>python launchers\install_environment.py list
+python launchers\install_environment.py check expression
+python launchers\install_environment.py install docking --with-ml
+python launchers\install_environment.py install full</pre>
+    <p class="env-help">各板块的 <code>launchers\install_*.bat</code> 与 <code>check_*.bat</code> 仍可直接双击使用；详细说明见项目 README 与 <code>docs/software_guide.md</code>。</p>
+  </section>
+</div>
+
+<script>
+(function () {
+  "use strict";
+
+  let envInstallActive = false;
+  let envCurrentModule = "";
+  let envPollTimer = null;
+
+  function moduleTitle(name) {
+    const card = document.querySelector(
+      '.env-module[data-module="' + name + '"]'
+    );
+    if (card) {
+      const title = card.querySelector("h2");
+      if (title && title.textContent) return title.textContent;
+    }
+    return name;
+  }
+
+  function logBoxFor(name) {
+    return (
+      document.getElementById("envLog-" + name) ||
+      document.getElementById("envActiveLog")
+    );
+  }
+
+  function showStatus(text, cls) {
+    const box = document.getElementById("envStatus");
+    if (!box) return;
+    box.className = "env-status " + (cls || "muted");
+    box.textContent = text;
+  }
+
+  function setModuleButtonsDisabled(disabled) {
+    document.querySelectorAll(".env-module button").forEach(function (button) {
+      button.disabled = disabled;
+    });
+  }
+
+  async function runEnvCheck(name) {
+    if (envInstallActive) return;
+    setModuleButtonsDisabled(true);
+    const logBox = logBoxFor(name);
+    logBox.textContent = "正在检查环境，请稍候...";
+    showStatus(moduleTitle(name) + "：环境检查中", "");
+    const withMl = document.getElementById("envWithMl").checked;
+    try {
+      const query =
+        "/environment/check?module=" +
+        encodeURIComponent(name) +
+        "&with_ml=" +
+        (withMl ? "yes" : "no");
+      const resp = await fetch(query);
+      const data = await resp.json();
+      if (!resp.ok) throw new Error(data.error || "环境检查失败");
+      logBox.textContent = data.output || "环境检查完成。";
+      showStatus(
+        moduleTitle(name) +
+          (data.ok ? "：检查通过" : "：缺少组件，可点击一键补全"),
+        data.ok ? "ok" : "error"
+      );
+    } catch (error) {
+      logBox.textContent = "环境检查失败：" + String(error.message || error);
+      showStatus(moduleTitle(name) + "：环境检查失败", "error");
+    } finally {
+      if (!envInstallActive) setModuleButtonsDisabled(false);
+    }
+  }
+
+  async function startEnvInstall(name) {
+    if (envInstallActive) {
+      showStatus("已有环境补全任务正在运行，请等待完成。", "error");
+      return;
+    }
+    setModuleButtonsDisabled(true);
+    envInstallActive = true;
+    envCurrentModule = name;
+    const logBox = logBoxFor(name);
+    logBox.textContent = "正在启动环境补全...";
+    showStatus(moduleTitle(name) + "：补全任务启动中", "");
+    const form = new URLSearchParams();
+    form.set("project", name);
+    const target = document.getElementById("envTarget").value.trim();
+    if (target) form.set("target", target);
+    if (document.getElementById("envWithMl").checked) {
+      form.set("with_ml", "yes");
+    }
+    try {
+      const resp = await fetch("/install", {
+        method: "POST",
+        body: form,
+      });
+      const data = await resp.json();
+      if (!resp.ok) throw new Error(data.error || "环境补全启动失败");
+      if (data.running) {
+        showStatus(moduleTitle(name) + "：补全任务已启动", "");
+        await pollInstallOnce();
+        if (envInstallActive) {
+          if (envPollTimer) clearInterval(envPollTimer);
+          envPollTimer = setInterval(pollInstallOnce, 1000);
+        }
+      } else {
+        envInstallActive = false;
+        setModuleButtonsDisabled(false);
+        showStatus(moduleTitle(name) + "：环境补全任务未启动", "error");
+      }
+    } catch (error) {
+      logBox.textContent = "环境补全启动失败：" + String(error.message || error);
+      envInstallActive = false;
+      setModuleButtonsDisabled(false);
+      showStatus(moduleTitle(name) + "：环境补全启动失败", "error");
+    }
+  }
+
+  async function pollInstallOnce() {
+    let data = null;
+    try {
+      const resp = await fetch("/install-status");
+      data = await resp.json();
+    } catch (error) {
+      if (envPollTimer) clearInterval(envPollTimer);
+      envPollTimer = null;
+      envInstallActive = false;
+      setModuleButtonsDisabled(false);
+      showStatus("环境补全状态读取失败：" + String(error.message || error), "error");
+      return;
+    }
+    const module = data.module || envCurrentModule;
+    const logBox = logBoxFor(module);
+    if (logBox) {
+      logBox.textContent = data.log || (data.running ? "正在安装..." : "");
+    }
+    if (!data.running) {
+      if (envPollTimer) clearInterval(envPollTimer);
+      envPollTimer = null;
+      envInstallActive = false;
+      setModuleButtonsDisabled(false);
+      showStatus(
+        moduleTitle(module) + (data.ok ? "：环境补全完成" : "：环境补全失败，请查看日志"),
+        data.ok ? "ok" : "error"
+      );
+    }
+  }
+
+  async function restoreInstallState() {
+    try {
+      const resp = await fetch("/install-status");
+      const data = await resp.json();
+      if (!data.running) return;
+      envInstallActive = true;
+      envCurrentModule = data.module || "";
+      setModuleButtonsDisabled(true);
+      showStatus(
+        moduleTitle(envCurrentModule || "环境") + "：补全任务正在运行",
+        ""
+      );
+      await pollInstallOnce();
+      if (envInstallActive) {
+        if (envPollTimer) clearInterval(envPollTimer);
+        envPollTimer = setInterval(pollInstallOnce, 1000);
+      }
+    } catch (error) {
+      showStatus("读取进行中的环境补全任务失败：" + String(error.message || error), "error");
+    }
+  }
+
+  document
+    .querySelectorAll('.env-module button[data-action="check"]')
+    .forEach(function (button) {
+      const name = button.getAttribute("data-name") || "";
+      button.addEventListener("click", function () {
+        runEnvCheck(name);
+      });
+    });
+
+  document
+    .querySelectorAll('.env-module button[data-action="install"]')
+    .forEach(function (button) {
+      const name = button.getAttribute("data-name") || "";
+      button.addEventListener("click", function () {
+        startEnvInstall(name);
+      });
+    });
+
+  restoreInstallState();
+})();
+</script>
+</body>
+</html>

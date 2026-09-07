@@ -26,6 +26,8 @@ TEMPLATE_DIR = WEB_DIR / "templates"
 STATIC_DIR = WEB_DIR / "static"
 INDEX_PATH = TEMPLATE_DIR / "index.html"
 PAGE_TEMPLATE_PATH = TEMPLATE_DIR / "web_page_template.html"
+GUIDE_TEMPLATE_PATH = TEMPLATE_DIR / "guide_page_template.html"
+ENVIRONMENT_TEMPLATE_PATH = TEMPLATE_DIR / "environment_page_template.html"
 HISTORY_PATH = WEB_DIR / "history.json"
 HISTORY_LOCK = threading.RLock()
 INSTALL_LOG = WEB_DIR / "install_log.txt"
@@ -93,6 +95,7 @@ LOCAL_ORIGIN_HOSTS = {"127.0.0.1", "localhost", "[::1]", "::1"}
 NAV_HTML = (
     '<div class="topnav">'
     '<a href="/full">全自动流水线</a>'
+    '<a href="/environment">环境补全</a>'
     '<a href="/">表达分析</a>'
     '<a href="/datasets">数据集搜索</a>'
     '<a href="/dock">虚拟筛选</a>'
@@ -103,6 +106,7 @@ NAV_HTML = (
     '<a href="/faers">FAERS</a>'
     '<a href="/validation">真实数据验证</a>'
     '<a href="/results">结果清单</a>'
+    '<a href="/guide">使用教程</a>'
     '<a href="/tasks" class="nav-right">任务进度</a>'
     '</div>'
 )
@@ -121,6 +125,157 @@ NAV_CSS = (
     ".topnav a .nav-count[hidden]{display:none;}"
     ".topnav .nav-right{margin-left:auto;}"
 )
+
+ENV_MODULES = {
+    "expression": {
+        "title": "表达分析",
+        "summary": (
+            "单细胞 / bulk RNA-seq / microarray 表达分析依赖，包含 Python 与 R 包"
+            "（Seurat、DESeq2、clusterProfiler 等）。"
+        ),
+        "r_deps": True,
+        "dock_tools": False,
+        "skills": False,
+        "install_bat": "launchers/install_expression_environment.bat",
+        "check_bat": "launchers/check_expression_environment.bat",
+        "note": "Windows 上未找到 Rscript 时会自动下载安装 R。",
+    },
+    "datasets": {
+        "title": "数据集搜索",
+        "summary": "GEO / BioStudies / Expression Atlas 搜索、筛选和下载所需的 Python 依赖。",
+        "r_deps": False,
+        "dock_tools": False,
+        "skills": False,
+        "install_bat": "launchers/install_datasets_environment.bat",
+        "check_bat": None,
+        "note": "自动安装 numpy、pandas、scikit-learn 与 joblib 等搜索/重排依赖。",
+    },
+    "docking": {
+        "title": "虚拟筛选 / 对接",
+        "summary": "AutoDock Vina 虚拟筛选环境：RDKit、Meeko、Open Babel、AutoDockTools 与 Vina。",
+        "r_deps": False,
+        "dock_tools": True,
+        "skills": False,
+        "install_bat": "launchers/install_docking_environment.bat",
+        "check_bat": "launchers/check_docking_environment.bat",
+        "note": "缺失的 AutoDockTools / AutoDock Vina 会下载到 dock/tools/。",
+    },
+    "molecular-docking": {
+        "title": "独立分子对接",
+        "summary": "独立分子对接板块的 Python 与对接工具依赖，与虚拟筛选工作目录分开。",
+        "r_deps": False,
+        "dock_tools": True,
+        "skills": False,
+        "install_bat": "launchers/install_molecular_docking_environment.bat",
+        "check_bat": "launchers/check_molecular_docking_environment.bat",
+        "note": "复用 dock/tools/ 下的 AutoDockTools 与 Vina。",
+    },
+    "md": {
+        "title": "分子动力学",
+        "summary": "GROMACS 分子动力学准备和模拟所需依赖；补齐对接工具，便于处理蛋白与配体。",
+        "r_deps": False,
+        "dock_tools": True,
+        "skills": False,
+        "install_bat": "launchers/install_md_environment.bat",
+        "check_bat": "launchers/check_md_environment.bat",
+        "note": "GROMACS gmx 需要按系统单独安装。",
+    },
+    "full": {
+        "title": "全自动集成流水线",
+        "summary": "一次补齐表达分析、虚拟筛选、网页版与项目 Codex Skills，适合完整流程使用。",
+        "r_deps": True,
+        "dock_tools": True,
+        "skills": True,
+        "install_bat": "launchers/install_full_environment.bat",
+        "check_bat": "launchers/check_full_environment.bat",
+        "note": "安装耗时较长；也可以先按单个板块补齐。",
+    },
+    "web": {
+        "title": "网页版",
+        "summary": "检查 Python 版本与网页入口；网页本身不自动下载 R 或大型对接工具。",
+        "r_deps": False,
+        "dock_tools": False,
+        "skills": False,
+        "install_bat": "launchers/install_web_environment.bat",
+        "check_bat": None,
+        "note": "主要确认 web/web_ui.py 与本机 Python 可用。",
+    },
+    "skills": {
+        "title": "项目 Codex Skills",
+        "summary": "安装 liver-expression-analysis、liver-virtual-screening、liver-full-pipeline 与 liver-dataset-search。",
+        "r_deps": False,
+        "dock_tools": False,
+        "skills": True,
+        "install_bat": "launchers/install_codex_skills_environment.bat",
+        "check_bat": None,
+        "note": "Skill 只指导 Codex 调用项目脚本，不复制核心分析代码。",
+    },
+}
+
+
+def environment_module_cards() -> str:
+    """Return the per-module environment cards for the web board."""
+    cards = []
+    for name, meta in ENV_MODULES.items():
+        badges = []
+        if meta["r_deps"]:
+            badges.append('<span class="badge env-r">R 包</span>')
+        if meta["dock_tools"]:
+            badges.append('<span class="badge env-dock">对接工具</span>')
+        if meta["skills"]:
+            badges.append('<span class="badge env-skills">Codex Skills</span>')
+        badge_html = (
+            '<div class="env-badges">' + "".join(badges) + "</div>"
+            if badges
+            else ""
+        )
+        install_cmd = meta["install_bat"].replace("/", "\\")
+        if meta["check_bat"]:
+            check_cmd = meta["check_bat"].replace("/", "\\")
+            launcher_html = (
+                '<div class="env-cmd">一键补全：<code>'
+                + install_cmd
+                + "</code>　检查：<code>"
+                + check_cmd
+                + "</code></div>"
+            )
+        else:
+            launcher_html = (
+                '<div class="env-cmd">一键补全：<code>'
+                + install_cmd
+                + "</code>　检查：统一命令</div>"
+            )
+        cards.append(
+            '<section class="card env-module" data-module="'
+            + name
+            + '">'
+            + '<div class="env-head">'
+            + "<h2>"
+            + meta["title"]
+            + "</h2>"
+            + badge_html
+            + "</div>"
+            + '<p class="muted">'
+            + meta["summary"]
+            + "</p>"
+            + launcher_html
+            + '<p class="env-note">'
+            + meta["note"]
+            + "</p>"
+            + '<div class="actions env-actions">'
+            + '<button type="button" data-action="check" data-name="'
+            + name
+            + '">检查环境</button>'
+            + '<button type="button" class="secondary" data-action="install" data-name="'
+            + name
+            + '">一键补全</button>'
+            + "</div>"
+            + '<pre id="envLog-'
+            + name
+            + '" class="env-log">尚未检查此板块。</pre>'
+            + "</section>"
+        )
+    return "\n".join(cards)
 
 HEARTBEAT_SCRIPT = """
 <script>
@@ -1033,6 +1188,28 @@ def render_results_page() -> str:
     )
 
 
+def render_guide_page() -> str:
+    return _render_template(
+        GUIDE_TEMPLATE_PATH,
+        "guide template missing",
+    )
+
+
+def render_environment_page() -> str:
+    if not ENVIRONMENT_TEMPLATE_PATH.exists():
+        return (
+            "<html><body><h1>environment template missing</h1>"
+            "<p>web/templates/environment_page_template.html not found</p>"
+            "</body></html>"
+        )
+    html = ENVIRONMENT_TEMPLATE_PATH.read_text(encoding="utf-8")
+    html = html.replace(
+        "<!--ENV_MODULE_CARDS-->",
+        environment_module_cards(),
+    )
+    return _with_shared_nav(html)
+
+
 def result_guide_data() -> dict:
     """Return the result-figure guide as searchable sections."""
     if not RESULT_GUIDE_PATH.exists():
@@ -1123,6 +1300,45 @@ def _first(data: dict, key: str, default: str = "") -> str:
     if not values:
         return default
     return str(values[0])
+
+
+def run_environment_check(module: str, with_ml: bool = False) -> dict:
+    cmd = [
+        sys.executable,
+        str(APP_ROOT / "launchers" / "install_environment.py"),
+        "check",
+        module,
+    ]
+    if not with_ml:
+        cmd += ["--skip-ml"]
+    try:
+        result = subprocess.run(
+            cmd,
+            cwd=APP_ROOT,
+            capture_output=True,
+            text=True,
+            encoding="utf-8",
+            errors="replace",
+            timeout=420,
+        )
+        output = (result.stdout or "") + (result.stderr or "")
+        return {
+            "module": module,
+            "ok": result.returncode == 0,
+            "output": output[-8000:] or "环境检查完成。",
+        }
+    except subprocess.TimeoutExpired:
+        return {
+            "module": module,
+            "ok": False,
+            "output": "环境检查超时，请确认本机网络或稍后重试。",
+        }
+    except Exception as exc:
+        return {
+            "module": module,
+            "ok": False,
+            "output": f"环境检查失败：{exc}",
+        }
 
 
 def _float3(data: dict, prefix: str):
@@ -3544,6 +3760,20 @@ class Handler(BaseHTTPRequestHandler):
         if parsed.path == "/":
             self._send(200, get_page().encode("utf-8"), "text/html; charset=utf-8")
             return
+        if parsed.path == "/guide":
+            self._send(
+                200,
+                render_guide_page().encode("utf-8"),
+                "text/html; charset=utf-8",
+            )
+            return
+        if parsed.path == "/environment":
+            self._send(
+                200,
+                render_environment_page().encode("utf-8"),
+                "text/html; charset=utf-8",
+            )
+            return
         if parsed.path == "/datasets":
             self._send(
                 200,
@@ -4067,30 +4297,30 @@ class Handler(BaseHTTPRequestHandler):
             ).encode("utf-8")
             self._send(200, body, "application/json")
             return
-        if parsed.path == "/environment":
-            try:
-                result = subprocess.run(
-                    [
-                        sys.executable,
-                        str(APP_ROOT / "launchers" / "check_pipeline_environment.py"),
-                    ],
-                    cwd=APP_ROOT,
-                    capture_output=True,
-                    text=True,
-                    encoding="utf-8",
-                    errors="replace",
-                    timeout=180,
+        if parsed.path == "/environment/check":
+            query = parse_qs(parsed.query)
+            module = _first(query, "module", "").strip().lower()
+            if module not in ENV_MODULES:
+                self._send(
+                    400,
+                    json.dumps(
+                        {"error": f"unknown module: {module}"},
+                        ensure_ascii=False,
+                    ).encode("utf-8"),
+                    "application/json",
                 )
-                body = json.dumps({
-                    "ok": result.returncode == 0,
-                    "output": result.stdout + result.stderr,
-                }, ensure_ascii=False).encode("utf-8")
-                self._send(200, body, "application/json")
-            except Exception as exc:
-                self._send(200, json.dumps({
-                    "ok": False,
-                    "output": str(exc),
-                }, ensure_ascii=False).encode("utf-8"), "application/json")
+                return
+            with_ml = _first(query, "with_ml", "").strip().lower() in (
+                "1",
+                "yes",
+                "true",
+                "on",
+            )
+            body = json.dumps(
+                run_environment_check(module, with_ml=with_ml),
+                ensure_ascii=False,
+            ).encode("utf-8")
+            self._send(200, body, "application/json")
             return
         if parsed.path == "/dock-environment":
             try:
@@ -4124,6 +4354,7 @@ class Handler(BaseHTTPRequestHandler):
                     "running": False,
                     "ok": False,
                     "log": "",
+                    "module": "",
                 }).encode("utf-8")
                 self._send(200, body, "application/json")
                 return
@@ -4138,6 +4369,7 @@ class Handler(BaseHTTPRequestHandler):
                 "running": running,
                 "ok": not running and proc.returncode == 0,
                 "log": log_text,
+                "module": INSTALL_JOB.get("module", ""),
             }, ensure_ascii=False).encode("utf-8")
             self._send(200, body, "application/json")
             return
@@ -4687,6 +4919,7 @@ class Handler(BaseHTTPRequestHandler):
                 self._send(200, json.dumps({
                     "running": True,
                     "message": "环境补全已在运行",
+                    "module": INSTALL_JOB.get("module", ""),
                 }).encode("utf-8"), "application/json")
                 return
             project = _first(data, "project", "single")
@@ -4703,6 +4936,16 @@ class Handler(BaseHTTPRequestHandler):
                 "web": "web",
                 "skills": "skills",
             }.get(project, project)
+            if module not in ENV_MODULES:
+                self._send(
+                    400,
+                    json.dumps(
+                        {"error": f"unknown module: {module}"},
+                        ensure_ascii=False,
+                    ).encode("utf-8"),
+                    "application/json",
+                )
+                return
             cmd = [
                 sys.executable,
                 str(APP_ROOT / "launchers" / "install_environment.py"),
@@ -4711,6 +4954,13 @@ class Handler(BaseHTTPRequestHandler):
             ]
             if target:
                 cmd += ["--target", target]
+            if _first(data, "with_ml", "").strip().lower() in (
+                "1",
+                "yes",
+                "true",
+                "on",
+            ):
+                cmd += ["--with-ml"]
             log_handle = INSTALL_LOG.open("w", encoding="utf-8", errors="replace")
             proc = subprocess.Popen(
                 cmd,
@@ -4723,9 +4973,11 @@ class Handler(BaseHTTPRequestHandler):
             )
             INSTALL_JOB["proc"] = proc
             INSTALL_JOB["project"] = project
+            INSTALL_JOB["module"] = module
             self._send(200, json.dumps({
                 "running": True,
                 "message": f"{project} 环境自动补全已启动",
+                "module": module,
             }).encode("utf-8"), "application/json")
             return
 
@@ -4806,6 +5058,8 @@ def main() -> int:
             "results",
             "tasks",
             "datasets",
+            "guide",
+            "environment",
         ],
         default="full",
         help="page to open in the browser",
@@ -4865,6 +5119,10 @@ def main() -> int:
         open_url = url + "/tasks"
     elif args.page == "datasets":
         open_url = url + "/datasets"
+    elif args.page == "guide":
+        open_url = url + "/guide"
+    elif args.page == "environment":
+        open_url = url + "/environment"
     else:
         open_url = url
     if not args.no_browser:
