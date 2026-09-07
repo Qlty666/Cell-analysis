@@ -1,6 +1,6 @@
 ---
 name: liver-full-pipeline
-description: Run the integrated Liver Cancer Bioinformatics workflow from expression analysis through key targets, evidence, knockout, docking, cell feedback, and report generation. Use only inside that project or when LIVER_PIPELINE_ROOT points to it.
+description: Run the integrated Liver Cancer Bioinformatics workflow from expression analysis through key targets, evidence, knockout, docking, MD/ML/handoff, network toxicology, FAERS, cell feedback, and report generation. Use only inside that project or when LIVER_PIPELINE_ROOT points to it.
 ---
 
 # Liver Full Pipeline
@@ -28,13 +28,13 @@ The `--output` directory is the single-cell output root used by stage 01 and dow
 
 - Run `python scripts/liverbio.py full --list-stages` or `--dry-run` before a long first run when the user wants to confirm scope.
 - Do not pass `--force` by default; the stage markers preserve completed work and rerun only stale stages.
-- Respect the stage order 01-08 and use `--start-stage` only when the user needs to resume from a known stage.
+- Respect the stage order 01-11 and use `--start-stage` only when the user needs to resume from a known stage.
 - Report missing R, Python, Vina, or evidence-skill dependencies instead of continuing with fabricated output.
 - Keep user-provided labels (`--case-label`, `--normal-label`) verbatim; do not infer tumor/normal when the metadata is ambiguous.
 
 ## Useful options
 
-The full pipeline accepts `--skip-scrna`, `--skip-download`, `--skip-evidence-fetch`, `--skip-knockout`, `--skip-docking`, and `--skip-cell-feedback` to run partial workflows. Additional options and config defaults are documented by `python scripts/run_full_pipeline.py --help` and `README.md`.
+The full pipeline accepts `--skip-scrna`, `--skip-download`, `--skip-evidence-fetch`, `--skip-knockout`, `--skip-docking`, `--skip-md`, `--skip-network`, `--skip-faers`, and `--skip-cell-feedback` to run partial workflows. MD/ML/handoff and network/FAERS stages require no external data by default and write honest skipped summaries when inputs are absent. Additional options and config defaults are documented by `python scripts/run_full_pipeline.py --help` and `README.md`.
 
 ## References
 

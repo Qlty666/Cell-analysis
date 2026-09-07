@@ -1341,6 +1341,42 @@
       "type": "JSON 汇总文件",
       "use": "组合数、信号数、Top 药物；该文件用于程序读取状态、汇总指标和门控判定，也可人工复核。",
       "optional": false
+    },
+    {
+      "file": "outputs/integration/cadd_targets.csv",
+      "name": "cadd_targets.csv",
+      "kind": "data",
+      "content": "每靶点 MD、ML 重打分与工具交接状态",
+      "type": "CSV 数据表",
+      "use": "查看 CADD 下游逐靶点状态与错误；该表用于复现对应图表、复核统计结果，并作为下游筛选或报告汇总的输入。",
+      "optional": false
+    },
+    {
+      "file": "outputs/integration/cadd_downstream_summary.json",
+      "name": "cadd_downstream_summary.json",
+      "kind": "data",
+      "content": "CADD 下游阶段汇总统计",
+      "type": "JSON 汇总文件",
+      "use": "MD 完成/准备数、工具交接数和 ML 重打分数；该文件用于程序读取状态、汇总指标和门控判定，也可人工复核。",
+      "optional": false
+    },
+    {
+      "file": "outputs/integration/network_summary.json",
+      "name": "network_summary.json",
+      "kind": "data",
+      "content": "网络毒理学阶段汇总",
+      "type": "JSON 汇总文件",
+      "use": "交集基因、PPI hub 和 C-T-P-D 输出路径；该文件用于程序读取状态、汇总指标和门控判定，也可人工复核。",
+      "optional": true
+    },
+    {
+      "file": "outputs/integration/faers_summary.json",
+      "name": "faers_summary.json",
+      "kind": "data",
+      "content": "FAERS 阶段汇总",
+      "type": "JSON 汇总文件",
+      "use": "信号组合数、信号数和 Top 药物；该文件用于程序读取状态、汇总指标和门控判定，也可人工复核。",
+      "optional": true
     }
   ]
 }

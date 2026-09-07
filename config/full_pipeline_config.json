@@ -13,6 +13,42 @@
   "ko_top_n": 50,
   "depmap_csv": null,
   "ppi_network_csv": null,
+  "md_simulation": {
+    "enabled": true,
+    "mode": "prepare",
+    "top_n": 1
+  },
+  "handoff": {
+    "enabled": true
+  },
+  "docking_ml": {
+    "enabled": true,
+    "model": "rf",
+    "training_csv": null,
+    "label_column": "active"
+  },
+  "docking_ml_training_csv": null,
+  "network_toxicology": {
+    "enabled": true,
+    "compound_name": null,
+    "disease_name": null,
+    "compound_targets_csv": null,
+    "target_sources": null,
+    "disease_genes_csv": null,
+    "disease_gene_column": null,
+    "ppi_network_csv": null,
+    "venn": false,
+    "output_dir": "outputs/run_001/network_toxicology"
+  },
+  "faers": {
+    "enabled": true,
+    "input_csv": null,
+    "drug_column": "drug",
+    "event_column": "event",
+    "count_column": null,
+    "min_count": 3,
+    "output_dir": "outputs/run_001/faers"
+  },
   "cell_feedback": {
     "enabled": true,
     "top_n": 12,

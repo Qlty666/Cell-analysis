@@ -582,8 +582,11 @@ def _make_info(tmp: Path, returncode: int) -> dict:
         ("04", "knockout_inputs"),
         ("05", "knockout"),
         ("06", "docking"),
-        ("07", "cell_feedback"),
-        ("08", "report"),
+        ("07", "cadd_downstream"),
+        ("08", "network"),
+        ("09", "faers"),
+        ("10", "cell_feedback"),
+        ("11", "report"),
     ]:
         (marker_dir / f"{code}_{name}.done").write_text(
             "done",
@@ -733,7 +736,7 @@ class TestFullStatus(unittest.TestCase):
                     marker.unlink()
             info["log"].write_text(
                 "[INFO] === stage 06 docking ===\n"
-                "[INFO] === stage 07 cell_feedback ===\n"
+                "[INFO] === stage 10 cell_feedback ===\n"
                 "RuntimeError: cell feedback R analysis failed\n"
                 "Error in order(...) : argument 1 is not a vector\n",
                 encoding="utf-8",
