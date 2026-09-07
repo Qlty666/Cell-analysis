@@ -103,7 +103,13 @@ python -m pip install scikit-learn joblib torch
 虚拟筛选：
 
 ```text
+launchers\install_docking_environment.bat
 launchers\install_dock_dependencies.bat
 ```
+
+`install_docking_environment.bat` 会先安装基础 Python 依赖，再自动补全
+AutoDockTools；若 `dock/tools/vina.exe` 缺失，会自动下载 Windows 版
+AutoDock Vina 到该目录。需要 ML/DL 重打分时使用
+`launchers\install_docking_environment.bat --with-ml`。
 
 网页端：虚拟筛选页 → 软件环境 → 自动补全环境。

@@ -80,8 +80,11 @@ Script/
 | 运行 | `run_pipeline_prompt.bat` | 交互式表达分析入口 |
 | 环境 | `check_dock_environment.bat/.py` | 对接环境检查 |
 | 环境 | `check_pipeline_environment.bat/.py` | 流水线环境检查 |
+| 环境 | `install_environment.py` | 按功能板块安装/检查环境的统一入口 |
+| 环境 | `check_*_environment.bat` | 各功能板块环境检查快捷入口 |
 | 安装 | `install_dock_dependencies.bat/.py` | 对接依赖安装 |
 | 安装 | `install_pipeline_dependencies.bat/.py` | 流水线依赖安装 |
+| 安装 | `install_*_environment.bat` / `setup_environment.bat` | 各功能板块一键补全与选择式安装 |
 
 ## 3. 实现层
 

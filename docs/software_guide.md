@@ -56,6 +56,32 @@ liverbio doctor docking
 
 `liverbio doctor` 按顺序执行表达分析和虚拟筛选环境检查；缺少组件时按输出提示运行 `launchers` 下的安装脚本。
 
+### 按板块补全环境
+
+新电脑可按实际功能板块只补全对应环境：
+
+```text
+launchers\install_expression_environment.bat        # 表达分析
+launchers\install_datasets_environment.bat           # 数据集搜索
+launchers\install_docking_environment.bat            # 虚拟筛选 / 对接
+launchers\install_molecular_docking_environment.bat  # 独立分子对接
+launchers\install_md_environment.bat                 # 分子动力学
+launchers\install_full_environment.bat               # 全自动集成流水线
+launchers\install_web_environment.bat                # 网页版
+launchers\install_codex_skills_environment.bat       # Codex Skills
+```
+
+统一命令支持模块名和检查：
+
+```text
+python launchers\install_environment.py list
+python launchers\install_environment.py install expression
+python launchers\install_environment.py check docking
+python launchers\install_environment.py check full
+```
+
+表达分析补全时，如果 Windows 上找不到 `Rscript`，脚本会自动下载 R 到当前用户目录并安装 R 包；对接板块会自动补全 AutoDockTools 和 AutoDock Vina。ML/DL 依赖使用 `--with-ml` 额外安装。
+
 ## Codex Skills
 
 `skills/` 目录保存按功能拆分的 Codex skill 定义：
