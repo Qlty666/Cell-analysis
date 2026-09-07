@@ -29,6 +29,9 @@ Thumbs.db
 *.p12
 *.key
 
+# Local analysis workspace handoff
+/config/analysis_workspace.json
+
 # Web runtime files
 web/history.json
 web/dock_history.json
