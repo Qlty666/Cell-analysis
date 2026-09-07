@@ -603,7 +603,7 @@ async function checkEnvironment() {
   const box = document.getElementById('envOutput');
   box.textContent = '正在检查环境...';
   try {
-    const resp = await fetch('/environment');
+    const resp = await fetch('/environment/check?module=expression');
     const data = await resp.json();
     box.textContent = data.output || '环境检查完成';
     const msg = document.getElementById('message');

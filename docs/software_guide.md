@@ -44,7 +44,16 @@ liverbio web
 默认打开 `http://127.0.0.1:8000/full`。可使用 `--page dock`、
 `--page md-simulation`、`--page knockout`、`--page network`、
 `--page faers`、`--page validation`、`--page molecular-docking`、
-`--page datasets`、`--page results`、`--page tasks` 等打开对应页面。
+`--page datasets`、`--page results`、`--page tasks`、
+`--page guide`、`--page environment` 等打开对应页面。
+
+网页顶部提供“使用教程”与“环境补全”两个独立入口：
+
+- `/guide`：网页版使用教程，包含页面速查表、首次补全、标准运行流程、任务管理与结果查看。
+- `/environment`：按功能板块检查并一键补全环境，可填写自定义安装地址或勾选同时安装 ML/DL 依赖。
+
+也可以在各功能页内直接使用原有的“检查环境 / 自动补全”区域；新电脑建议先打开
+`/environment`，只补全实际使用板块的依赖，再进入对应分析页面。
 
 ### 检查运行环境
 

@@ -1,0 +1,264 @@
+<!DOCTYPE html>
+<html lang="zh-CN">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1">
+<link rel="stylesheet" href="/static/app.css">
+<script src="/static/nav.js" defer></script>
+<title>网页版使用教程</title>
+<style>
+.tutorial-step-grid {
+  display: grid;
+  grid-template-columns: repeat(auto-fit, minmax(min(220px, 100%), 1fr));
+  gap: 12px;
+  margin: 12px 0 4px;
+}
+.tutorial-step {
+  padding: 12px 14px;
+  border: 1px solid #dbe3ec;
+  border-top: 3px solid var(--blue);
+  border-radius: 8px;
+  background: #f8fafc;
+}
+.tutorial-step .step-label {
+  display: block;
+  margin-bottom: 5px;
+  color: var(--blue-deep);
+  font-size: 12px;
+  font-weight: 700;
+}
+.tutorial-step p {
+  margin: 0;
+  color: #334155;
+  font-size: 13px;
+  line-height: 1.6;
+}
+.tutorial-step code,
+.env-cmd code {
+  font-family: Consolas, "Courier New", monospace;
+}
+.guide-card h2 {
+  margin-top: 0;
+}
+.guide-flow {
+  margin: 12px 0 0;
+  padding: 0 0 0 20px;
+}
+.guide-flow li {
+  margin: 7px 0;
+  line-height: 1.65;
+}
+.guide-flow code,
+.page-table code {
+  background: #eef2f7;
+  border-radius: 4px;
+  padding: 1px 5px;
+  color: #0f4f96;
+}
+.page-table {
+  margin-top: 12px;
+}
+.workflow-grid {
+  display: grid;
+  gap: 16px;
+  margin-top: 12px;
+}
+.workflow-item {
+  border: 1px solid #dbe3ec;
+  border-left: 4px solid var(--green);
+  border-radius: 8px;
+  padding: 12px 14px;
+  background: #ffffff;
+}
+.workflow-item h3 {
+  margin: 0 0 6px;
+}
+.workflow-item ul {
+  margin: 6px 0 0;
+  padding-left: 22px;
+}
+.workflow-item li {
+  margin: 4px 0;
+  color: #334155;
+  font-size: 13px;
+  line-height: 1.6;
+}
+.guide-tip {
+  display: block;
+  margin: 8px 0 0;
+  color: #6b7280;
+  font-size: 12px;
+  line-height: 1.6;
+}
+@media (max-width: 760px) {
+  .tutorial-step-grid {
+    grid-template-columns: 1fr;
+  }
+}
+</style>
+</head>
+<body>
+<div class="topnav"></div>
+<div class="wrap">
+  <div class="page-head">
+    <div class="page-title">
+      <h1>网页版使用教程</h1>
+      <p class="page-sub">从启动网页、补全环境、运行分析到查看结果，按下面步骤即可完成一条完整流程。</p>
+    </div>
+    <div class="page-actions">
+      <a class="link-button" href="/environment">环境补全</a>
+      <a class="link-button" href="/full">全自动流水线</a>
+    </div>
+  </div>
+
+  <div class="quicknav">
+    <a href="#start">打开与导航</a>
+    <a href="#first-run">首次使用</a>
+    <a href="#workflow">标准流程</a>
+    <a href="#scenes">按场景使用</a>
+    <a href="#tasks">任务管理</a>
+    <a href="#results">结果查看</a>
+  </div>
+
+  <section class="card guide-card" id="start">
+    <h2>第一步：打开网页与认识导航</h2>
+    <p class="muted">在项目根目录启动本地网页版。启动后默认打开“全自动流水线”，顶部导航可在各功能页之间切换。</p>
+    <pre>liverbio web
+liverbio web --page full
+liverbio web --page environment
+launchers\run_web_ui.bat</pre>
+    <div class="tablebox page-table">
+      <table>
+        <thead>
+          <tr><th>页面</th><th>入口</th><th>用途</th></tr>
+        </thead>
+        <tbody>
+          <tr><td>全自动流水线</td><td><code>/full</code></td><td>表达分析到虚拟敲除、虚拟筛选、安全性分析的集成流程</td></tr>
+          <tr><td>环境补全</td><td><code>/environment</code></td><td>按功能板块检查并补齐依赖</td></tr>
+          <tr><td>表达分析</td><td><code>/</code></td><td>单独运行表达数据集分析</td></tr>
+          <tr><td>数据集搜索</td><td><code>/datasets</code></td><td>搜索并下载 GEO / BioStudies / Expression Atlas 数据</td></tr>
+          <tr><td>虚拟筛选</td><td><code>/dock</code></td><td>受体/配体准备、Vina 对接、命中分析与重打分</td></tr>
+          <tr><td>分子动力学</td><td><code>/md-simulation</code></td><td>准备并运行 GROMACS 蛋白-配体模拟</td></tr>
+          <tr><td>分子对接</td><td><code>/molecular-docking</code></td><td>不依赖虚拟筛选的独立分子对接流程</td></tr>
+          <tr><td>虚拟敲除</td><td><code>/knockout</code></td><td>基因优先级评分与单细胞虚拟敲除</td></tr>
+          <tr><td>网络毒理学</td><td><code>/network</code></td><td>化合物-疾病靶点交集与 PPI 网络分析</td></tr>
+          <tr><td>FAERS</td><td><code>/faers</code></td><td>药物-事件表不相称性信号检测</td></tr>
+          <tr><td>真实数据验证</td><td><code>/validation</code></td><td>随机真实 GEO 数据验证全流程</td></tr>
+          <tr><td>结果清单</td><td><code>/results</code></td><td>汇总可交付结果图与数据，联动判读指南</td></tr>
+          <tr><td>任务进度</td><td><code>/tasks</code></td><td>集中查看排队、运行和暂停的任务</td></tr>
+          <tr><td>使用教程</td><td><code>/guide</code></td><td>本页面</td></tr>
+        </tbody>
+      </table>
+    </div>
+  </section>
+
+  <section class="card guide-card" id="first-run">
+    <h2>第二步：新电脑先补全对应板块</h2>
+    <p class="muted">不需要一次装完所有依赖。打开“环境补全”页，点对应板块的“检查环境”；缺少组件时再点“一键补全”。</p>
+    <div class="tutorial-step-grid">
+      <div class="tutorial-step">
+        <span class="step-label">1. 进入环境补全</span>
+        <p>打开 <code>/environment</code>，页面会列出表达分析、虚拟筛选、分子动力学等全部功能板块。</p>
+      </div>
+      <div class="tutorial-step">
+        <span class="step-label">2. 检查依赖</span>
+        <p>在要使用的板块点击“检查环境”，先确认 Python、R 包或对接工具是否可用。</p>
+      </div>
+      <div class="tutorial-step">
+        <span class="step-label">3. 一键补全</span>
+        <p>检查未通过时点击“一键补全”。可在顶部填写自定义安装地址，或勾选同时安装 ML/DL 依赖。</p>
+      </div>
+      <div class="tutorial-step">
+        <span class="step-label">4. 回到分析页</span>
+        <p>安装完成后从顶部导航进入对应分析页面开始使用。</p>
+      </div>
+    </div>
+    <span class="guide-tip">说明：表达分析会检查 R；全自动集成流水线的“一键补全”覆盖表达分析、虚拟筛选与 Codex Skills，安装时间会更长。</span>
+  </section>
+
+  <section class="card guide-card" id="workflow">
+    <h2>第三步：标准运行流程</h2>
+    <ol class="guide-flow">
+      <li>在“数据集搜索”页搜索感兴趣的数据集，或直接使用已知 GEO / ArrayExpress 编号。</li>
+      <li>进入“全自动流水线”或“表达分析”页，填写编号、输出路径和物种，必要时展开表单分组调整参数。</li>
+      <li>点击开始任务后，可在当前页实时查看日志；切到“任务进度”页可同时管理多个任务。</li>
+      <li>任务完成或中断时浏览器会弹窗提醒。完成的任务可回到对应页面查看结果表、图片和报告。</li>
+      <li>在“结果清单”页搜索文件名，查看每个结果的用途、路径与“结果图判读指南”。</li>
+    </ol>
+    <div class="tutorial-step-grid">
+      <div class="tutorial-step">
+        <span class="step-label">设置保存</span>
+        <p>支持保存设置的页面会提供“保存设置 / 恢复设置 / 恢复默认”，参数存到当前浏览器标签页。</p>
+      </div>
+      <div class="tutorial-step">
+        <span class="step-label">断点续跑</span>
+        <p>全自动流水线支持阶段断点续跑与 <code>dry-run</code>；暂停的任务可在原页继续。</p>
+      </div>
+      <div class="tutorial-step">
+        <span class="step-label">已跑结果</span>
+        <p>全自动流水线页可直接填写工作目录加载已有结果，不要求重新运行。</p>
+      </div>
+    </div>
+  </section>
+
+  <section class="card guide-card" id="scenes">
+    <h2>按场景使用</h2>
+    <div class="workflow-grid">
+      <div class="workflow-item">
+        <h3>表达数据分析</h3>
+        <ul>
+          <li>在“表达分析”页填写数据集编号、输出路径与物种后开始。</li>
+          <li>单细胞数据会执行 QC、双细胞、聚类注释、差异表达与富集；bulk / microarray 数据按样本级矩阵运行。</li>
+          <li>非单细胞数据不会伪造细胞级结果；完成后可直接打开 <code>result_report.html</code>。</li>
+        </ul>
+      </div>
+      <div class="workflow-item">
+        <h3>从表达谱推进到靶点</h3>
+        <ul>
+          <li>在“全自动流水线”页填写工作目录、输出目录与数据集编号。</li>
+          <li>流水线会依次执行关键基因筛选、证据富集、虚拟敲除、虚拟筛选、MD/ML 交接、网络毒理学/FAERS 与细胞反馈。</li>
+          <li>首次运行可先使用 <code>dry-run</code> 查看每个阶段会运行还是已完成。</li>
+        </ul>
+      </div>
+      <div class="workflow-item">
+        <h3>虚拟筛选与独立分子对接</h3>
+        <ul>
+          <li>“虚拟筛选”页适合从证据收集、受体/配体准备到对接分析的全流程；无输入数据时会明确提示缺失文件。</li>
+          <li>“分子对接”页使用独立工作目录，适合单独准备受体、配体库并运行 Vina。</li>
+          <li>工作目录中填写相对路径时，文件需位于该工作目录下；对接结果会按亲和力排序并可下载 PDBQT。</li>
+        </ul>
+      </div>
+      <div class="workflow-item">
+        <h3>敲除、网络毒理学与 FAERS</h3>
+        <ul>
+          <li>“虚拟敲除”页需要表达/计数输入；填写目标基因后可按需启用 scTenifoldKnk 或 CellOracle 风格分析。</li>
+          <li>“网络毒理学”页用化合物-靶点表与疾病基因表计算交集、PPI hub 与 Venn/C-T-P-D 网络。</li>
+          <li>“FAERS”页使用药物-事件计数表输出 ROR、PRR、BCPNN IC 与 EBGM 组合信号。</li>
+        </ul>
+      </div>
+    </div>
+  </section>
+
+  <section class="card guide-card" id="tasks">
+    <h2>任务管理</h2>
+    <p class="muted">“任务进度”页集中显示各流水线页启动的任务。刷新或切换页面不会清除正在运行的任务记录，返回原页面后会自动恢复日志轮询。</p>
+    <ul class="guide-flow">
+      <li>排队中的任务会等待前面的任务完成，避免同一类流程并发冲突。</li>
+      <li>运行中任务可暂停；暂停后从原页面点击“继续任务”恢复。</li>
+      <li>完成或中断时会弹窗提示；中断提示会显示运行到的阶段与原因。</li>
+      <li>不需要的任务历史可在任务进度页一键清空。</li>
+    </ul>
+  </section>
+
+  <section class="card guide-card" id="results">
+    <h2>结果与报告</h2>
+    <p class="muted">网页结果区优先展示“结果表 + 文件下载 + 图片画廊”。需要系统检查所有交付物时使用“结果清单”。</p>
+    <ul class="guide-flow">
+      <li>结果清单支持按文件名、类型和用途筛选，点击行可展开说明，并联动打开对应指南章节。</li>
+      <li>每个结果图的判读标准、输出路径和用途见结果清单页的“结果图说明与判断指南”。</li>
+      <li>集成报告、run_manifest 等文件仍保留在对应工作目录的 <code>outputs</code> 中，可作为复现记录。</li>
+    </ul>
+  </section>
+</div>
+</body>
+</html>

@@ -1124,6 +1124,8 @@ class TestTemplatePolish(unittest.TestCase):
             "network_page_template.html",
             "faers_page_template.html",
             "validation_page_template.html",
+            "guide_page_template.html",
+            "environment_page_template.html",
         ):
             html = self._read(name)
             self.assertIn(
@@ -1140,6 +1142,36 @@ class TestTemplatePolish(unittest.TestCase):
         ).read_text(encoding="utf-8")
         self.assertIn(".topnav a .nav-count", css)
         self.assertIn(".topnav a .nav-count[hidden]", css)
+
+    def test_guide_and_environment_pages_render(self):
+        self.assertIn("/guide", web_ui_module.NAV_HTML)
+        self.assertIn("/environment", web_ui_module.NAV_HTML)
+        guide = web_ui_module.render_guide_page()
+        self.assertIn("网页版使用教程", guide)
+        self.assertIn("/full", guide)
+        self.assertIn("/environment", guide)
+        env = web_ui_module.render_environment_page()
+        self.assertIn("环境补全中心", env)
+        self.assertIn("/environment/check", env)
+        self.assertIn('data-module="expression"', env)
+        self.assertIn('data-module="full"', env)
+        self.assertIn("一键补全", env)
+
+    def test_environment_board_matches_installer_modules(self):
+        if str(APP_ROOT / "launchers") not in sys.path:
+            sys.path.insert(0, str(APP_ROOT / "launchers"))
+        import install_environment
+
+        self.assertEqual(
+            set(web_ui_module.ENV_MODULES),
+            set(install_environment.MODULES),
+        )
+        for name, meta in web_ui_module.ENV_MODULES.items():
+            with self.subTest(module=name):
+                self.assertTrue(
+                    (APP_ROOT / meta["install_bat"]).is_file(),
+                    f"{meta['install_bat']} should exist",
+                )
 
     def test_split_tool_pages_render_independently(self):
         for path, marker in (
