@@ -178,7 +178,7 @@ DEFAULT_NETWORK_TOXICOLOGY = {
     "disease_genes_csv": None,
     "disease_gene_column": None,
     "ppi_network_csv": None,
-    "venn": False,
+    "venn": True,
     "output_dir": "outputs/run_001/network_toxicology",
 }
 
@@ -547,6 +547,26 @@ def _clear_downstream_markers(workdir: Path, from_index: int = 1) -> None:
                 code,
                 name,
             )
+
+
+def _prune_stale_stage_markers(workdir: Path) -> int:
+    """Remove legacy markers that no longer match the current stage list."""
+    stage_dir = _stage_dir(workdir)
+    if not stage_dir.exists():
+        return 0
+    current = {f"{code}_{name}" for code, name, _description in STAGES}
+    removed = 0
+    for marker in stage_dir.glob("*.done"):
+        if marker.stem not in current:
+            marker.unlink(missing_ok=True)
+            removed += 1
+    if removed:
+        log.warning(
+            "removed %s stale stage marker(s) from %s",
+            removed,
+            stage_dir,
+        )
+    return removed
 
 
 def _single_cell_outputs_ready(root: Path) -> bool:
@@ -2281,8 +2301,10 @@ def generate_integrated_report(
             "gene",
             "md_status",
             "md_mode",
+            "md_requested",
             "md_completed",
             "md_prepared",
+            "md_failed",
             "handoff_status",
             "ml_status",
             "ml_scored",
@@ -2730,8 +2752,10 @@ def _run_target_cadd(
         "gene": str(gene),
         "md_status": "skipped",
         "md_mode": md_settings.get("mode", "prepare"),
+        "md_requested": 0,
         "md_completed": 0,
         "md_prepared": 0,
+        "md_failed": 0,
         "handoff_status": "skipped",
         "ml_status": "skipped",
         "ml_scored": 0,
@@ -2753,21 +2777,26 @@ def _run_target_cadd(
                 cfg.data["md_simulation"]["top_n"] = int(md_settings["top_n"])
             md_summary = md_simulation.run_md_simulation(cfg, log, mode=mode)
             rec["md_mode"] = mode
+            rec["md_requested"] = int(md_summary.get("requested", 0))
             rec["md_completed"] = int(md_summary.get("completed", 0))
             rec["md_prepared"] = int(md_summary.get("prepared", 0))
-            requested = int(md_summary.get("requested", 0))
-            failed = int(md_summary.get("failed", 0))
+            requested = rec["md_requested"]
+            rec["md_failed"] = int(md_summary.get("failed", 0))
+            failed = rec["md_failed"]
             if requested == 0:
                 rec["md_status"] = "skipped"
                 rec["error"] = "no top docking poses selected for MD"
             elif failed == requested:
                 rec["md_status"] = "failed"
+            elif failed > 0:
+                rec["md_status"] = "partial"
             elif rec["md_completed"]:
                 rec["md_status"] = "completed"
             else:
                 rec["md_status"] = "prepared"
         except Exception as exc:  # noqa: BLE001
             rec["md_status"] = "failed"
+            rec["md_failed"] = max(1, int(rec.get("md_failed", 0)))
             rec["error"] = f"MD simulation failed: {exc}"
             log.error("target %s MD failed: %s", gene, exc)
 
@@ -2787,8 +2816,11 @@ def _run_target_cadd(
     if docking_ml_settings.get("enabled", True):
         try:
             model_file = cfg.ml_dir() / "data" / "ml_model_info.json"
-            train_path = Path(str(training_csv or "")).expanduser()
-            if train_path.exists():
+            training_value = str(training_csv or "").strip()
+            train_path = (
+                Path(training_value).expanduser() if training_value else None
+            )
+            if train_path is not None and train_path.is_file():
                 docking_ml.train_ml(
                     cfg,
                     log,
@@ -2859,8 +2891,10 @@ def _stage_cadd_downstream(args, workdir: Path, ctx: dict) -> None:
                 "gene",
                 "md_status",
                 "md_mode",
+                "md_requested",
                 "md_completed",
                 "md_prepared",
+                "md_failed",
                 "handoff_status",
                 "ml_status",
                 "ml_scored",
@@ -2881,9 +2915,64 @@ def _stage_cadd_downstream(args, workdir: Path, ctx: dict) -> None:
         md_completed = int(frame["md_completed"].sum())
         md_prepared = int(frame["md_prepared"].sum())
         handoff_ok = int((frame["handoff_status"] == "completed").sum())
+        handoff_failed = int((frame["handoff_status"] == "failed").sum())
+        ml_failed = int((frame["ml_status"] == "failed").sum())
         ml_scored = int(frame["ml_scored"].sum())
+        md_enabled = bool(
+            (
+                getattr(args, "md_simulation", DEFAULT_MD_SIMULATION) or {}
+            ).get("enabled", True)
+        )
+        handoff_enabled = bool(
+            (getattr(args, "handoff", DEFAULT_HANDOFF) or {}).get(
+                "enabled",
+                True,
+            )
+        )
+        docking_ml_enabled = bool(
+            (getattr(args, "docking_ml", DEFAULT_DOCKING_ML) or {}).get(
+                "enabled",
+                True,
+            )
+        )
+        all_md_failed = (
+            md_enabled
+            and md_failed
+            and not (md_completed or md_prepared)
+        )
+        all_handoff_failed = (
+            handoff_enabled
+            and handoff_failed == len(rows)
+            and handoff_ok == 0
+        )
+        all_ml_failed = (
+            docking_ml_enabled
+            and ml_failed == len(rows)
+            and len(rows) > 0
+        )
+        if all_md_failed or all_handoff_failed or all_ml_failed:
+            status = "failed"
+            details = []
+            if all_md_failed:
+                details.append("MD failed for all target(s)")
+            if all_handoff_failed:
+                details.append("handoff failed for all target(s)")
+            if all_ml_failed:
+                details.append("ML rescoring failed for all target(s)")
+            reason = "; ".join(details)
+        elif md_failed or handoff_failed or ml_failed:
+            status = "partial"
+            reason = (
+                f"MD failed for {md_failed}, handoff failed for "
+                f"{handoff_failed}, ML rescoring failed for {ml_failed} "
+                f"of {len(rows)} target(s)"
+            )
+        else:
+            status = "completed"
+            reason = ""
         summary = {
-            "status": "completed",
+            "status": status,
+            "reason": reason,
             "targets": len(rows),
             "md_failed": md_failed,
             "md_completed": md_completed,
@@ -2899,6 +2988,8 @@ def _stage_cadd_downstream(args, workdir: Path, ctx: dict) -> None:
         summary,
     )
     ctx["cadd_downstream"] = summary
+    if summary.get("status") == "failed":
+        raise IntegrationError(summary.get("reason") or "CADD downstream failed")
 
 
 def _resolved_section_paths(section: dict, base: Path) -> dict:
@@ -2975,7 +3066,9 @@ def _stage_network(args, workdir: Path, ctx: dict) -> None:
         }
         write_json(summary_path, summary)
         log.error("network toxicology failed: %s", exc)
-        return
+        raise IntegrationError(
+            "network toxicology stage failed: " + str(exc)
+        ) from exc
     summary = {"status": "completed", **result}
     summary["output_dir"] = section.get("output_dir", "")
     write_json(summary_path, summary)
@@ -3021,7 +3114,9 @@ def _stage_faers(args, workdir: Path, ctx: dict) -> None:
         }
         write_json(summary_path, summary)
         log.error("FAERS signal detection failed: %s", exc)
-        return
+        raise IntegrationError(
+            "FAERS signal detection stage failed: " + str(exc)
+        ) from exc
     summary = {"status": "completed", **result}
     summary["output_dir"] = section.get("output_dir", "")
     write_json(summary_path, summary)
@@ -3144,6 +3239,7 @@ def run_full_pipeline(args) -> int:
         _invalidate_markers_for_changed_root(workdir, ctx["single_cell_root"])
     if args.dry_run:
         return _dry_run_stages(args, workdir, ctx)
+    _prune_stale_stage_markers(workdir)
 
     stage_fns = {
         "01": _stage_single_cell,
@@ -3478,6 +3574,29 @@ def _apply_defaults(args, config: dict) -> None:
             value = getattr(args, attr_name, None)
             if value is not None:
                 section[section_key] = value
+    config_path_keys = {
+        "network_toxicology": [
+            "compound_targets_csv",
+            "disease_genes_csv",
+            "ppi_network_csv",
+        ],
+        "faers": ["input_csv"],
+    }
+    for section_name, keys in config_path_keys.items():
+        section = getattr(args, section_name, {})
+        if not isinstance(section, dict):
+            continue
+        for key in keys:
+            value = section.get(key)
+            if value and not Path(str(value)).is_absolute():
+                section[key] = str(_resolve_path(value, Path.cwd()))
+        targets = section.get("target_sources")
+        if isinstance(targets, dict):
+            section["target_sources"] = {
+                str(source): str(_resolve_path(path, Path.cwd()))
+                for source, path in targets.items()
+                if path
+            }
 
 
 def build_parser() -> argparse.ArgumentParser:

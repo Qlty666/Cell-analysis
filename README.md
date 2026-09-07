@@ -895,7 +895,10 @@ MIT License. See `LICENSE` for details.
 - 网络毒理学与 FAERS 作为输入可选的流水线阶段接入：提供 `network_toxicology.compound_targets_csv` / `target_sources` 和 `faers.input_csv` 后自动运行，缺输入时写 `skipped` 汇总而不是中断或伪造结果。
 - 网页全自动流水线页同步增加 MD/ML/导出、网络毒理学与 FAERS 的输入控件、运行开关、阶段显示和结果表；结果清单文件扫描加入 MD 导出目录。
 - 集成报告与 `integration_summary.json` 新增 CADD 下游、网络毒理学和 FAERS 汇总；阶段标记升级后旧运行目录会自然重建新增阶段。
-- 全量测试通过：267 个测试用例 + 18 个 subtests（含新增 4 个全流程 CADD/安全阶段测试）。
+- 审计修复：网络毒理学/FAERS 用户显式提供输入但运行失败时不再吞错，流水线返回失败；MD 逐靶点记录 `md_requested/md_failed`，全部失败时阶段状态为 failed 并中断。
+- 审计修复：运行前自动清理旧版 `07_cell_feedback` / `08_report` 等不再属于当前阶段表的遗留标记，避免网页进度虚高或阶段显示错误；网络毒理学 Venn 默认改为 true，与独立命令和文档一致。
+- 审计修复：未配置 ML 训练 CSV 时不再把空路径当作训练文件尝试读取；修复后会如实跳过 ML 重打分。
+- 全量测试通过：271 个测试用例 + 18 个 subtests（含新增 4 个审计修复回归测试）。
 
 ### v1.4.0
 

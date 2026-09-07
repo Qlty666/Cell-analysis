@@ -37,7 +37,7 @@
     "disease_genes_csv": null,
     "disease_gene_column": null,
     "ppi_network_csv": null,
-    "venn": false,
+    "venn": true,
     "output_dir": "outputs/run_001/network_toxicology"
   },
   "faers": {
