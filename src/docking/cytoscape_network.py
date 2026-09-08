@@ -49,7 +49,8 @@ def cytoscape_running(base_url: str = "http://127.0.0.1:1234") -> bool:
     try:
         with urllib.request.urlopen(probe, timeout=1.2) as resp:
             return bool(resp.status == 200)
-    except Exception:
+    except Exception as exc:
+        LOG.debug("Cytoscape/CyREST probe %s failed: %s", probe, exc)
         return False
 
 
@@ -87,7 +88,13 @@ def write_xgmml_network(
         shape = _NODE_SHAPE.get(node_type, "ELLIPSE")
         try:
             degree = float(row.get("ppi_degree") or 0)
-        except ValueError:
+        except ValueError as exc:
+            LOG.debug(
+                "non-numeric ppi_degree %r for node %s: %s",
+                row.get("ppi_degree"),
+                node_id,
+                exc,
+            )
             degree = 0.0
         if node_type == "compound":
             width, height = 110.0, 42.0
@@ -120,7 +127,14 @@ def write_xgmml_network(
             label = f"{source} ({edge_type}) {target}"
             try:
                 score = float(row.get("combined_score") or 0)
-            except ValueError:
+            except ValueError as exc:
+                LOG.debug(
+                    "non-numeric combined_score %r for edge %s -> %s: %s",
+                    row.get("combined_score"),
+                    source,
+                    target,
+                    exc,
+                )
                 score = 0.0
             if str(edge_type).lower() == "ppi" and score:
                 width = min(6.0, max(1.5, score / 1000.0 * 5.0))
@@ -233,8 +247,12 @@ def export_network_to_cytoscape(
         chosen_layout = _apply_layout(p4c, network_suid, layout, cyrest_url)
         try:
             p4c.fit_content(network=network_suid, base_url=cyrest_url)
-        except Exception:
-            pass
+        except Exception as exc:
+            LOG.warning(
+                "Cytoscape fit-content failed for network %s: %s",
+                network_suid,
+                exc,
+            )
 
         png_path = out / "figures" / "ctpd_network_cytoscape.png"
         png_path.parent.mkdir(parents=True, exist_ok=True)
@@ -304,7 +322,12 @@ def _apply_style(
 ) -> None:
     try:
         p4c.copy_visual_style("default", style_name, base_url=base_url)
-    except Exception:
+    except Exception as exc:
+        LOG.warning(
+            "copying the default Cytoscape style failed; creating %s instead: %s",
+            style_name,
+            exc,
+        )
         p4c.create_visual_style(
             style_name,
             defaults=[
@@ -439,5 +462,6 @@ def _export_image(
             )
             if png_path.exists():
                 return
-        except Exception:
+        except Exception as exc:
+            LOG.debug("Cytoscape PNG export to %s failed: %s", filename, exc)
             continue

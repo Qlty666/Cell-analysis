@@ -21,6 +21,9 @@ class ToolNotFoundError(DockingError):
     """Raised when an external tool required by a stage is missing."""
 
 
+LOG = logging.getLogger(__name__)
+
+
 def setup_logging(verbose: bool = False) -> logging.Logger:
     logging.basicConfig(
         level=logging.DEBUG if verbose else logging.INFO,
@@ -121,8 +124,8 @@ def find_script(name: str) -> str | None:
         ]:
             if cand.exists():
                 return str(cand)
-    except Exception:
-        pass
+    except Exception as exc:
+        LOG.debug("meeko script discovery failed for %s: %s", name, exc)
     return None
 
 
@@ -143,15 +146,20 @@ def parse_vina_affinities(text: str) -> list[dict]:
         try:
             mode = int(parts[0])
             affinity = float(parts[1])
-        except (ValueError, IndexError):
+        except (ValueError, IndexError) as exc:
+            LOG.debug("skipping unparseable Vina line %r: %s", line, exc)
             continue
         entry = {"mode": mode, "affinity": affinity}
         if len(parts) >= 4:
             try:
                 entry["rmsd_lb"] = float(parts[2])
                 entry["rmsd_ub"] = float(parts[3])
-            except ValueError:
-                pass
+            except ValueError as exc:
+                LOG.debug(
+                    "skipping unparseable Vina RMSD bounds on line %r: %s",
+                    line,
+                    exc,
+                )
         modes.append(entry)
     return modes
 
@@ -170,7 +178,8 @@ def read_json(path: Path, default=None):
         import json
 
         return json.loads(path.read_text(encoding="utf-8"))
-    except Exception:
+    except Exception as exc:
+        LOG.warning("could not read JSON %s: %s", path, exc)
         return default
 
 

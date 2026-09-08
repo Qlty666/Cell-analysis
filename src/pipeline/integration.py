@@ -254,7 +254,8 @@ def _sha256_file(path: Path) -> str:
             for block in iter(lambda: fh.read(1 << 20), b""):
                 digest.update(block)
         return digest.hexdigest()
-    except OSError:
+    except OSError as exc:
+        log.warning("could not hash %s: %s", path, exc)
         return "missing"
 
 
@@ -266,7 +267,12 @@ def _json_sorted(value) -> str:
             ensure_ascii=False,
             default=str,
         )
-    except Exception:
+    except Exception as exc:
+        log.debug(
+            "JSON serialization fell back to str() for %s: %s",
+            type(value).__name__,
+            exc,
+        )
         return str(value)
 
 
@@ -625,7 +631,10 @@ def _stage_outputs_ready(code: str, workdir: Path, ctx: dict, args) -> bool:
             path.exists() and path.stat().st_size > 0
             for path in _stage_output_paths(code, workdir, ctx, args)
         )
-    except OSError:
+    except OSError as exc:
+        log.warning(
+            "could not stat stage %s outputs in %s: %s", code, workdir, exc
+        )
         return False
 
 
@@ -653,7 +662,8 @@ def _as_float(value) -> float | None:
     try:
         number = float(value)
         return number if math.isfinite(number) else None
-    except (TypeError, ValueError):
+    except (TypeError, ValueError) as exc:
+        log.debug("non-numeric value %r: %s", value, exc)
         return None
 
 
@@ -1255,7 +1265,10 @@ def extract_key_genes(
             ml.index = ml.index.astype(str)
             ml_values = ml.iloc[:, 0].astype(float)
             frame["ml_importance"] = frame["gene"].map(ml_values).fillna(0.0)
-        except Exception:
+        except Exception as exc:
+            log.warning(
+                "could not read ML feature importance %s: %s", ml_path, exc
+            )
             frame["ml_importance"] = 0.0
     else:
         frame["ml_importance"] = 0.0
@@ -1773,7 +1786,13 @@ def _knockout_inputs_ready(expression_path: Path, metadata_path: Path) -> bool:
         if meta["condition"].nunique() < 2:
             return False
         return True
-    except Exception:
+    except Exception as exc:
+        log.warning(
+            "could not validate pseudobulk inputs %s / %s: %s",
+            expression_path,
+            metadata_path,
+            exc,
+        )
         return False
 
 
@@ -1872,7 +1891,10 @@ def _valid_docking_box(center, size) -> bool:
             and all(np.isfinite(size))
             and all(float(value) > 0 for value in size)
         )
-    except (TypeError, ValueError):
+    except (TypeError, ValueError) as exc:
+        log.debug(
+            "invalid docking box center=%r size=%r: %s", center, size, exc
+        )
         return False
 
 
@@ -1980,11 +2002,17 @@ def _extract_cocrystal_ligands(pdb_path: Path, max_ligands: int = 5) -> list[dic
     """Extract non-water HETATM residues as SMILES when DB ligands are missing."""
     try:
         from rdkit import Chem
-    except ImportError:
+    except ImportError as exc:
+        log.debug(
+            "rdkit unavailable; skipping cocrystal ligand extraction for %s: %s",
+            pdb_path,
+            exc,
+        )
         return []
     try:
         lines = pdb_path.read_text(encoding="utf-8", errors="replace").splitlines()
-    except OSError:
+    except OSError as exc:
+        log.warning("could not read PDB %s: %s", pdb_path, exc)
         return []
     small_ions = {
         "HOH", "WAT", "DOD", "CL", "NA", "K", "MG", "CA", "ZN",
@@ -2015,7 +2043,8 @@ def _extract_cocrystal_ligands(pdb_path: Path, max_ligands: int = 5) -> list[dic
         for line in atom_lines:
             try:
                 atom_ids.add(int(line[6:11]))
-            except ValueError:
+            except ValueError as exc:
+                log.debug("skipping PDB atom with bad serial %r: %s", line[6:11], exc)
                 continue
         block_lines = list(atom_lines)
         for line in conect:
@@ -2024,7 +2053,8 @@ def _extract_cocrystal_ligands(pdb_path: Path, max_ligands: int = 5) -> list[dic
                 continue
             try:
                 ids = [int(part) for part in parts[1:] if part.isdigit()]
-            except ValueError:
+            except ValueError as exc:
+                log.debug("skipping unparseable CONECT record %r: %s", line, exc)
                 continue
             if any(atom_id in atom_ids for atom_id in ids):
                 block_lines.append(line)
@@ -2050,7 +2080,15 @@ def _extract_cocrystal_ligands(pdb_path: Path, max_ligands: int = 5) -> list[dic
             )
             if len(ligands) >= max_ligands:
                 break
-        except Exception:
+        except Exception as exc:
+            log.debug(
+                "skipping cocrystal ligand %s_%s%s from %s: %s",
+                resname,
+                chain,
+                resseq,
+                pdb_path,
+                exc,
+            )
             continue
     return ligands
 
@@ -2193,7 +2231,12 @@ def run_target_docking(
             hits = int((ranked_df["affinity"] <= float(cfg.get("analysis", "cutoff", -7.0))).sum())
             if "affinity" in ranked_df.columns:
                 best = _min_affinity_text(ranked_df["affinity"])
-        except Exception:
+        except Exception as exc:
+            log.warning(
+                "could not read ranked docking results %s; using summary: %s",
+                ranked,
+                exc,
+            )
             hits = int(summary.get("hits", 0))
             best = str(summary.get("best_affinity", ""))
     else:
@@ -2344,7 +2387,8 @@ def _stage_single_cell(args, workdir: Path, ctx: dict) -> None:
                 manifest = json.loads(
                     manifest_path.read_text(encoding="utf-8")
                 )
-            except (OSError, ValueError):
+            except (OSError, ValueError) as exc:
+                log.warning("could not read manifest %s: %s", manifest_path, exc)
                 manifest = {}
             dataset_mode = (
                 "single_cell"
@@ -2943,7 +2987,8 @@ def _resolve_feedback_species(args, ctx: dict) -> str:
                         manifest_path.read_text(encoding="utf-8")
                     ).get("organism", "")
                 ).lower()
-            except (OSError, ValueError):
+            except (OSError, ValueError) as exc:
+                log.warning("could not read manifest %s: %s", manifest_path, exc)
                 organism = ""
             if organism in ("hs", "mm"):
                 return organism

@@ -165,7 +165,8 @@ def _finite_float(value) -> float | None:
     """Parse a numeric cell, rejecting blanks, 'nan'/'NA' and infinities."""
     try:
         number = float(value)
-    except (TypeError, ValueError):
+    except (TypeError, ValueError) as exc:
+        log.debug("non-numeric value %r: %s", value, exc)
         return None
     return number if math.isfinite(number) else None
 
@@ -344,7 +345,8 @@ def analyze_json(path: Path) -> dict:
     findings = []
     try:
         data = json.loads(path.read_text(encoding="utf-8", errors="replace"))
-    except Exception:
+    except Exception as exc:
+        log.warning("could not parse JSON %s: %s", path, exc)
         findings.append("JSON 文件无法解析，建议人工检查格式。")
         data = None
     if isinstance(data, dict):
@@ -473,7 +475,8 @@ def data_findings_brief(analysis: dict, limit: int = 6) -> list[str]:
 def num_str(value) -> str:
     try:
         return fmt_num(float(value))
-    except (TypeError, ValueError):
+    except (TypeError, ValueError) as exc:
+        log.debug("could not format %r as a number: %s", value, exc)
         return str(value or "")
 
 
@@ -497,7 +500,10 @@ def top_table_summary(name: str, n: int = 3) -> str:
     if p_col:
         try:
             ranked = sorted(rows, key=lambda r: float(r.get(p_col, 1)))[:n]
-        except (TypeError, ValueError):
+        except (TypeError, ValueError) as exc:
+            log.debug(
+                "could not sort rows of %s by %s: %s", name, p_col, exc
+            )
             ranked = rows[:n]
     parts = []
     for row in ranked:
@@ -526,7 +532,13 @@ def ml_metrics_line() -> str:
             if key in row:
                 try:
                     value = fmt_num(float(row.get(key)))
-                except (TypeError, ValueError):
+                except (TypeError, ValueError) as exc:
+                    log.debug(
+                        "non-numeric ML metric %s=%r: %s",
+                        key,
+                        row.get(key),
+                        exc,
+                    )
                     value = str(row.get(key))
                 metrics.append(f"{key}={value}")
         if metrics:
@@ -559,7 +571,8 @@ def _deg_up_down(summary: dict) -> tuple[int, int]:
     def _as_int(value) -> int:
         try:
             return int(float(value))
-        except (TypeError, ValueError):
+        except (TypeError, ValueError) as exc:
+            log.debug("non-numeric DEG count %r: %s", value, exc)
             return 0
 
     return _as_int(summary.get("deg_up", 0)), _as_int(summary.get("deg_down", 0))

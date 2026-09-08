@@ -10,6 +10,7 @@ from __future__ import annotations
 
 import argparse
 import json
+import logging
 import os
 import subprocess
 import sys
@@ -48,6 +49,8 @@ DATASETS = [
 HEARTBEAT_INTERVAL = 4.0
 POLL_INTERVAL = 20.0
 
+logger = logging.getLogger(__name__)
+
 
 def log(msg: str) -> None:
     line = f"[{time.strftime('%Y-%m-%d %H:%M:%S')}] {msg}"
@@ -77,8 +80,8 @@ def heartbeat_loop(base: str, stop: list[bool]) -> None:
                 f"{base}/heartbeat?client={urllib.parse.quote(client_id)}",
                 timeout=10,
             ).read()
-        except Exception:
-            pass
+        except Exception as exc:
+            logger.debug("heartbeat to %s failed: %r", base, exc)
         time.sleep(HEARTBEAT_INTERVAL)
 
 
@@ -140,7 +143,8 @@ def main() -> int:
         try:
             urllib.request.urlopen(base + "/full", timeout=5).read()
             break
-        except Exception:
+        except Exception as exc:
+            logger.debug("readiness probe %s/full failed: %r", base, exc)
             time.sleep(1)
     else:
         log("web UI did not become ready in time")
@@ -213,7 +217,8 @@ def main() -> int:
     try:
         server.terminate()
         server.wait(timeout=10)
-    except Exception:
+    except Exception as exc:
+        logger.warning("graceful web UI shutdown failed, killing process: %r", exc)
         server.kill()
     return 0
 

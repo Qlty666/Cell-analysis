@@ -75,3 +75,7 @@ portable/
 # Validation artifacts
 *.log
 *.tmp
+
+# Scratch / helper files that must never be committed
+scripts/_test_h5ad_reader.R
+.tmp_*

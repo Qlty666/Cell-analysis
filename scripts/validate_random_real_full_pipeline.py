@@ -12,6 +12,7 @@ from __future__ import annotations
 import argparse
 import csv
 import json
+import logging
 import os
 import random
 import re
@@ -27,6 +28,8 @@ if str(ROOT / "src") not in sys.path:
     sys.path.insert(0, str(ROOT / "src"))
 
 from common.env import find_rscript as _common_find_rscript  # noqa: E402
+
+LOGGER = logging.getLogger(__name__)
 
 DEFAULT_RESULT_ROOT = Path(
     os.environ.get(
@@ -85,7 +88,8 @@ def read_json(path: Path, default=None):
     try:
         data = json.loads(path.read_text(encoding="utf-8"))
         return data if isinstance(data, dict) else default or {}
-    except Exception:
+    except Exception as exc:
+        LOGGER.warning("could not read JSON %s: %s", path, exc)
         return default or {}
 
 
@@ -120,7 +124,8 @@ def install_r_deps() -> bool:
             timeout=1800,
         )
         return result.returncode == 0
-    except Exception:
+    except Exception as exc:
+        LOGGER.warning("R dependency installation failed: %s", exc)
         return False
 
 
@@ -307,6 +312,12 @@ def run_one(
                     env=env,
                 )
         except subprocess.TimeoutExpired:
+            LOGGER.warning(
+                "pipeline for %s timed out after %ss (attempt %s)",
+                accession,
+                args.timeout,
+                attempt,
+            )
             attempts.append(
                 {
                     "attempt": attempt,
@@ -319,8 +330,8 @@ def run_one(
             log_text = ""
             try:
                 log_text = log_path.read_text(encoding="utf-8", errors="replace")
-            except Exception:
-                pass
+            except Exception as exc:
+                LOGGER.warning("could not read pipeline log %s: %s", log_path, exc)
             if attempt < args.max_attempts:
                 actions = diagnose(
                     log_text[-40000:],
@@ -357,8 +368,8 @@ def run_one(
         log_text = ""
         try:
             log_text = log_path.read_text(encoding="utf-8", errors="replace")
-        except Exception:
-            pass
+        except Exception as exc:
+            LOGGER.warning("could not read pipeline log %s: %s", log_path, exc)
         if attempt >= args.max_attempts:
             break
         actions = diagnose(log_text[-40000:], accession, single_cell_root, workdir)

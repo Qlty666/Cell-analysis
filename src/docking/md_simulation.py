@@ -1034,8 +1034,8 @@ def _analyze_gromacs_output(cfg: ResolvedConfig, run_dir: Path) -> dict:
     if cfg.get("md_simulation", "figures", True):
         try:
             make_figures(run_dir)
-        except Exception:
-            pass
+        except Exception as exc:
+            LOG.warning("MD figure generation failed for %s: %s", run_dir, exc)
     return metrics
 
 
@@ -1078,7 +1078,10 @@ def _run_gmx_metric(
             env=_gmx_env(gmx, cfg),
             stdin_text=stdin_text,
         )
-    except Exception:
+    except Exception as exc:
+        LOG.warning(
+            "GROMACS metric %s failed in %s: %s", out_name, run_dir, exc
+        )
         return None
     if result.returncode != 0 or not out.exists():
         return None
@@ -1123,7 +1126,8 @@ def _gro_atom_records(path: Path) -> list[tuple[int, np.ndarray]]:
         return []
     try:
         total = int(lines[1].strip())
-    except ValueError:
+    except ValueError as exc:
+        LOG.warning("unreadable GRO atom count in %s: %s", path, exc)
         return []
     records: list[tuple[int, np.ndarray]] = []
     fallback = 0
@@ -1142,7 +1146,12 @@ def _gro_atom_records(path: Path) -> list[tuple[int, np.ndarray]]:
                         [float(parts[-3]), float(parts[-2]), float(parts[-1])],
                         dtype=float,
                     )
-                except ValueError:
+                except ValueError as exc:
+                    LOG.debug(
+                        "skipping unparseable GRO atom line in %s: %s",
+                        path,
+                        exc,
+                    )
                     continue
             else:
                 continue
@@ -1150,8 +1159,13 @@ def _gro_atom_records(path: Path) -> list[tuple[int, np.ndarray]]:
         if raw[:5].strip():
             try:
                 residue = int(raw[:5].strip())
-            except ValueError:
-                pass
+            except ValueError as exc:
+                LOG.debug(
+                    "non-numeric GRO residue number %r in %s: %s",
+                    raw[:5],
+                    path,
+                    exc,
+                )
         records.append((residue, coords))
     return records
 
@@ -1248,7 +1262,8 @@ def parse_xvg(path: Path) -> np.ndarray | None:
         parts = line.split()
         try:
             rows.append([float(value) for value in parts])
-        except ValueError:
+        except ValueError as exc:
+            LOG.debug("skipping unparseable XVG line in %s: %s", path, exc)
             continue
     if not rows:
         return None
@@ -1261,7 +1276,8 @@ def make_figures(run_dir: Path) -> None:
 
         matplotlib.use("Agg")
         import matplotlib.pyplot as plt
-    except Exception:
+    except Exception as exc:
+        LOG.debug("matplotlib unavailable; skipping MD figures: %s", exc)
         return
     fig, axes = plt.subplots(3, 1, figsize=(9, 10), sharex=False)
     for ax, label, title, color in [
@@ -1291,7 +1307,10 @@ def _make_dynamics_figure(run_dir: Path) -> None:
 
         matplotlib.use("Agg")
         import matplotlib.pyplot as plt
-    except Exception:
+    except Exception as exc:
+        LOG.debug(
+            "matplotlib unavailable; skipping MD dynamics figures: %s", exc
+        )
         return
     panels = [
         (
@@ -1343,7 +1362,12 @@ def _make_dynamics_figure(run_dir: Path) -> None:
                         ).splitlines()
                         if line.strip()
                     ]
-                except ValueError:
+                except ValueError as exc:
+                    LOG.warning(
+                        "unreadable binding-site residues in %s: %s",
+                        contact_path,
+                        exc,
+                    )
                     residues = []
                 if residues:
                     wanted = np.asarray(residues, dtype=int)

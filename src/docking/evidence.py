@@ -5,6 +5,7 @@ from __future__ import annotations
 
 import csv
 import json
+import logging
 import os
 import subprocess
 import sys
@@ -14,6 +15,8 @@ from pathlib import Path
 
 from .config import ResolvedConfig
 from .utils import write_json
+
+LOG = logging.getLogger(__name__)
 
 SKILLS_ROOT = (
     Path(os.environ.get("CODEX_HOME", str(Path.home() / ".codex"))) / "skills"
@@ -550,7 +553,8 @@ def gather_evidence(cfg: ResolvedConfig, log) -> dict:
 def _load_raw_list(path: Path, key: str) -> list:
     try:
         data = json.loads(path.read_text(encoding="utf-8"))
-    except Exception:
+    except Exception as exc:
+        LOG.warning("could not read raw evidence list %s (key=%s): %s", path, key, exc)
         return []
     if isinstance(data, list):
         return data
@@ -563,7 +567,8 @@ def _load_raw_dict(path: Path) -> dict:
     try:
         data = json.loads(path.read_text(encoding="utf-8"))
         return data if isinstance(data, dict) else {}
-    except Exception:
+    except Exception as exc:
+        LOG.warning("could not read raw evidence dict %s: %s", path, exc)
         return {}
 
 

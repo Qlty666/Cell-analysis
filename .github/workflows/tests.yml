@@ -1,0 +1,56 @@
+name: tests
+
+on:
+  push:
+  pull_request:
+
+jobs:
+  pytest:
+    name: pytest (${{ matrix.os }}, Python ${{ matrix.python-version }})
+    runs-on: ${{ matrix.os }}
+    strategy:
+      fail-fast: false
+      matrix:
+        os:
+          - ubuntu-latest
+          - windows-latest
+        python-version:
+          - "3.11"
+
+    steps:
+      - name: Checkout
+        uses: actions/checkout@v4
+
+      - name: Set up Python
+        uses: actions/setup-python@v5
+        with:
+          python-version: ${{ matrix.python-version }}
+          cache: pip
+
+      # requirements.txt is the primary dependency source. A few entries are
+      # platform-specific / heavy, so fall back to the minimal set the test
+      # suite actually imports if the pinned install fails on a runner.
+      - name: Install dependencies
+        shell: bash
+        run: |
+          python -m pip install --upgrade pip
+          python -m pip install pytest
+          if ! python -m pip install -r requirements.txt; then
+            echo "::warning::requirements.txt install failed; falling back to minimal test dependencies"
+            python -m pip install numpy pandas matplotlib pyyaml openpyxl h5py scipy scikit-learn umap-learn fpdf2
+          fi
+
+      - name: Run tests
+        shell: bash
+        run: python -m pytest -q -p no:cacheprovider
+
+      # Optional: only runs when the runner happens to provide Rscript.
+      - name: Validate R analysis pipeline syntax (optional)
+        continue-on-error: true
+        shell: bash
+        run: |
+          if command -v Rscript >/dev/null 2>&1; then
+            Rscript -e "invisible(parse('src/analysis/analysis_pipeline.R'))"
+          else
+            echo "Rscript not available; skipping R syntax check"
+          fi

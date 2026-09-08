@@ -211,8 +211,10 @@ def _notify_finished(
             del FINISHED_NOTIFICATIONS[:-50]
     try:
         _append_task_history(item)
-    except Exception:
-        pass
+    except Exception as exc:  # noqa: BLE001 - notification is best effort
+        logging.getLogger("web_ui").warning(
+            "could not append task history for %s: %s", item.get("job", "?"), exc
+        )
 
 
 def record_job(info: dict, ok: bool) -> None:

@@ -232,7 +232,10 @@ def _evidence_for_gene(gene: str, info: dict) -> dict:
                     break
             if not chembl_id and targets:
                 chembl_id = targets[0].get("target_chembl_id") or ""
-        except Exception:
+        except Exception as exc:
+            LOG.warning(
+                "ChEMBL target lookup failed for %s (%s): %s", gene, uniprot, exc
+            )
             chembl_id = ""
         if chembl_id:
             try:
@@ -243,7 +246,13 @@ def _evidence_for_gene(gene: str, info: dict) -> dict:
                 )
                 meta = act.get("page_meta") or {}
                 bioactivities = int(meta.get("total_count") or 0)
-            except Exception:
+            except Exception as exc:
+                LOG.warning(
+                    "ChEMBL activity count failed for %s (%s): %s",
+                    gene,
+                    chembl_id,
+                    exc,
+                )
                 bioactivities = 0
             # ChEMBL molecule.json ignores target filters, so the target-
             # specific activity count is used for both ligand columns.
@@ -274,7 +283,13 @@ def _evidence_for_gene(gene: str, info: dict) -> dict:
                 timeout=60,
             )
             pdb_count = int(res.get("total_count") or 0)
-        except Exception:
+        except Exception as exc:
+            LOG.warning(
+                "RCSB structure search failed for %s (%s): %s",
+                gene,
+                uniprot,
+                exc,
+            )
             pdb_count = 0
     LOG.info(
         "evidence %s: ligands=%s chembl=%s pdb=%s",
@@ -420,8 +435,13 @@ def median_split_cox_hr(
             ll_full = float(-res.fun)
             stat = 2.0 * max(0.0, ll_full - ll0)
             return float(np.exp(beta)), float(chi2.sf(stat, df=1))
-    except Exception:
-        pass
+    except Exception as exc:
+        LOG.warning(
+            "Cox model failed (n=%s, events=%s); HR/p fall back to 1.0: %s",
+            len(frame),
+            int(frame["status"].sum()),
+            exc,
+        )
     return 1.0, 1.0
 
 
@@ -454,7 +474,13 @@ def build_tcga_dataset(
     for row in rows:
         try:
             value = float(row.get("value"))
-        except (TypeError, ValueError):
+        except (TypeError, ValueError) as exc:
+            LOG.debug(
+                "skipping non-numeric expression value for gene %s sample %s: %s",
+                row.get("entrezGeneId"),
+                row.get("sampleId"),
+                exc,
+            )
             continue
         expr_rows[(int(row["entrezGeneId"]), row["sampleId"])] = value
     entrez_to_gene = {
