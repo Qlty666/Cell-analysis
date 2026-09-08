@@ -24,6 +24,9 @@ SKILL_NAMES = {
 }
 ROOT = Path(__file__).resolve().parent.parent
 OUT_DIR = ROOT / "dock" / "validation_real"
+# Sane pass thresholds: a near-total miss must not be reported as PASS.
+DEFAULT_MIN_OK_TARGETS = 10
+DEFAULT_MIN_LIGANDS = 10
 TARGETS = [
     ("1M17", "EGFR"),
     ("1XKK", "BRAF"),
@@ -96,8 +99,25 @@ def main() -> int:
     parser = argparse.ArgumentParser(
         description="Validate evidence collection against real PDB structures."
     )
-    parser.add_argument("--min-ok-targets", type=int, default=1)
-    parser.add_argument("--min-ligands", type=int, default=1)
+    parser.add_argument(
+        "--min-ok-targets",
+        type=int,
+        default=DEFAULT_MIN_OK_TARGETS,
+        help=(
+            "minimum number of targets whose RCSB lookup must succeed "
+            f"(default: {DEFAULT_MIN_OK_TARGETS}, i.e. all {len(TARGETS)} "
+            "targets)"
+        ),
+    )
+    parser.add_argument(
+        "--min-ligands",
+        type=int,
+        default=DEFAULT_MIN_LIGANDS,
+        help=(
+            "minimum total number of BindingDB ligands "
+            f"(default: {DEFAULT_MIN_LIGANDS})"
+        ),
+    )
     args = parser.parse_args()
 
     OUT_DIR.mkdir(parents=True, exist_ok=True)

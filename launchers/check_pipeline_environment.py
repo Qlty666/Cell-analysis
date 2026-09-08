@@ -1,6 +1,7 @@
 #!/usr/bin/env python3
 """Check whether the current computer can run the single-cell pipeline."""
 
+import argparse
 import shutil
 import subprocess
 import sys
@@ -61,15 +62,28 @@ def parse_version(text: str) -> tuple:
     return tuple(parts)
 
 
-def main() -> int:
+def main(argv: list[str] | None = None) -> int:
+    parser = argparse.ArgumentParser(description=__doc__)
+    parser.add_argument(
+        "--offline",
+        action="store_true",
+        help="skip the NCBI GEO network probe (useful on air-gapped hosts)",
+    )
+    args = parser.parse_args(argv)
+
     ok = True
     checks = []
 
     def report(name: str, passed: bool, detail: str) -> None:
         nonlocal ok
-        checks.append((name, passed, detail))
+        checks.append((name, "OK " if passed else "FAIL", detail))
         if not passed:
             ok = False
+
+    def warn(name: str, detail: str) -> None:
+        # Warnings never change the exit code: an offline host must still be
+        # able to pass `check full`.
+        checks.append((name, "WARN", detail))
 
     py = sys.version_info
     report(
@@ -154,28 +168,34 @@ def main() -> int:
     else:
         report("R packages", False, "Rscript unavailable")
 
-    try:
-        req = urllib.request.Request(
-            "https://ftp.ncbi.nlm.nih.gov/",
-            method="HEAD",
-            headers={"User-Agent": "Mozilla/5.0"},
-        )
-        with urllib.request.urlopen(req, timeout=15) as resp:
-            reachable = resp.status < 400
-        report("NCBI GEO access", reachable, "reachable" if reachable else "unreachable")
-    except Exception as exc:
-        report("NCBI GEO access", False, str(exc))
+    if args.offline:
+        warn("NCBI GEO access", "skipped (--offline)")
+    else:
+        try:
+            req = urllib.request.Request(
+                "https://ftp.ncbi.nlm.nih.gov/",
+                method="HEAD",
+                headers={"User-Agent": "Mozilla/5.0"},
+            )
+            with urllib.request.urlopen(req, timeout=15) as resp:
+                reachable = resp.status < 400
+            if reachable:
+                report("NCBI GEO access", True, "reachable")
+            else:
+                warn("NCBI GEO access", "unreachable (warning only)")
+        except Exception as exc:
+            warn("NCBI GEO access", f"{exc} (warning only)")
 
     print()
     print("Environment check result")
     print("=" * 60)
-    for name, passed, detail in checks:
-        status = "OK " if passed else "FAIL"
+    for name, status, detail in checks:
         print(f"[{status}] {name}: {detail}")
     print("=" * 60)
     print("Result:", "PASS" if ok else "FAIL")
     if not ok:
         print("Run install_pipeline_dependencies.py to install missing R packages.")
+    print("Note: WARN entries (network probe) do not affect the exit code.")
     return 0 if ok else 1
 
 

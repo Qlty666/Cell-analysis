@@ -2,6 +2,7 @@
 """ML disease classification, feature importance, and SHAP explainability."""
 
 import json
+import logging
 import os
 import sys
 from pathlib import Path
@@ -11,6 +12,7 @@ matplotlib.use("Agg")
 import matplotlib.pyplot as plt
 import numpy as np
 import pandas as pd
+from sklearn.base import BaseEstimator, TransformerMixin
 from sklearn.calibration import calibration_curve
 from sklearn.ensemble import (
     GradientBoostingClassifier,
@@ -32,8 +34,11 @@ from sklearn.model_selection import (
     cross_val_score,
 )
 from sklearn.neural_network import MLPClassifier
+from sklearn.pipeline import Pipeline
 from sklearn.preprocessing import LabelEncoder
 from sklearn.svm import SVC
+
+log = logging.getLogger("ml_analysis")
 
 
 def model_name() -> str:
@@ -84,6 +89,64 @@ def build_model(name: str, random_state: int = 42):
             max_depth=8,
             random_state=random_state,
             n_jobs=-1,
+        )
+
+
+class _LassoRfeSelector(BaseEstimator, TransformerMixin):
+    """LASSO + SVM-RFE selection that is fit inside each CV fold.
+
+    Fitting the selectors on the full matrix before ``cross_val_score`` leaks
+    the held-out samples into feature selection and inflates the metrics.
+    """
+
+    def __init__(self, n_features_cap: int = 15, random_state: int = 42) -> None:
+        self.n_features_cap = n_features_cap
+        self.random_state = random_state
+
+    def fit(self, X, y):
+        X = np.asarray(X, dtype=float)
+        lasso = SelectFromModel(
+            LogisticRegression(
+                penalty="l1",
+                solver="liblinear",
+                C=1.0,
+                max_iter=1000,
+                random_state=self.random_state,
+            )
+        )
+        lasso.fit(X, y)
+        support = lasso.get_support()
+        if support.sum() < 1:
+            support = np.zeros(X.shape[1], dtype=bool)
+            support[: min(5, X.shape[1])] = True
+        self.lasso_support_ = support
+        reduced = X[:, support]
+        if reduced.shape[1] >= 2:
+            n_features = max(2, min(self.n_features_cap, reduced.shape[1]))
+            rfe = RFE(
+                SVC(
+                    kernel="linear",
+                    probability=True,
+                    random_state=self.random_state,
+                ),
+                n_features_to_select=n_features,
+            )
+            rfe.fit(reduced, y)
+            self.rfe_support_ = rfe.get_support()
+        else:
+            self.rfe_support_ = np.ones(reduced.shape[1], dtype=bool)
+        self.n_features_in_ = X.shape[1]
+        return self
+
+    def transform(self, X):
+        X = np.asarray(X, dtype=float)
+        return X[:, self.lasso_support_][:, self.rfe_support_]
+
+    def selected_columns(self, columns) -> list:
+        return list(
+            np.asarray(list(columns), dtype=object)[self.lasso_support_][
+                self.rfe_support_
+            ]
         )
 
 
@@ -168,8 +231,15 @@ def main() -> int:
         le = LabelEncoder()
         y_enc = le.fit_transform(y)
         X = features.drop(columns=["condition"]).fillna(0)
-        if len(set(y_enc)) < 2 or X.shape[0] < 4:
+        if len(set(y_enc)) < 2 or X.shape[0] < 6:
+            status["status"] = "skipped"
             status["reason"] = "insufficient samples or groups for classification"
+            log.warning(
+                "skipping classification: %s samples, %s classes "
+                "(need >= 6 samples and >= 2 classes)",
+                X.shape[0],
+                len(set(y_enc)),
+            )
             (data_dir / "ml_model_summary.json").write_text(
                 json.dumps(status, ensure_ascii=False, indent=2),
                 encoding="utf-8",
@@ -177,38 +247,19 @@ def main() -> int:
             return 0
 
         chosen_model = model_name()
-        fit_X = X
-        selected_columns = list(X.columns)
         feature_selection = "none"
+        estimator = build_model(chosen_model)
         if chosen_model == "lasso_svm":
-            lasso_selector = SelectFromModel(
-                LogisticRegression(
-                    penalty="l1",
-                    solver="liblinear",
-                    C=1.0,
-                    max_iter=1000,
-                    random_state=42,
-                )
+            # Selectors live inside the pipeline, so every CV fold selects
+            # features on its training split only (no leakage).
+            estimator = Pipeline(
+                [
+                    ("select", _LassoRfeSelector(random_state=42)),
+                    ("clf", estimator),
+                ]
             )
-            lasso_selector.fit(X, y_enc)
-            fit_X = lasso_selector.transform(X)
-            selected_columns = X.columns[lasso_selector.get_support()].tolist()
-            if fit_X.shape[1] < 1:
-                selected_columns = list(X.columns[:5])
-                fit_X = X[selected_columns].to_numpy()
-            if fit_X.shape[1] >= 2:
-                n_features = max(2, min(15, fit_X.shape[1]))
-                rfe = RFE(
-                    SVC(kernel="linear", probability=True, random_state=42),
-                    n_features_to_select=n_features,
-                )
-                rfe.fit(fit_X, y_enc)
-                keep = rfe.get_support()
-                fit_X = fit_X[:, keep]
-                selected_columns = np.asarray(selected_columns)[keep].tolist()
             feature_selection = "lasso_svm"
 
-        model = build_model(chosen_model)
         min_class = min(pd.Series(y_enc).value_counts())
         n_splits = max(2, min(5, min_class))
         cv = StratifiedKFold(
@@ -217,37 +268,53 @@ def main() -> int:
             random_state=42,
         )
         scores = cross_val_score(
-            model,
-            fit_X,
+            estimator,
+            X,
             y_enc,
             cv=cv,
             scoring="accuracy",
         )
-        y_pred = cross_val_predict(model, fit_X, y_enc, cv=cv)
+        y_pred = cross_val_predict(estimator, X, y_enc, cv=cv)
         try:
             y_proba = cross_val_predict(
-                model,
-                fit_X,
+                estimator,
+                X,
                 y_enc,
                 cv=cv,
                 method="predict_proba",
             )
-        except Exception:
-            model.fit(fit_X, y_enc)
-            y_proba = model.predict_proba(fit_X)
-        model.fit(fit_X, y_enc)
+        except Exception as exc:
+            log.warning(
+                "cross-validated probabilities unavailable (%s); "
+                "ROC/calibration will be skipped",
+                exc,
+            )
+            y_proba = None
+        estimator.fit(X, y_enc)
+        if chosen_model == "lasso_svm":
+            selector = estimator.named_steps["select"]
+            selected_columns = selector.selected_columns(X.columns)
+            fit_X = selector.transform(X)
+            model = estimator.named_steps["clf"]
+        else:
+            selected_columns = list(X.columns)
+            fit_X = np.asarray(X, dtype=float)
+            model = estimator
 
-        proba = model.predict_proba(fit_X)
         sample_ids = (
             features["sample"]
             if "sample" in features.columns
             else features.index
         )
+        if y_proba is not None:
+            confidence_values = y_proba.max(axis=1)
+        else:
+            confidence_values = np.full(len(y_pred), np.nan)
         confidence = pd.DataFrame({
             "sample": sample_ids,
             "condition": features["condition"],
-            "predicted_condition": le.inverse_transform(model.predict(fit_X)),
-            "confidence": proba.max(axis=1),
+            "predicted_condition": le.inverse_transform(y_pred),
+            "confidence": confidence_values,
         })
         confidence.to_csv(
             data_dir / "fig_43_44_45_ml_classification_results.csv",
@@ -347,51 +414,61 @@ def main() -> int:
         plt.close(fig)
 
         n_classes = len(le.classes_)
-        fig, axes = plt.subplots(1, 2, figsize=(10, 4.5))
-        if n_classes == 2:
-            fpr, tpr, _ = roc_curve(y_enc, y_proba[:, 1])
-            roc_auc = auc(fpr, tpr)
-            precision, recall, _ = precision_recall_curve(y_enc, y_proba[:, 1])
-            ap_score = average_precision_score(y_enc, y_proba[:, 1])
-            axes[0].plot(fpr, tpr, label=f"AUC={roc_auc:.3f}")
-            axes[1].plot(recall, precision, label=f"AP={ap_score:.3f}")
-        else:
+        if y_proba is None:
             roc_auc = 0.0
             ap_score = 0.0
-            for i in range(n_classes):
-                y_bin = (y_enc == i).astype(int)
-                fpr, tpr, _ = roc_curve(y_bin, y_proba[:, i])
-                class_auc = auc(fpr, tpr)
-                roc_auc += class_auc
+            (data_dir / "ml_roc_status.txt").write_text(
+                "ROC/PR curves skipped: cross-validated probabilities unavailable",
+                encoding="utf-8",
+            )
+        else:
+            fig, axes = plt.subplots(1, 2, figsize=(10, 4.5))
+            if n_classes == 2:
+                fpr, tpr, _ = roc_curve(y_enc, y_proba[:, 1])
+                roc_auc = auc(fpr, tpr)
                 precision, recall, _ = precision_recall_curve(
-                    y_bin, y_proba[:, i]
+                    y_enc, y_proba[:, 1]
                 )
-                class_ap = average_precision_score(y_bin, y_proba[:, i])
-                ap_score += class_ap
-                axes[0].plot(
-                    fpr,
-                    tpr,
-                    label=f"{le.classes_[i]} (AUC={class_auc:.3f})",
-                )
-                axes[1].plot(
-                    recall,
-                    precision,
-                    label=f"{le.classes_[i]} (AP={class_ap:.3f})",
-                )
-            roc_auc /= n_classes
-            ap_score /= n_classes
-        axes[0].plot([0, 1], [0, 1], "--", color="grey")
-        axes[0].set_xlabel("False positive rate")
-        axes[0].set_ylabel("True positive rate")
-        axes[0].set_title("ROC curve")
-        axes[0].legend(fontsize=8)
-        axes[1].set_xlabel("Recall")
-        axes[1].set_ylabel("Precision")
-        axes[1].set_title("Precision-recall curve")
-        axes[1].legend(fontsize=8)
-        fig.tight_layout()
-        fig.savefig(fig_dir / "fig_44_ml_roc_pr.png", dpi=150)
-        plt.close(fig)
+                ap_score = average_precision_score(y_enc, y_proba[:, 1])
+                axes[0].plot(fpr, tpr, label=f"AUC={roc_auc:.3f}")
+                axes[1].plot(recall, precision, label=f"AP={ap_score:.3f}")
+            else:
+                roc_auc = 0.0
+                ap_score = 0.0
+                for i in range(n_classes):
+                    y_bin = (y_enc == i).astype(int)
+                    fpr, tpr, _ = roc_curve(y_bin, y_proba[:, i])
+                    class_auc = auc(fpr, tpr)
+                    roc_auc += class_auc
+                    precision, recall, _ = precision_recall_curve(
+                        y_bin, y_proba[:, i]
+                    )
+                    class_ap = average_precision_score(y_bin, y_proba[:, i])
+                    ap_score += class_ap
+                    axes[0].plot(
+                        fpr,
+                        tpr,
+                        label=f"{le.classes_[i]} (AUC={class_auc:.3f})",
+                    )
+                    axes[1].plot(
+                        recall,
+                        precision,
+                        label=f"{le.classes_[i]} (AP={class_ap:.3f})",
+                    )
+                roc_auc /= n_classes
+                ap_score /= n_classes
+            axes[0].plot([0, 1], [0, 1], "--", color="grey")
+            axes[0].set_xlabel("False positive rate")
+            axes[0].set_ylabel("True positive rate")
+            axes[0].set_title("ROC curve")
+            axes[0].legend(fontsize=8)
+            axes[1].set_xlabel("Recall")
+            axes[1].set_ylabel("Precision")
+            axes[1].set_title("Precision-recall curve")
+            axes[1].legend(fontsize=8)
+            fig.tight_layout()
+            fig.savefig(fig_dir / "fig_44_ml_roc_pr.png", dpi=150)
+            plt.close(fig)
 
         fig, ax = plt.subplots(figsize=(6, 4.5))
         ax.boxplot(scores, patch_artist=True)
@@ -404,7 +481,7 @@ def main() -> int:
         fig.savefig(fig_dir / "fig_45_ml_cv_scores.png", dpi=150)
         plt.close(fig)
 
-        if n_classes == 2:
+        if y_proba is not None and n_classes == 2:
             try:
                 n_bins = max(3, min(6, int(np.ceil(np.sqrt(len(y_enc))))))
                 prob_true, prob_pred = calibration_curve(
@@ -466,12 +543,14 @@ def main() -> int:
             encoding="utf-8",
         )
     except Exception as exc:
+        log.exception("ML analysis failed: %s", exc)
         status["status"] = "failed"
         status["reason"] = str(exc)
         (data_dir / "ml_model_summary.json").write_text(
             json.dumps(status, ensure_ascii=False, indent=2),
             encoding="utf-8",
         )
+        return 1
     return 0
 
 

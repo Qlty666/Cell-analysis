@@ -5,6 +5,7 @@ import argparse
 import json
 import os
 import re
+import secrets
 import socket
 import subprocess
 import sys
@@ -19,32 +20,15 @@ from urllib.parse import parse_qs, urlencode, urlparse
 WEB_DIR = Path(__file__).resolve().parent
 APP_ROOT = WEB_DIR.parent
 SCRIPTS_DIR = APP_ROOT / "scripts"
-JOBS = {}
-QUEUE = []
-QUEUE_LOCK = threading.RLock()
 TEMPLATE_DIR = WEB_DIR / "templates"
 STATIC_DIR = WEB_DIR / "static"
 INDEX_PATH = TEMPLATE_DIR / "index.html"
 PAGE_TEMPLATE_PATH = TEMPLATE_DIR / "web_page_template.html"
 GUIDE_TEMPLATE_PATH = TEMPLATE_DIR / "guide_page_template.html"
 ENVIRONMENT_TEMPLATE_PATH = TEMPLATE_DIR / "environment_page_template.html"
-HISTORY_PATH = WEB_DIR / "history.json"
-HISTORY_LOCK = threading.RLock()
 INSTALL_LOG = WEB_DIR / "install_log.txt"
-INSTALL_JOB = {}
-FINISHED_NOTIFICATIONS: list[dict] = []
-NOTIFY_LOCK = threading.Lock()
-TASK_HISTORY_PATH = WEB_DIR / "task_history.json"
-TASK_HISTORY_LOCK = threading.Lock()
-JOB_RECORD_LOCK = threading.Lock()
 
-HEARTBEAT_CLIENTS: dict[str, float] = {}
 HEARTBEAT_LAST_SEEN_AT: float | None = None
-HEARTBEAT_LOCK = threading.Lock()
-HEARTBEAT_INTERVAL_SECONDS = 5
-HEARTBEAT_IDLE_TIMEOUT_SECONDS = 120
-HEARTBEAT_START_GRACE_SECONDS = 20
-HEARTBEAT_SHUTDOWN_GRACE_SECONDS = 5
 
 SRC_DIR = APP_ROOT / "src"
 if str(SRC_DIR) not in sys.path:
@@ -54,6 +38,77 @@ if str(APP_ROOT) not in sys.path:
 if str(SCRIPTS_DIR) not in sys.path:
     sys.path.insert(0, str(SCRIPTS_DIR))
 
+from web_state import (  # noqa: E402
+    JOB_STORE_MAX_RECORDS,
+    JOBS,
+    QUEUE,
+    QUEUE_LOCK,
+    HISTORY_PATH,
+    HISTORY_LOCK,
+    INSTALL_JOB,
+    FINISHED_NOTIFICATIONS,
+    NOTIFY_LOCK,
+    TASK_HISTORY_PATH,
+    TASK_HISTORY_LOCK,
+    JOB_RECORD_LOCK,
+    HEARTBEAT_CLIENTS,
+    HEARTBEAT_LOCK,
+    HEARTBEAT_INTERVAL_SECONDS,
+    HEARTBEAT_IDLE_TIMEOUT_SECONDS,
+    HEARTBEAT_START_GRACE_SECONDS,
+    HEARTBEAT_SHUTDOWN_GRACE_SECONDS,
+    DOCK_JOBS,
+    DOCK_QUEUE,
+    DOCK_QUEUE_LOCK,
+    DOCK_HISTORY_PATH,
+    DOCK_HISTORY_LOCK,
+    MOLECULAR_DOCK_JOBS,
+    MOLECULAR_DOCK_QUEUE,
+    MOLECULAR_DOCK_QUEUE_LOCK,
+    MOLECULAR_DOCK_HISTORY_PATH,
+    MOLECULAR_DOCK_HISTORY_LOCK,
+    FULL_JOBS,
+    FULL_QUEUE,
+    FULL_QUEUE_LOCK,
+    DATASET_DOWNLOAD_JOBS,
+    DATASET_DOWNLOAD_LOCK,
+    VALIDATION_JOB,
+    _has_active_jobs,
+    _prune_job_stores,
+    _read_history_file,
+    _write_json_atomic,
+    _write_history_file,
+    load_history,
+    save_history,
+    load_dock_history,
+    save_dock_history,
+    load_molecular_docking_history,
+    save_molecular_docking_history,
+    _load_task_history,
+    _save_task_history,
+    _spawn_process,
+    _drain_store,
+)
+from web_results import (  # noqa: E402
+    _marker_progress,
+    _current_stage,
+    _log_tail,
+    _stage_from_log,
+    _full_stage_from_log,
+    _full_stage_label,
+    _extract_error,
+    _finished_info,
+    _append_task_history,
+    task_history_data,
+    clear_task_history,
+    _notify_finished,
+    record_job,
+    record_dock_job,
+    record_molecular_docking_job,
+    _full_log_paths,
+    _single_cell_root_from_workdir,
+    _read_json,
+)
 from common.env import require_rscript  # noqa: E402
 
 DOCK_TEMPLATE_PATH = TEMPLATE_DIR / "dock_page_template.html"
@@ -62,17 +117,7 @@ KNOCKOUT_TEMPLATE_PATH = TEMPLATE_DIR / "knockout_page_template.html"
 NETWORK_TEMPLATE_PATH = TEMPLATE_DIR / "network_page_template.html"
 FAERS_TEMPLATE_PATH = TEMPLATE_DIR / "faers_page_template.html"
 VALIDATION_TEMPLATE_PATH = TEMPLATE_DIR / "validation_page_template.html"
-DOCK_JOBS = {}
-DOCK_QUEUE = []
-DOCK_QUEUE_LOCK = threading.RLock()
-DOCK_HISTORY_PATH = WEB_DIR / "dock_history.json"
-DOCK_HISTORY_LOCK = threading.RLock()
 MOLECULAR_DOCK_TEMPLATE_PATH = TEMPLATE_DIR / "molecular_docking_template.html"
-MOLECULAR_DOCK_JOBS = {}
-MOLECULAR_DOCK_QUEUE = []
-MOLECULAR_DOCK_QUEUE_LOCK = threading.RLock()
-MOLECULAR_DOCK_HISTORY_PATH = WEB_DIR / "molecular_docking_history.json"
-MOLECULAR_DOCK_HISTORY_LOCK = threading.RLock()
 FULL_TEMPLATE_PATH = TEMPLATE_DIR / "full_page_template.html"
 RESULTS_TEMPLATE_PATH = TEMPLATE_DIR / "results_manifest_optimized.html"
 RESULT_GUIDE_PATH = APP_ROOT / "docs" / "result_figure_guide.md"
@@ -81,11 +126,6 @@ TASKS_TEMPLATE_PATH = TEMPLATE_DIR / "tasks_template.html"
 DATASET_TEMPLATE_PATH = TEMPLATE_DIR / "datasets_template.html"
 DATASET_SEARCH_DIR = APP_ROOT / "data_cache" / "dataset_search"
 DATASET_DATABASES = ("geo", "biostudies", "atlas")
-DATASET_DOWNLOAD_JOBS = {}
-DATASET_DOWNLOAD_LOCK = threading.Lock()
-FULL_JOBS = {}
-FULL_QUEUE = []
-FULL_QUEUE_LOCK = threading.RLock()
 VALIDATION_ROOT = Path(
     os.environ.get(
         "LIVER_VALIDATION_ROOT",
@@ -95,136 +135,72 @@ VALIDATION_ROOT = Path(
 VALIDATION_REPORT_DIR = VALIDATION_ROOT / "validation"
 VALIDATION_REPORT_PATH = VALIDATION_REPORT_DIR / "validation_summary.json"
 VALIDATION_LOG = WEB_DIR / "validation_run.log"
-VALIDATION_JOB = {"proc": None, "log": None, "handle": None, "started": None}
 MAX_POST_BODY_BYTES = 1_000_000
+MAX_SERVED_FILE_BYTES = 64 * 1024 * 1024
 LOCAL_ORIGIN_HOSTS = {"127.0.0.1", "localhost", "[::1]", "::1"}
-NAV_HTML = (
-    '<div class="topnav">'
-    '<a href="/full">全自动流水线</a>'
-    '<a href="/environment">环境补全</a>'
-    '<a href="/">表达分析</a>'
-    '<a href="/datasets">数据集搜索</a>'
-    '<a href="/dock">虚拟筛选</a>'
-    '<a href="/md-simulation">分子动力学</a>'
-    '<a href="/molecular-docking">分子对接</a>'
-    '<a href="/knockout">虚拟敲除</a>'
-    '<a href="/network">网络毒理学</a>'
-    '<a href="/faers">FAERS</a>'
-    '<a href="/validation">真实数据验证</a>'
-    '<a href="/results">结果清单</a>'
-    '<a href="/guide">使用教程</a>'
-    '<a href="/tasks" class="nav-right">任务进度</a>'
-    '</div>'
-)
-NAV_CSS = (
-    ".topnav{position:sticky;top:0;z-index:100;"
-    "background:#0f172a;padding:12px 28px;box-shadow:0 2px 8px rgba(15,23,42,.35);"
-    "display:flex;gap:18px;align-items:center;flex-wrap:wrap;}"
-    ".topnav a{color:#ffffff;text-decoration:none;font-size:15px;"
-    "font-weight:600;padding:6px 10px;border-radius:6px;"
-    "background:rgba(255,255,255,.08);}"
-    ".topnav a:hover,.topnav a.active{background:#1665c0;color:#fff;}"
-    ".topnav a .nav-count{display:inline-flex;align-items:center;"
-    "justify-content:center;min-width:20px;height:20px;margin-left:6px;"
-    "padding:0 6px;border-radius:999px;background:#f59e0b;color:#fff;"
-    "font-size:12px;font-weight:700;line-height:1;}"
-    ".topnav a .nav-count[hidden]{display:none;}"
-    ".topnav .nav-right{margin-left:auto;}"
-)
+LOOPBACK_HOSTS = {"127.0.0.1", "localhost", "::1", "[::1]"}
 
-ENV_MODULES = {
-    "expression": {
-        "title": "表达分析",
-        "summary": (
-            "单细胞 / bulk RNA-seq / microarray 表达分析依赖，包含 Python 与 R 包"
-            "（Seurat、DESeq2、clusterProfiler 等）。"
-        ),
-        "r_deps": True,
-        "dock_tools": False,
-        "skills": False,
-        "install_bat": "launchers/install_expression_environment.bat",
-        "check_bat": "launchers/check_expression_environment.bat",
-        "note": "Windows 上未找到 Rscript 时会自动下载安装 R。",
-    },
-    "datasets": {
-        "title": "数据集搜索",
-        "summary": "GEO / BioStudies / Expression Atlas 搜索、筛选和下载所需的 Python 依赖。",
-        "r_deps": False,
-        "dock_tools": False,
-        "skills": False,
-        "install_bat": "launchers/install_datasets_environment.bat",
-        "check_bat": None,
-        "note": "自动安装 numpy、pandas、scikit-learn 与 joblib 等搜索/重排依赖。",
-    },
-    "docking": {
-        "title": "虚拟筛选 / 对接",
-        "summary": (
-            "AutoDock Vina 虚拟筛选环境：RDKit、Meeko、Open Babel、"
-            "AutoDockTools、Vina，以及网络毒理学 Cytoscape 推送依赖 "
-            "py4cytoscape。"
-        ),
-        "r_deps": False,
-        "dock_tools": True,
-        "skills": False,
-        "install_bat": "launchers/install_docking_environment.bat",
-        "check_bat": "launchers/check_docking_environment.bat",
-        "note": (
-            "缺失的 AutoDockTools / AutoDock Vina 会下载到 dock/tools/；"
-            "Cytoscape 桌面版需单独安装并用 -R 1234 启动 CyREST。"
-        ),
-    },
-    "molecular-docking": {
-        "title": "独立分子对接",
-        "summary": "独立分子对接板块的 Python 与对接工具依赖，与虚拟筛选工作目录分开。",
-        "r_deps": False,
-        "dock_tools": True,
-        "skills": False,
-        "install_bat": "launchers/install_molecular_docking_environment.bat",
-        "check_bat": "launchers/check_molecular_docking_environment.bat",
-        "note": "复用 dock/tools/ 下的 AutoDockTools 与 Vina。",
-    },
-    "md": {
-        "title": "分子动力学",
-        "summary": "GROMACS 分子动力学准备和模拟所需依赖；补齐对接工具，便于处理蛋白与配体。",
-        "r_deps": False,
-        "dock_tools": True,
-        "skills": False,
-        "install_bat": "launchers/install_md_environment.bat",
-        "check_bat": "launchers/check_md_environment.bat",
-        "note": "GROMACS gmx 需要按系统单独安装。",
-    },
-    "full": {
-        "title": "全自动集成流水线",
-        "summary": "一次补齐表达分析、虚拟筛选、网页版与项目 Codex Skills，适合完整流程使用。",
-        "r_deps": True,
-        "dock_tools": True,
-        "skills": True,
-        "install_bat": "launchers/install_full_environment.bat",
-        "check_bat": "launchers/check_full_environment.bat",
-        "note": "安装耗时较长；也可以先按单个板块补齐。",
-    },
-    "web": {
-        "title": "网页版",
-        "summary": "检查 Python 版本与网页入口；网页本身不自动下载 R 或大型对接工具。",
-        "r_deps": False,
-        "dock_tools": False,
-        "skills": False,
-        "install_bat": "launchers/install_web_environment.bat",
-        "check_bat": None,
-        "note": "主要确认 web/web_ui.py 与本机 Python 可用。",
-    },
-    "skills": {
-        "title": "项目 Codex Skills",
-        "summary": "安装 liver-expression-analysis、liver-virtual-screening、liver-full-pipeline 与 liver-dataset-search。",
-        "r_deps": False,
-        "dock_tools": False,
-        "skills": True,
-        "install_bat": "launchers/install_codex_skills_environment.bat",
-        "check_bat": None,
-        "note": "Skill 只指导 Codex 调用项目脚本，不复制核心分析代码。",
-    },
+# Runtime security state. ``AUTH_TOKEN`` is only created when the server binds a
+# non-loopback host; loopback usage keeps the zero-friction local workflow.
+SERVER_PORT: int | None = None
+AUTH_TOKEN: str | None = None
+
+# Directories the web console may read results from. Anything else must be a
+# workdir already registered by a job started through this console, or an
+# explicit ``--allow-path`` given on the command line.
+DEFAULT_WORKDIR_ROOTS: tuple[Path, ...] = tuple(
+    Path(item).expanduser().resolve()
+    for item in (
+        os.environ.get("LIVER_OUTPUT_ROOT")
+        or str(APP_ROOT.parent / "liver_cancer"),
+        os.environ.get("LIVER_VALIDATION_ROOT")
+        or str(APP_ROOT / "data_cache"),
+        str(APP_ROOT / "dock"),
+        str(APP_ROOT / "molecular_docking"),
+        str(APP_ROOT / "data_cache"),
+    )
+)
+EXTRA_WORKDIR_ROOTS: list[Path] = []
+
+# One table for every result/static file the console serves (previously copied
+# inline in eight request handlers).
+CONTENT_TYPES = {
+    ".png": "image/png",
+    ".jpg": "image/jpeg",
+    ".jpeg": "image/jpeg",
+    ".svg": "image/svg+xml",
+    ".pdf": "application/pdf",
+    ".csv": "text/csv; charset=utf-8",
+    ".tsv": "text/tab-separated-values; charset=utf-8",
+    ".json": "application/json",
+    ".html": "text/html; charset=utf-8",
+    ".css": "text/css; charset=utf-8",
+    ".js": "text/javascript; charset=utf-8",
+    ".md": "text/markdown; charset=utf-8",
+    ".mtx": "text/plain; charset=utf-8",
+    ".xlsx": "application/vnd.openxmlformats-officedocument.spreadsheetml.sheet",
+    ".pdbqt": "chemical/x-pdbqt",
 }
 
+
+def _content_type(suffix: str) -> str:
+    return CONTENT_TYPES.get((suffix or "").lower(), "application/octet-stream")
+from web_data import (  # noqa: E402
+    NAV_HTML,
+    NAV_CSS,
+    ENV_MODULES,
+    FIGURES,
+    FIGURE_NAMES,
+    STYLE_LABELS,
+    SOFTWARE,
+    SINGLE_STAGE_LABELS,
+    DOCK_STAGE_LABELS,
+    MOLECULAR_DOCK_STAGE_LABELS,
+    FULL_STAGE_LABELS,
+    RESULT_IMAGE_SUFFIXES,
+    RESULT_DATA_SUFFIXES,
+    RESULT_FILE_SUFFIXES,
+)
 
 def environment_module_cards() -> str:
     """Return the per-module environment cards for the web board."""
@@ -361,24 +337,83 @@ def _purge_stale_heartbeats(
                 HEARTBEAT_CLIENTS.pop(client_id, None)
 
 
-def _has_active_jobs() -> bool:
+
+
+
+
+
+
+
+
+
+
+def _is_loopback_host(host: str) -> bool:
+    return (host or "").strip().lower() in LOOPBACK_HOSTS
+
+
+def _configure_runtime(host: str, port: int) -> str | None:
+    """Record the bound port and mint an auth token for non-loopback binds."""
+    global SERVER_PORT, AUTH_TOKEN
+    SERVER_PORT = int(port)
+    AUTH_TOKEN = None if _is_loopback_host(host) else secrets.token_urlsafe(24)
+    return AUTH_TOKEN
+
+
+def _known_workdirs() -> set[str]:
+    """Workdirs registered by jobs that this console actually started."""
+    known: set[str] = set()
     for store in (JOBS, DOCK_JOBS, MOLECULAR_DOCK_JOBS, FULL_JOBS):
-        for info in store.values():
-            proc = info.get("proc")
-            if proc is None:
-                if info.get("queued"):
-                    return True
-                continue
-            exit_code = proc.poll()
-            if exit_code is None or info.get("paused") or exit_code == 98:
-                return True
-    with DATASET_DOWNLOAD_LOCK:
-        if any(info.get("running") for info in DATASET_DOWNLOAD_JOBS.values()):
-            return True
-    for proc in (VALIDATION_JOB.get("proc"), INSTALL_JOB.get("proc")):
-        if proc is not None and proc.poll() is None:
-            return True
-    return False
+        for info in list(store.values()):
+            for key in ("out", "workdir"):
+                value = info.get(key)
+                if value:
+                    try:
+                        known.add(str(Path(value).resolve()))
+                    except (OSError, ValueError):
+                        continue
+    return known
+
+
+def _workdir_allowed(value: str | Path) -> Path | None:
+    """Return the resolved workdir when it is inside an allowed root, else None."""
+    try:
+        candidate = Path(value).expanduser().resolve()
+    except (OSError, RuntimeError, ValueError):
+        return None
+    if str(candidate) in _known_workdirs():
+        return candidate
+    for root in (*DEFAULT_WORKDIR_ROOTS, *EXTRA_WORKDIR_ROOTS):
+        try:
+            if candidate == root or candidate.is_relative_to(root):
+                return candidate
+        except (OSError, ValueError):
+            continue
+    return None
+
+
+def _request_token(handler) -> str:
+    headers = getattr(handler, "headers", None)
+    if headers is not None:
+        header = (headers.get("X-Auth-Token") or "").strip()
+        if header:
+            return header
+        cookie = headers.get("Cookie") or ""
+        for chunk in cookie.split(";"):
+            name, _, value = chunk.strip().partition("=")
+            if name == "liverbio_token" and value:
+                return value.strip()
+    try:
+        query = parse_qs(urlparse(handler.path).query)
+    except (AttributeError, ValueError):
+        return ""
+    return (query.get("token", [""])[0] or "").strip()
+
+
+def _request_authorized(handler) -> bool:
+    """Loopback requests are unauthenticated; remote binds require the token."""
+    if AUTH_TOKEN is None:
+        return True
+    return secrets.compare_digest(_request_token(handler), AUTH_TOKEN)
 
 
 def _origin_allowed(origin: str) -> bool:
@@ -389,10 +424,13 @@ def _origin_allowed(origin: str) -> bool:
         parts = urlparse(origin)
     except Exception:
         return False
-    return (
-        parts.scheme.lower() in ("http", "https")
-        and (parts.hostname or "").lower() in LOCAL_ORIGIN_HOSTS
-    )
+    if parts.scheme.lower() not in ("http", "https"):
+        return False
+    if (parts.hostname or "").lower() not in LOCAL_ORIGIN_HOSTS:
+        return False
+    if SERVER_PORT is not None and parts.port is not None and parts.port != SERVER_PORT:
+        return False
+    return True
 
 
 def _fetch_site_allowed(site: str) -> bool:
@@ -411,9 +449,13 @@ def _run_idle_shutdown_monitor(
     started_at: float,
 ) -> None:
     idle_since: float | None = None
+    last_prune = time.monotonic()
     while True:
         now = time.monotonic()
         _purge_stale_heartbeats(now)
+        if now - last_prune >= 60.0:
+            _prune_job_stores()
+            last_prune = now
         if _heartbeat_client_ids() or _has_active_jobs():
             idle_since = None
         else:
@@ -481,92 +523,6 @@ def _cleanup_stale_web_ui(host: str, port: int) -> bool:
         return True
     print(f"Port {port} is in use; checking for stale web UI process...")
     return _stop_stale_web_ui(host, port)
-
-
-FIGURES = [
-    {"file": "fig_01_qc_raw_violin.png", "label": "QC 小提琴图（原始）"},
-    {"file": "fig_01_qc_filtered_violin.png", "label": "QC 小提琴图（过滤后）"},
-    {"file": "fig_48_qc_pvalue_comparison.png", "label": "QC 质控差异度 P 值"},
-    {"file": "fig_49_qc_umi_feature_correlation.png", "label": "UMI 与基因数关系 QC 图"},
-    {"file": "fig_02_doublet_scores.png", "label": "双细胞得分图"},
-    {"file": "fig_03_umap_clusters.png", "label": "UMAP 聚类图"},
-    {"file": "fig_04_umap_condition.png", "label": "UMAP 分组图"},
-    {"file": "fig_05_umap_annotation.png", "label": "UMAP 注释图"},
-    {"file": "fig_06_dotplot_markers.png", "label": "Marker 基因 DotPlot"},
-    {"file": "fig_07_annotation_confusion_heatmap.png", "label": "注释混淆矩阵热图"},
-    {"file": "fig_08_volcano.png", "label": "差异表达图", "styles": ["volcano", "maplot"]},
-    {"file": "fig_09_deg_heatmap.png", "label": "Top DEG 热图"},
-    {"file": "fig_09_deg_horizontal_violin.png", "label": "Top DEG 横向小提琴图（P 值）"},
-    {"file": "fig_10_go_up.png", "label": "GO BP 富集图（上调）", "styles": ["dotplot", "barplot", "cnetplot"]},
-    {"file": "fig_11_go_down.png", "label": "GO BP 富集图（下调）", "styles": ["dotplot", "barplot", "cnetplot"]},
-    {"file": "fig_12_kegg_up.png", "label": "KEGG 富集图（上调）", "styles": ["dotplot", "barplot", "cnetplot"]},
-    {"file": "fig_13_kegg_down.png", "label": "KEGG 富集图（下调）", "styles": ["dotplot", "barplot", "cnetplot"]},
-    {"file": "fig_14_pca.png", "label": "PCA 分组图"},
-    {"file": "fig_15_elbow.png", "label": "主成分 Elbow 图"},
-    {"file": "fig_16_featureplot_markers.png", "label": "Marker 基因 FeaturePlot"},
-    {"file": "fig_17_marker_violin.png", "label": "Marker 基因小提琴图"},
-    {"file": "fig_50_marker_ridgeplot.png", "label": "Marker 基因峰峦图"},
-    {"file": "fig_51_marker_stacked_violin.png", "label": "Marker 基因堆叠小提琴图"},
-    {"file": "fig_18_celltype_proportion.png", "label": "细胞类型比例堆叠图"},
-    {"file": "fig_19_condition_proportion.png", "label": "分组构成比例图"},
-    {"file": "fig_20_gsea_go.png", "label": "GSEA GO BP 富集图", "styles": ["ridgeplot", "gseaplot2"]},
-    {"file": "fig_21_gsea_kegg.png", "label": "GSEA KEGG 富集图", "styles": ["ridgeplot", "gseaplot2"]},
-    {"file": "fig_22_go_network.png", "label": "GO BP 通路网络图（Top5 核心 + 5 延伸）", "styles": ["cnetplot", "emapplot"]},
-    {"file": "fig_23_kegg_network.png", "label": "KEGG 通路网络图（Top5 核心 + 5 延伸）", "styles": ["cnetplot", "emapplot"]},
-    {"file": "fig_46_go_top5.png", "label": "GO BP 筛选后 Top5", "styles": ["dotplot", "barplot", "cnetplot", "emapplot"]},
-    {"file": "fig_47_kegg_top5.png", "label": "KEGG 筛选后 Top5", "styles": ["dotplot", "barplot", "cnetplot", "emapplot"]},
-    {"file": "fig_24_ml_feature_importance.png", "label": "ML 特征重要性图"},
-    {"file": "fig_25_ml_shap.png", "label": "SHAP 可解释性图"},
-    {"file": "fig_26_cellcycle_umap.png", "label": "细胞周期 UMAP"},
-    {"file": "fig_27_cellcycle_proportion.png", "label": "细胞周期比例图"},
-    {"file": "fig_28_umap_sample.png", "label": "UMAP 按样本"},
-    {"file": "fig_29_doublet_rate_sample.png", "label": "样本双细胞率图"},
-    {"file": "fig_30_sample_proportion.png", "label": "样本细胞类型比例图"},
-    {"file": "fig_31_cluster_marker_heatmap.png", "label": "聚类 Marker 热图"},
-    {"file": "fig_32_cluster_marker_dotplot.png", "label": "聚类 Marker DotPlot"},
-    {"file": "fig_33_signature_scores_umap.png", "label": "功能签名 UMAP"},
-    {"file": "fig_34_signature_scores_boxplot.png", "label": "功能签名箱线图"},
-    {"file": "fig_35_celltype_abundance_effect.png", "label": "细胞类型丰度变化图"},
-    {"file": "fig_36_cnv_heatmap.png", "label": "推断 CNV 热图"},
-    {"file": "fig_37_singler_umap.png", "label": "SingleR 注释 UMAP"},
-    {"file": "fig_38_singler_confusion_heatmap.png", "label": "SingleR 混淆矩阵热图"},
-    {"file": "fig_39_trajectory_umap.png", "label": "拟时序轨迹图"},
-    {"file": "fig_40_cellchat_network.png", "label": "CellChat 通讯网络图"},
-    {"file": "fig_41_cellchat_heatmap.png", "label": "CellChat 通讯热图"},
-    {"file": "fig_42_cellchat_bubble.png", "label": "CellChat 配体受体气泡图"},
-    {"file": "fig_43_ml_confusion_matrix.png", "label": "ML 混淆矩阵"},
-    {"file": "fig_44_ml_roc_pr.png", "label": "ML ROC 与 PR 曲线"},
-    {"file": "fig_45_ml_cv_scores.png", "label": "ML 交叉验证得分图"},
-    {"file": "fig_45_ml_calibration_curve.png", "label": "ML 校准曲线"},
-]
-FIGURE_NAMES = [item["file"] for item in FIGURES]
-
-STYLE_LABELS = {
-    "volcano": "火山图",
-    "maplot": "MA 图",
-    "dotplot": "气泡图",
-    "barplot": "柱状图",
-    "cnetplot": "通路网络图",
-    "ridgeplot": "峰峦图",
-    "gseaplot2": "GSEA 富集曲线",
-    "emapplot": "富集关系网络图",
-}
-
-SOFTWARE = [
-    {"name": "R", "url": "https://www.r-project.org/", "kind": "software"},
-    {"name": "Python", "url": "https://www.python.org/", "kind": "software"},
-    {"name": "Seurat", "url": "https://satijalab.org/seurat/", "kind": "package", "install": "install.packages('Seurat')"},
-    {"name": "scDblFinder", "url": "https://bioconductor.org/packages/scDblFinder/", "kind": "package", "install": "BiocManager::install('scDblFinder')"},
-    {"name": "SingleCellExperiment", "url": "https://bioconductor.org/packages/SingleCellExperiment/", "kind": "package", "install": "BiocManager::install('SingleCellExperiment')"},
-    {"name": "clusterProfiler", "url": "https://bioconductor.org/packages/clusterProfiler/", "kind": "package", "install": "BiocManager::install('clusterProfiler')"},
-    {"name": "enrichplot", "url": "https://bioconductor.org/packages/enrichplot/", "kind": "package", "install": "BiocManager::install('enrichplot')"},
-    {"name": "BiocParallel", "url": "https://bioconductor.org/packages/BiocParallel/", "kind": "package", "install": "BiocManager::install('BiocParallel')"},
-    {"name": "org.Hs.eg.db", "url": "https://bioconductor.org/packages/org.Hs.eg.db/", "kind": "package", "install": "BiocManager::install('org.Hs.eg.db')"},
-    {"name": "org.Mm.eg.db", "url": "https://bioconductor.org/packages/org.Mm.eg.db/", "kind": "package", "install": "BiocManager::install('org.Mm.eg.db')"},
-    {"name": "DESeq2", "url": "https://bioconductor.org/packages/DESeq2/", "kind": "package", "install": "BiocManager::install('DESeq2')"},
-    {"name": "data.table", "url": "https://rdatatable.gitlab.io/data.table/", "kind": "package", "install": "install.packages('data.table')"},
-    {"name": "ggplot2", "url": "https://ggplot2.tidyverse.org/", "kind": "package", "install": "install.packages('ggplot2')"},
-]
 
 
 def validate_accession(accession: str) -> str:
@@ -713,69 +669,22 @@ def start_job(
     }
 
 
+
+
+
+
 def _start_process(info: dict) -> None:
-    log_handle = info["log"].open("w", encoding="utf-8", errors="replace")
-    proc = subprocess.Popen(
-        info["cmd"],
-        cwd=APP_ROOT,
-        env=info["env"],
-        stdout=log_handle,
-        stderr=subprocess.STDOUT,
-        text=True,
-        encoding="utf-8",
-        errors="replace",
-    )
-    info["proc"] = proc
-    info["queued"] = False
-    info["started"] = time.time()
+    _spawn_process(info)
 
 
 def _drain_queue() -> None:
-    with QUEUE_LOCK:
-        for info in QUEUE:
-            if info.get("proc") is None:
-                _start_process(info)
-                break
+    _drain_store(QUEUE, QUEUE_LOCK)
 
 
-def load_history() -> list[dict]:
-    with HISTORY_LOCK:
-        if not HISTORY_PATH.exists():
-            return []
-        try:
-            return json.loads(HISTORY_PATH.read_text(encoding="utf-8"))
-        except Exception:
-            return []
 
 
-def save_history(records: list[dict]) -> None:
-    with HISTORY_LOCK:
-        HISTORY_PATH.write_text(
-            json.dumps(records, ensure_ascii=False, indent=2),
-            encoding="utf-8",
-        )
 
 
-def record_job(info: dict, ok: bool) -> None:
-    fig_dir = info["out"] / "results" / "figures"
-    figure_count = 0
-    if fig_dir.exists():
-        figure_count = len(list(fig_dir.rglob("*.png")))
-    record = {
-        "job": info["log"].stem.replace("web_", ""),
-        "accession": info["accession"],
-        "output": str(info["out"]),
-        "species": info["species"],
-        "status": "success" if ok else "failed",
-        "started": info["started"],
-        "finished": time.time(),
-        "figures": figure_count,
-        "report": str(info["out"] / "results" / "result_report.html"),
-    }
-    with HISTORY_LOCK:
-        records = load_history()
-        records.insert(0, record)
-        save_history(records)
 
 
 def resume_job(job_id: str) -> dict:
@@ -1457,16 +1366,27 @@ def dataset_search_request(data: dict) -> dict:
         model_file = Path(model_value).expanduser()
         if not model_file.is_file():
             raise ValueError(f"模型文件不存在：{model_file}")
+        # Only load models produced by this console. joblib/pickle deserializes
+        # arbitrary code, so an unconstrained path is remote code execution.
+        allowed_model = _model_path_allowed(model_file)
+        if allowed_model is None:
+            raise ValueError(
+                "模型文件必须位于数据检索缓存目录内：" + str(DATASET_SEARCH_DIR)
+            )
         from dataset_search_ml import load_model, rerank
 
+        try:
+            model = load_model(allowed_model, allow_root=DATASET_SEARCH_DIR)
+        except TypeError:  # older signature without the allowlist argument
+            model = load_model(allowed_model)
         rows = rerank(
             rows,
             disease,
             research_direction,
-            model=load_model(model_file),
+            model=model,
         )
         model_applied = True
-        model_path = str(model_file)
+        model_path = str(allowed_model)
 
     DATASET_SEARCH_DIR.mkdir(parents=True, exist_ok=True)
     csv_path, json_path = sd.write_outputs(rows, DATASET_SEARCH_DIR)
@@ -1574,10 +1494,7 @@ def _run_dataset_download(
                     log=log,
                 )
                 info["results"] = results
-                (DATASET_SEARCH_DIR / "download_results.json").write_text(
-                    json.dumps(results, ensure_ascii=False, indent=2),
-                    encoding="utf-8",
-                )
+                _write_json_atomic(DATASET_SEARCH_DIR / "download_results.json", results)
                 log_handle.write("download results:\n")
                 log_handle.write(
                     json.dumps(results, ensure_ascii=False, indent=2)
@@ -1616,6 +1533,18 @@ def dataset_file_path(name: str) -> Path | None:
     if target.parent != DATASET_SEARCH_DIR.resolve() or not target.is_file():
         return None
     return target
+
+
+def _model_path_allowed(path: Path) -> Path | None:
+    """Only accept ML model files inside the dataset-search cache directory."""
+    try:
+        candidate = path.expanduser().resolve()
+    except (OSError, ValueError):
+        return None
+    root = DATASET_SEARCH_DIR.resolve()
+    if candidate.is_file() and candidate.is_relative_to(root):
+        return candidate
+    return None
 
 
 def dataset_full_pipeline_url(row: dict) -> str:
@@ -1738,28 +1667,11 @@ def start_dock_job(data: dict) -> dict:
 
 
 def _start_dock_process(info: dict) -> None:
-    log_handle = info["log"].open("w", encoding="utf-8", errors="replace")
-    proc = subprocess.Popen(
-        info["cmd"],
-        cwd=APP_ROOT,
-        env=info["env"],
-        stdout=log_handle,
-        stderr=subprocess.STDOUT,
-        text=True,
-        encoding="utf-8",
-        errors="replace",
-    )
-    info["proc"] = proc
-    info["queued"] = False
-    info["started"] = time.time()
+    _spawn_process(info)
 
 
 def _drain_dock_queue() -> None:
-    with DOCK_QUEUE_LOCK:
-        for info in DOCK_QUEUE:
-            if info.get("proc") is None:
-                _start_dock_process(info)
-                break
+    _drain_store(DOCK_QUEUE, DOCK_QUEUE_LOCK)
 
 
 def _dock_status(info: dict) -> dict:
@@ -1898,28 +1810,11 @@ def start_molecular_docking_job(data: dict) -> dict:
 
 
 def _start_molecular_docking_process(info: dict) -> None:
-    log_handle = info["log"].open("w", encoding="utf-8", errors="replace")
-    proc = subprocess.Popen(
-        info["cmd"],
-        cwd=APP_ROOT,
-        env=info["env"],
-        stdout=log_handle,
-        stderr=subprocess.STDOUT,
-        text=True,
-        encoding="utf-8",
-        errors="replace",
-    )
-    info["proc"] = proc
-    info["queued"] = False
-    info["started"] = time.time()
+    _spawn_process(info)
 
 
 def _drain_molecular_docking_queue() -> None:
-    with MOLECULAR_DOCK_QUEUE_LOCK:
-        for info in MOLECULAR_DOCK_QUEUE:
-            if info.get("proc") is None:
-                _start_molecular_docking_process(info)
-                break
+    _drain_store(MOLECULAR_DOCK_QUEUE, MOLECULAR_DOCK_QUEUE_LOCK)
 
 
 def _molecular_docking_status(info: dict) -> dict:
@@ -2200,28 +2095,11 @@ def start_full_job(data: dict) -> dict:
 
 
 def _start_full_process(info: dict) -> None:
-    log_handle = info["log"].open("w", encoding="utf-8", errors="replace")
-    proc = subprocess.Popen(
-        info["cmd"],
-        cwd=APP_ROOT,
-        env=info["env"],
-        stdout=log_handle,
-        stderr=subprocess.STDOUT,
-        text=True,
-        encoding="utf-8",
-        errors="replace",
-    )
-    info["proc"] = proc
-    info["queued"] = False
-    info["started"] = time.time()
+    _spawn_process(info)
 
 
 def _drain_full_queue() -> None:
-    with FULL_QUEUE_LOCK:
-        for info in FULL_QUEUE:
-            if info.get("proc") is None:
-                _start_full_process(info)
-                break
+    _drain_store(FULL_QUEUE, FULL_QUEUE_LOCK)
 
 
 def _full_status(info: dict) -> dict:
@@ -2363,254 +2241,34 @@ def _single_status(info: dict) -> dict:
     return {"running": True, "ok": False, "queued": False, "paused": False, "stage": "", "error": ""}
 
 
-SINGLE_STAGE_LABELS = {
-    "01": "数据加载",
-    "02": "QC 过滤",
-    "03": "双细胞检测",
-    "04": "聚类",
-    "05": "细胞注释",
-    "06": "差异表达",
-    "07": "富集分析",
-    "08": "发表级分析",
-    "09": "汇总输出",
-}
-
-DOCK_STAGE_LABELS = {
-    "01": "受体准备",
-    "02": "配体准备",
-    "03": "分子对接",
-    "04": "结果分析",
-    "05": "精修重对接",
-    "06": "HTML 报告",
-}
-
-MOLECULAR_DOCK_STAGE_LABELS = DOCK_STAGE_LABELS
-
-FULL_STAGE_LABELS = {
-    "01": "表达分析",
-    "02": "关键基因",
-    "03": "证据富集",
-    "04": "敲除输入",
-    "05": "虚拟敲除",
-    "06": "分子对接",
-    "07": "CADD 下游",
-    "08": "网络毒理学",
-    "09": "FAERS",
-    "10": "细胞反馈",
-    "11": "集成报告",
-}
 
 
-def _marker_progress(marker_dir: Path, total: int) -> int:
-    if not marker_dir.exists() or total <= 0:
-        return 0
-    try:
-        done = len(list(marker_dir.glob("*.done")))
-    except OSError:
-        return 0
-    return max(0, min(100, int(round(done * 100 / total))))
 
 
-def _current_stage(marker_dir: Path, labels: dict) -> str:
-    if not marker_dir.exists():
-        return ""
-    try:
-        done = [path.stem for path in marker_dir.glob("*.done")]
-    except OSError:
-        return ""
-    if not done:
-        return ""
-    codes = sorted(code[:2] for code in done)
-    return labels.get(codes[-1], "")
 
 
-def _log_tail(path: Path, limit: int = 1200) -> str:
-    if not path.exists():
-        return ""
-    try:
-        text = path.read_text(encoding="utf-8", errors="replace")
-        return text[-limit:]
-    except OSError:
-        return ""
 
 
-def _stage_from_log(log_text: str, labels: dict) -> str:
-    if not log_text:
-        return ""
-    matches = []
-    for pattern in [
-        r"start stage:\s*(\d+)[_\s-][A-Za-z0-9_-]+",
-        r"=== stage (\d+) [A-Za-z0-9_-]+ ===",
-    ]:
-        matches.extend(re.finditer(pattern, log_text))
-    if not matches:
-        return ""
-    return labels.get(matches[-1].group(1), "")
 
 
-def _full_stage_from_log(
-    log_text: str,
-    full_labels: dict,
-    single_labels: dict,
-) -> str:
-    full_matches = re.findall(
-        r"=== stage (\d+) [A-Za-z0-9_-]+ ===",
-        log_text,
-    )
-    if full_matches:
-        return full_labels.get(full_matches[-1], "")
-    single_matches = re.findall(
-        r"start stage:\s*(\d+)[_\s-][A-Za-z0-9_-]+",
-        log_text,
-    )
-    if single_matches:
-        single_label = single_labels.get(single_matches[-1], "")
-        return "表达分析" if single_label else "表达分析"
-    return ""
 
 
-def _full_log_paths(info: dict) -> list[Path]:
-    paths = [Path(info["log"])]
-    roots: list[Path] = []
-    output = info.get("output")
-    if output:
-        roots.append(Path(output).expanduser().resolve())
-    context_root = _single_cell_root_from_workdir(Path(info["workdir"]))
-    if context_root is not None:
-        roots.append(context_root)
-    for root in roots:
-        paths.append(root / "logs" / "pipeline_r.log")
-    return paths
 
 
-def _full_stage_label(info: dict, marker_dir: Path) -> str:
-    log_text = "\n".join(
-        _log_tail(path, 20000) for path in _full_log_paths(info)
-    ).strip()
-    stage = _full_stage_from_log(
-        log_text,
-        FULL_STAGE_LABELS,
-        SINGLE_STAGE_LABELS,
-    )
-    if stage:
-        return stage
-    return _current_stage(marker_dir, FULL_STAGE_LABELS) or ""
 
 
-def _extract_error(log_text: str, limit: int = 700) -> str:
-    lines = [line.strip() for line in log_text.splitlines() if line.strip()]
-    if not lines:
-        return ""
-    keywords = ("error", "traceback", "exception", "failed", "fatal", "cannot", "missing")
-    error_lines = [
-        line for line in lines
-        if any(keyword in line.lower() for keyword in keywords)
-    ]
-    tail = "\n".join(error_lines[-6:]) if error_lines else "\n".join(lines[-8:])
-    return tail[-limit:]
 
 
-def _finished_info(
-    marker_dir: Path,
-    labels: dict,
-    log_paths: list[Path],
-    paused: bool,
-    single_cell_labels: dict | None = None,
-) -> tuple[str, str]:
-    log_text = "\n".join(_log_tail(path, 20000) for path in log_paths).strip()
-    stage = ""
-    if single_cell_labels is not None:
-        stage = _full_stage_from_log(log_text, labels, single_cell_labels)
-        if not stage:
-            stage = _stage_from_log(log_text, single_cell_labels)
-            if stage:
-                stage = "表达分析"
-    else:
-        stage = _stage_from_log(log_text, labels)
-    stage = stage or _current_stage(marker_dir, labels) or "未知"
-    if paused:
-        error = "任务已暂停"
-    else:
-        error = _extract_error(log_text) or "进程已退出，请查看日志"
-    return stage, error
 
 
-def _load_task_history() -> list[dict]:
-    if not TASK_HISTORY_PATH.exists():
-        return []
-    try:
-        data = json.loads(TASK_HISTORY_PATH.read_text(encoding="utf-8"))
-        return data if isinstance(data, list) else []
-    except Exception:
-        return []
 
 
-def _save_task_history(records: list[dict]) -> None:
-    TASK_HISTORY_PATH.write_text(
-        json.dumps(records, ensure_ascii=False, indent=2),
-        encoding="utf-8",
-    )
 
 
-def _append_task_history(item: dict) -> None:
-    with TASK_HISTORY_LOCK:
-        records = _load_task_history()
-        records.insert(0, item)
-        if len(records) > 100:
-            del records[100:]
-        _save_task_history(records)
 
 
-def task_history_data() -> dict:
-    with TASK_HISTORY_LOCK:
-        records = _load_task_history()
-    return {"history": records, "count": len(records)}
 
 
-def clear_task_history() -> dict:
-    with TASK_HISTORY_LOCK:
-        try:
-            _save_task_history([])
-            return {"cleared": True, "count": 0}
-        except Exception as exc:
-            return {"cleared": False, "error": str(exc)}
-
-
-def _notify_finished(
-    info: dict,
-    page: str,
-    page_label: str,
-    title: str,
-    status: str,
-    stage: str,
-    error: str,
-    exit_code: int | None = None,
-) -> None:
-    if info.get("notified"):
-        return
-    info["notified"] = True
-    item = {
-        "page": page,
-        "page_label": page_label,
-        "job": info.get("job_id", ""),
-        "title": title,
-        "status": status,
-        "stage": stage,
-        "error": error,
-        "exit_code": exit_code,
-        "finished_at": time.time(),
-    }
-    started_at = float(info.get("started") or time.time())
-    item["started_at"] = started_at
-    item["elapsed"] = max(0, int(time.time() - started_at))
-    with NOTIFY_LOCK:
-        FINISHED_NOTIFICATIONS.append(item)
-        if len(FINISHED_NOTIFICATIONS) > 50:
-            del FINISHED_NOTIFICATIONS[:-50]
-    try:
-        _append_task_history(item)
-    except Exception:
-        pass
 
 
 def running_tasks_data(include_logs: bool = True) -> dict:
@@ -2806,19 +2464,8 @@ def running_task_counts() -> dict:
     }
 
 
-def _read_json(path: Path) -> dict:
-    if not path.exists():
-        return {}
-    try:
-        data = json.loads(path.read_text(encoding="utf-8"))
-        return data if isinstance(data, dict) else {}
-    except Exception:
-        return {}
 
 
-RESULT_IMAGE_SUFFIXES = {".png", ".jpg", ".jpeg", ".svg"}
-RESULT_DATA_SUFFIXES = {".csv", ".xlsx", ".rds", ".xgmml"}
-RESULT_FILE_SUFFIXES = RESULT_IMAGE_SUFFIXES | RESULT_DATA_SUFFIXES
 
 
 def _is_result_file(path: Path) -> bool:
@@ -2845,14 +2492,6 @@ def _list_result_images(root: Path) -> list[str]:
     )
 
 
-def _single_cell_root_from_workdir(workdir: Path) -> Path | None:
-    context = _read_json(
-        workdir / "outputs" / "integration" / ".stages" / "run_context.json"
-    )
-    value = context.get("single_cell_root")
-    if not value:
-        return None
-    return Path(str(value)).expanduser().resolve()
 
 
 def _full_result_files(workdir: Path) -> list[str]:
@@ -3197,40 +2836,10 @@ def validation_job_status() -> dict:
     }
 
 
-def load_dock_history() -> list[dict]:
-    with DOCK_HISTORY_LOCK:
-        if not DOCK_HISTORY_PATH.exists():
-            return []
-        try:
-            return json.loads(DOCK_HISTORY_PATH.read_text(encoding="utf-8"))
-        except Exception:
-            return []
 
 
-def save_dock_history(records: list[dict]) -> None:
-    with DOCK_HISTORY_LOCK:
-        DOCK_HISTORY_PATH.write_text(
-            json.dumps(records, ensure_ascii=False, indent=2),
-            encoding="utf-8",
-        )
 
 
-def record_dock_job(info: dict, ok: bool) -> None:
-    with DOCK_HISTORY_LOCK:
-        records = load_dock_history()
-        records.insert(
-            0,
-            {
-                "job": info["log"].stem.replace("web_dock_", ""),
-                "stage": info.get("stage", ""),
-                "workdir": str(info["workdir"]),
-                "output": str(info["output_dir"]),
-                "status": "success" if ok else "failed",
-                "started": info["started"],
-                "finished": time.time(),
-            },
-        )
-        save_dock_history(records)
 
 
 def dock_results(info: dict) -> dict:
@@ -3313,40 +2922,10 @@ def _dock_file_path(info: dict, name: str):
     return None
 
 
-def load_molecular_docking_history() -> list[dict]:
-    with MOLECULAR_DOCK_HISTORY_LOCK:
-        if not MOLECULAR_DOCK_HISTORY_PATH.exists():
-            return []
-        try:
-            return json.loads(MOLECULAR_DOCK_HISTORY_PATH.read_text(encoding="utf-8"))
-        except Exception:
-            return []
 
 
-def save_molecular_docking_history(records: list[dict]) -> None:
-    with MOLECULAR_DOCK_HISTORY_LOCK:
-        MOLECULAR_DOCK_HISTORY_PATH.write_text(
-            json.dumps(records, ensure_ascii=False, indent=2),
-            encoding="utf-8",
-        )
 
 
-def record_molecular_docking_job(info: dict, ok: bool) -> None:
-    with MOLECULAR_DOCK_HISTORY_LOCK:
-        records = load_molecular_docking_history()
-        records.insert(
-            0,
-            {
-                "job": info["log"].stem.replace("molecular_docking_", ""),
-                "stage": info.get("stage", ""),
-                "workdir": str(info["workdir"]),
-                "output": str(info["output_dir"]),
-                "status": "success" if ok else "failed",
-                "started": info["started"],
-                "finished": time.time(),
-            },
-        )
-        save_molecular_docking_history(records)
 
 
 def molecular_docking_results(info: dict) -> dict:
@@ -3793,8 +3372,31 @@ class Handler(BaseHTTPRequestHandler):
         self.send_header("Content-Type", content_type)
         self.send_header("Content-Length", str(len(body)))
         self.send_header("Cache-Control", "no-store, no-cache, must-revalidate")
+        self.send_header("X-Content-Type-Options", "nosniff")
+        self.send_header("Referrer-Policy", "no-referrer")
+        if AUTH_TOKEN is not None and code == 200 and _request_authorized(self):
+            self.send_header(
+                "Set-Cookie",
+                f"liverbio_token={AUTH_TOKEN}; Path=/; SameSite=Strict; HttpOnly",
+            )
         self.end_headers()
         self.wfile.write(body)
+
+    def _send_file(self, target: Path, content_type: str) -> None:
+        """Serve a result file, refusing oversized payloads."""
+        try:
+            if target.stat().st_size > MAX_SERVED_FILE_BYTES:
+                self._send(413, b"file too large to serve", "text/plain; charset=utf-8")
+                return
+            body = target.read_bytes()
+        except OSError as exc:
+            self._send(
+                404,
+                f"file not readable: {exc}".encode("utf-8"),
+                "text/plain; charset=utf-8",
+            )
+            return
+        self._send(200, body, content_type)
 
     def _handle_heartbeat(self, params: dict) -> None:
         client_id = _first(params, "client")
@@ -3807,6 +3409,9 @@ class Handler(BaseHTTPRequestHandler):
 
     def do_GET(self):
         parsed = urlparse(self.path)
+        if not _request_authorized(self):
+            self._send(403, b"unauthorized: invalid or missing token", "text/plain; charset=utf-8")
+            return
         if not _fetch_site_allowed(self.headers.get("Sec-Fetch-Site", "")):
             self._send(403, b"cross-site request blocked", "text/plain; charset=utf-8")
             return
@@ -3890,12 +3495,10 @@ class Handler(BaseHTTPRequestHandler):
                 self._send(404, b"job not found", "text/plain; charset=utf-8")
                 return
             parts = []
-            if info["log"].exists():
-                parts.append(info["log"].read_text(encoding="utf-8", errors="replace"))
+            parts.append(_log_tail(info["log"], limit=20000))
             r_log = info["out"] / "logs" / "pipeline_r.log"
-            if r_log.exists():
-                parts.append(r_log.read_text(encoding="utf-8", errors="replace"))
-            text = "\n".join(parts)
+            parts.append(_log_tail(r_log, limit=20000))
+            text = "\n".join(part for part in parts if part)
             self._send(200, text.encode("utf-8"), "text/plain; charset=utf-8")
             return
         if parsed.path == "/status":
@@ -3931,28 +3534,22 @@ class Handler(BaseHTTPRequestHandler):
                 self._send(404, b"job not found", "text/plain; charset=utf-8")
                 return
             fig_dir = (info["out"] / "results" / "figures").resolve()
-            target = next(
-                (p for p in fig_dir.rglob(name) if p.is_file()),
-                None,
-            )
-            if target is None:
+            candidate = (fig_dir / name).resolve()
+            if not candidate.is_relative_to(fig_dir) or not candidate.is_file():
                 self._send(404, b"figure not found", "text/plain; charset=utf-8")
                 return
+            target = candidate
             suffix = target.suffix.lower()
-            content_type = {
-                ".png": "image/png",
-                ".jpg": "image/jpeg",
-                ".jpeg": "image/jpeg",
-                ".svg": "image/svg+xml",
-                ".pdf": "application/pdf",
-            }.get(suffix, "application/octet-stream")
-            self._send(200, target.read_bytes(), content_type)
+            self._send_file(target, _content_type(suffix))
             return
         if parsed.path == "/report":
             query = parse_qs(parsed.query)
             job = query.get("job", [""])[0]
             output = query.get("output", [""])[0]
             info = JOBS.get(job) if job else None
+            if info is None and output and not _workdir_allowed(output):
+                self._send(403, b"output directory not allowed", "text/plain; charset=utf-8")
+                return
             target = (
                 _single_report_path(info)
                 if info is not None
@@ -3961,7 +3558,7 @@ class Handler(BaseHTTPRequestHandler):
             if not target:
                 self._send(404, b"report not found", "text/plain; charset=utf-8")
                 return
-            self._send(200, target.read_bytes(), "text/html; charset=utf-8")
+            self._send_file(target, "text/html; charset=utf-8")
             return
         if parsed.path == "/datasets/file":
             query = parse_qs(parsed.query)
@@ -3970,11 +3567,7 @@ class Handler(BaseHTTPRequestHandler):
             if not target:
                 self._send(404, b"file not found", "text/plain; charset=utf-8")
                 return
-            content_type = {
-                ".csv": "text/csv; charset=utf-8",
-                ".json": "application/json",
-            }.get(target.suffix.lower(), "application/octet-stream")
-            self._send(200, target.read_bytes(), content_type)
+            self._send_file(target, _content_type(target.suffix))
             return
         if parsed.path == "/datasets/download/status":
             query = parse_qs(parsed.query)
@@ -4065,19 +3658,7 @@ class Handler(BaseHTTPRequestHandler):
             if not target:
                 self._send(404, b"file not found", "text/plain; charset=utf-8")
                 return
-            content_type = {
-                ".png": "image/png",
-                ".jpg": "image/jpeg",
-                ".jpeg": "image/jpeg",
-                ".svg": "image/svg+xml",
-                ".pdf": "application/pdf",
-                ".csv": "text/csv; charset=utf-8",
-                ".xlsx": "application/vnd.openxmlformats-officedocument.spreadsheetml.sheet",
-                ".json": "application/json",
-                ".html": "text/html; charset=utf-8",
-                ".pdbqt": "chemical/x-pdbqt",
-            }.get(target.suffix.lower(), "application/octet-stream")
-            self._send(200, target.read_bytes(), content_type)
+            self._send_file(target, _content_type(target.suffix))
             return
         if parsed.path == "/molecular-docking/history":
             body = json.dumps(
@@ -4148,9 +3729,10 @@ class Handler(BaseHTTPRequestHandler):
             self._send(200, body, "application/json")
             return
         if parsed.path == "/tasks/notifications":
+            # Read-only peek: draining is a POST so a prefetch/retry cannot
+            # silently swallow notifications.
             with NOTIFY_LOCK:
                 items = FINISHED_NOTIFICATIONS[:]
-                FINISHED_NOTIFICATIONS.clear()
             body = json.dumps(
                 {"notifications": items},
                 ensure_ascii=False,
@@ -4196,6 +3778,9 @@ class Handler(BaseHTTPRequestHandler):
             if not workdir:
                 self._send(400, b"job or workdir required", "application/json")
                 return
+            if job not in FULL_JOBS and not _workdir_allowed(workdir):
+                self._send(403, b"workdir not allowed", "text/plain; charset=utf-8")
+                return
             body = json.dumps(
                 full_results(workdir),
                 ensure_ascii=False,
@@ -4211,24 +3796,14 @@ class Handler(BaseHTTPRequestHandler):
             if not workdir or not name:
                 self._send(400, b"workdir and name required", "text/plain; charset=utf-8")
                 return
+            if job not in FULL_JOBS and not _workdir_allowed(workdir):
+                self._send(403, b"workdir not allowed", "text/plain; charset=utf-8")
+                return
             target = _full_file_path(workdir, name)
             if not target:
                 self._send(404, b"file not found", "text/plain; charset=utf-8")
                 return
-            content_type = {
-                ".png": "image/png",
-                ".jpg": "image/jpeg",
-                ".jpeg": "image/jpeg",
-                ".svg": "image/svg+xml",
-                ".pdf": "application/pdf",
-                ".csv": "text/csv; charset=utf-8",
-                ".json": "application/json",
-                ".html": "text/html; charset=utf-8",
-                ".css": "text/css; charset=utf-8",
-                ".md": "text/markdown; charset=utf-8",
-                ".xlsx": "application/vnd.openxmlformats-officedocument.spreadsheetml.sheet",
-            }.get(target.suffix.lower(), "application/octet-stream")
-            self._send(200, target.read_bytes(), content_type)
+            self._send_file(target, _content_type(target.suffix))
             return
         if parsed.path == "/dock/results":
             query = parse_qs(parsed.query)
@@ -4255,18 +3830,7 @@ class Handler(BaseHTTPRequestHandler):
             if not target:
                 self._send(404, b"file not found", "text/plain; charset=utf-8")
                 return
-            content_type = {
-                ".png": "image/png",
-                ".jpg": "image/jpeg",
-                ".jpeg": "image/jpeg",
-                ".svg": "image/svg+xml",
-                ".pdf": "application/pdf",
-                ".csv": "text/csv; charset=utf-8",
-                ".xlsx": "application/vnd.openxmlformats-officedocument.spreadsheetml.sheet",
-                ".json": "application/json",
-                ".pdbqt": "chemical/x-pdbqt",
-            }.get(target.suffix.lower(), "application/octet-stream")
-            self._send(200, target.read_bytes(), content_type)
+            self._send_file(target, _content_type(target.suffix))
             return
         if parsed.path == "/dock/history":
             body = json.dumps(
@@ -4291,43 +3855,27 @@ class Handler(BaseHTTPRequestHandler):
                     "text/plain; charset=utf-8",
                 )
                 return
+            if not _workdir_allowed(workdir):
+                self._send(403, b"workdir not allowed", "text/plain; charset=utf-8")
+                return
             target = _analysis_file_path(workdir, name, kind)
             if not target:
                 self._send(404, b"file not found", "text/plain; charset=utf-8")
                 return
-            content_type = {
-                ".png": "image/png",
-                ".jpg": "image/jpeg",
-                ".jpeg": "image/jpeg",
-                ".svg": "image/svg+xml",
-                ".pdf": "application/pdf",
-                ".csv": "text/csv; charset=utf-8",
-                ".html": "text/html; charset=utf-8",
-                ".json": "application/json",
-                ".md": "text/markdown; charset=utf-8",
-                ".xlsx": "application/vnd.openxmlformats-officedocument.spreadsheetml.sheet",
-            }.get(target.suffix.lower(), "application/octet-stream")
-            self._send(200, target.read_bytes(), content_type)
+            self._send_file(target, _content_type(target.suffix))
             return
         if parsed.path == "/dock/knockout/file":
             query = parse_qs(parsed.query)
             workdir = query.get("workdir", [""])[0]
             name = query.get("name", [""])[0]
+            if not _workdir_allowed(workdir):
+                self._send(403, b"workdir not allowed", "text/plain; charset=utf-8")
+                return
             target = _ko_file_path(workdir, name)
             if not target:
                 self._send(404, b"file not found", "text/plain; charset=utf-8")
                 return
-            content_type = {
-                ".png": "image/png",
-                ".jpg": "image/jpeg",
-                ".jpeg": "image/jpeg",
-                ".svg": "image/svg+xml",
-                ".pdf": "application/pdf",
-                ".csv": "text/csv; charset=utf-8",
-                ".md": "text/markdown; charset=utf-8",
-                ".json": "application/json",
-            }.get(target.suffix.lower(), "application/octet-stream")
-            self._send(200, target.read_bytes(), content_type)
+            self._send_file(target, _content_type(target.suffix))
             return
         if parsed.path == "/dock/validation-report":
             body = json.dumps(
@@ -4439,20 +3987,15 @@ class Handler(BaseHTTPRequestHandler):
             if not target.is_file() or target.parent != STATIC_DIR.resolve():
                 self._send(404, b"file not found", "text/plain; charset=utf-8")
                 return
-            content_type = {
-                ".png": "image/png",
-                ".jpg": "image/jpeg",
-                ".svg": "image/svg+xml",
-                ".css": "text/css; charset=utf-8",
-                ".js": "text/javascript; charset=utf-8",
-                ".json": "application/json; charset=utf-8",
-            }.get(target.suffix.lower(), "application/octet-stream")
-            self._send(200, target.read_bytes(), content_type)
+            self._send_file(target, _content_type(target.suffix))
             return
         self._send(404, b"not found", "text/plain; charset=utf-8")
 
     def do_POST(self):
         parsed = urlparse(self.path)
+        if not _request_authorized(self):
+            self._send(403, b"unauthorized: invalid or missing token", "text/plain; charset=utf-8")
+            return
         if not _fetch_site_allowed(self.headers.get("Sec-Fetch-Site", "")):
             self._send(403, b"cross-site request blocked", "text/plain; charset=utf-8")
             return
@@ -4474,6 +4017,17 @@ class Handler(BaseHTTPRequestHandler):
             params = parse_qs(parsed.query)
             params.update(data)
             self._handle_heartbeat(params)
+            return
+
+        if parsed.path == "/tasks/notifications/clear":
+            with NOTIFY_LOCK:
+                items = FINISHED_NOTIFICATIONS[:]
+                FINISHED_NOTIFICATIONS.clear()
+            self._send(
+                200,
+                json.dumps({"cleared": len(items)}, ensure_ascii=False).encode("utf-8"),
+                "application/json",
+            )
             return
 
         if parsed.path == "/pause":
@@ -5125,13 +4679,27 @@ def main() -> int:
         action="store_true",
         help="start the server without opening a browser window",
     )
+    parser.add_argument(
+        "--allow-path",
+        action="append",
+        default=[],
+        metavar="DIR",
+        help=(
+            "additional directory the results browser may read from "
+            "(repeatable); by default only project output roots and workdirs "
+            "registered by jobs started in this console are allowed"
+        ),
+    )
     args = parser.parse_args()
+
+    for extra in args.allow_path:
+        EXTRA_WORKDIR_ROOTS.append(Path(extra).expanduser().resolve())
 
     if not _cleanup_stale_web_ui(args.host, args.port):
         print(f"ERROR: port {args.port} is still in use by another process.")
         return 1
 
-    INDEX_PATH.write_text(render_page(), encoding="utf-8")
+    token = _configure_runtime(args.host, args.port)
     # On Windows, SO_REUSEADDR allows a second instance to bind the same port
     # and steal incoming connections, which surfaces as "connection refused".
     ThreadingHTTPServer.allow_reuse_address = False
@@ -5142,6 +4710,12 @@ def main() -> int:
         return 1
     url = f"http://{args.host}:{args.port}"
     print(f"Web UI started: {url}")
+    if token:
+        print(
+            "Non-loopback bind: a session token is required. Open this URL:\n"
+            f"  {url}/?token={token}\n"
+            "or send the header 'X-Auth-Token: <token>' with every request."
+        )
     if args.host not in ("127.0.0.1", "localhost", "::1"):
         print(
             "WARNING: Web UI exposes pipeline command and file endpoints "

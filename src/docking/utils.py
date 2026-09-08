@@ -174,6 +174,30 @@ def read_json(path: Path, default=None):
         return default
 
 
+CELL_TYPE_COLS = frozenset(
+    {
+        "cell_type",
+        "celltype",
+        "cell_types",
+        "annotation",
+        "annotations",
+        "cell_annotation",
+        "cluster_label",
+        "cell_type_annotation",
+    }
+)
+
+
+def resolve_path(cfg, value) -> Path | None:
+    """Resolve an optional config path against the config workdir."""
+    if value is None or str(value).strip() == "":
+        return None
+    path = Path(str(value)).expanduser()
+    if not path.is_absolute():
+        path = cfg.workdir / path
+    return path.resolve()
+
+
 def write_json(path: Path, data) -> None:
     import json
 

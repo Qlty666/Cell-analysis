@@ -22,7 +22,13 @@ import numpy as np
 import pandas as pd
 
 from .config import ResolvedConfig
-from .utils import DockingError, write_json
+from .html_utils import esc
+from .utils import (
+    CELL_TYPE_COLS,
+    DockingError,
+    resolve_path as _resolve_path,
+    write_json,
+)
 
 APP_ROOT = Path(__file__).resolve().parent.parent.parent
 
@@ -35,17 +41,7 @@ _CELL_ID_COLS = {
     "sample_id",
     "index",
 }
-_CELL_TYPE_COLS = {
-    "cell_type",
-    "celltype",
-    "cell_types",
-    "annotation",
-    "annotations",
-    "cell_annotation",
-    "cluster_label",
-    "cell_type_annotation",
-    "louvain_annot",
-}
+_CELL_TYPE_COLS = CELL_TYPE_COLS | {"louvain_annot"}
 _SC_TENIFOLD_ENGINES = frozenset({"scTenifold", "scTenifoldknk", "triple"})
 _TARGET_EXCLUDE = re.compile(
     r"^(MT-|MTRNR|RPL|RPS|MRPL|MRPS|SNORD|SNORA|SCGB|IGH|IGK|IGL|TRA|TRB|TRG|"
@@ -628,15 +624,6 @@ def _run_drugreflector(
     }
 
 
-def _resolve_path(cfg: ResolvedConfig, value) -> Path | None:
-    if value is None or str(value).strip() == "":
-        return None
-    path = Path(str(value)).expanduser()
-    if not path.is_absolute():
-        path = cfg.workdir / path
-    return path.resolve()
-
-
 def _load_wide_expression(path: Path, ko: dict) -> pd.DataFrame:
     df = pd.read_csv(path)
     if df.empty:
@@ -827,6 +814,7 @@ def _knn_impute(
     log_mat: pd.DataFrame,
     pca_space: np.ndarray,
     isko: dict,
+    block_rows: int | None = None,
 ) -> pd.DataFrame:
     from sklearn.neighbors import NearestNeighbors
 
@@ -837,7 +825,15 @@ def _knn_impute(
     nn = NearestNeighbors(n_neighbors=k, metric="euclidean")
     nn.fit(pca_space)
     _, idx = nn.kneighbors(pca_space)
-    imputed = log_mat.to_numpy()[idx].mean(axis=1)
+    values = log_mat.to_numpy()
+    # Accumulate the neighbour mean in row blocks so peak memory stays
+    # bounded instead of materialising a (cells x k x genes) tensor.
+    block = int(block_rows or isko.get("knn_impute_block_rows", 256) or 256)
+    block = max(1, block)
+    imputed = np.empty_like(values)
+    for start in range(0, len(values), block):
+        stop = min(start + block, len(values))
+        imputed[start:stop] = values[idx[start:stop]].mean(axis=1)
     return pd.DataFrame(
         imputed,
         index=log_mat.index,
@@ -1833,7 +1829,7 @@ def _write_html_report(
     rows = "".join(
         "<tr><td>{gene}</td><td>{wt:.4f}</td><td>{ko:.4f}</td><td>{d:.4f}</td>"
         "<td>{direction}</td>{sc}</tr>".format(
-            gene=row.gene,
+            gene=esc(row.gene),
             wt=row.wt_mean,
             ko=row.ko_mean,
             d=row.delta,
@@ -1873,10 +1869,14 @@ def _write_html_report(
         if has_sc
         else ""
     )
+    ko_gene_html = esc(ko_gene)
+    species_html = esc(species)
+    engine_html = esc(engine_label)
+    note_html = esc(note)
     html = f"""<!doctype html>
 <html lang="zh-CN">
 <head><meta charset="utf-8">
-<title>{ko_gene} 虚拟敲除分析报告</title>
+<title>{ko_gene_html} 虚拟敲除分析报告</title>
 <style>
 body{{font-family:'Microsoft YaHei',Arial,sans-serif;max-width:1100px;margin:32px auto;padding:0 24px;color:#222}}
 h1{{border-bottom:3px solid #1f6f8b;padding-bottom:10px}}
@@ -1891,23 +1891,23 @@ th{{background:#f1f5f6}}
 .note{{background:#eef7f3;padding:10px 14px;border-radius:4px}}
 </style></head>
 <body>
-<h1>{ko_gene} 虚拟敲除分析报告 <small>(In Silico Knockout)</small></h1>
-<div class="meta">分析时间：{datetime.now():%Y-%m-%d %H:%M}；物种：{species}；分析方式：{engine_label}</div>
+<h1>{ko_gene_html} 虚拟敲除分析报告 <small>(In Silico Knockout)</small></h1>
+<div class="meta">分析时间：{datetime.now():%Y-%m-%d %H:%M}；物种：{species_html}；分析方式：{engine_html}</div>
 <div class="alert">本报告为基于单细胞基因调控网络的预测性结果，不等同于真实敲除实验；下游结论需经湿实验验证。</div>
 <h2>1. 数据集来源与分析规模</h2>
 <p>本次模拟使用输入表达矩阵中的 <b>{matrix.shape[1]}</b> 个细胞和 <b>{matrix.shape[0]}</b> 个基因。经高变基因筛选后，模型纳入 <b>{len(changes)}</b> 个基因；若提供细胞类型注释，UMAP 向量场按注释着色。</p>
 <h2>2. 敲除基因生物学背景</h2>
-<div class="note">{note or "未配置该基因的生物学背景说明。可在配置项 insilico_knockout.gene_note 中补充。"}</div>
+<div class="note">{note_html or "未配置该基因的生物学背景说明。可在配置项 insilico_knockout.gene_note 中补充。"}</div>
 <h2>3. 细胞命运偏转轨迹预测 (UMAP 向量场分析)</h2>
-<p>下图箭头表示基因 {ko_gene} 功能缺失后预测的细胞状态位移。箭头方向指示状态转变方向，长度代表转变动力强弱。</p>
-<figure><img src="figures/fig_66_ko_shift_umap.png"><figcaption>图1：{ko_gene} 虚拟敲除后细胞在 UMAP 空间中的命运偏转矢量场。</figcaption></figure>
+<p>下图箭头表示基因 {ko_gene_html} 功能缺失后预测的细胞状态位移。箭头方向指示状态转变方向，长度代表转变动力强弱。</p>
+<figure><img src="figures/fig_66_ko_shift_umap.png"><figcaption>图1：{ko_gene_html} 虚拟敲除后细胞在 UMAP 空间中的命运偏转矢量场。</figcaption></figure>
 <h2>4. 基因调控网络作用权重 (TF-Target Network)</h2>
-<p>网络以 {ko_gene} 为中心，展示表达调控系数最强的下游靶基因。绿色边代表正调控/激活，红色边代表负调控/抑制。</p>
-<figure><img src="figures/fig_65_ko_regulatory_network.png"><figcaption>图2：{ko_gene} 局部转录调控网络拓扑图。</figcaption></figure>
+<p>网络以 {ko_gene_html} 为中心，展示表达调控系数最强的下游靶基因。绿色边代表正调控/激活，红色边代表负调控/抑制。</p>
+<figure><img src="figures/fig_65_ko_regulatory_network.png"><figcaption>图2：{ko_gene_html} 局部转录调控网络拓扑图。</figcaption></figure>
 <h2>5. 下游靶基因定量变化 (Expression Changes)</h2>
 <p>下图展示受敲除影响最明显的靶基因在野生型 (WT) 与敲除型 (KO) 条件下的平均表达量变化预测。</p>
 {sc_method_note}
-<figure><img src="figures/fig_64_ko_target_expression_bar.png"><figcaption>图3：野生型与 {ko_gene} 虚拟敲除型细胞中关键靶基因表达水平的对比柱状图。</figcaption></figure>
+<figure><img src="figures/fig_64_ko_target_expression_bar.png"><figcaption>图3：野生型与 {ko_gene_html} 虚拟敲除型细胞中关键靶基因表达水平的对比柱状图。</figcaption></figure>
 <h3>靶基因表达定量变化数据表 (Top 15)</h3>
 <table><tr><th>靶基因</th><th>野生型表达均值</th><th>敲除型表达均值</th><th>表达变化值</th><th>调控倾向</th>{sc_header}</tr>{rows}</table>
 <h2>6. GO / KEGG 富集分析</h2>

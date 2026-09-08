@@ -16,7 +16,7 @@ The module can run in two modes:
 from __future__ import annotations
 
 import html
-import json
+import logging
 import os
 import shutil
 import subprocess
@@ -32,9 +32,13 @@ from .utils import (
     find_tool,
     run_command,
     tail,
+    write_json,
 )
 
 MD_DIR_NAME = "06_md"
+LOG = logging.getLogger(__name__)
+# HETATM residues that are solvent/ions rather than ligands or cofactors.
+_ION_RESIDUES = {"HOH", "WAT", "DOD", "NA", "CL", "K", "CA", "MG", "ZN"}
 
 
 def _empty_md_metrics() -> dict:
@@ -62,6 +66,9 @@ def _empty_md_metrics() -> dict:
         "rmsf_contact_residue_mean_nm": "",
         "binding_site_residues": "",
         "stability_label": "",
+        "equil_ns": "",
+        "prod_ns": "",
+        "dropped_residues": "",
     }
 
 
@@ -95,6 +102,7 @@ def run_md_simulation(
 
     rows: list[dict] = []
     ok_count = 0
+    equil_ns, prod_ns = _simulated_time_ns(cfg)
     for _, row in selected.iterrows():
         lig_id = str(row.get("id", "ligand"))
         run_dir = out_dir / lig_id
@@ -107,6 +115,8 @@ def run_md_simulation(
             "error": "",
         }
         entry.update(_empty_md_metrics())
+        entry["equil_ns"] = equil_ns
+        entry["prod_ns"] = prod_ns
         try:
             entry.update(_prepare_hit_dir(cfg, row, run_dir, log))
             if mode == "auto":
@@ -133,8 +143,18 @@ def run_md_simulation(
         "completed": completed,
         "prepared": prepared,
         "failed": failed,
+        "equil_ns": equil_ns,
+        "prod_ns": prod_ns,
+        "total_ns": round(equil_ns + prod_ns, 6),
+        "dt_ps": _md_float(cfg, "dt_ps", 0.002),
+        "gen_seed": int(_md_float(cfg, "gen_seed", 42)),
         "output_dir": str(out_dir),
         "results_csv": str(results_path),
+        "dropped_residues": {
+            row["id"]: row.get("dropped_residues", "")
+            for row in rows
+            if row.get("dropped_residues")
+        },
     }
     write_json(out_dir / "md_simulation_summary.json", summary)
     _write_report(out_dir, rows, summary)
@@ -188,7 +208,9 @@ def _prepare_hit_dir(
     if not pose_file.exists():
         raise DockingError(f"docking pose not found: {pose_file}")
 
-    protein_pdb = _write_protein_pdb(receptor_pdb, run_dir)
+    protein_pdb, dropped_residues = _write_protein_pdb(
+        receptor_pdb, run_dir, log
+    )
     ligand_pdb = _write_ligand_pdb(pose_file, run_dir)
     _write_complex_pdb(protein_pdb, ligand_pdb, run_dir / "complex.pdb")
     _write_mdp_files(run_dir, cfg)
@@ -198,6 +220,7 @@ def _prepare_hit_dir(
         "protein_pdb": str(protein_pdb),
         "ligand_pdb": str(ligand_pdb),
         "complex_pdb": str(run_dir / "complex.pdb"),
+        "dropped_residues": "; ".join(dropped_residues),
     }
 
 
@@ -220,22 +243,45 @@ def _pose_path(cfg: ResolvedConfig, row) -> Path:
     return cfg.docked_dir() / f"{str(row.get('id', 'ligand'))}.pdbqt"
 
 
-def _write_protein_pdb(source: Path, run_dir: Path) -> Path:
-    """Keep only standard ATOM records so pdb2gmx can build the topology."""
+def _write_protein_pdb(
+    source: Path,
+    run_dir: Path,
+    log=None,
+) -> tuple[Path, list[str]]:
+    """Keep only standard ATOM records so pdb2gmx can build the topology.
 
+    HETATM records (metals, cofactors such as FAD/heme, modified residues)
+    and solvent/ion records cannot be typed by pdb2gmx and are dropped; the
+    dropped residue names are logged and returned so callers can surface them.
+    """
     out = run_dir / "protein.pdb"
     kept: list[str] = []
+    dropped: dict[str, int] = {}
     for line in source.read_text(encoding="utf-8", errors="replace").splitlines():
-        if line.startswith("ATOM  "):
-            resname = line[17:20].strip().upper()
-            if resname in {"HOH", "WAT", "NA", "CL", "K", "CA", "MG", "ZN"}:
+        if line.startswith("ATOM  ") or line.startswith("HETATM"):
+            resname = line[17:20].strip().upper() or "UNK"
+            if line.startswith("HETATM") or resname in _ION_RESIDUES:
+                dropped[resname] = dropped.get(resname, 0) + 1
                 continue
-            kept.append(line[:6] + line[6:])
+            kept.append(line)
+    if dropped:
+        names = ", ".join(
+            f"{name} x{count}" for name, count in sorted(dropped.items())
+        )
+        logger = log or LOG
+        logger.warning(
+            "MD protein preparation for %s dropped non-ATOM residues "
+            "(metals/cofactors/modified residues/solvent): %s",
+            source,
+            names,
+        )
     if not kept:
         raise DockingError(f"no protein ATOM records found in {source}")
     text = "\n".join(kept) + "\nTER\nEND\n"
     out.write_text(text, encoding="utf-8")
-    return out
+    return out, [
+        f"{name} x{count}" for name, count in sorted(dropped.items())
+    ]
 
 
 def _write_ligand_pdb(pose_file: Path, run_dir: Path) -> Path:
@@ -1152,6 +1198,14 @@ def _md_float(cfg: ResolvedConfig | None, key: str, default: float) -> float:
     return float(cfg.get("md_simulation", key, default) or default)
 
 
+def _simulated_time_ns(cfg: ResolvedConfig | None) -> tuple[float, float]:
+    """Return the configured equilibration and production time in ns."""
+    dt = _md_float(cfg, "dt_ps", 0.002)
+    equil = _md_float(cfg, "equil_steps", 250000.0)
+    prod = _md_float(cfg, "prod_steps", 25000000.0)
+    return round(equil * dt / 1000.0, 6), round(prod * dt / 1000.0, 6)
+
+
 def _stability_label(metrics: dict, cfg: ResolvedConfig | None = None) -> str:
     """Return a heuristic stability label based on last-half trajectory noise."""
     required = [
@@ -1316,25 +1370,30 @@ def _make_dynamics_figure(run_dir: Path) -> None:
 
 def _write_mdp_files(run_dir: Path, cfg: ResolvedConfig) -> None:
     em_steps = int(cfg.get("md_simulation", "em_steps", 5000) or 5000)
-    equil_steps = int(cfg.get("md_simulation", "equil_steps", 5000) or 5000)
-    prod_steps = int(cfg.get("md_simulation", "prod_steps", 250000) or 250000)
+    equil_steps = int(
+        cfg.get("md_simulation", "equil_steps", 250000) or 250000
+    )
+    prod_steps = int(
+        cfg.get("md_simulation", "prod_steps", 25000000) or 25000000
+    )
     dt = float(cfg.get("md_simulation", "dt_ps", 0.002) or 0.002)
     temp = float(cfg.get("md_simulation", "temperature", 300) or 300)
     pressure = float(cfg.get("md_simulation", "pressure", 1.0) or 1.0)
+    gen_seed = int(cfg.get("md_simulation", "gen_seed", 42) or 42)
     (run_dir / "em.mdp").write_text(
         _em_mdp(em_steps),
         encoding="utf-8",
     )
     (run_dir / "nvt.mdp").write_text(
-        _thermo_mdp("nvt", equil_steps, dt, temp, pressure),
+        _thermo_mdp("nvt", equil_steps, dt, temp, pressure, gen_seed),
         encoding="utf-8",
     )
     (run_dir / "npt.mdp").write_text(
-        _thermo_mdp("npt", equil_steps, dt, temp, pressure),
+        _thermo_mdp("npt", equil_steps, dt, temp, pressure, gen_seed),
         encoding="utf-8",
     )
     (run_dir / "md.mdp").write_text(
-        _thermo_mdp("md", prod_steps, dt, temp, pressure),
+        _thermo_mdp("md", prod_steps, dt, temp, pressure, gen_seed),
         encoding="utf-8",
     )
 
@@ -1360,7 +1419,14 @@ DispCorr                 = no
 """
 
 
-def _thermo_mdp(kind: str, steps: int, dt: float, temp: float, pressure: float) -> str:
+def _thermo_mdp(
+    kind: str,
+    steps: int,
+    dt: float,
+    temp: float,
+    pressure: float,
+    gen_seed: int = 42,
+) -> str:
     define = ""
     pcoupl = "no"
     continuation = "no"
@@ -1424,7 +1490,7 @@ lincs_order              = 4
 continuation             = {continuation}
 gen_vel                  = {gen_vel}
 gen_temp                 = {temp}
-gen_seed                 = -1
+gen_seed                 = {gen_seed}
 """
 
 
@@ -1560,11 +1626,3 @@ def _short_gmx_error(text: str) -> str:
         if detail:
             return tail(detail, 1500)
     return tail(text)
-
-
-def write_json(path: Path, data) -> None:
-    path.parent.mkdir(parents=True, exist_ok=True)
-    path.write_text(
-        json.dumps(data, ensure_ascii=False, indent=2),
-        encoding="utf-8",
-    )

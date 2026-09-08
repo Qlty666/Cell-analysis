@@ -11,11 +11,12 @@ from __future__ import annotations
 import argparse
 import csv
 import json
+import logging
+import os
 import re
 import sys
 import time
 import urllib.parse
-import urllib.request
 import xml.etree.ElementTree as ET
 from pathlib import Path
 
@@ -23,12 +24,25 @@ APP_ROOT = Path(__file__).resolve().parent.parent
 if str(APP_ROOT / "src") not in sys.path:
     sys.path.insert(0, str(APP_ROOT / "src"))
 
+from common.http import DEFAULT_USER_AGENT, http_get  # noqa: E402
+
+logger = logging.getLogger(__name__)
+
 EUTILS = "https://eutils.ncbi.nlm.nih.gov/entrez/eutils"
 BIOSTUDIES_API = "https://www.ebi.ac.uk/biostudies/api/v1"
 ATLAS_API = "https://www.ebi.ac.uk/gxa/json/experiments"
 ATLAS_CACHE = APP_ROOT / "data_cache" / "dataset_search" / "expression_atlas_index.json"
 ATLAS_CACHE_TTL_SECONDS = 7 * 24 * 3600
-USER_AGENT = "Mozilla/5.0 (liver-cancer-pipeline; dataset-search)"
+USER_AGENT = DEFAULT_USER_AGENT
+
+# NCBI E-utilities require identifying tool/email parameters and allow three
+# requests per second (ten with an API key).
+NCBI_TOOL_DEFAULT = "liver-cancer-dataset-search"
+NCBI_EMAIL_DEFAULT = "your-email@example.com"
+NCBI_MIN_INTERVAL_SECONDS = 0.34
+NCBI_API_KEY_INTERVAL_SECONDS = 0.11
+EBI_MIN_INTERVAL_SECONDS = 0.2
+_REQUEST_TIMESTAMPS: dict[str, float] = {}
 
 SUPPORTED_DATABASES = ("geo", "biostudies", "atlas")
 DATABASE_LABELS = {
@@ -184,20 +198,50 @@ def _parse_date(value) -> tuple[int, int, int] | None:
     return None
 
 
+def _throttle(key: str, interval: float) -> None:
+    """Space out repeated requests to one API to respect its rate limit."""
+    now = time.monotonic()
+    last = _REQUEST_TIMESTAMPS.get(key)
+    if last is not None:
+        wait = interval - (now - last)
+        if wait > 0:
+            time.sleep(wait)
+    _REQUEST_TIMESTAMPS[key] = time.monotonic()
+
+
+def _throttle_ncbi() -> None:
+    interval = (
+        NCBI_API_KEY_INTERVAL_SECONDS
+        if os.environ.get("NCBI_API_KEY")
+        else NCBI_MIN_INTERVAL_SECONDS
+    )
+    _throttle("ncbi", interval)
+
+
+def _ncbi_identity_params() -> dict[str, str]:
+    """Return NCBI E-utilities identification parameters.
+
+    NCBI asks every client to send ``tool`` and ``email`` (and an ``api_key``
+    when one is available) so they can contact the operator about traffic.
+    """
+    params = {
+        "tool": os.environ.get("NCBI_TOOL", NCBI_TOOL_DEFAULT),
+        "email": os.environ.get("NCBI_EMAIL", NCBI_EMAIL_DEFAULT),
+    }
+    api_key = os.environ.get("NCBI_API_KEY")
+    if api_key:
+        params["api_key"] = api_key
+    return params
+
+
 def _http_get(url: str, timeout: int = 90, retries: int = 3) -> str:
-    last_error: Exception | None = None
-    for attempt in range(retries):
-        try:
-            req = urllib.request.Request(url, headers={"User-Agent": USER_AGENT})
-            with urllib.request.urlopen(req, timeout=timeout) as resp:
-                return resp.read().decode("utf-8", "replace")
-        except Exception as exc:  # noqa: BLE001
-            last_error = exc
-            if attempt < retries - 1:
-                time.sleep(1 + attempt * 2)
-    if last_error is not None:
-        raise last_error
-    raise RuntimeError(f"failed to fetch: {url}")
+    return http_get(
+        url,
+        timeout=timeout,
+        retries=retries,
+        backoff=2.0,
+        user_agent=USER_AGENT,
+    ).decode("utf-8", "replace")
 
 
 def _http_get_json(url: str, timeout: int = 90, retries: int = 3) -> dict:
@@ -338,12 +382,14 @@ def _normalize_row(row: dict) -> dict:
 
 
 def esearch(query: str, max_results: int = 20) -> list[str]:
+    _throttle_ncbi()
     params = urllib.parse.urlencode(
         {
             "db": "gds",
             "term": query,
             "retmax": max(max_results, 1),
             "retmode": "xml",
+            **_ncbi_identity_params(),
         }
     )
     root = ET.fromstring(_http_get(f"{EUTILS}/esearch.fcgi?{params}"))
@@ -369,11 +415,13 @@ def _doc_summary(doc: ET.Element) -> dict:
 
 
 def esummary(uid: str) -> dict:
+    _throttle_ncbi()
     params = urllib.parse.urlencode(
         {
             "db": "gds",
             "id": uid,
             "retmode": "xml",
+            **_ncbi_identity_params(),
         }
     )
     root = ET.fromstring(_http_get(f"{EUTILS}/esummary.fcgi?{params}"))
@@ -384,11 +432,13 @@ def esummary(uid: str) -> dict:
 def esummary_many(uids: list[str]) -> dict[str, dict]:
     if not uids:
         return {}
+    _throttle_ncbi()
     params = urllib.parse.urlencode(
         {
             "db": "gds",
             "id": ",".join(uids),
             "retmode": "xml",
+            **_ncbi_identity_params(),
         }
     )
     root = ET.fromstring(_http_get(f"{EUTILS}/esummary.fcgi?{params}"))
@@ -543,6 +593,7 @@ def search_biostudies(
             "pageSize": max(max_results, 1),
         }
     )
+    _throttle("ebi", EBI_MIN_INTERVAL_SECONDS)
     data = _http_get_json(f"{BIOSTUDIES_API}/search?{params}")
     rows: list[dict] = []
     for hit in data.get("hits") or []:
@@ -588,20 +639,31 @@ def _load_atlas_index(force_refresh: bool = False) -> list[dict]:
         try:
             cached = json.loads(ATLAS_CACHE.read_text(encoding="utf-8"))
             fetched_at = float(cached.get("fetched_at") or 0)
-            if time.time() - fetched_at < ATLAS_CACHE_TTL_SECONDS:
-                return cached.get("experiments") or []
-        except (OSError, ValueError, TypeError):
-            pass
+            experiments = cached.get("experiments") or []
+            # Never trust a cached empty index: an upstream hiccup must not be
+            # frozen in place for the full TTL.
+            if experiments and time.time() - fetched_at < ATLAS_CACHE_TTL_SECONDS:
+                return experiments
+        except (OSError, ValueError, TypeError) as exc:
+            logger.warning("could not read Expression Atlas cache %s: %s", ATLAS_CACHE, exc)
+    _throttle("ebi", EBI_MIN_INTERVAL_SECONDS)
     data = _http_get_json(ATLAS_API)
     experiments = data.get("experiments") or []
     ATLAS_CACHE.parent.mkdir(parents=True, exist_ok=True)
-    ATLAS_CACHE.write_text(
-        json.dumps(
-            {"fetched_at": time.time(), "experiments": experiments},
-            ensure_ascii=False,
-        ),
-        encoding="utf-8",
-    )
+    if experiments:
+        ATLAS_CACHE.write_text(
+            json.dumps(
+                {"fetched_at": time.time(), "experiments": experiments},
+                ensure_ascii=False,
+            ),
+            encoding="utf-8",
+        )
+    else:
+        logger.warning(
+            "Expression Atlas returned no experiments from %s; not caching the "
+            "empty result",
+            ATLAS_API,
+        )
     return experiments
 
 
@@ -756,6 +818,21 @@ def build_query(
     return " ".join(part.strip() for part in parts if part.strip())
 
 
+CSV_FORMULA_PREFIXES = ("=", "+", "-", "@", "\t", "\r")
+
+
+def _sanitize_csv_cell(value):
+    """Neutralize spreadsheet formula injection in remote text fields.
+
+    Excel/LibreOffice treat a cell beginning with ``=``, ``+``, ``-``, ``@``,
+    tab or carriage return as a formula, so remote titles/summaries are
+    prefixed with a single quote before they are written to CSV.
+    """
+    if isinstance(value, str) and value.startswith(CSV_FORMULA_PREFIXES):
+        return "'" + value
+    return value
+
+
 def write_outputs(rows: list[dict], out_dir: Path) -> tuple[Path, Path]:
     out_dir.mkdir(parents=True, exist_ok=True)
     csv_path = out_dir / "dataset_search_results.csv"
@@ -763,7 +840,13 @@ def write_outputs(rows: list[dict], out_dir: Path) -> tuple[Path, Path]:
     with csv_path.open("w", newline="", encoding="utf-8") as fh:
         writer = csv.DictWriter(fh, fieldnames=CSV_COLUMNS)
         writer.writeheader()
-        writer.writerows(rows)
+        writer.writerows(
+            {
+                key: _sanitize_csv_cell(value)
+                for key, value in row.items()
+            }
+            for row in rows
+        )
     json_path.write_text(
         json.dumps(rows, ensure_ascii=False, indent=2),
         encoding="utf-8",

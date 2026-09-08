@@ -31,5 +31,15 @@ class TestSkillNames(unittest.TestCase):
         self.assertIn("missing skill script", result["error"]["message"])
 
 
+class TestThresholds(unittest.TestCase):
+    def test_defaults_require_most_targets(self):
+        self.assertEqual(validate_real_evidence.DEFAULT_MIN_OK_TARGETS, 10)
+        self.assertEqual(validate_real_evidence.DEFAULT_MIN_LIGANDS, 10)
+        self.assertEqual(
+            validate_real_evidence.DEFAULT_MIN_OK_TARGETS,
+            len(validate_real_evidence.TARGETS),
+        )
+
+
 if __name__ == "__main__":
     unittest.main()

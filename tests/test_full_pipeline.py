@@ -980,48 +980,49 @@ class TestQcGate(unittest.TestCase):
 
 
 class TestDifferentialAbundance(unittest.TestCase):
+    """Composition testing is sample-level: cells in one sample are not independent."""
+
+    @staticmethod
+    def _write_annotations(root: Path, rows: list[dict]) -> None:
+        ann_dir = root / "results" / "data" / "04_annotation"
+        ann_dir.mkdir(parents=True, exist_ok=True)
+        pd.DataFrame(rows).to_csv(
+            ann_dir / "fig_05_16_17_cell_annotations.csv",
+            index=False,
+        )
+
+    @staticmethod
+    def _sample_level_rows() -> list[dict]:
+        # Four donors per condition with a consistent composition shift.
+        tumor = {"S1": (30, 10), "S2": (32, 8), "S3": (28, 12), "S4": (30, 10)}
+        normal = {"N1": (10, 30), "N2": (8, 32), "N3": (12, 28), "N4": (10, 30)}
+        rows: list[dict] = []
+        for group, samples in (("Tumor", tumor), ("Normal", normal)):
+            for sample, (t_cells, hepatocytes) in samples.items():
+                for index in range(t_cells):
+                    rows.append(
+                        {
+                            "cell": f"{sample}_t{index}",
+                            "celltype_annot": "T_cell",
+                            "condition": group,
+                            "sample": sample,
+                        }
+                    )
+                for index in range(hepatocytes):
+                    rows.append(
+                        {
+                            "cell": f"{sample}_h{index}",
+                            "celltype_annot": "Hepatocyte",
+                            "condition": group,
+                            "sample": sample,
+                        }
+                    )
+        return rows
+
     def test_composition_shift_detected(self):
         with tempfile.TemporaryDirectory() as tmp:
             root = Path(tmp) / "single_cell"
-            ann_dir = root / "results" / "data" / "04_annotation"
-            ann_dir.mkdir(parents=True)
-            rows = []
-            for i in range(40):
-                rows.append(
-                    {
-                        "cell": f"t{i}",
-                        "celltype_annot": "T_cell",
-                        "condition": "Tumor",
-                    }
-                )
-            for i in range(10):
-                rows.append(
-                    {
-                        "cell": f"h{i}",
-                        "celltype_annot": "Hepatocyte",
-                        "condition": "Tumor",
-                    }
-                )
-            for i in range(10):
-                rows.append(
-                    {
-                        "cell": f"n{i}",
-                        "celltype_annot": "T_cell",
-                        "condition": "Normal",
-                    }
-                )
-            for i in range(40):
-                rows.append(
-                    {
-                        "cell": f"nh{i}",
-                        "celltype_annot": "Hepatocyte",
-                        "condition": "Normal",
-                    }
-                )
-            pd.DataFrame(rows).to_csv(
-                ann_dir / "fig_05_16_17_cell_annotations.csv",
-                index=False,
-            )
+            self._write_annotations(root, self._sample_level_rows())
             out = Path(tmp) / "integration"
             summary = run_differential_abundance(
                 root,
@@ -1029,11 +1030,61 @@ class TestDifferentialAbundance(unittest.TestCase):
                 {"min_cells": 5, "fdr": 0.05},
             )
             self.assertEqual(summary["status"], "completed")
+            self.assertEqual(
+                summary["test"], "welch_t_test_on_per_sample_proportions"
+            )
+            self.assertEqual(
+                summary["samples_per_condition"],
+                {"Normal": 4, "Tumor": 4},
+            )
             self.assertGreaterEqual(summary["celltypes_tested"], 2)
             self.assertGreaterEqual(summary["significant_celltypes"], 1)
             frame = pd.read_csv(out / "differential_abundance.csv")
             self.assertLessEqual(frame["p_adjust"].max(), 1.0)
             self.assertGreaterEqual(frame["p_adjust"].min(), 0.0)
+
+    def test_missing_sample_column_is_skipped(self):
+        """Without sample labels the sample-level test cannot run."""
+        with tempfile.TemporaryDirectory() as tmp:
+            root = Path(tmp) / "single_cell"
+            rows = [
+                {
+                    "cell": f"c{index}",
+                    "celltype_annot": "T_cell" if index % 2 else "Hepatocyte",
+                    "condition": "Tumor" if index < 10 else "Normal",
+                }
+                for index in range(20)
+            ]
+            self._write_annotations(root, rows)
+            summary = run_differential_abundance(
+                root,
+                Path(tmp) / "integration",
+                {"min_cells": 5},
+            )
+            self.assertEqual(summary["status"], "skipped")
+            self.assertIn("sample", summary["reason"])
+
+    def test_more_than_two_conditions_raises(self):
+        with tempfile.TemporaryDirectory() as tmp:
+            root = Path(tmp) / "single_cell"
+            rows = [
+                {
+                    "cell": f"c{index}",
+                    "celltype_annot": "T_cell",
+                    "condition": condition,
+                    "sample": f"{condition}-1",
+                }
+                for index, condition in enumerate(
+                    ["Tumor"] * 5 + ["Normal"] * 5 + ["Cirrhosis"] * 5
+                )
+            ]
+            self._write_annotations(root, rows)
+            with self.assertRaises(IntegrationError):
+                run_differential_abundance(
+                    root,
+                    Path(tmp) / "integration",
+                    {"min_cells": 5},
+                )
 
 
 class TestDockingRobustness(unittest.TestCase):

@@ -49,7 +49,13 @@ class TestSelectProcessedFiles(unittest.TestCase):
 
 
 class TestEnsureBioStudiesDataset(unittest.TestCase):
-    def test_writes_manifest(self):
+    def _ensure(
+        self,
+        tmp: str,
+        organism: str = "Homo sapiens",
+        description: str = "bulk RNA-seq",
+        accession: str = "E-MTAB-1",
+    ) -> dict:
         def fake_json(url):
             if url.endswith("/files"):
                 return {
@@ -72,12 +78,12 @@ class TestEnsureBioStudiesDataset(unittest.TestCase):
                     ]
                 }
             return {
-                "attributes": [{"name": "RootPath", "value": "E-MTAB-1"}],
+                "attributes": [{"name": "RootPath", "value": accession}],
                 "section": {
                     "attributes": [
                         {"name": "Title", "value": "HCC counts"},
-                        {"name": "Organism", "value": "Homo sapiens"},
-                        {"name": "Description", "value": "bulk RNA-seq"},
+                        {"name": "Organism", "value": organism},
+                        {"name": "Description", "value": description},
                     ]
                 },
             }
@@ -89,25 +95,53 @@ class TestEnsureBioStudiesDataset(unittest.TestCase):
             else:
                 out.write_bytes(b"A\nB\n")
 
+        with (
+            mock.patch.object(bsd, "_http_get_json", side_effect=fake_json),
+            mock.patch.object(bsd.gd, "_download", side_effect=fake_download),
+            mock.patch.object(bsd, "CACHE_ROOT", Path(tmp) / "cache"),
+        ):
+            return bsd.ensure_biostudies_dataset(
+                accession,
+                Path(tmp) / "root",
+                lambda _msg: None,
+            )
+
+    def test_writes_manifest(self):
         with tempfile.TemporaryDirectory() as tmp:
-            root = Path(tmp) / "root"
-            logs: list[str] = []
-            with (
-                mock.patch.object(bsd, "_http_get_json", side_effect=fake_json),
-                mock.patch.object(bsd.gd, "_download", side_effect=fake_download),
-            ):
-                manifest = bsd.ensure_biostudies_dataset(
-                    "E-MTAB-1",
-                    root,
-                    logs.append,
-                )
+            manifest = self._ensure(tmp)
             self.assertEqual(manifest["accession"], "E-MTAB-1")
             self.assertEqual(manifest["organism"], "hs")
             self.assertIn("GSM1_counts.txt", manifest["files"]["matrix"])
             self.assertEqual(manifest["files"]["genes"], ["genes.tsv"])
-            manifest_path = root / "data" / "E-MTAB-1_manifest.json"
+            manifest_path = Path(tmp) / "root" / "data" / "E-MTAB-1_manifest.json"
             self.assertTrue(manifest_path.exists())
-            self.assertTrue((root / "data" / "raw" / "E-MTAB-1" / "GSM1_counts.txt").exists())
+            self.assertTrue(
+                (
+                    Path(tmp)
+                    / "root"
+                    / "data"
+                    / "raw"
+                    / "E-MTAB-1"
+                    / "GSM1_counts.txt"
+                ).exists()
+            )
+
+    def test_maps_mouse_and_zebrafish_organisms(self):
+        with tempfile.TemporaryDirectory() as tmp:
+            mouse = self._ensure(tmp, organism="Mus musculus")
+            self.assertEqual(mouse["organism"], "mm")
+        with tempfile.TemporaryDirectory() as tmp:
+            zebrafish = self._ensure(tmp, organism="Danio rerio")
+            self.assertEqual(zebrafish["organism"], "dr")
+
+    def test_unknown_organism_is_recorded_not_defaulted_to_human(self):
+        with tempfile.TemporaryDirectory() as tmp:
+            manifest = self._ensure(
+                tmp,
+                organism="Glycine max",
+                description="soybean seed development",
+            )
+            self.assertEqual(manifest["organism"], "unknown")
 
     def test_no_matrix_raises(self):
         def fake_json(url):

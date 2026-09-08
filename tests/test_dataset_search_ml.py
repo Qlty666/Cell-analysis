@@ -86,7 +86,7 @@ class TestDatasetSearchML(unittest.TestCase):
                 seed=42,
             )
             self.assertTrue(model_path.exists())
-            payload = dataset_search_ml.load_model(model_path)
+            payload = dataset_search_ml.load_model(model_path, allow_root=tmp_path)
             self.assertIn("vectorizer", payload)
             self.assertIn("model", payload)
             result = dataset_search_ml.evaluate(

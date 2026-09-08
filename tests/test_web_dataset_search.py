@@ -229,7 +229,9 @@ class TestDatasetSearchRequest(unittest.TestCase):
     def test_model_rerank_applied_when_model_exists(self):
         with tempfile.TemporaryDirectory() as tmp:
             base = Path(tmp)
-            model_file = base / "model.joblib"
+            search_dir = base / "search"
+            search_dir.mkdir()
+            model_file = search_dir / "model.joblib"
             model_file.write_bytes(b"model")
             fake_search = _fake_search_module()
             fake_ml = types.ModuleType("dataset_search_ml")
@@ -248,7 +250,7 @@ class TestDatasetSearchRequest(unittest.TestCase):
                     "search_datasets": fake_search,
                     "dataset_search_ml": fake_ml,
                 },
-            ), mock.patch.object(web_ui, "DATASET_SEARCH_DIR", base / "search"):
+            ), mock.patch.object(web_ui, "DATASET_SEARCH_DIR", search_dir):
                 result = web_ui.dataset_search_request(
                     {
                         "disease": ["liver cancer"],
@@ -258,6 +260,33 @@ class TestDatasetSearchRequest(unittest.TestCase):
             self.assertTrue(result["model_applied"])
             self.assertEqual(result["results"][0]["relevance_score"], 0.9)
             self.assertEqual(result["model_path"], str(model_file))
+
+    def test_model_outside_search_dir_is_rejected(self):
+        """A model path outside the search cache must not be deserialized."""
+        with tempfile.TemporaryDirectory() as tmp:
+            base = Path(tmp)
+            search_dir = base / "search"
+            search_dir.mkdir()
+            outside = base / "evil.joblib"
+            outside.write_bytes(b"model")
+            fake_search = _fake_search_module()
+            fake_ml = types.ModuleType("dataset_search_ml")
+            fake_ml.load_model = lambda path: {"path": str(path)}
+            fake_ml.rerank = lambda rows, disease, direction, model=None: rows
+            with mock.patch.dict(
+                sys.modules,
+                {
+                    "search_datasets": fake_search,
+                    "dataset_search_ml": fake_ml,
+                },
+            ), mock.patch.object(web_ui, "DATASET_SEARCH_DIR", search_dir):
+                with self.assertRaises(ValueError):
+                    web_ui.dataset_search_request(
+                        {
+                            "disease": ["liver cancer"],
+                            "model": [str(outside)],
+                        }
+                    )
 
     def test_model_missing_raises(self):
         fake_search = _fake_search_module()

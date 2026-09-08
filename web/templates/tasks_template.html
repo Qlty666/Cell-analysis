@@ -375,7 +375,9 @@ async function pollNotifications() {
     const resp = await fetch('/tasks/notifications');
     if (!resp.ok) return;
     const data = await resp.json();
-    (data.notifications || []).forEach((n) => {
+    const items = data.notifications || [];
+    if (!items.length) return;
+    items.forEach((n) => {
       const status = n.status || 'interrupted';
       const title = (n.page_label || '任务') + ' · ' +
         (status === 'completed' ? '任务已完成' : status === 'paused' ? '任务已暂停' : '任务中断');
@@ -391,6 +393,7 @@ async function pollNotifications() {
         body
       );
     });
+    await fetch('/tasks/notifications/clear', { method: 'POST' });
   } catch (e) {
     // keep polling on transient errors
   }

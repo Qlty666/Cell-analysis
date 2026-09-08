@@ -2,9 +2,11 @@
 """Disproportionality signal detection for pharmacovigilance-style tables.
 
 Implements the four FAERS-style signal measures referenced in the reviewed
-articles: ROR, PRR, BCPNN IC and EBGM. The BCPNN and EBGM values use the
-standard closed-form approximations; they are suitable for screening and
-should be treated as approximations for exploratory use.
+articles: ROR, PRR, BCPNN IC and EBGM. ROR and PRR (and their standard
+errors) use the Haldane-Anscombe +0.5 correction so sparse 2x2 tables with
+zero cells stay finite. The BCPNN and EBGM values use the standard
+closed-form approximations; they are suitable for screening and should be
+treated as approximations for exploratory use.
 """
 
 from __future__ import annotations
@@ -14,6 +16,7 @@ import math
 import numpy as np
 import pandas as pd
 
+from .html_utils import esc
 from .utils import DockingError, write_json
 
 
@@ -84,15 +87,26 @@ def detect_signals(
     c = out["c"]
     d = out["d"]
     n = total
-    ror = (a * d) / (b * c)
-    ror_se = np.sqrt(1.0 / a + 1.0 / b + 1.0 / c + 1.0 / d)
+    # Haldane-Anscombe +0.5 correction keeps ROR/PRR and their standard
+    # errors finite when a 2x2 cell is zero (sparse FAERS tables).
+    a_c = _safe(a)
+    b_c = _safe(b)
+    c_c = _safe(c)
+    d_c = _safe(d)
+    ror = (a_c * d_c) / (b_c * c_c)
+    ror_se = np.sqrt(1.0 / a_c + 1.0 / b_c + 1.0 / c_c + 1.0 / d_c)
     out["ror"] = ror
     out["ror_lower"], out["ror_upper"] = zip(
         *[_ci_lower_upper(p, se) for p, se in zip(ror, ror_se)]
     )
 
-    prr = (a / (a + b)) / (c / (c + d))
-    prr_se = np.sqrt(1.0 / a - 1.0 / (a + b) + 1.0 / c - 1.0 / (c + d))
+    prr = (a_c / (a_c + b_c)) / (c_c / (c_c + d_c))
+    prr_se = np.sqrt(
+        1.0 / a_c
+        - 1.0 / (a_c + b_c)
+        + 1.0 / c_c
+        - 1.0 / (c_c + d_c)
+    )
     out["prr"] = prr
     out["prr_lower"], out["prr_upper"] = zip(
         *[_ci_lower_upper(p, se) for p, se in zip(prr, prr_se)]
@@ -161,10 +175,19 @@ def run_faers(cfg, log) -> dict:
     html_path = out_dir / "data" / "faers_signals.html"
     top = signals.head(100)
     rows = "".join(
-        f"<tr><td>{row['drug']}</td><td>{row['event']}</td>"
-        f"<td>{int(row['a'])}</td><td>{row['ror']:.2f}</td>"
-        f"<td>{row['prr']:.2f}</td><td>{row['ic']:.2f}</td>"
-        f"<td>{row['ebgm']:.2f}</td><td>{row['signal']}</td></tr>"
+        "<tr><td>{drug}</td><td>{event}</td>"
+        "<td>{a}</td><td>{ror:.2f}</td>"
+        "<td>{prr:.2f}</td><td>{ic:.2f}</td>"
+        "<td>{ebgm:.2f}</td><td>{signal}</td></tr>".format(
+            drug=esc(row["drug"]),
+            event=esc(row["event"]),
+            a=esc(int(row["a"])),
+            ror=row["ror"],
+            prr=row["prr"],
+            ic=row["ic"],
+            ebgm=row["ebgm"],
+            signal=esc(row["signal"]),
+        )
         for row in top.to_dict("records")
     )
     html = f"""<!doctype html>

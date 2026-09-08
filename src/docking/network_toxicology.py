@@ -22,6 +22,7 @@ import numpy as np
 import pandas as pd
 
 from .cytoscape_network import export_network_to_cytoscape, write_xgmml_network
+from .html_utils import esc
 from .utils import DockingError, write_json
 
 _GENE_COLS = (
@@ -629,8 +630,8 @@ def write_ctpd_network(
 
     html_path = out_dir / "ctpd_network.html"
     rows = "".join(
-        f"<tr><td>{row['source']}</td><td>{row['target']}</td>"
-        f"<td>{row['edge_type']}</td><td>{row['sources']}</td></tr>"
+        f"<tr><td>{esc(row['source'])}</td><td>{esc(row['target'])}</td>"
+        f"<td>{esc(row['edge_type'])}</td><td>{esc(row['sources'])}</td></tr>"
         for row in edges[:500]
     )
     html = f"""<!doctype html>
@@ -638,7 +639,7 @@ def write_ctpd_network(
 <head><meta charset="utf-8"><title>C-T-P-D network</title></head>
 <body>
 <h1>Compound-Target-Disease Network</h1>
-<p>{compound_name or "Compound"} / {disease_name or "Disease"} /
+<p>{esc(compound_name or "Compound")} / {esc(disease_name or "Disease")} /
 {len(overlap)} overlapping targets / {len(edges)} edges</p>
 <table border="1" cellpadding="4" cellspacing="0">
 <thead><tr><th>Source</th><th>Target</th><th>Type</th><th>Evidence</th></tr></thead>

@@ -3,17 +3,19 @@
 from __future__ import annotations
 
 import json
+import logging
 import re
 import shutil
-import time
-import urllib.request
 from pathlib import Path
 
+from common.http import DEFAULT_USER_AGENT, http_get
 from . import geo_downloader as gd
+
+logger = logging.getLogger(__name__)
 
 BIOSTUDIES_API = "https://www.ebi.ac.uk/biostudies/api/v1"
 CACHE_ROOT = Path(__file__).resolve().parents[2] / "data_cache"
-USER_AGENT = "Mozilla/5.0 (liver-cancer-pipeline; dataset-download)"
+USER_AGENT = DEFAULT_USER_AGENT
 
 ACCESSION_RE = re.compile(r"(?:E-[A-Z0-9]+-\d+|S-BSST\d+)", re.IGNORECASE)
 
@@ -28,22 +30,14 @@ def normalize_accession(accession: str) -> str:
 
 
 def _http_get_json(url: str, timeout: int = 120, retries: int = 3) -> dict:
-    last_error: Exception | None = None
-    for attempt in range(retries):
-        try:
-            req = urllib.request.Request(
-                url,
-                headers={"User-Agent": USER_AGENT},
-            )
-            with urllib.request.urlopen(req, timeout=timeout) as resp:
-                return json.loads(resp.read().decode("utf-8", "replace"))
-        except Exception as exc:  # noqa: BLE001
-            last_error = exc
-            if attempt < retries - 1:
-                time.sleep(1 + attempt * 2)
-    if last_error is not None:
-        raise last_error
-    raise RuntimeError(f"failed to fetch: {url}")
+    body = http_get(
+        url,
+        timeout=timeout,
+        retries=retries,
+        backoff=2.0,
+        user_agent=USER_AGENT,
+    )
+    return json.loads(body.decode("utf-8", "replace"))
 
 
 def _safe_rel(path: str) -> str:
@@ -83,13 +77,19 @@ def _study_metadata(accession: str) -> dict:
 
 
 def _list_files(accession: str) -> list[dict]:
+    files_url = f"{BIOSTUDIES_API}/studies/{accession}/files"
     try:
-        data = _http_get_json(f"{BIOSTUDIES_API}/studies/{accession}/files")
+        data = _http_get_json(files_url)
         items = data.get("items") or []
         if items:
             return items
-    except Exception:  # noqa: BLE001
-        pass
+    except Exception as exc:  # noqa: BLE001 - fall back to the study payload
+        logger.warning(
+            "BioStudies file listing failed for %s (%s); falling back to the "
+            "study document",
+            files_url,
+            exc,
+        )
     data = _http_get_json(f"{BIOSTUDIES_API}/studies/{accession}")
     items: list[dict] = []
 
@@ -267,13 +267,14 @@ def ensure_biostudies_dataset(
         )
 
     single_cell_hint = gd._matrix_files_look_single_cell(downloaded, raw_dir)
-    organism = "hs"
-    if re.search(
-        r"mus musculus",
-        f"{metadata['organism']} {metadata['description']}",
-        re.IGNORECASE,
-    ):
-        organism = "mm"
+    organism = (
+        gd.detect_organism_code(
+            metadata["organism"],
+            metadata["title"],
+            metadata["description"],
+        )
+        or "unknown"
+    )
 
     manifest = {
         "accession": acc,

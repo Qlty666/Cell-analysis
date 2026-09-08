@@ -6,6 +6,7 @@ from __future__ import annotations
 import sys
 import tempfile
 import unittest
+import zipfile
 from pathlib import Path
 
 APP_ROOT = Path(__file__).resolve().parent.parent
@@ -66,6 +67,38 @@ class TestPortablePackage(unittest.TestCase):
         self.assertTrue(_excluded(APP_ROOT / "data_cache" / "index.json"))
         self.assertTrue(_excluded(APP_ROOT / "logs" / "run.log"))
         self.assertTrue(_excluded(APP_ROOT / "src" / "__pycache__" / "x.pyc"))
+
+    def test_excluded_rejects_secret_files(self):
+        for name in (
+            ".env",
+            ".env.local",
+            "server.pem",
+            "client.p12",
+            "private.key",
+            "bundle.pfx",
+        ):
+            with self.subTest(name=name):
+                self.assertTrue(_excluded(APP_ROOT / name))
+        self.assertTrue(
+            _excluded(APP_ROOT / "config" / ".env.production")
+        )
+
+    def test_excluded_keeps_normal_sources(self):
+        self.assertFalse(
+            _excluded(APP_ROOT / "src" / "docking" / "network_toxicology.py")
+        )
+        self.assertFalse(_excluded(APP_ROOT / "requirements.txt"))
+
+    def test_build_package_refuses_existing_output_without_force(self):
+        with tempfile.TemporaryDirectory() as tmp:
+            output = Path(tmp) / "package.zip"
+            output.write_bytes(b"stale archive")
+            with self.assertRaises(SystemExit):
+                build_package(output)
+            self.assertEqual(output.read_bytes(), b"stale archive")
+            build_package(output, force=True)
+            self.assertTrue(zipfile.is_zipfile(output))
+            self.assertGreater(output.stat().st_size, len(b"stale archive"))
 
 
 if __name__ == "__main__":

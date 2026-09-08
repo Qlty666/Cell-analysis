@@ -5,7 +5,6 @@ import subprocess
 import sys
 import zipfile
 import argparse
-import json
 import shutil
 import urllib.request
 from pathlib import Path
@@ -13,14 +12,22 @@ from pathlib import Path
 ROOT = Path(__file__).resolve().parent.parent
 REQUIREMENTS = ROOT / "requirements_dock.txt"
 TARGET = ""
+
+# Pinned AutoDockTools_py3 release (GitHub tag, resolved 2026-06).
+ADT_REPO = "Valdes-Tresanco-MS/AutoDockTools_py3"
+ADT_TAG = "1.5.7.post1"
 ADT_ZIP_URL = (
-    "https://codeload.github.com/Valdes-Tresanco-MS/AutoDockTools_py3/"
-    "zip/refs/heads/master"
+    f"https://codeload.github.com/{ADT_REPO}/zip/refs/tags/{ADT_TAG}"
 )
+# Pinned AutoDock Vina release. GitHub publishes no checksum for these assets,
+# so the exact release URL is the integrity control here.
+VINA_VERSION = "1.2.7"
 VINA_FALLBACK_URL = (
     "https://github.com/ccsb-scripps/AutoDock-Vina/releases/download/"
-    "v1.2.7/vina_1.2.7_win.exe"
+    f"v{VINA_VERSION}/vina_{VINA_VERSION}_win.exe"
 )
+PIP_TIMEOUT_SECONDS = 3600
+DOWNLOAD_TIMEOUT_SECONDS = 300
 
 
 def main() -> int:
@@ -45,22 +52,60 @@ def main() -> int:
     return 0
 
 
-def _run_pip(args: list[str]) -> int:
+def _cmd_text(cmd: list[str]) -> str:
+    return " ".join(str(part) for part in cmd)
+
+
+def _run_pip(args: list[str], timeout: int = PIP_TIMEOUT_SECONDS) -> int:
     cmd = [sys.executable, "-m", "pip", *args]
     if TARGET:
         cmd += ["--target", str(Path(TARGET).expanduser().resolve())]
-    return subprocess.run(cmd, cwd=ROOT).returncode
+    print(f"> {_cmd_text(cmd)} (timeout {timeout}s)")
+    try:
+        return subprocess.run(cmd, cwd=ROOT, timeout=timeout).returncode
+    except subprocess.TimeoutExpired:
+        print(
+            f"pip timed out after {timeout}s: {_cmd_text(cmd)}",
+            file=sys.stderr,
+        )
+        return 124
+
+
+def _extracted_adt_dir(tools: Path) -> Path | None:
+    preferred = tools / f"AutoDockTools_py3-{ADT_TAG}"
+    if preferred.is_dir():
+        return preferred
+    for candidate in sorted(tools.glob("AutoDockTools_py3-*")):
+        if candidate.is_dir():
+            return candidate
+    return None
 
 
 def _ensure_autodocktools() -> bool:
     tools = ROOT / "dock" / "tools"
     src = tools / "AutoDockTools_py3"
     zip_path = tools / "autodocktools_py3.zip"
+    ref_marker = tools / "autodocktools_py3.ref"
     if not src.exists():
+        cached_ref = (
+            ref_marker.read_text(encoding="utf-8").strip()
+            if ref_marker.is_file()
+            else ""
+        )
+        if zip_path.exists() and cached_ref != ADT_TAG:
+            print(
+                "discarding cached AutoDockTools_py3 archive "
+                f"(ref {cached_ref or 'unknown'} != {ADT_TAG})"
+            )
+            zip_path.unlink()
         if not zip_path.exists():
-            print("AutoDockTools_py3 source and zip missing; downloading...")
+            print(
+                "AutoDockTools_py3 source and zip missing; "
+                f"downloading tag {ADT_TAG}..."
+            )
             if not _download(ADT_ZIP_URL, zip_path):
                 return False
+            ref_marker.write_text(ADT_TAG, encoding="utf-8")
         print("Extracting AutoDockTools_py3...")
         with zipfile.ZipFile(zip_path) as archive:
             tools_resolved = tools.resolve()
@@ -70,8 +115,8 @@ def _ensure_autodocktools() -> bool:
                 if not target.is_relative_to(tools_resolved):
                     raise RuntimeError(f"unsafe zip member: {member.filename}")
             archive.extractall(tools)
-        extracted = tools / "AutoDockTools_py3-master"
-        if extracted.exists() and not src.exists():
+        extracted = _extracted_adt_dir(tools)
+        if extracted is not None and not src.exists():
             extracted.rename(src)
     if not src.exists():
         print("AutoDockTools_py3 source still missing after extraction")
@@ -83,6 +128,7 @@ def _ensure_autodocktools() -> bool:
 
 
 def _download(url: str, dest: Path) -> bool:
+    dest = Path(dest)
     dest.parent.mkdir(parents=True, exist_ok=True)
     print(f"Downloading {url}")
     request = urllib.request.Request(
@@ -90,9 +136,9 @@ def _download(url: str, dest: Path) -> bool:
         headers={"User-Agent": "Mozilla/5.0 liver-cancer-pipeline-env"},
     )
     try:
-        with urllib.request.urlopen(request, timeout=120) as resp, dest.open(
-            "wb"
-        ) as handle:
+        with urllib.request.urlopen(
+            request, timeout=DOWNLOAD_TIMEOUT_SECONDS
+        ) as resp, dest.open("wb") as handle:
             while True:
                 chunk = resp.read(1024 * 256)
                 if not chunk:
@@ -103,29 +149,12 @@ def _download(url: str, dest: Path) -> bool:
         if dest.exists():
             dest.unlink()
         return False
-    return dest.is_file()
-
-
-def _latest_vina_win_url() -> str:
-    api = "https://api.github.com/repos/ccsb-scripps/AutoDock-Vina/releases/latest"
-    request = urllib.request.Request(
-        api,
-        headers={"User-Agent": "Mozilla/5.0 liver-cancer-pipeline-env"},
-    )
-    try:
-        with urllib.request.urlopen(request, timeout=60) as resp:
-            payload = json.loads(resp.read().decode("utf-8", "replace"))
-        for asset in payload.get("assets", []):
-            name = asset.get("name", "")
-            if (
-                name.endswith("_win.exe")
-                and "_split_" not in name
-                and name.startswith("vina_")
-            ):
-                return asset.get("browser_download_url") or VINA_FALLBACK_URL
-    except Exception as exc:
-        print(f"could not query Vina release metadata: {exc}", file=sys.stderr)
-    return VINA_FALLBACK_URL
+    if not dest.is_file() or dest.stat().st_size == 0:
+        print(f"download produced no data: {dest}", file=sys.stderr)
+        if dest.exists():
+            dest.unlink()
+        return False
+    return True
 
 
 def _ensure_vina() -> bool:
@@ -144,8 +173,17 @@ def _ensure_vina() -> bool:
         )
         return False
     tmp = target.with_suffix(".exe.download")
-    print("AutoDock Vina missing; downloading Windows binary...")
-    if not _download(_latest_vina_win_url(), tmp):
+    print(
+        f"AutoDock Vina missing; downloading pinned Windows binary "
+        f"v{VINA_VERSION}..."
+    )
+    if not _download(VINA_FALLBACK_URL, tmp):
+        print(
+            "could not download AutoDock Vina. Download it manually from "
+            "https://github.com/ccsb-scripps/AutoDock-Vina/releases and place "
+            f"it at {target}.",
+            file=sys.stderr,
+        )
         return False
     tmp.replace(target)
     print(f"AutoDock Vina: {target}")

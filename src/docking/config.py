@@ -99,9 +99,10 @@ DEFAULTS = {
         "ligand_forcefield": "gaff2",
         "topology_dir": None,
         "em_steps": 5000,
-        "equil_steps": 5000,
-        "prod_steps": 250000,
+        "equil_steps": 250000,
+        "prod_steps": 25000000,
         "dt_ps": 0.002,
+        "gen_seed": 42,
         "temperature": 300,
         "pressure": 1.0,
         "timeout_seconds": 86400,
@@ -336,6 +337,13 @@ class ResolvedConfig:
     def md_dir(self) -> Path:
         return self.reports_dir() / "06_md"
 
+    def _number(self, section: str, key: str, default: float) -> float:
+        value = self.get(section, key, default)
+        try:
+            return float(value)
+        except (TypeError, ValueError):
+            raise ValueError(f"{section}.{key} must be a number") from None
+
     def validate(self) -> None:
         for name, values in [
             ("center", self.receptor_center()),
@@ -345,16 +353,126 @@ class ResolvedConfig:
                 raise ValueError(f"receptor.{name} must be a list of 3 numbers")
         if any(v <= 0 for v in self.receptor_size()):
             raise ValueError("receptor.size values must be positive")
+        if any(v > 200.0 for v in self.receptor_size()):
+            raise ValueError(
+                "receptor.size values must be <= 200 Angstrom; a larger box "
+                "usually means the wrong receptor or a unit mistake"
+            )
         for section, key in [
             ("docking", "exhaustiveness"),
             ("docking", "num_modes"),
             ("docking", "cpu"),
             ("docking", "max_workers"),
         ]:
-            if int(self.get(section, key, 0)) < 1:
+            if self._number(section, key, 0) < 1:
                 raise ValueError(f"{section}.{key} must be >= 1")
-        if float(self.get("docking", "energy_range", 3.0)) <= 0:
-            raise ValueError("docking.energy_range must be positive")
+        for section, key, default in [
+            ("docking", "energy_range", 3.0),
+            ("docking", "timeout_seconds", 600.0),
+            ("redock", "exhaustiveness", 32.0),
+            ("redock", "num_modes", 9.0),
+            ("redock", "top_n", 20.0),
+            ("redock", "energy_range", 3.0),
+            ("redock", "max_workers", 4.0),
+            ("redock", "timeout_seconds", 600.0),
+        ]:
+            if self._number(section, key, default) <= 0:
+                raise ValueError(f"{section}.{key} must be positive")
+        cutoff = self._number("analysis", "cutoff", -7.0)
+        moderate = self._number("analysis", "moderate_cutoff", -5.0)
+        if cutoff > moderate:
+            raise ValueError(
+                "analysis.cutoff must be <= analysis.moderate_cutoff"
+            )
+        if self._number("analysis", "top_n", 100) < 1:
+            raise ValueError("analysis.top_n must be >= 1")
+        tanimoto = self._number("analysis", "tanimoto_cutoff", 0.7)
+        if not 0.0 <= tanimoto <= 1.0:
+            raise ValueError(
+                "analysis.tanimoto_cutoff must be between 0 and 1"
+            )
+        for section, key, minimum, strict in [
+            ("md_simulation", "dt_ps", 0.0, True),
+            ("md_simulation", "temperature", 0.0, True),
+            ("md_simulation", "pressure", 0.0, True),
+            ("md_simulation", "box_padding_nm", 0.0, True),
+            ("md_simulation", "contact_cutoff_nm", 0.0, True),
+            ("md_simulation", "prod_steps", 0.0, True),
+            ("md_simulation", "timeout_seconds", 0.0, True),
+            ("md_simulation", "ion_concentration", 0.0, False),
+            ("md_simulation", "em_steps", 0.0, False),
+            ("md_simulation", "equil_steps", 0.0, False),
+            ("md_simulation", "top_n", 1.0, False),
+            ("md_simulation", "cpu", 1.0, False),
+            ("md", "top_n", 1.0, False),
+        ]:
+            value = self._number(section, key, minimum)
+            if (strict and value <= minimum) or (
+                not strict and value < minimum
+            ):
+                raise ValueError(
+                    f"{section}.{key} must be "
+                    f"{'>' if strict else '>='} {minimum:g}"
+                )
+        fraction = self._number("md_simulation", "equilibrate_fraction", 0.5)
+        if not 0.0 <= fraction <= 1.0:
+            raise ValueError(
+                "md_simulation.equilibrate_fraction must be between 0 and 1"
+            )
+        if not 0.0 <= self._number("ligand", "ph", 7.4) <= 14.0:
+            raise ValueError("ligand.ph must be between 0 and 14")
+        if self._number("ligand", "max_heavy_atoms", 60) < 1:
+            raise ValueError("ligand.max_heavy_atoms must be >= 1")
+        if self._number("ligand", "max_rotatable_bonds", 15) < 0:
+            raise ValueError("ligand.max_rotatable_bonds must be >= 0")
+        if self._number("ligand", "conformers", 1) < 1:
+            raise ValueError("ligand.conformers must be >= 1")
+        max_ligands = self.get("ligand", "max_ligands")
+        if max_ligands is not None and self._number(
+            "ligand", "max_ligands", 1
+        ) < 1:
+            raise ValueError("ligand.max_ligands must be >= 1")
+        test_size = self._number("ml", "test_size", 0.2)
+        if not 0.0 < test_size < 1.0:
+            raise ValueError("ml.test_size must be between 0 and 1")
+        if self._number("ml", "epochs", 80) < 1:
+            raise ValueError("ml.epochs must be >= 1")
+        if self._number("ml", "hidden_size", 128) < 1:
+            raise ValueError("ml.hidden_size must be >= 1")
+        if self._number("evidence", "max_items", 10) < 1:
+            raise ValueError("evidence.max_items must be >= 1")
+        min_cells = self._number("insilico_knockout", "min_cells", 100)
+        max_cells = self._number("insilico_knockout", "max_cells", 5000)
+        if min_cells < 1:
+            raise ValueError("insilico_knockout.min_cells must be >= 1")
+        if max_cells < 1:
+            raise ValueError("insilico_knockout.max_cells must be >= 1")
+        if min_cells > max_cells:
+            raise ValueError(
+                "insilico_knockout.min_cells must be <= "
+                "insilico_knockout.max_cells"
+            )
+        if self._number("insilico_knockout", "max_genes", 1800) < 1:
+            raise ValueError("insilico_knockout.max_genes must be >= 1")
+        if self._number("insilico_knockout", "n_propagation", 3) < 1:
+            raise ValueError("insilico_knockout.n_propagation must be >= 1")
+        if self._number("knockout", "top_n", 50) < 1:
+            raise ValueError("knockout.top_n must be >= 1")
+        if self._number("knockout", "max_genes", 2000) < 1:
+            raise ValueError("knockout.max_genes must be >= 1")
+        if self._number("knockout", "max_samples", 5000) < 1:
+            raise ValueError("knockout.max_samples must be >= 1")
+        corr_cutoff = self._number("knockout", "corr_cutoff", 0.7)
+        if not -1.0 <= corr_cutoff <= 1.0:
+            raise ValueError("knockout.corr_cutoff must be between -1 and 1")
+        if self._number("network_toxicology", "max_ppi_edges", 2000) < 1:
+            raise ValueError("network_toxicology.max_ppi_edges must be >= 1")
+        if self._number("faers", "min_count", 3) < 1:
+            raise ValueError("faers.min_count must be >= 1")
+        if self._number("report", "top_n", 20) < 1:
+            raise ValueError("report.top_n must be >= 1")
+        if self._number("validation", "top_n", 10) < 1:
+            raise ValueError("validation.top_n must be >= 1")
 
 
 def load_config(
@@ -431,6 +549,7 @@ def apply_overrides(cfg: ResolvedConfig, overrides: dict) -> ResolvedConfig:
         "md_em_steps": ("md_simulation", "em_steps"),
         "md_equil_steps": ("md_simulation", "equil_steps"),
         "md_prod_steps": ("md_simulation", "prod_steps"),
+        "md_gen_seed": ("md_simulation", "gen_seed"),
         "md_temperature": ("md_simulation", "temperature"),
         "md_ligand_charge": ("md_simulation", "ligand_charge"),
         "md_cpu": ("md_simulation", "cpu"),
@@ -508,22 +627,38 @@ def set_dotted(data: dict, dotted: str, value) -> None:
     target[parts[-1]] = value
 
 
-def save_config(cfg: ResolvedConfig, path: Path) -> None:
+def save_config(
+    cfg: ResolvedConfig,
+    path: Path,
+    sections: list[str] | None = None,
+    posix_paths: bool = False,
+    strict_relative: bool = False,
+) -> None:
+    """Serialize the resolved config.
+
+    ``sections`` keeps only the named top-level keys (used by the standalone
+    molecular docking board, which manages a subset of the full config).
+    ``posix_paths`` writes forward-slash relative paths and
+    ``strict_relative`` only relativizes paths inside the workdir.
+    """
+    def _rel_path(value: Path) -> str:
+        return _rel(value, cfg.workdir, strict_relative)
+
     data = {
         "name": cfg.data.get("name", "virtual_screening"),
         "workdir": str(cfg.workdir),
-        "output_dir": _rel(cfg.output_dir, cfg.workdir),
+        "output_dir": _rel_path(cfg.output_dir),
         "receptor": {
-            "input": _rel(cfg.receptor_input(), cfg.workdir),
-            "output": _rel(cfg.receptor_output(), cfg.workdir),
+            "input": _rel_path(cfg.receptor_input()),
+            "output": _rel_path(cfg.receptor_output()),
             "detect_input": cfg.get("receptor", "detect_input"),
             "center": cfg.receptor_center(),
             "size": cfg.receptor_size(),
-            "flexible": [_rel(item, cfg.workdir) for item in cfg.receptor_flexible()],
+            "flexible": [_rel_path(item) for item in cfg.receptor_flexible()],
         },
         "ligand": {
-            "input": _rel(cfg.ligand_input(), cfg.workdir),
-            "output_dir": _rel(cfg.ligand_output_dir(), cfg.workdir),
+            "input": _rel_path(cfg.ligand_input()),
+            "output_dir": _rel_path(cfg.ligand_output_dir()),
             "smiles_column": cfg.get("ligand", "smiles_column", "SMILES"),
             "id_column": cfg.get("ligand", "id_column", "ID"),
             "ph": cfg.get("ligand", "ph", 7.4),
@@ -603,9 +738,10 @@ def save_config(cfg: ResolvedConfig, path: Path) -> None:
             ),
             "topology_dir": cfg.get("md_simulation", "topology_dir"),
             "em_steps": cfg.get("md_simulation", "em_steps", 5000),
-            "equil_steps": cfg.get("md_simulation", "equil_steps", 5000),
-            "prod_steps": cfg.get("md_simulation", "prod_steps", 250000),
+            "equil_steps": cfg.get("md_simulation", "equil_steps", 250000),
+            "prod_steps": cfg.get("md_simulation", "prod_steps", 25000000),
             "dt_ps": cfg.get("md_simulation", "dt_ps", 0.002),
+            "gen_seed": cfg.get("md_simulation", "gen_seed", 42),
             "temperature": cfg.get("md_simulation", "temperature", 300),
             "pressure": cfg.get("md_simulation", "pressure", 1.0),
             "timeout_seconds": cfg.get(
@@ -833,11 +969,30 @@ def save_config(cfg: ResolvedConfig, path: Path) -> None:
             ),
         },
     }
+    if sections is not None:
+        data = {key: value for key, value in data.items() if key in sections}
+    if posix_paths:
+        data = _posix_paths(data)
     path.parent.mkdir(parents=True, exist_ok=True)
     path.write_text(json.dumps(data, ensure_ascii=False, indent=2), encoding="utf-8")
 
 
-def _rel(path: Path, base: Path) -> str:
+def _posix_paths(value):
+    if isinstance(value, dict):
+        return {key: _posix_paths(item) for key, item in value.items()}
+    if isinstance(value, list):
+        return [_posix_paths(item) for item in value]
+    if isinstance(value, str):
+        return value.replace("\\", "/")
+    return value
+
+
+def _rel(path: Path, base: Path, strict: bool = False) -> str:
+    if strict:
+        try:
+            return path.resolve().relative_to(Path(base).resolve()).as_posix()
+        except ValueError:
+            return str(path)
     try:
         return os.path.relpath(path, base)
     except ValueError:

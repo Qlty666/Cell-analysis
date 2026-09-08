@@ -28,6 +28,10 @@ SKILL_NAMES = {
     "chebi": "chebi-skill",
 }
 OUT_DIR = ROOT / "dock" / "validation_real_random"
+# Sane pass thresholds: a near-total miss must not be reported as PASS.
+DEFAULT_MIN_OK_TARGETS = 10
+DEFAULT_MIN_BOX_OK = 10
+DEFAULT_MIN_LIGANDS = 10
 POOL = [
     "1M17",
     "1XKK",
@@ -117,9 +121,33 @@ def main() -> int:
     parser = argparse.ArgumentParser(
         description="Random real-data validation for evidence and detect-box."
     )
-    parser.add_argument("--min-ok-targets", type=int, default=1)
-    parser.add_argument("--min-box-ok", type=int, default=1)
-    parser.add_argument("--min-ligands", type=int, default=1)
+    parser.add_argument(
+        "--min-ok-targets",
+        type=int,
+        default=DEFAULT_MIN_OK_TARGETS,
+        help=(
+            "minimum number of RCSB lookups that must succeed "
+            f"(default: {DEFAULT_MIN_OK_TARGETS})"
+        ),
+    )
+    parser.add_argument(
+        "--min-box-ok",
+        type=int,
+        default=DEFAULT_MIN_BOX_OK,
+        help=(
+            "minimum number of successful docking-box detections "
+            f"(default: {DEFAULT_MIN_BOX_OK})"
+        ),
+    )
+    parser.add_argument(
+        "--min-ligands",
+        type=int,
+        default=DEFAULT_MIN_LIGANDS,
+        help=(
+            "minimum total number of BindingDB ligands "
+            f"(default: {DEFAULT_MIN_LIGANDS})"
+        ),
+    )
     args = parser.parse_args()
 
     random.seed(20260807)

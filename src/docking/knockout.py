@@ -15,6 +15,7 @@ not a mechanistic simulation of the knockout phenotype.
 
 from __future__ import annotations
 
+import logging
 from pathlib import Path
 
 import numpy as np
@@ -23,7 +24,12 @@ import pandas as pd
 from .config import ResolvedConfig
 from .network_toxicology import ppi_hub_scores
 from .provenance import write_run_manifest
-from .utils import DockingError, write_json
+from .utils import (
+    CELL_TYPE_COLS,
+    DockingError,
+    resolve_path as _resolve_path,
+    write_json,
+)
 
 PROLIFERATION_SIGNATURE = [
     "MKI67",
@@ -126,16 +132,7 @@ DEFAULT_TARGET_WEIGHTS = {
     "ppi_hub": 0.10,
 }
 
-_CELL_TYPE_COLS = {
-    "cell_type",
-    "celltype",
-    "cell_types",
-    "annotation",
-    "annotations",
-    "cell_annotation",
-    "cluster_label",
-    "cell_type_annotation",
-}
+_CELL_TYPE_COLS = CELL_TYPE_COLS
 
 
 def run_knockout(cfg: ResolvedConfig, log) -> dict:
@@ -149,7 +146,7 @@ def run_knockout(cfg: ResolvedConfig, log) -> dict:
             "knockout.expression_csv"
         )
 
-    matrix, long_meta = _load_expression(expression_csv, ko)
+    matrix, long_meta = _load_expression(expression_csv, ko, log)
     if len(matrix) < 5:
         raise DockingError(
             f"expression matrix has only {len(matrix)} genes; need at least 5"
@@ -409,16 +406,18 @@ def run_knockout(cfg: ResolvedConfig, log) -> dict:
     return summary
 
 
-def _resolve_path(cfg: ResolvedConfig, value) -> Path | None:
-    if value is None or str(value).strip() == "":
-        return None
-    path = Path(str(value)).expanduser()
-    if not path.is_absolute():
-        path = cfg.workdir / path
-    return path.resolve()
+def _load_expression(
+    path: Path,
+    ko: dict,
+    log=None,
+) -> tuple[pd.DataFrame, pd.DataFrame | None]:
+    """Load a raw, non-negative expression matrix.
 
-
-def _load_expression(path: Path, ko: dict) -> tuple[pd.DataFrame, pd.DataFrame | None]:
+    The contract is raw (linear) expression counts/TPM/FPKM, not
+    log-transformed values: :func:`run_knockout` applies ``log2(x + 1)`` once.
+    Negative values raise :class:`DockingError`; NaN entries are counted,
+    logged and filled with 0.0 so downstream scoring stays finite.
+    """
     df = pd.read_csv(path)
     if df.empty:
         raise DockingError(f"expression CSV is empty: {path}")
@@ -452,7 +451,23 @@ def _load_expression(path: Path, ko: dict) -> tuple[pd.DataFrame, pd.DataFrame |
         first_col = df.columns[0]
         matrix = df.set_index(first_col).apply(pd.to_numeric, errors="coerce")
         long_meta = None
-    matrix = matrix.dropna(how="all").fillna(0.0)
+    matrix = matrix.apply(pd.to_numeric, errors="coerce").dropna(how="all")
+    numeric = matrix.to_numpy(dtype=float)
+    if numeric.size and np.isnan(numeric).any():
+        logger = log or logging.getLogger(__name__)
+        logger.warning(
+            "expression matrix %s has %s missing value(s); filling with 0.0",
+            path,
+            int(np.isnan(numeric).sum()),
+        )
+    finite = numeric[np.isfinite(numeric)]
+    if finite.size and float(finite.min()) < 0:
+        raise DockingError(
+            f"expression matrix {path} contains negative values "
+            f"(min {float(finite.min()):.4g}); knockout expects raw "
+            "non-negative counts/TPM, not log-transformed or centered values"
+        )
+    matrix = matrix.fillna(0.0)
     matrix.columns = matrix.columns.astype(str)
     matrix.index = matrix.index.astype(str)
     matrix = matrix[~matrix.index.duplicated(keep="first")]

@@ -25,8 +25,17 @@ def run_pipeline(
     cfg: ResolvedConfig,
     force: bool = False,
     start_stage: str | None = None,
+    stages: list | None = None,
+    logger_name: str = "docking",
+    complete_message: str = "pipeline complete",
+    stage_error: str = "refusing to remove an unexpected stage directory",
 ) -> None:
-    log = logging.getLogger("docking")
+    """Run the configured stages with per-stage resume markers.
+
+    ``stages``/``logger_name``/``complete_message`` let the standalone
+    molecular docking board reuse this runner with its own stage list.
+    """
+    log = logging.getLogger(logger_name)
     stage_dir = cfg.stage_dir()
     if force and stage_dir.exists():
         resolved_out = cfg.output_dir.resolve()
@@ -35,11 +44,11 @@ def run_pipeline(
             resolved_stage.parent != resolved_out
             or resolved_stage.name != ".stages"
         ):
-            raise DockingError("refusing to remove an unexpected stage directory")
+            raise DockingError(stage_error)
         shutil.rmtree(stage_dir)
     stage_dir.mkdir(parents=True, exist_ok=True)
 
-    for code, name, fn in STAGES:
+    for code, name, fn in stages or STAGES:
         marker = stage_dir / f"{code}_{name}.done"
         if not force and marker.exists():
             log.info("skip stage %s %s (already done)", code, name)
@@ -51,4 +60,4 @@ def run_pipeline(
         fn(cfg, log)
         marker.write_text(datetime.now().isoformat(timespec="seconds"), encoding="utf-8")
         log.info("stage %s %s complete", code, name)
-    log.info("pipeline complete")
+    log.info("%s", complete_message)

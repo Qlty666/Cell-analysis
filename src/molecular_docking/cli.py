@@ -7,7 +7,8 @@ import logging
 import sys
 from pathlib import Path
 
-from docking.box import detect_box_data
+from docking.box import detect_and_update_config
+from docking.cli import _add_common
 from docking.environment import check_environment
 from docking.utils import DockingError, setup_logging, write_json
 
@@ -35,7 +36,12 @@ def main(argv: list[str] | None = None) -> int:
         ("check-env", "check Python packages and external docking tools"),
     ]:
         sub = subparsers.add_parser(name, help=help_text)
-        _add_common(sub)
+        _add_common(
+            sub,
+            extended=False,
+            config_default=DEFAULT_CONFIG,
+            config_help="path to molecular docking config JSON",
+        )
 
     args = parser.parse_args(argv)
     log = setup_logging(verbose=args.verbose)
@@ -127,55 +133,16 @@ def main(argv: list[str] | None = None) -> int:
 
 
 def _detect_box(cfg, log):
-    detect_value = cfg.get("receptor", "detect_input")
-    detect_path = Path(detect_value) if detect_value else cfg.receptor_input()
-    if not detect_path.is_absolute():
-        detect_path = cfg.workdir / detect_path
-    center, size, mode = detect_box_data(detect_path)
-    cfg.data["receptor"]["center"] = center
-    cfg.data["receptor"]["size"] = size
-    save_config(cfg, cfg.config_path)
+    center, size, mode = detect_and_update_config(
+        cfg,
+        log,
+        save=save_config,
+    )
     write_json(
         cfg.output_dir / "detect_box_result.json",
         {"center": center, "size": size, "mode": mode},
     )
-    log.info(
-        "detect-box: mode=%s center=%s size=%s -> %s",
-        mode,
-        center,
-        size,
-        cfg.config_path,
-    )
     return center, size, mode
-
-
-def _add_common(sub: argparse.ArgumentParser) -> None:
-    sub.add_argument(
-        "--config",
-        default=str(DEFAULT_CONFIG),
-        help="path to molecular docking config JSON",
-    )
-    sub.add_argument("--workdir", help="override working directory")
-    sub.add_argument("--outdir", help="override output directory")
-    sub.add_argument("--receptor", help="override receptor input file")
-    sub.add_argument("--ligand", help="override ligand library file")
-    sub.add_argument("--center", nargs=3, type=float, metavar=("X", "Y", "Z"))
-    sub.add_argument("--size", nargs=3, type=float, metavar=("X", "Y", "Z"))
-    sub.add_argument("--exhaustiveness", type=int)
-    sub.add_argument("--num-modes", type=int)
-    sub.add_argument("--energy-range", type=float)
-    sub.add_argument("--cpu", type=int)
-    sub.add_argument("--max-workers", type=int)
-    sub.add_argument("--seed", type=int)
-    sub.add_argument("--max-ligands", type=int)
-    sub.add_argument("--cutoff", type=float)
-    sub.add_argument("--moderate-cutoff", type=float)
-    sub.add_argument("--top-n", type=int)
-    sub.add_argument("--executable", help="AutoDock Vina executable path")
-    sub.add_argument("--scoring", help="Vina scoring function, e.g. vina/vinardo")
-    sub.add_argument("--force", action="store_true", help="rerun stages from scratch")
-    sub.add_argument("--start-stage", default=None, help="stage code to start from")
-    sub.add_argument("--verbose", action="store_true")
 
 
 if __name__ == "__main__":

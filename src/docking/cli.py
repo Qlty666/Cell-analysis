@@ -104,6 +104,7 @@ def main(argv: list[str] | None = None) -> int:
         "md_em_steps": args.md_em_steps,
         "md_equil_steps": args.md_equil_steps,
         "md_prod_steps": args.md_prod_steps,
+        "md_gen_seed": args.md_gen_seed,
         "md_temperature": args.md_temperature,
         "md_ligand_charge": args.md_ligand_charge,
         "md_cpu": args.md_cpu,
@@ -246,11 +247,21 @@ def main(argv: list[str] | None = None) -> int:
     return 0
 
 
-def _add_common(sub: argparse.ArgumentParser) -> None:
+def _add_common(
+    sub: argparse.ArgumentParser,
+    extended: bool = True,
+    config_default: Path | str | None = None,
+    config_help: str = "path to docking config JSON/YAML",
+) -> None:
+    """Add the shared CLI options.
+
+    ``extended=True`` (full pipeline) also adds the ML/MD/evidence/knockout
+    options; the standalone molecular docking board uses ``extended=False``.
+    """
     sub.add_argument(
         "--config",
-        default=str(DEFAULT_CONFIG),
-        help="path to docking config JSON/YAML",
+        default=str(config_default or DEFAULT_CONFIG),
+        help=config_help,
     )
     sub.add_argument("--workdir", help="override working directory")
     sub.add_argument("--outdir", help="override output directory")
@@ -270,6 +281,11 @@ def _add_common(sub: argparse.ArgumentParser) -> None:
     sub.add_argument("--top-n", type=int)
     sub.add_argument("--executable", help="Vina executable or script path")
     sub.add_argument("--scoring", help="Vina scoring function, e.g. vina/vinardo")
+    sub.add_argument("--force", action="store_true", help="rerun stages from scratch")
+    sub.add_argument("--start-stage", default=None, help="stage code to start from")
+    sub.add_argument("--verbose", action="store_true")
+    if not extended:
+        return
     sub.add_argument("--model", help="ML model: rf, gbm, mlp, lasso_svm or torch")
     sub.add_argument("--label-column", help="training label column")
     sub.add_argument("--training-csv", help="training CSV path")
@@ -291,6 +307,11 @@ def _add_common(sub: argparse.ArgumentParser) -> None:
     sub.add_argument("--md-em-steps", type=int, help="energy minimization steps")
     sub.add_argument("--md-equil-steps", type=int, help="NVT/NPT steps")
     sub.add_argument("--md-prod-steps", type=int, help="production MD steps")
+    sub.add_argument(
+        "--md-gen-seed",
+        type=int,
+        help="velocity generation seed for reproducible MD (default: 42)",
+    )
     sub.add_argument("--md-temperature", type=float, help="simulation temperature (K)")
     sub.add_argument("--md-ligand-charge", type=int, help="ligand net charge")
     sub.add_argument("--md-cpu", type=int, help="GROMACS OpenMP threads")
@@ -459,9 +480,6 @@ def _add_common(sub: argparse.ArgumentParser) -> None:
         default="hs",
         help="species used by cell feedback enrichment (default: hs)",
     )
-    sub.add_argument("--force", action="store_true", help="rerun stages from scratch")
-    sub.add_argument("--start-stage", default=None, help="stage code to start from")
-    sub.add_argument("--verbose", action="store_true")
 
 
 def _init_workdir(cfg, log) -> None:

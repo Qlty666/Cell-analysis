@@ -4,12 +4,18 @@ from pathlib import Path
 import concurrent.futures
 import json
 import gzip
+import logging
 import re
 import shutil
 import subprocess
 import time
 import tarfile
-import urllib.request
+
+from common.http import DEFAULT_USER_AGENT, HttpError, http_download, http_get
+
+logger = logging.getLogger(__name__)
+
+USER_AGENT = DEFAULT_USER_AGENT
 
 CACHE_ROOT = Path(__file__).resolve().parents[2] / "data_cache"
 
@@ -96,7 +102,8 @@ def _matrix_header_looks_single_cell(path: Path) -> bool:
             _CELL_BARCODE_RE.match(fields[0])
             or (len(fields) >= 2 and _CELL_BARCODE_RE.match(fields[1]))
         )
-    except Exception:
+    except Exception as exc:  # noqa: BLE001 - unreadable file means "not single cell"
+        logger.warning("could not inspect matrix header %s: %s", path, exc)
         return False
 
 
@@ -118,7 +125,8 @@ def _series_matrix_says_single_cell(path: Path) -> bool:
                 "smart-seq",
             )
         )
-    except Exception:
+    except Exception as exc:  # noqa: BLE001 - unreadable file means "not single cell"
+        logger.warning("could not read series matrix %s: %s", path, exc)
         return False
 
 
@@ -127,6 +135,41 @@ def _matrix_files_look_single_cell(files: dict, base_dir: Path) -> bool:
         if _matrix_header_looks_single_cell(base_dir / rel):
             return True
     return False
+
+
+# Ensembl-style organism codes. Aliases use word boundaries so that words such
+# as "generated" or "collaborative" are not misread as "rat".
+ORGANISM_PATTERNS: tuple[tuple[str, str], ...] = (
+    (r"\bhomo\s+sapiens\b", "hs"),
+    (r"\bhuman\b", "hs"),
+    (r"\bmus\s+musculus\b", "mm"),
+    (r"\bmouse\b", "mm"),
+    (r"\brattus\s+norvegicus\b", "rn"),
+    (r"\brat\b", "rn"),
+    (r"\bdanio\s+rerio\b", "dr"),
+    (r"\bzebrafish\b", "dr"),
+    (r"\bdrosophila\s+melanogaster\b", "dm"),
+    (r"\bsaccharomyces\s+cerevisiae\b", "sc"),
+    (r"\bcaenorhabditis\s+elegans\b", "ce"),
+    (r"\bmacaca\s+mulatta\b", "mmul"),
+    (r"\bsus\s+scrofa\b", "ss"),
+    (r"\bcanis\s+lupus\s+familiaris\b", "cf"),
+)
+
+
+def detect_organism_code(*texts: str) -> str | None:
+    """Return the Ensembl-style code for the first recognized organism.
+
+    ``None`` means no supported organism was mentioned; callers must record
+    that explicitly instead of silently assuming human.
+    """
+    haystack = " ".join(text for text in texts if text).lower()
+    if not haystack:
+        return None
+    for pattern, code in ORGANISM_PATTERNS:
+        if re.search(pattern, haystack):
+            return code
+    return None
 
 
 def _is_archive(name: str) -> bool:
@@ -141,32 +184,37 @@ def _curl() -> str:
 
 
 def _fetch(url: str) -> str:
+    """Fetch a small text/HTML resource, preferring the shared HTTP helper."""
     try:
-        req = urllib.request.Request(
+        return http_get(
             url,
-            headers={"User-Agent": "Mozilla/5.0"},
+            timeout=120,
+            retries=3,
+            backoff=2.0,
+            user_agent=USER_AGENT,
+        ).decode("utf-8", "replace")
+    except HttpError as exc:
+        logger.warning(
+            "urllib fetch failed for %s (%s); retrying with curl", url, exc
         )
-        with urllib.request.urlopen(req, timeout=120) as resp:
-            return resp.read().decode("utf-8", "replace")
-    except Exception:
-        result = subprocess.run(
-            [
-                _curl(),
-                "-L",
-                "--ssl-no-revoke",
-                "-A", "Mozilla/5.0",
-                "--silent",
-                "--show-error",
-                "--max-time", "120",
-                url,
-            ],
-            capture_output=True,
-            text=True,
-            encoding="utf-8",
-            errors="replace",
-            check=True,
-        )
-        return result.stdout
+    result = subprocess.run(
+        [
+            _curl(),
+            "-L",
+            "--ssl-no-revoke",
+            "-A", USER_AGENT,
+            "--silent",
+            "--show-error",
+            "--max-time", "120",
+            url,
+        ],
+        capture_output=True,
+        text=True,
+        encoding="utf-8",
+        errors="replace",
+        check=True,
+    )
+    return result.stdout
 
 
 def _download(url: str, out: Path, log, force: bool = False) -> None:
@@ -181,7 +229,7 @@ def _download(url: str, out: Path, log, force: bool = False) -> None:
                     _curl(),
                     "-L",
                     "--ssl-no-revoke",
-                    "-A", "Mozilla/5.0",
+                    "-A", USER_AGENT,
                     "-C", "-",
                     "--retry", "5",
                     "--retry-delay", "3",
@@ -199,7 +247,23 @@ def _download(url: str, out: Path, log, force: bool = False) -> None:
             return
         except (subprocess.CalledProcessError, OSError, RuntimeError) as exc:
             if attempt == 3:
-                raise
+                # curl keeps resume support for multi-GB GEO archives; the
+                # shared helper is the fallback when curl is missing/blocked.
+                logger.warning(
+                    "curl download failed for %s (%s); falling back to urllib",
+                    url,
+                    exc,
+                )
+                http_download(
+                    url,
+                    out,
+                    timeout=5400,
+                    retries=3,
+                    backoff=3.0,
+                    user_agent=USER_AGENT,
+                    log=log,
+                )
+                return
             delay = 3 * attempt
             log(f"download attempt {attempt} failed ({exc}); retrying in {delay}s")
             time.sleep(delay)
@@ -703,16 +767,18 @@ def ensure_geo_dataset(accession: str, root: Path, log) -> dict:
         _download(matrix_url + name, out, log)
         series_paths.append(safe_name)
 
-    organism = "hs"
+    organism_texts: list[str] = []
     for name in series_paths:
         try:
             with gzip.open(raw_dir / name, "rt", encoding="utf-8", errors="replace") as fh:
-                text = fh.read(20000)
-            if "mus musculus" in text.lower():
-                organism = "mm"
-                break
-        except Exception:
-            continue
+                organism_texts.append(fh.read(20000))
+        except (OSError, EOFError) as exc:
+            logger.warning(
+                "could not read series matrix %s for organism detection: %s",
+                raw_dir / name,
+                exc,
+            )
+    organism = detect_organism_code(*organism_texts) or "unknown"
 
     single_cell_hint = any(
         _series_matrix_says_single_cell(raw_dir / name)
