@@ -40,6 +40,28 @@ class TestPortablePackage(unittest.TestCase):
         self.assertFalse(
             any(name.startswith("scripts/_test_h5ad_reader.R") for name in relative)
         )
+        home = Path.home()
+        # Personal absolute paths must never be committed into the portable
+        # source. ``Path.home()`` is resolved at runtime, so no username or
+        # machine-specific directory is hardcoded here. When the checkout
+        # itself lives inside the home directory, the absolute home prefix is
+        # not a reliable leak marker, so it is skipped.
+        home_inside_repo = home == APP_ROOT or APP_ROOT in home.parents
+        home_tokens = (
+            ()
+            if home_inside_repo
+            else tuple(
+                dict.fromkeys(
+                    (
+                        str(home),
+                        str(home).replace("\\", "/"),
+                        f"Users\\{home.name}",
+                        f"Users/{home.name}",
+                        f"/home/{home.name}",
+                    )
+                )
+            )
+        )
         for path in files:
             if path.suffix.lower() not in {
                 ".py",
@@ -53,8 +75,14 @@ class TestPortablePackage(unittest.TestCase):
             }:
                 continue
             text = path.read_text(encoding="utf-8", errors="replace")
-            self.assertNotIn("D:\\AAA Liver cancer", text, str(path))
-            self.assertNotIn("C:\\Users\\20338", text, str(path))
+            repo_tokens = (
+                str(APP_ROOT),
+                str(APP_ROOT).replace("\\", "/"),
+            )
+            for token in repo_tokens:
+                self.assertNotIn(token, text, str(path))
+            for token in home_tokens:
+                self.assertNotIn(token, text, str(path))
 
     def test_build_package_dry_run_does_not_write(self):
         with tempfile.TemporaryDirectory() as tmp:

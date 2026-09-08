@@ -107,11 +107,24 @@ def read_tail(path: Path, limit: int = 4000) -> str:
 
 
 def _snapshot_r_script(log_dir: Path) -> Path:
-    """Copy the R script so live edits cannot corrupt a running parse."""
+    """Copy the R script so live edits cannot corrupt a running parse.
+
+    The driver loads its top-level functions from ``src/analysis/R``; snapshot
+    that directory next to the script as well and point ``LIVER_R_MODULES_DIR``
+    at the copy so the snapshot run never depends on the live tree.
+    """
     log_dir.mkdir(parents=True, exist_ok=True)
     source = ROOT / "src" / "analysis" / "analysis_pipeline.R"
     snapshot = log_dir / "pipeline_analysis.R"
     shutil.copy2(source, snapshot)
+    modules_source = ROOT / "src" / "analysis" / "R"
+    if modules_source.is_dir():
+        modules_snapshot = log_dir / "R"
+        if modules_snapshot.exists():
+            shutil.rmtree(modules_snapshot)
+        shutil.copytree(modules_source, modules_snapshot)
+        os.environ["LIVER_R_MODULES_DIR"] = str(modules_snapshot)
+        log(f"R modules snapshot: {modules_snapshot}")
     log(f"R script snapshot: {snapshot}")
     return snapshot
 

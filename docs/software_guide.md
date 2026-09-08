@@ -67,6 +67,8 @@ liverbio web
 `--page datasets`、`--page results`、`--page tasks`、
 `--page guide`、`--page environment` 等打开对应页面。
 
+网页服务默认绑定回环地址 `127.0.0.1`，无需认证；用 `--host` 绑定非回环地址时会自动生成会话 token，必须通过带 `?token=...` 的 URL 或 `X-Auth-Token` 请求头访问。结果浏览默认只允许读取项目输出根目录和本控制台启动过的任务目录，其他目录需用 `--allow-path <目录>` 显式放行。
+
 网页顶部提供“使用教程”与“环境补全”两个独立入口：
 
 - `/guide`：网页版使用教程，包含页面速查表、首次补全、标准运行流程、任务管理与结果查看。

@@ -141,7 +141,7 @@
 
 ### 2.5 网页版统一界面
 
-`web/web_ui.py` 提供本地网页端。除全自动流水线保留集成入口外，其余分析工具按功能拆成独立页面，顶部导航顺序为全自动流水线、环境补全、表达分析、数据集搜索、虚拟筛选、分子动力学、分子对接、虚拟敲除、网络毒理学、FAERS、真实数据验证、结果清单、使用教程，“任务进度”固定在右上角：
+`web/web_ui.py`（配合 `web/web_handler.py` 请求处理、`web/web_data.py` 静态数据表、`web/web_state.py` 运行时状态和 `web/web_results.py` 结果读取）提供本地网页端。除全自动流水线保留集成入口外，其余分析工具按功能拆成独立页面，顶部导航顺序为全自动流水线、环境补全、表达分析、数据集搜索、虚拟筛选、分子动力学、分子对接、虚拟敲除、网络毒理学、FAERS、真实数据验证、结果清单、使用教程，“任务进度”固定在右上角：
 
 - 全自动流水线：`/full`
 - 环境补全：`/environment`
@@ -285,6 +285,8 @@ liverbio package
 launchers\check_pipeline_environment.bat
 launchers\install_pipeline_dependencies.bat
 ```
+
+离线或内网主机可跳过 NCBI GEO 网络探测：`python launchers\check_pipeline_environment.py --offline`（`check_pipeline_environment.bat` 入口不转发参数，需要离线检查时请直接调用该 Python 脚本）。
 
 `install_pipeline_dependencies.bat` 会安装表达分析所需的 R 包；使用 pip 手动安装 Python 依赖时执行：
 
@@ -588,11 +590,15 @@ launchers\run_web_ui.bat --page tasks
 
 关闭所有网页标签后，本地网页服务会在数秒内自动退出并释放端口；正常退出时启动窗口也会自动关闭。再次启动时，如果检测到旧网页服务仍占用端口，会自动关闭旧实例后再启动；若端口被其他非网页程序占用，窗口会保留错误信息等待确认后关闭。
 
+网页服务默认绑定回环地址 `127.0.0.1`，此时无需认证，保持本地零配置；改用 `--host 0.0.0.0` 等非回环地址启动时会自动生成会话 token，必须用带 `?token=...` 的 URL 访问或为每个请求发送 `X-Auth-Token` 头，否则返回 403，同时终端会提示只应在可信网络中使用。结果浏览默认只允许读取项目输出根目录，以及本控制台启动过的任务工作目录；需要读取其他目录时用 `--allow-path <目录>`（可重复）显式放行。
+
 ### 4.5 验证脚本与测试
 
 ```bash
-python -m unittest discover -s tests -p "test_*.py" -v
+python -m pytest -q
 ```
+
+测试配置见 `pytest.ini`，共享导入路径引导见 `tests/conftest.py`；`.github/workflows/tests.yml` 会在 Windows/Linux + Python 3.11 上运行同一命令。单独运行某个测试文件时可直接指定路径，例如 `python -m pytest -q tests/test_portable_package.py`。
 
 各验证脚本用途：
 
@@ -828,6 +834,7 @@ python scripts\install_codex_skills.py --list
 | `scripts/validate_random_real_full_pipeline.py` | 随机真实 GSE 全流程验证 |
 | `scripts/validate_dataset_search.py` | 多数据库数据集搜索随机验证（默认 GEO） |
 | `launchers/install_environment.py` | 按功能板块安装/检查环境 |
+| `launchers/_common.bat` | launchers 批处理公共 Python 3 探测 |
 | `launchers/install_*_environment.bat` | 各功能板块一键补全环境 |
 | `launchers/check_*.bat/.py` | 环境检查 |
 | `launchers/install_*.bat/.py` | 环境自动补全 |
@@ -842,22 +849,42 @@ python scripts\install_codex_skills.py --list
 | `setup_new_computer.bat` / `check_new_computer.bat` | 新电脑安装与检查 |
 | `package_for_new_computer.bat` | 新电脑源码包生成入口 |
 | `src/analysis/*` | R/Python 分析实现（QC、聚类、DEG、富集、CellChat、ML） |
-| `src/common/*` | Rscript/工具路径与环境探测 |
+| `src/analysis/analysis_pipeline.R` | 表达分析驱动脚本（参数、阶段调度与模块加载） |
+| `src/analysis/R/*.R` | 表达分析函数模块（读取、QC、聚类、注释、DEG、富集、出图） |
+| `src/common/*` | Rscript/工具路径、环境探测与通用 HTTP/HTML 工具 |
+| `src/common/http.py` | 通用 HTTP 请求（重试、退避、大小限制） |
+| `src/common/html_utils.py` | 报告 HTML 转义工具 |
 | `src/data/*` | GEO/ArrayExpress/BioStudies 下载、格式转换、合成数据生成 |
 | `src/docking/*` | 虚拟筛选、证据、虚拟敲除、MD、验证、报告等实现 |
+| `src/docking/http.py` | 证据收集 HTTP 下载（超时与重试） |
+| `src/docking/html_utils.py` | 对接报告 HTML 转义工具 |
 | `src/molecular_docking/*` | 独立分子对接板块实现 |
 | `src/liverbio_suite/*` | `liverbio` 统一入口实现 |
 | `src/pipeline/orchestrator.py` | 表达流水线编排 |
 | `src/pipeline/integration.py` | 全自动集成流水线编排 |
+| `src/pipeline/stage_paths.py` | 全自动流水线阶段目录、标记与输出清单 |
+| `src/pipeline/integrated_report.py` | 集成 HTML 报告生成 |
 | `src/pipeline/cell_feedback.py` / `cell_feedback.R` | 虚拟敲除/对接结果返回单细胞对象的闭环分析 |
 | `src/pipeline/export_pseudobulk.R` | 伪 bulk 表达矩阵导出 |
 | `src/report/*` | HTML/Word 报告生成 |
-| `web/web_ui.py` | 本地网页服务 |
+| `src/report/guides.py` | 结果图/数据指南表 |
+| `web/web_ui.py` | 本地网页服务与任务调度 |
+| `web/web_handler.py` | 网页端 HTTP 路由与请求处理 |
+| `web/web_data.py` | 网页端静态数据表（导航、图目录、软件清单） |
+| `web/web_state.py` | 网页端任务、队列与历史运行时状态 |
+| `web/web_results.py` | 网页端任务状态、历史与结果清单读取 |
 | `web/templates/*` | 全流程、表达分析、数据集、虚拟筛选、分子对接、结果清单等页面模板 |
 | `config/*.json` | 表达分析、对接、独立分子对接和全流程配置 |
 | `skills/liver-*/SKILL.md` | Codex skill 定义 |
 | `docs/project_structure.md` | 代码文件结构化说明 |
+| `pytest.ini` | pytest 配置（`testpaths = tests`） |
+| `tests/conftest.py` | pytest 共享 `sys.path` 引导 |
 | `tests/test_*.py` | 单元/集成测试 |
+| `tests/test_r_pipeline_syntax.py` | R 脚本解析与模块加载冒烟测试 |
+| `tests/test_web_security.py` | 网页端同源/跨站与路径安全测试 |
+| `tests/test_web_server_smoke.py` | 网页端真实 HTTP 服务冒烟测试 |
+| `tests/test_web_script_mode.py` | 网页端脚本模式状态一致性测试 |
+| `.github/workflows/tests.yml` | GitHub Actions 测试工作流（Windows/Linux，Python 3.11） |
 
 ## 7. 目录结构
 
@@ -877,6 +904,11 @@ Script/
 ├── requirements.txt
 ├── requirements_dock.txt
 ├── environment_dock.yml
+├── pytest.ini           # pytest 配置
+├── .gitignore
+├── .github/
+│   └── workflows/
+│       └── tests.yml    # GitHub Actions 测试工作流
 ├── scripts/
 │   ├── run_pipeline.py
 │   ├── run_docking.py
@@ -894,34 +926,38 @@ Script/
 │   ├── molecular_docking_config.json
 │   └── full_pipeline_config.json
 ├── src/
-│   ├── analysis/        # 表达分析 R/Python
-│   ├── common/          # 环境探测
+│   ├── analysis/        # 表达分析 R/Python（analysis_pipeline.R 驱动 + R/ 模块）
+│   │   └── R/           # 表达分析函数模块
+│   ├── common/          # 环境探测、HTTP 与 HTML 工具
 │   ├── data/            # 数据下载与转换
 │   ├── docking/         # 虚拟筛选/CADD/MD/虚拟敲除
 │   ├── molecular_docking/ # 独立分子对接
 │   ├── liverbio_suite/  # liverbio 统一入口
-│   ├── pipeline/        # 流水线编排与细胞反馈
-│   └── report/          # 报告生成
+│   ├── pipeline/        # 流水线编排、阶段路径、集成报告与细胞反馈
+│   └── report/          # 报告生成与结果图指南
 ├── web/
-│   ├── web_ui.py
+│   ├── web_ui.py        # 网页服务与任务调度
+│   ├── web_handler.py   # HTTP 路由与请求处理
+│   ├── web_data.py      # 静态数据表
+│   ├── web_state.py     # 运行时任务状态
+│   ├── web_results.py   # 任务状态、历史与结果读取
 │   ├── static/
 │   └── templates/
-├── launchers/           # .bat 快捷入口及同名 .py
+├── launchers/           # .bat 快捷入口及同名 .py（_common.bat 为公共 Python 探测）
 ├── skills/              # Codex skill 源文件
 ├── docs/                # 使用与结构说明
-├── tests/
+├── tests/               # 单元/集成测试（conftest.py 为 pytest 引导）
 ├── data_cache/          # 运行时下载缓存（gitignore）
 ├── dock/                # 虚拟筛选工作目录（产物 gitignore）
 │   ├── config/
 │   ├── data/
 │   ├── outputs/
-│   ├── evidence/
-│   ├── validation_real/
-│   └── tools/
+│   ├── tools/
+│   └── work/
 └── results/             # 表达分析结果（gitignore）
 ```
 
-`dock/tools/`、`dock/outputs/`、`dock/logs/`、`dock/evidence/`、`dock/validation_real/`、`dock/work/`、`data_cache/` 等运行产物和二进制文件默认被 `.gitignore` 排除，不会上传 GitHub。
+`dock/tools/`、`dock/outputs/`、`dock/logs/`、`dock/evidence/`、`dock/validation_real/`、`dock/work/`、`data_cache/` 等运行产物和二进制文件默认被 `.gitignore` 排除，不会上传 GitHub；其中 `dock/evidence/`、`dock/validation_real/`、`dock/logs/` 等目录在首次运行对应阶段时才创建。
 
 ## 8. 数据来源与许可
 
