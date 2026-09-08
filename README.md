@@ -1,6 +1,6 @@
 # Liver Cancer Bioinformatics Workflow
 
-> 当前版本：1.5.0
+> 当前版本：1.5.1
 
 面向肝癌研究的本地生信自动化工作流，整合三条可实际运行的流水线：
 
@@ -970,6 +970,15 @@ GSE165816 和 TCGA PanCancer Atlas 仅用于真实数据验证。
 MIT License. See `LICENSE` for details.
 
 ## 9. 更新日志
+
+### v1.5.1
+
+- 依据只读代码审查修复 P0/P1 问题：MD 默认模拟时长与完成信息、可复现随机种子、HETATM 丢弃告警、信号检测零细胞修正、虚拟敲除输入校验、配置跨字段约束、`docking.cpu` / tanimoto 去重阈值接线、HTTP 超时重试、HTML 转义与失败原因记录。
+- 收敛 docking 与 molecular_docking 共享逻辑：参数化保存配置、流水线阶段/日志名与 CLI 公共参数，删除重复的盒子检测、路径解析、读取/转义/JSON 写入等私有副本。
+- 拆分巨型文件：`analysis_pipeline.R` 的 R 分析函数抽到 `src/analysis/R/*.R`；`web_ui.py` 抽成 `web/web_handler.py`、`web/web_data.py`、`web/web_state.py`、`web/web_results.py`；`integration.py` / `generate_report.py` 的阶段路径、HTML 报告与指南表抽到独立模块。
+- 补齐 R 模块快照与冒烟测试：orchestrator 运行时会同步 `src/analysis/R` 并设置 `LIVER_R_MODULES_DIR`；新增 `tests/test_r_pipeline_syntax.py`，逐文件解析 R 并验证模块可独立加载。
+- 清理静默异常与仓库卫生：网页/脚本路径读取失败改为带原因日志；离线环境检查、公共 `.bat` Python 探测、`.gitignore`、`pytest.ini` / `tests/conftest.py` 与 GitHub Actions Windows/Linux 测试工作流同步。
+- 全量测试通过：339 个测试用例 + 45 个 subtests。
 
 ### v1.5.0
 
