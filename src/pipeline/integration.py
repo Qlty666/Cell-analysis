@@ -58,6 +58,7 @@ from docking.knockout import run_knockout  # noqa: E402
 from docking.provenance import write_run_manifest  # noqa: E402
 from docking.utils import DockingError, ToolNotFoundError, safe_name, write_json  # noqa: E402
 from docking.validation import export_validation  # noqa: E402
+from common.html_utils import esc as _esc  # noqa: E402
 from data.geo_downloader import canonical_accession  # noqa: E402
 
 from . import cell_feedback, orchestrator  # noqa: E402
@@ -276,8 +277,8 @@ def _read_stage_marker(workdir: Path, code: str, name: str) -> dict | None:
         data = json.loads(marker.read_text(encoding="utf-8"))
         if isinstance(data, dict) and data.get("signature"):
             return data
-    except Exception:
-        pass
+    except (OSError, ValueError) as exc:
+        log.warning("unreadable stage marker %s: %s", marker, exc)
     return None
 
 
@@ -373,6 +374,11 @@ def _stage_signature(code: str, args, workdir: Path, ctx: dict) -> str:
     elif code == "06":
         key_genes = ctx.get("key_genes_path") or integration / "key_genes.csv"
         evidence = ctx.get("evidence_path") or integration / "gene_evidence.csv"
+        # The ChEMBL ligand library is fetched at docking time and persisted to
+        # outputs/integration/ligands/ (with a per-gene sha256 recorded in
+        # docking_summary.json). It is an output, so it cannot be part of the
+        # input signature without permanently invalidating the stage; the
+        # persisted library is reused on rerun/resume instead.
         payload.update(
             {
                 "docking_config": str(docking_config),
@@ -517,8 +523,8 @@ def _dataset_mode_from_root(root: Path) -> str:
             mode = str(summary.get("dataset_mode", "")).strip()
             if mode:
                 return mode
-        except (OSError, ValueError):
-            pass
+        except (OSError, ValueError) as exc:
+            log.warning("could not read dataset mode from %s: %s", summary_path, exc)
     return "single_cell"
 
 
@@ -685,8 +691,8 @@ def collect_qc_metrics(single_cell_root: Path, workdir: Path) -> dict:
             metrics["qc_thresholds"] = threshold_frame.to_dict(
                 orient="records"
             )
-        except Exception:
-            pass
+        except (OSError, ValueError) as exc:
+            log.warning("could not read QC threshold CSV %s: %s", qc_threshold_csv, exc)
 
     doublet_csv = data_dir / "08_publication" / "fig_29_doublet_rate_by_sample.csv"
     if not doublet_csv.exists():
@@ -698,8 +704,8 @@ def collect_qc_metrics(single_cell_root: Path, workdir: Path) -> dict:
             metrics["doublet_rate_by_sample"] = frame.to_dict(orient="records")
             if rates.notna().any():
                 metrics["doublet_rate"] = float(rates.mean())
-        except Exception:
-            pass
+        except (OSError, ValueError) as exc:
+            log.warning("could not read doublet-rate CSV %s: %s", doublet_csv, exc)
     else:
         doublet_tbl = data_dir / "02_doublets" / "fig_02_doublet_results.csv"
         if doublet_tbl.exists():
@@ -727,8 +733,12 @@ def collect_qc_metrics(single_cell_root: Path, workdir: Path) -> dict:
                     )
                     if rates.notna().any():
                         metrics["doublet_rate"] = float(rates.mean())
-            except Exception:
-                pass
+            except (OSError, ValueError) as exc:
+                log.warning(
+                    "could not read doublet results CSV %s: %s",
+                    doublet_tbl,
+                    exc,
+                )
 
     warn_path = data_dir / "pseudobulk_warning.txt"
     if warn_path.exists():
@@ -737,8 +747,8 @@ def collect_qc_metrics(single_cell_root: Path, workdir: Path) -> dict:
                 warn_path.read_text(encoding="utf-8", errors="replace").strip()
             )
             metrics["pseudobulk_used"] = False
-        except OSError:
-            pass
+        except OSError as exc:
+            log.warning("could not read pseudobulk warning %s: %s", warn_path, exc)
 
     integration = _integration_dir(workdir)
     ko_summary = _read_json(integration / "knockout_summary.json")
@@ -899,12 +909,93 @@ def _bh_adjust(p_values) -> list[float]:
     return [float(v) for v in out]
 
 
+def _betacf(a: float, b: float, x: float, max_iter: int = 200) -> float:
+    """Continued fraction for the regularized incomplete beta function."""
+    qab = a + b
+    qap = a + 1.0
+    qam = a - 1.0
+    c = 1.0
+    d = 1.0 - qab * x / qap
+    if abs(d) < 1e-30:
+        d = 1e-30
+    d = 1.0 / d
+    h = d
+    for m in range(1, max_iter + 1):
+        m2 = 2 * m
+        aa = m * (b - m) * x / ((qam + m2) * (a + m2))
+        d = 1.0 + aa * d
+        if abs(d) < 1e-30:
+            d = 1e-30
+        c = 1.0 + aa / c
+        if abs(c) < 1e-30:
+            c = 1e-30
+        d = 1.0 / d
+        h *= d * c
+        aa = -(a + m) * (qab + m) * x / ((a + m2) * (qap + m2))
+        d = 1.0 + aa * d
+        if abs(d) < 1e-30:
+            d = 1e-30
+        c = 1.0 + aa / c
+        if abs(c) < 1e-30:
+            c = 1e-30
+        d = 1.0 / d
+        delta = d * c
+        h *= delta
+        if abs(delta - 1.0) < 3e-12:
+            break
+    return h
+
+
+def _regularized_incomplete_beta(a: float, b: float, x: float) -> float:
+    if x <= 0.0:
+        return 0.0
+    if x >= 1.0:
+        return 1.0
+    front = math.exp(
+        math.lgamma(a + b)
+        - math.lgamma(a)
+        - math.lgamma(b)
+        + a * math.log(x)
+        + b * math.log1p(-x)
+    )
+    if x < (a + 1.0) / (a + b + 2.0):
+        return front * _betacf(a, b, x) / a
+    return 1.0 - _regularized_incomplete_beta(b, a, 1.0 - x)
+
+
+def _welch_ttest(sample_a, sample_b) -> tuple[float, float]:
+    """Two-sided Welch t-test without scipy; returns (t, p) or (nan, nan)."""
+    a = np.asarray(sample_a, dtype=float)
+    b = np.asarray(sample_b, dtype=float)
+    a = a[np.isfinite(a)]
+    b = b[np.isfinite(b)]
+    n_a, n_b = len(a), len(b)
+    if n_a < 2 or n_b < 2:
+        return float("nan"), float("nan")
+    var_a = float(a.var(ddof=1))
+    var_b = float(b.var(ddof=1))
+    standard_error = var_a / n_a + var_b / n_b
+    if not math.isfinite(standard_error) or standard_error <= 0.0:
+        return float("nan"), float("nan")
+    t_value = float((a.mean() - b.mean()) / math.sqrt(standard_error))
+    if t_value == 0.0:
+        return 0.0, 1.0
+    df = standard_error**2 / (
+        (var_a / n_a) ** 2 / (n_a - 1) + (var_b / n_b) ** 2 / (n_b - 1)
+    )
+    if not math.isfinite(df) or df <= 0.0:
+        return t_value, float("nan")
+    x = df / (df + t_value * t_value)
+    p_value = _regularized_incomplete_beta(df / 2.0, 0.5, x)
+    return t_value, float(min(max(p_value, 0.0), 1.0))
+
+
 def run_differential_abundance(
     single_cell_root: Path,
     out_dir: Path,
     config: dict | None = None,
 ) -> dict:
-    """Pair DE with a cell-type composition shift test (skill-guided)."""
+    """Pair DE with a sample-level cell-type composition shift test."""
     cfg = config or {}
     out_dir.mkdir(parents=True, exist_ok=True)
     ann_path = (
@@ -922,26 +1013,51 @@ def run_differential_abundance(
         }
     try:
         ann = pd.read_csv(ann_path)
-    except Exception:
+    except (OSError, ValueError) as exc:
+        log.warning("could not read cell annotation CSV %s: %s", ann_path, exc)
         return {
             "status": "skipped",
             "reason": "cell annotation CSV unreadable",
             "output_csv": "",
         }
-    if not {"celltype_annot", "condition"}.issubset(ann.columns):
+    required = {"celltype_annot", "condition", "sample"}
+    if not required.issubset(ann.columns):
         return {
             "status": "skipped",
-            "reason": "annotation CSV lacks celltype_annot/condition columns",
+            "reason": (
+                "annotation CSV lacks celltype_annot/condition/sample columns"
+            ),
             "output_csv": "",
         }
-    conditions = [str(x) for x in ann["condition"].dropna().unique()]
-    if len(conditions) < 2:
-        return {
-            "status": "skipped",
-            "reason": "fewer than two conditions for composition test",
-            "output_csv": "",
-        }
-    cond0, cond1 = conditions[0], conditions[1]
+    ann = ann.dropna(subset=["celltype_annot", "condition", "sample"]).copy()
+    ann["celltype_annot"] = ann["celltype_annot"].astype(str)
+    ann["condition"] = ann["condition"].astype(str)
+    ann["sample"] = ann["sample"].astype(str)
+    conditions = sorted(ann["condition"].unique().tolist())
+    if len(conditions) != 2:
+        raise IntegrationError(
+            "differential abundance requires exactly two conditions; found "
+            f"{len(conditions)}: {conditions}"
+        )
+    cond0, cond1 = conditions
+
+    # Cells inside one sample are not independent observations. Aggregate the
+    # per-sample cell-type composition first and test the resulting proportions
+    # across samples instead of running a cell-level contingency test.
+    multi_condition = ann.groupby("sample")["condition"].nunique()
+    ambiguous = multi_condition[multi_condition > 1].index.tolist()
+    if ambiguous:
+        log.warning(
+            "excluding %s sample(s) that map to more than one condition: %s",
+            len(ambiguous),
+            ", ".join(str(name) for name in ambiguous[:5]),
+        )
+        ann = ann[~ann["sample"].isin(ambiguous)]
+    sample_condition = ann.groupby("sample")["condition"].first()
+    sample_counts = pd.crosstab(ann["sample"], ann["celltype_annot"])
+    sample_totals = sample_counts.sum(axis=1).replace(0, np.nan)
+    sample_props = sample_counts.div(sample_totals, axis=0)
+
     counts = pd.crosstab(ann["celltype_annot"], ann["condition"])
     if cond0 not in counts.columns or cond1 not in counts.columns:
         return {
@@ -953,17 +1069,34 @@ def run_differential_abundance(
     total0 = int(counts[cond0].sum())
     total1 = int(counts[cond1].sum())
     min_cells = int(cfg.get("min_cells", 5))
+    mask0 = (sample_condition == cond0).reindex(
+        sample_props.index, fill_value=False
+    )
+    mask1 = (sample_condition == cond1).reindex(
+        sample_props.index, fill_value=False
+    )
     rows: list[dict] = []
     for celltype, row in counts.iterrows():
-        a = int(row[cond0])
-        b = int(row[cond1])
-        if a + b < min_cells or (total0 + total1) == 0:
+        a = int(row.get(cond0, 0))
+        b = int(row.get(cond1, 0))
+        if a + b < min_cells:
             continue
-        table = np.array(
-            [[a, total0 - a], [b, total1 - b]],
-            dtype=float,
+        if celltype in sample_props.columns:
+            props0 = sample_props.loc[mask0, celltype].dropna().tolist()
+            props1 = sample_props.loc[mask1, celltype].dropna().tolist()
+        else:
+            props0, props1 = [], []
+        mean0 = (
+            float(np.mean(props0))
+            if props0
+            else (a / total0 if total0 else 0.0)
         )
-        chi2, p_value = _chi2_contingency(table)
+        mean1 = (
+            float(np.mean(props1))
+            if props1
+            else (b / total1 if total1 else 0.0)
+        )
+        t_stat, p_value = _welch_ttest(props0, props1)
         fraction0 = a / total0 if total0 else 0.0
         fraction1 = b / total1 if total1 else 0.0
         rows.append(
@@ -974,11 +1107,13 @@ def run_differential_abundance(
                 f"{cond0}_fraction": round(fraction0, 6),
                 f"{cond1}_fraction": round(fraction1, 6),
                 "n_cells": a + b,
-                "chi2": None if math.isnan(chi2) else round(chi2, 6),
+                f"n_samples_{cond0}": len(props0),
+                f"n_samples_{cond1}": len(props1),
+                "t_stat": None if math.isnan(t_stat) else round(t_stat, 6),
                 "p_value": None if math.isnan(p_value) else p_value,
                 "direction": (
                     "enriched_in_" + cond0
-                    if fraction0 > fraction1
+                    if mean0 > mean1
                     else "enriched_in_" + cond1
                 ),
             }
@@ -995,19 +1130,32 @@ def run_differential_abundance(
 
     csv_path = out_dir / "differential_abundance.csv"
     frame.to_csv(csv_path, index=False)
+    samples0 = int(mask0.sum())
+    samples1 = int(mask1.sum())
     summary = {
         "status": "completed",
+        "test": "welch_t_test_on_per_sample_proportions",
         "conditions": [cond0, cond1],
+        "samples_per_condition": {cond0: samples0, cond1: samples1},
         "celltypes_tested": int(len(frame)),
         "significant_celltypes": int(
             frame["significant"].sum() if not frame.empty else 0
         ),
         "output_csv": str(csv_path),
     }
+    if samples0 < 2 or samples1 < 2:
+        log.warning(
+            "differential abundance has fewer than two samples in a condition "
+            "(samples per condition: %s); p-values are not estimable",
+            summary["samples_per_condition"],
+        )
     write_json(out_dir / "differential_abundance_summary.json", summary)
     log.info(
-        "differential abundance: %s cell types tested, %s significant",
+        "differential abundance: %s cell types tested across %s/%s samples, "
+        "%s significant",
         summary["celltypes_tested"],
+        samples0,
+        samples1,
         summary["significant_celltypes"],
     )
     return summary
@@ -1053,6 +1201,23 @@ def extract_key_genes(
     if "gene" not in frame.columns:
         raise IntegrationError(f"DEG table has no gene column: {deg_path}")
 
+    if "p_val_adj" not in frame.columns:
+        # Never emit a raw p-value under the adjusted-p-value name. When the
+        # DEG table only carries p_val, derive BH-adjusted values from the full
+        # table before any significance/direction filtering.
+        if "p_val" not in frame.columns:
+            raise IntegrationError(
+                f"DEG table has neither p_val_adj nor p_val: {deg_path}"
+            )
+        frame["p_val_adj"] = _bh_adjust(
+            pd.to_numeric(frame["p_val"], errors="coerce").fillna(1.0)
+        )
+        log.warning(
+            "DEG table %s has no p_val_adj column; computed BH-adjusted "
+            "p-values from p_val",
+            deg_path,
+        )
+
     if "significant" in frame.columns:
         flag = (
             frame["significant"]
@@ -1067,8 +1232,6 @@ def extract_key_genes(
 
     if "avg_log2fc" not in frame.columns:
         raise IntegrationError(f"DEG table has no log2FC column: {deg_path}")
-    if "p_val_adj" not in frame.columns:
-        frame["p_val_adj"] = np.nan
 
     frame = frame.copy()
     frame["gene"] = frame["gene"].astype(str)
@@ -1198,7 +1361,22 @@ def _http_json(url: str, payload: dict | None = None, timeout: int = 90) -> dict
     raise RuntimeError(f"HTTP request failed: {url}: {last_error}")
 
 
-def _mygene_info(gene: str, timeout: int) -> dict:
+def _record_fetch_failure(
+    failures: list[dict] | None,
+    source: str,
+    exc: Exception,
+) -> None:
+    """Log an evidence fetch failure and collect it for the stage summary."""
+    log.warning("evidence fetch failed (%s): %s", source, exc)
+    if failures is not None:
+        failures.append({"source": source, "error": str(exc)})
+
+
+def _mygene_info(
+    gene: str,
+    timeout: int,
+    failures: list[dict] | None = None,
+) -> dict:
     payload = {
         "q": gene,
         "scopes": "symbol",
@@ -1206,13 +1384,15 @@ def _mygene_info(gene: str, timeout: int) -> dict:
         "species": "human",
         "size": 5,
     }
+    url = "https://mygene.info/v3/query"
     try:
         hits = _http_json(
-            "https://mygene.info/v3/query",
+            url,
             payload,
             timeout,
         )
-    except Exception:
+    except Exception as exc:  # noqa: BLE001
+        _record_fetch_failure(failures, f"mygene:{gene}:{url}", exc)
         return {}
     for hit in hits or []:
         if str(hit.get("query", "")).upper() != gene:
@@ -1239,14 +1419,22 @@ def _mygene_info(gene: str, timeout: int) -> dict:
     return {}
 
 
-def _chembl_evidence(uniprot: str, timeout: int) -> tuple[str, int]:
+def _chembl_evidence(
+    uniprot: str,
+    timeout: int,
+    gene: str = "",
+    failures: list[dict] | None = None,
+) -> tuple[str, int]:
     if not uniprot:
         return "", 0
     chembl_id = ""
+    target_url = (
+        "https://www.ebi.ac.uk/chembl/api/data/target.json"
+        f"?target_components__accession={uniprot}&limit=50"
+    )
     try:
         res = _http_json(
-            "https://www.ebi.ac.uk/chembl/api/data/target.json"
-            f"?target_components__accession={uniprot}&limit=50",
+            target_url,
             timeout=timeout,
         )
         targets = res.get("targets") or []
@@ -1256,23 +1444,37 @@ def _chembl_evidence(uniprot: str, timeout: int) -> tuple[str, int]:
                 break
         if not chembl_id and targets:
             chembl_id = targets[0].get("target_chembl_id") or ""
-    except Exception:
+    except Exception as exc:  # noqa: BLE001
+        _record_fetch_failure(
+            failures, f"chembl_target:{gene or uniprot}:{target_url}", exc
+        )
         chembl_id = ""
     if not chembl_id:
         return chembl_id, 0
+    activity_url = (
+        "https://www.ebi.ac.uk/chembl/api/data/activity.json"
+        f"?target_chembl_id={chembl_id}&limit=1"
+    )
     try:
         res = _http_json(
-            "https://www.ebi.ac.uk/chembl/api/data/activity.json"
-            f"?target_chembl_id={chembl_id}&limit=1",
+            activity_url,
             timeout=timeout,
         )
         meta = res.get("page_meta") or {}
         return chembl_id, int(meta.get("total_count") or 0)
-    except Exception:
+    except Exception as exc:  # noqa: BLE001
+        _record_fetch_failure(
+            failures, f"chembl_activity:{gene or chembl_id}:{activity_url}", exc
+        )
         return chembl_id, 0
 
 
-def _rcsb_evidence(uniprot: str, timeout: int) -> tuple[int, list[str]]:
+def _rcsb_evidence(
+    uniprot: str,
+    timeout: int,
+    gene: str = "",
+    failures: list[dict] | None = None,
+) -> tuple[int, list[str]]:
     if not uniprot:
         return 0, []
     query = {
@@ -1291,13 +1493,15 @@ def _rcsb_evidence(uniprot: str, timeout: int) -> tuple[int, list[str]]:
         "return_type": "entry",
         "request_options": {"paginate": {"start": 0, "rows": 5}},
     }
+    url = "https://search.rcsb.org/rcsbsearch/v2/query"
     try:
         res = _http_json(
-            "https://search.rcsb.org/rcsbsearch/v2/query",
+            url,
             query,
             timeout,
         )
-    except Exception:
+    except Exception as exc:  # noqa: BLE001
+        _record_fetch_failure(failures, f"rcsb:{gene or uniprot}:{url}", exc)
         return 0, []
     total = int(res.get("total_count") or 0)
     ids = [
@@ -1338,11 +1542,14 @@ def _empty_evidence(gene: str) -> dict:
 
 
 def _evidence_for_gene(gene: str, timeout: int = 90) -> dict:
-    info = _mygene_info(gene, timeout)
+    failures: list[dict] = []
+    info = _mygene_info(gene, timeout, failures)
     uniprot = info.get("uniprot") or ""
     ensembl = info.get("ensembl") or ""
-    chembl_id, bioactivities = _chembl_evidence(uniprot, timeout)
-    pdb_count, pdb_ids = _rcsb_evidence(uniprot, timeout)
+    chembl_id, bioactivities = _chembl_evidence(
+        uniprot, timeout, gene, failures
+    )
+    pdb_count, pdb_ids = _rcsb_evidence(uniprot, timeout, gene, failures)
     database = evidence_mod.collect_gene_database_evidence(
         gene,
         max_items=10,
@@ -1377,6 +1584,7 @@ def _evidence_for_gene(gene: str, timeout: int = 90) -> dict:
         database.get("kegg_pathways", 0),
         database.get("database_sources", ""),
     )
+    row["_fetch_failures"] = failures
     return row
 
 
@@ -1395,9 +1603,11 @@ def ensure_gene_evidence(
             old = pd.read_csv(out_path)
             for _, row in old.iterrows():
                 cache[str(row["gene"])] = row.to_dict()
-        except Exception:
+        except (OSError, ValueError) as exc:
+            log.warning("could not reuse cached evidence %s: %s", out_path, exc)
             cache = {}
 
+    failures: list[dict] = []
     missing = [gene for gene in genes if gene not in cache]
     if missing and fetch:
         log.info("fetching evidence for %s genes", len(missing))
@@ -1406,12 +1616,14 @@ def ensure_gene_evidence(
                 pool.submit(_evidence_for_gene, gene, timeout)
                 for gene in missing
             ]
-            for future in futures:
+            for gene, future in zip(missing, futures):
                 try:
                     row = future.result()
+                    failures.extend(row.pop("_fetch_failures", []))
                     cache[str(row["gene"])] = row
                 except Exception as exc:  # noqa: BLE001
-                    log.warning("evidence fetch failed: %s", exc)
+                    log.warning("evidence fetch failed for %s: %s", gene, exc)
+                    failures.append({"source": f"gene:{gene}", "error": str(exc)})
 
     rows = []
     for gene in genes:
@@ -1420,6 +1632,20 @@ def ensure_gene_evidence(
     frame = pd.DataFrame(rows)
     out_path.parent.mkdir(parents=True, exist_ok=True)
     frame.to_csv(out_path, index=False)
+    write_json(
+        out_path.parent / "evidence_summary.json",
+        {
+            "genes": len(frame),
+            "fetched": len(missing) if fetch else 0,
+            "evidence_failures": failures,
+        },
+    )
+    if failures:
+        log.warning(
+            "gene evidence recorded %s fetch failure(s); see %s",
+            len(failures),
+            out_path.parent / "evidence_summary.json",
+        )
     log.info(
         "gene evidence ready: %s genes, %s with PDB structures",
         len(frame),
@@ -1502,13 +1728,21 @@ def build_knockout_inputs(
     ].copy()
     off_target.to_csv(ko_dir / "off_target.csv", index=False)
 
-    prognosis = pd.DataFrame({"gene": genes, "hr": 1.0, "p": 1.0})
+    # No clinical prognosis cohort is available at this stage, so we must not
+    # fabricate hazard ratios. Write an empty (header-only) prognosis frame:
+    # docking.knockout._prognosis_scores returns (None, None) for an empty CSV
+    # and drops the prognosis dimension from target scoring instead of treating
+    # every gene as HR=1.0.
+    prognosis = pd.DataFrame(columns=["gene", "hr", "p"])
     prognosis.to_csv(ko_dir / "prognosis.csv", index=False)
 
     summary = {
         "expression_csv": str(expression_dst),
         "metadata_csv": str(metadata_dst),
         "prognosis_csv": str(ko_dir / "prognosis.csv"),
+        # Placeholder only: the prognosis dimension is excluded from scoring
+        # until a real clinical cohort is supplied.
+        "prognosis_source": "not_available",
         "druggability_csv": str(ko_dir / "druggability.csv"),
         "off_target_csv": str(ko_dir / "off_target.csv"),
         "genes": len(genes),
@@ -1647,6 +1881,43 @@ def _valid_docking_box(center, size) -> bool:
         )
     except (TypeError, ValueError):
         return False
+
+
+def _ligand_library_dir(workdir: Path) -> Path:
+    return _integration_dir(workdir) / "ligands"
+
+
+def _persisted_ligand_library(workdir: Path, gene: str) -> Path | None:
+    """Return the ligand library persisted by an earlier docking run."""
+    base = _ligand_library_dir(workdir) / safe_name(str(gene), str(gene))
+    for suffix in (".csv", ".smi", ".sdf"):
+        candidate = base.with_suffix(suffix)
+        if candidate.exists() and candidate.stat().st_size > 0:
+            return candidate
+    return None
+
+
+def _persist_ligand_library(
+    workdir: Path,
+    gene: str,
+    library: Path,
+) -> tuple[Path, str]:
+    """Copy the per-target ligand library into the stage dir and hash it.
+
+    The library may come from a live ChEMBL fetch, which is not part of the
+    stage signature. Persisting it here keeps the docked ligand set auditable
+    and reusable on resume/rerun.
+    """
+    dest_dir = _ligand_library_dir(workdir)
+    dest_dir.mkdir(parents=True, exist_ok=True)
+    dest = dest_dir / f"{safe_name(str(gene), str(gene))}{library.suffix or '.csv'}"
+    try:
+        if library.resolve() != dest.resolve():
+            shutil.copyfile(library, dest)
+    except OSError as exc:
+        log.warning("could not persist ligand library for %s: %s", gene, exc)
+        return library, _sha256_file(library)
+    return dest, _sha256_file(dest)
 
 
 def _prepare_ligand_library(
@@ -1811,6 +2082,8 @@ def run_target_docking(
         "best_affinity": "",
         "output_dir": "",
         "error": "",
+        "ligand_library": "",
+        "ligand_library_sha256": "",
     }
     if row.empty:
         base["error"] = "no evidence row"
@@ -1848,23 +2121,30 @@ def run_target_docking(
         },
     )
     chembl_id = info.get("chembl_target_id")
-    if chembl_id and not pd.isna(chembl_id):
-        cfg.data.setdefault("evidence", {})["chembl_target_id"] = str(chembl_id)
-    try:
-        evidence_mod.gather_evidence(cfg, log)
-    except Exception as exc:  # noqa: BLE001
-        log.warning("evidence collection failed for %s: %s", gene, exc)
+    persisted = _persisted_ligand_library(workdir, gene)
+    if persisted is not None:
+        # Reuse the library captured by the first run so a rerun/resume cannot
+        # silently dock a different ligand set from a live database fetch.
+        log.info("reusing persisted ligand library for %s: %s", gene, persisted)
+    else:
+        if chembl_id and not pd.isna(chembl_id):
+            cfg.data.setdefault("evidence", {})["chembl_target_id"] = str(chembl_id)
+        try:
+            evidence_mod.gather_evidence(cfg, log)
+        except Exception as exc:  # noqa: BLE001
+            log.warning("evidence collection failed for %s: %s", gene, exc)
 
     known = target_dir / "evidence" / "known_ligands.csv"
     library = _prepare_ligand_library(
         target_dir,
-        known,
+        persisted if persisted is not None else known,
         ligand_library,
         pdb_path=pdb_path,
     )
     if library is None:
         base["error"] = "no ligand library available"
         return base
+    library_path, library_digest = _persist_ligand_library(workdir, gene, library)
 
     try:
         center, size, mode = box.detect_box_data(pdb_path)
@@ -1938,6 +2218,8 @@ def run_target_docking(
         "best_affinity": best,
         "output_dir": str(cfg.output_dir),
         "error": "",
+        "ligand_library": str(library_path),
+        "ligand_library_sha256": library_digest,
     }
     write_json(
         target_dir / "outputs" / "integration" / "target_summary.json",
@@ -2002,10 +2284,16 @@ def run_docking_stage(
                     "best_affinity": "",
                     "output_dir": "",
                     "error": str(exc),
+                    "ligand_library": "",
+                    "ligand_library_sha256": "",
                 }
             )
     frame = pd.DataFrame(rows)
     frame.to_csv(out_dir / "docking_targets.csv", index=False)
+    ligand_digests = {
+        str(row.get("gene", "")): str(row.get("ligand_library_sha256", ""))
+        for _, row in frame.iterrows()
+    }
     summary = {
         "status": "completed",
         "targets_requested": len(genes),
@@ -2024,6 +2312,10 @@ def run_docking_stage(
             else ""
         ),
         "output_csv": str(out_dir / "docking_targets.csv"),
+        "ligand_library_digest": hashlib.sha256(
+            json.dumps(ligand_digests, sort_keys=True).encode("utf-8")
+        ).hexdigest(),
+        "ligand_libraries": ligand_digests,
     }
     write_json(out_dir / "docking_summary.json", summary)
     log.info(
@@ -2033,12 +2325,6 @@ def run_docking_stage(
         summary["skipped"],
     )
     return summary
-
-
-def _esc(value) -> str:
-    import html
-
-    return html.escape(str(value if value is not None else ""))
 
 
 def _render_table(frame: pd.DataFrame, columns: list[str]) -> str:
@@ -2084,13 +2370,14 @@ def generate_integrated_report(
             / "results"
             / "04_knockout"
             / "data"
-            / "fig_52_53_ranked_knockout.csv"
+            / "fig_52_target_candidates.csv"
         )
     if ko_ranked.exists():
         ko_top = pd.read_csv(ko_ranked)
     docking_summary = _read_json(out_dir / "docking_summary.json")
     docking = pd.read_csv(out_dir / "docking_targets.csv") if (out_dir / "docking_targets.csv").exists() else pd.DataFrame()
     evidence = pd.read_csv(out_dir / "gene_evidence.csv") if (out_dir / "gene_evidence.csv").exists() else pd.DataFrame()
+    evidence_summary = _read_json(out_dir / "evidence_summary.json")
     cadd_summary = _read_json(out_dir / "cadd_downstream_summary.json")
     cadd_targets = (
         pd.read_csv(out_dir / "cadd_targets.csv")
@@ -2521,6 +2808,7 @@ a {{ color: #1d4ed8; }}
             "figures": feedback_summary.get("figures", []),
         },
         "evidence_genes": len(evidence),
+        "evidence_failures": evidence_summary.get("evidence_failures", []),
         "evidence_database_sources": (
             ",".join(
                 sorted(
@@ -2651,6 +2939,10 @@ def _stage_evidence(args, workdir: Path, ctx: dict) -> None:
         out_path = _integration_dir(workdir) / "gene_evidence.csv"
         out_path.parent.mkdir(parents=True, exist_ok=True)
         pd.DataFrame(columns=list(EVIDENCE_COLUMNS)).to_csv(out_path, index=False)
+        write_json(
+            out_path.parent / "evidence_summary.json",
+            {"genes": 0, "fetched": 0, "evidence_failures": []},
+        )
         ctx["evidence"] = pd.DataFrame(columns=list(EVIDENCE_COLUMNS))
         ctx["evidence_path"] = out_path
         return
@@ -3349,7 +3641,16 @@ def load_full_config(path: Path) -> dict:
     }
     raw = {}
     if path.exists():
-        raw = json.loads(path.read_text(encoding="utf-8"))
+        try:
+            raw = json.loads(path.read_text(encoding="utf-8"))
+        except (OSError, ValueError) as exc:
+            raise IntegrationError(
+                f"config file is not valid JSON: {path}: {exc}"
+            ) from exc
+        if not isinstance(raw, dict):
+            raise IntegrationError(
+                f"config file must contain a JSON object: {path}"
+            )
     config = dict(defaults)
     config.update(raw or {})
     config["cell_feedback"] = dict(defaults["cell_feedback"])
@@ -3750,6 +4051,9 @@ def main(argv: list[str] | None = None) -> int:
         return run_full_pipeline(args)
     except (IntegrationError, DockingError, ToolNotFoundError) as exc:
         log.error("ERROR: %s", exc)
+        return 1
+    except (OSError, ValueError) as exc:
+        log.error("ERROR: invalid configuration or JSON input: %s", exc)
         return 1
     except KeyboardInterrupt:
         log.info("interrupted")

@@ -262,7 +262,7 @@ def write_training_samples(
     return path
 
 
-def main() -> int:
+def main(argv: list[str] | None = None) -> int:
     if hasattr(sys.stdout, "reconfigure"):
         sys.stdout.reconfigure(encoding="utf-8", errors="replace")
         sys.stderr.reconfigure(encoding="utf-8", errors="replace")
@@ -309,7 +309,15 @@ def main() -> int:
             "from manual review; labels override heuristic labels"
         ),
     )
-    args = parser.parse_args()
+    parser.add_argument(
+        "--allow-empty",
+        action="store_true",
+        help=(
+            "exit 0 even when no round found a relevant dataset "
+            "(default: a total miss is a failure)"
+        ),
+    )
+    args = parser.parse_args(argv)
     model = None
     if args.model:
         from dataset_search_ml import load_model
@@ -435,6 +443,14 @@ def main() -> int:
         f"Summary: {found}/{len(records)} rounds found relevant datasets "
         f"({summary['found_rate']:.1%}); expanded {expanded} rounds"
     )
+    if found == 0 and not args.allow_empty:
+        print(
+            "Validation FAILED: no round found a relevant dataset. "
+            "Re-run with --allow-empty to treat an empty result as "
+            "non-fatal.",
+            file=sys.stderr,
+        )
+        return 1
     return 0
 
 

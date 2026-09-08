@@ -143,8 +143,27 @@ def train(
     return output_model
 
 
-def load_model(path: Path) -> dict:
-    return joblib.load(path)
+DEFAULT_MODEL_ROOT = (APP_ROOT / "data_cache" / "dataset_search").resolve()
+
+
+def load_model(path: Path, *, allow_root: Path | None = None) -> dict:
+    """Load a joblib model only from an allowed directory.
+
+    ``joblib.load`` unpickles arbitrary code, so the default allowlist is the
+    dataset-search cache directory. Callers that keep models elsewhere (for
+    example the web layer) must pass an explicit ``allow_root``.
+    """
+    root = (Path(allow_root) if allow_root is not None else DEFAULT_MODEL_ROOT)
+    root = root.expanduser().resolve()
+    resolved = Path(path).expanduser().resolve()
+    if resolved != root and not resolved.is_relative_to(root):
+        raise ValueError(
+            f"refusing to load model outside {root}: {resolved}; pass "
+            "allow_root=<directory> to allow a different location"
+        )
+    if not resolved.is_file():
+        raise FileNotFoundError(f"model file not found: {resolved}")
+    return joblib.load(resolved)
 
 
 def lexical_scores(

@@ -5,6 +5,7 @@ from __future__ import annotations
 
 import io
 import sys
+import tempfile
 import unittest
 from contextlib import redirect_stdout
 from pathlib import Path
@@ -15,11 +16,59 @@ if str(APP_ROOT / "launchers") not in sys.path:
 
 from install_environment import (  # noqa: E402
     MODULES,
+    _download,
     check_module,
     install_module,
     main,
+    md5_file,
     resolve_module,
+    sha256_file,
+    verify_checksum,
 )
+
+
+class TestChecksums(unittest.TestCase):
+    PAYLOAD = b"liver-cancer"
+    SHA256 = "e46aa0f5f3e14b088ae65ff4dc8158ca1ff4dffbf3a73ea6b9778c2b1cc276cc"
+    MD5 = "0c16659c807c8c6df298926073219cf3"
+
+    def test_digest_helpers(self):
+        with tempfile.TemporaryDirectory() as tmp:
+            path = Path(tmp) / "payload.bin"
+            path.write_bytes(self.PAYLOAD)
+            self.assertEqual(sha256_file(path), self.SHA256)
+            self.assertEqual(md5_file(path), self.MD5)
+
+    def test_verify_checksum_accepts_matching_digest(self):
+        with tempfile.TemporaryDirectory() as tmp:
+            path = Path(tmp) / "payload.bin"
+            path.write_bytes(self.PAYLOAD)
+            self.assertTrue(verify_checksum(path, self.SHA256))
+            self.assertTrue(verify_checksum(path, self.MD5, "md5"))
+
+    def test_verify_checksum_rejects_missing_file_and_bad_digest(self):
+        with tempfile.TemporaryDirectory() as tmp:
+            path = Path(tmp) / "payload.bin"
+            self.assertFalse(verify_checksum(path, self.SHA256))
+            path.write_bytes(self.PAYLOAD)
+            self.assertFalse(verify_checksum(path, "0" * 64))
+            self.assertFalse(verify_checksum(path, ""))
+            self.assertFalse(verify_checksum(path, "not-a-digest", "md5"))
+
+    def test_verify_checksum_rejects_unknown_algorithm(self):
+        with tempfile.TemporaryDirectory() as tmp:
+            path = Path(tmp) / "payload.bin"
+            path.write_bytes(self.PAYLOAD)
+            with self.assertRaises(ValueError):
+                verify_checksum(path, self.SHA256, "crc32")
+
+    def test_download_failure_removes_partial_file(self):
+        with tempfile.TemporaryDirectory() as tmp:
+            dest = Path(tmp) / "partial.bin"
+            dest.write_bytes(b"stale")
+            missing = (Path(tmp) / "missing.bin").as_uri()
+            self.assertFalse(_download(missing, dest))
+            self.assertFalse(dest.exists())
 
 
 class TestModuleEnvironment(unittest.TestCase):

@@ -5,6 +5,7 @@ import argparse
 import json
 import os
 import re
+import secrets
 import socket
 import subprocess
 import sys
@@ -35,7 +36,7 @@ INSTALL_JOB = {}
 FINISHED_NOTIFICATIONS: list[dict] = []
 NOTIFY_LOCK = threading.Lock()
 TASK_HISTORY_PATH = WEB_DIR / "task_history.json"
-TASK_HISTORY_LOCK = threading.Lock()
+TASK_HISTORY_LOCK = threading.RLock()
 JOB_RECORD_LOCK = threading.Lock()
 
 HEARTBEAT_CLIENTS: dict[str, float] = {}
@@ -97,7 +98,56 @@ VALIDATION_REPORT_PATH = VALIDATION_REPORT_DIR / "validation_summary.json"
 VALIDATION_LOG = WEB_DIR / "validation_run.log"
 VALIDATION_JOB = {"proc": None, "log": None, "handle": None, "started": None}
 MAX_POST_BODY_BYTES = 1_000_000
+MAX_SERVED_FILE_BYTES = 64 * 1024 * 1024
+JOB_STORE_MAX_RECORDS = 200
 LOCAL_ORIGIN_HOSTS = {"127.0.0.1", "localhost", "[::1]", "::1"}
+LOOPBACK_HOSTS = {"127.0.0.1", "localhost", "::1", "[::1]"}
+
+# Runtime security state. ``AUTH_TOKEN`` is only created when the server binds a
+# non-loopback host; loopback usage keeps the zero-friction local workflow.
+SERVER_PORT: int | None = None
+AUTH_TOKEN: str | None = None
+
+# Directories the web console may read results from. Anything else must be a
+# workdir already registered by a job started through this console, or an
+# explicit ``--allow-path`` given on the command line.
+DEFAULT_WORKDIR_ROOTS: tuple[Path, ...] = tuple(
+    Path(item).expanduser().resolve()
+    for item in (
+        os.environ.get("LIVER_OUTPUT_ROOT")
+        or str(APP_ROOT.parent / "liver_cancer"),
+        os.environ.get("LIVER_VALIDATION_ROOT")
+        or str(APP_ROOT / "data_cache"),
+        str(APP_ROOT / "dock"),
+        str(APP_ROOT / "molecular_docking"),
+        str(APP_ROOT / "data_cache"),
+    )
+)
+EXTRA_WORKDIR_ROOTS: list[Path] = []
+
+# One table for every result/static file the console serves (previously copied
+# inline in eight request handlers).
+CONTENT_TYPES = {
+    ".png": "image/png",
+    ".jpg": "image/jpeg",
+    ".jpeg": "image/jpeg",
+    ".svg": "image/svg+xml",
+    ".pdf": "application/pdf",
+    ".csv": "text/csv; charset=utf-8",
+    ".tsv": "text/tab-separated-values; charset=utf-8",
+    ".json": "application/json",
+    ".html": "text/html; charset=utf-8",
+    ".css": "text/css; charset=utf-8",
+    ".js": "text/javascript; charset=utf-8",
+    ".md": "text/markdown; charset=utf-8",
+    ".mtx": "text/plain; charset=utf-8",
+    ".xlsx": "application/vnd.openxmlformats-officedocument.spreadsheetml.sheet",
+    ".pdbqt": "chemical/x-pdbqt",
+}
+
+
+def _content_type(suffix: str) -> str:
+    return CONTENT_TYPES.get((suffix or "").lower(), "application/octet-stream")
 NAV_HTML = (
     '<div class="topnav">'
     '<a href="/full">全自动流水线</a>'
@@ -363,7 +413,9 @@ def _purge_stale_heartbeats(
 
 def _has_active_jobs() -> bool:
     for store in (JOBS, DOCK_JOBS, MOLECULAR_DOCK_JOBS, FULL_JOBS):
-        for info in store.values():
+        # Iterate over a snapshot: handlers insert into these dicts from other
+        # threads without holding a lock.
+        for info in list(store.values()):
             proc = info.get("proc")
             if proc is None:
                 if info.get("queued"):
@@ -381,6 +433,133 @@ def _has_active_jobs() -> bool:
     return False
 
 
+def _prune_job_stores(max_records: int = JOB_STORE_MAX_RECORDS) -> None:
+    """Drop finished job records beyond ``max_records`` so memory stays bounded.
+
+    Running/queued/paused jobs are never removed.
+    """
+    for store in (JOBS, DOCK_JOBS, MOLECULAR_DOCK_JOBS, FULL_JOBS):
+        if len(store) <= max_records:
+            continue
+        removable: list[str] = []
+        for job_id, info in list(store.items()):
+            if len(store) - len(removable) <= max_records:
+                break
+            proc = info.get("proc")
+            if info.get("queued") or info.get("paused"):
+                continue
+            if proc is not None and proc.poll() is None:
+                continue
+            removable.append(job_id)
+        for job_id in removable:
+            store.pop(job_id, None)
+    with DATASET_DOWNLOAD_LOCK:
+        if len(DATASET_DOWNLOAD_JOBS) > max_records:
+            for job_id, info in list(DATASET_DOWNLOAD_JOBS.items()):
+                if len(DATASET_DOWNLOAD_JOBS) <= max_records:
+                    break
+                if info.get("running"):
+                    continue
+                DATASET_DOWNLOAD_JOBS.pop(job_id, None)
+
+
+def _read_history_file(path: Path, lock) -> list[dict]:
+    with lock:
+        if not path.exists():
+            return []
+        try:
+            data = json.loads(path.read_text(encoding="utf-8"))
+        except (OSError, ValueError):
+            return []
+        return data if isinstance(data, list) else []
+
+
+def _write_json_atomic(path: Path, data) -> None:
+    """Write JSON via a temp file + replace so readers never see a partial file."""
+    path.parent.mkdir(parents=True, exist_ok=True)
+    tmp = path.with_name(path.name + ".tmp")
+    tmp.write_text(
+        json.dumps(data, ensure_ascii=False, indent=2),
+        encoding="utf-8",
+    )
+    os.replace(tmp, path)
+
+
+def _write_history_file(path: Path, records: list[dict], lock) -> None:
+    """Write JSON history atomically so a crash cannot truncate the file."""
+    with lock:
+        _write_json_atomic(path, records)
+
+
+def _is_loopback_host(host: str) -> bool:
+    return (host or "").strip().lower() in LOOPBACK_HOSTS
+
+
+def _configure_runtime(host: str, port: int) -> str | None:
+    """Record the bound port and mint an auth token for non-loopback binds."""
+    global SERVER_PORT, AUTH_TOKEN
+    SERVER_PORT = int(port)
+    AUTH_TOKEN = None if _is_loopback_host(host) else secrets.token_urlsafe(24)
+    return AUTH_TOKEN
+
+
+def _known_workdirs() -> set[str]:
+    """Workdirs registered by jobs that this console actually started."""
+    known: set[str] = set()
+    for store in (JOBS, DOCK_JOBS, MOLECULAR_DOCK_JOBS, FULL_JOBS):
+        for info in list(store.values()):
+            for key in ("out", "workdir"):
+                value = info.get(key)
+                if value:
+                    try:
+                        known.add(str(Path(value).resolve()))
+                    except (OSError, ValueError):
+                        continue
+    return known
+
+
+def _workdir_allowed(value: str | Path) -> Path | None:
+    """Return the resolved workdir when it is inside an allowed root, else None."""
+    try:
+        candidate = Path(value).expanduser().resolve()
+    except (OSError, RuntimeError, ValueError):
+        return None
+    if str(candidate) in _known_workdirs():
+        return candidate
+    for root in (*DEFAULT_WORKDIR_ROOTS, *EXTRA_WORKDIR_ROOTS):
+        try:
+            if candidate == root or candidate.is_relative_to(root):
+                return candidate
+        except (OSError, ValueError):
+            continue
+    return None
+
+
+def _request_token(handler) -> str:
+    headers = getattr(handler, "headers", None)
+    if headers is not None:
+        header = (headers.get("X-Auth-Token") or "").strip()
+        if header:
+            return header
+        cookie = headers.get("Cookie") or ""
+        for chunk in cookie.split(";"):
+            name, _, value = chunk.strip().partition("=")
+            if name == "liverbio_token" and value:
+                return value.strip()
+    try:
+        query = parse_qs(urlparse(handler.path).query)
+    except (AttributeError, ValueError):
+        return ""
+    return (query.get("token", [""])[0] or "").strip()
+
+
+def _request_authorized(handler) -> bool:
+    """Loopback requests are unauthenticated; remote binds require the token."""
+    if AUTH_TOKEN is None:
+        return True
+    return secrets.compare_digest(_request_token(handler), AUTH_TOKEN)
+
+
 def _origin_allowed(origin: str) -> bool:
     origin = (origin or "").strip()
     if not origin:
@@ -389,10 +568,13 @@ def _origin_allowed(origin: str) -> bool:
         parts = urlparse(origin)
     except Exception:
         return False
-    return (
-        parts.scheme.lower() in ("http", "https")
-        and (parts.hostname or "").lower() in LOCAL_ORIGIN_HOSTS
-    )
+    if parts.scheme.lower() not in ("http", "https"):
+        return False
+    if (parts.hostname or "").lower() not in LOCAL_ORIGIN_HOSTS:
+        return False
+    if SERVER_PORT is not None and parts.port is not None and parts.port != SERVER_PORT:
+        return False
+    return True
 
 
 def _fetch_site_allowed(site: str) -> bool:
@@ -411,9 +593,13 @@ def _run_idle_shutdown_monitor(
     started_at: float,
 ) -> None:
     idle_since: float | None = None
+    last_prune = time.monotonic()
     while True:
         now = time.monotonic()
         _purge_stale_heartbeats(now)
+        if now - last_prune >= 60.0:
+            _prune_job_stores()
+            last_prune = now
         if _heartbeat_client_ids() or _has_active_jobs():
             idle_since = None
         else:
@@ -713,7 +899,8 @@ def start_job(
     }
 
 
-def _start_process(info: dict) -> None:
+def _spawn_process(info: dict) -> None:
+    """Launch a queued job process; identical for every job domain."""
     log_handle = info["log"].open("w", encoding="utf-8", errors="replace")
     proc = subprocess.Popen(
         info["cmd"],
@@ -730,30 +917,29 @@ def _start_process(info: dict) -> None:
     info["started"] = time.time()
 
 
-def _drain_queue() -> None:
-    with QUEUE_LOCK:
-        for info in QUEUE:
+def _drain_store(queue: list, lock) -> None:
+    """Start at most one queued job per domain (each domain is serial)."""
+    with lock:
+        for info in queue:
             if info.get("proc") is None:
-                _start_process(info)
+                _spawn_process(info)
                 break
 
 
+def _start_process(info: dict) -> None:
+    _spawn_process(info)
+
+
+def _drain_queue() -> None:
+    _drain_store(QUEUE, QUEUE_LOCK)
+
+
 def load_history() -> list[dict]:
-    with HISTORY_LOCK:
-        if not HISTORY_PATH.exists():
-            return []
-        try:
-            return json.loads(HISTORY_PATH.read_text(encoding="utf-8"))
-        except Exception:
-            return []
+    return _read_history_file(HISTORY_PATH, HISTORY_LOCK)
 
 
 def save_history(records: list[dict]) -> None:
-    with HISTORY_LOCK:
-        HISTORY_PATH.write_text(
-            json.dumps(records, ensure_ascii=False, indent=2),
-            encoding="utf-8",
-        )
+    _write_history_file(HISTORY_PATH, records, HISTORY_LOCK)
 
 
 def record_job(info: dict, ok: bool) -> None:
@@ -1457,16 +1643,27 @@ def dataset_search_request(data: dict) -> dict:
         model_file = Path(model_value).expanduser()
         if not model_file.is_file():
             raise ValueError(f"模型文件不存在：{model_file}")
+        # Only load models produced by this console. joblib/pickle deserializes
+        # arbitrary code, so an unconstrained path is remote code execution.
+        allowed_model = _model_path_allowed(model_file)
+        if allowed_model is None:
+            raise ValueError(
+                "模型文件必须位于数据检索缓存目录内：" + str(DATASET_SEARCH_DIR)
+            )
         from dataset_search_ml import load_model, rerank
 
+        try:
+            model = load_model(allowed_model, allow_root=DATASET_SEARCH_DIR)
+        except TypeError:  # older signature without the allowlist argument
+            model = load_model(allowed_model)
         rows = rerank(
             rows,
             disease,
             research_direction,
-            model=load_model(model_file),
+            model=model,
         )
         model_applied = True
-        model_path = str(model_file)
+        model_path = str(allowed_model)
 
     DATASET_SEARCH_DIR.mkdir(parents=True, exist_ok=True)
     csv_path, json_path = sd.write_outputs(rows, DATASET_SEARCH_DIR)
@@ -1574,10 +1771,7 @@ def _run_dataset_download(
                     log=log,
                 )
                 info["results"] = results
-                (DATASET_SEARCH_DIR / "download_results.json").write_text(
-                    json.dumps(results, ensure_ascii=False, indent=2),
-                    encoding="utf-8",
-                )
+                _write_json_atomic(DATASET_SEARCH_DIR / "download_results.json", results)
                 log_handle.write("download results:\n")
                 log_handle.write(
                     json.dumps(results, ensure_ascii=False, indent=2)
@@ -1616,6 +1810,18 @@ def dataset_file_path(name: str) -> Path | None:
     if target.parent != DATASET_SEARCH_DIR.resolve() or not target.is_file():
         return None
     return target
+
+
+def _model_path_allowed(path: Path) -> Path | None:
+    """Only accept ML model files inside the dataset-search cache directory."""
+    try:
+        candidate = path.expanduser().resolve()
+    except (OSError, ValueError):
+        return None
+    root = DATASET_SEARCH_DIR.resolve()
+    if candidate.is_file() and candidate.is_relative_to(root):
+        return candidate
+    return None
 
 
 def dataset_full_pipeline_url(row: dict) -> str:
@@ -1738,28 +1944,11 @@ def start_dock_job(data: dict) -> dict:
 
 
 def _start_dock_process(info: dict) -> None:
-    log_handle = info["log"].open("w", encoding="utf-8", errors="replace")
-    proc = subprocess.Popen(
-        info["cmd"],
-        cwd=APP_ROOT,
-        env=info["env"],
-        stdout=log_handle,
-        stderr=subprocess.STDOUT,
-        text=True,
-        encoding="utf-8",
-        errors="replace",
-    )
-    info["proc"] = proc
-    info["queued"] = False
-    info["started"] = time.time()
+    _spawn_process(info)
 
 
 def _drain_dock_queue() -> None:
-    with DOCK_QUEUE_LOCK:
-        for info in DOCK_QUEUE:
-            if info.get("proc") is None:
-                _start_dock_process(info)
-                break
+    _drain_store(DOCK_QUEUE, DOCK_QUEUE_LOCK)
 
 
 def _dock_status(info: dict) -> dict:
@@ -1898,28 +2087,11 @@ def start_molecular_docking_job(data: dict) -> dict:
 
 
 def _start_molecular_docking_process(info: dict) -> None:
-    log_handle = info["log"].open("w", encoding="utf-8", errors="replace")
-    proc = subprocess.Popen(
-        info["cmd"],
-        cwd=APP_ROOT,
-        env=info["env"],
-        stdout=log_handle,
-        stderr=subprocess.STDOUT,
-        text=True,
-        encoding="utf-8",
-        errors="replace",
-    )
-    info["proc"] = proc
-    info["queued"] = False
-    info["started"] = time.time()
+    _spawn_process(info)
 
 
 def _drain_molecular_docking_queue() -> None:
-    with MOLECULAR_DOCK_QUEUE_LOCK:
-        for info in MOLECULAR_DOCK_QUEUE:
-            if info.get("proc") is None:
-                _start_molecular_docking_process(info)
-                break
+    _drain_store(MOLECULAR_DOCK_QUEUE, MOLECULAR_DOCK_QUEUE_LOCK)
 
 
 def _molecular_docking_status(info: dict) -> dict:
@@ -2200,28 +2372,11 @@ def start_full_job(data: dict) -> dict:
 
 
 def _start_full_process(info: dict) -> None:
-    log_handle = info["log"].open("w", encoding="utf-8", errors="replace")
-    proc = subprocess.Popen(
-        info["cmd"],
-        cwd=APP_ROOT,
-        env=info["env"],
-        stdout=log_handle,
-        stderr=subprocess.STDOUT,
-        text=True,
-        encoding="utf-8",
-        errors="replace",
-    )
-    info["proc"] = proc
-    info["queued"] = False
-    info["started"] = time.time()
+    _spawn_process(info)
 
 
 def _drain_full_queue() -> None:
-    with FULL_QUEUE_LOCK:
-        for info in FULL_QUEUE:
-            if info.get("proc") is None:
-                _start_full_process(info)
-                break
+    _drain_store(FULL_QUEUE, FULL_QUEUE_LOCK)
 
 
 def _full_status(info: dict) -> dict:
@@ -2428,8 +2583,12 @@ def _log_tail(path: Path, limit: int = 1200) -> str:
     if not path.exists():
         return ""
     try:
-        text = path.read_text(encoding="utf-8", errors="replace")
-        return text[-limit:]
+        size = path.stat().st_size
+        with path.open("rb") as handle:
+            if size > limit:
+                handle.seek(size - limit)
+            data = handle.read(limit)
+        return data.decode("utf-8", errors="replace")
     except OSError:
         return ""
 
@@ -2536,20 +2695,11 @@ def _finished_info(
 
 
 def _load_task_history() -> list[dict]:
-    if not TASK_HISTORY_PATH.exists():
-        return []
-    try:
-        data = json.loads(TASK_HISTORY_PATH.read_text(encoding="utf-8"))
-        return data if isinstance(data, list) else []
-    except Exception:
-        return []
+    return _read_history_file(TASK_HISTORY_PATH, TASK_HISTORY_LOCK)
 
 
 def _save_task_history(records: list[dict]) -> None:
-    TASK_HISTORY_PATH.write_text(
-        json.dumps(records, ensure_ascii=False, indent=2),
-        encoding="utf-8",
-    )
+    _write_history_file(TASK_HISTORY_PATH, records, TASK_HISTORY_LOCK)
 
 
 def _append_task_history(item: dict) -> None:
@@ -3198,21 +3348,11 @@ def validation_job_status() -> dict:
 
 
 def load_dock_history() -> list[dict]:
-    with DOCK_HISTORY_LOCK:
-        if not DOCK_HISTORY_PATH.exists():
-            return []
-        try:
-            return json.loads(DOCK_HISTORY_PATH.read_text(encoding="utf-8"))
-        except Exception:
-            return []
+    return _read_history_file(DOCK_HISTORY_PATH, DOCK_HISTORY_LOCK)
 
 
 def save_dock_history(records: list[dict]) -> None:
-    with DOCK_HISTORY_LOCK:
-        DOCK_HISTORY_PATH.write_text(
-            json.dumps(records, ensure_ascii=False, indent=2),
-            encoding="utf-8",
-        )
+    _write_history_file(DOCK_HISTORY_PATH, records, DOCK_HISTORY_LOCK)
 
 
 def record_dock_job(info: dict, ok: bool) -> None:
@@ -3314,21 +3454,13 @@ def _dock_file_path(info: dict, name: str):
 
 
 def load_molecular_docking_history() -> list[dict]:
-    with MOLECULAR_DOCK_HISTORY_LOCK:
-        if not MOLECULAR_DOCK_HISTORY_PATH.exists():
-            return []
-        try:
-            return json.loads(MOLECULAR_DOCK_HISTORY_PATH.read_text(encoding="utf-8"))
-        except Exception:
-            return []
+    return _read_history_file(MOLECULAR_DOCK_HISTORY_PATH, MOLECULAR_DOCK_HISTORY_LOCK)
 
 
 def save_molecular_docking_history(records: list[dict]) -> None:
-    with MOLECULAR_DOCK_HISTORY_LOCK:
-        MOLECULAR_DOCK_HISTORY_PATH.write_text(
-            json.dumps(records, ensure_ascii=False, indent=2),
-            encoding="utf-8",
-        )
+    _write_history_file(
+        MOLECULAR_DOCK_HISTORY_PATH, records, MOLECULAR_DOCK_HISTORY_LOCK
+    )
 
 
 def record_molecular_docking_job(info: dict, ok: bool) -> None:
@@ -3793,8 +3925,31 @@ class Handler(BaseHTTPRequestHandler):
         self.send_header("Content-Type", content_type)
         self.send_header("Content-Length", str(len(body)))
         self.send_header("Cache-Control", "no-store, no-cache, must-revalidate")
+        self.send_header("X-Content-Type-Options", "nosniff")
+        self.send_header("Referrer-Policy", "no-referrer")
+        if AUTH_TOKEN is not None and code == 200 and _request_authorized(self):
+            self.send_header(
+                "Set-Cookie",
+                f"liverbio_token={AUTH_TOKEN}; Path=/; SameSite=Strict; HttpOnly",
+            )
         self.end_headers()
         self.wfile.write(body)
+
+    def _send_file(self, target: Path, content_type: str) -> None:
+        """Serve a result file, refusing oversized payloads."""
+        try:
+            if target.stat().st_size > MAX_SERVED_FILE_BYTES:
+                self._send(413, b"file too large to serve", "text/plain; charset=utf-8")
+                return
+            body = target.read_bytes()
+        except OSError as exc:
+            self._send(
+                404,
+                f"file not readable: {exc}".encode("utf-8"),
+                "text/plain; charset=utf-8",
+            )
+            return
+        self._send(200, body, content_type)
 
     def _handle_heartbeat(self, params: dict) -> None:
         client_id = _first(params, "client")
@@ -3807,6 +3962,9 @@ class Handler(BaseHTTPRequestHandler):
 
     def do_GET(self):
         parsed = urlparse(self.path)
+        if not _request_authorized(self):
+            self._send(403, b"unauthorized: invalid or missing token", "text/plain; charset=utf-8")
+            return
         if not _fetch_site_allowed(self.headers.get("Sec-Fetch-Site", "")):
             self._send(403, b"cross-site request blocked", "text/plain; charset=utf-8")
             return
@@ -3890,12 +4048,10 @@ class Handler(BaseHTTPRequestHandler):
                 self._send(404, b"job not found", "text/plain; charset=utf-8")
                 return
             parts = []
-            if info["log"].exists():
-                parts.append(info["log"].read_text(encoding="utf-8", errors="replace"))
+            parts.append(_log_tail(info["log"], limit=20000))
             r_log = info["out"] / "logs" / "pipeline_r.log"
-            if r_log.exists():
-                parts.append(r_log.read_text(encoding="utf-8", errors="replace"))
-            text = "\n".join(parts)
+            parts.append(_log_tail(r_log, limit=20000))
+            text = "\n".join(part for part in parts if part)
             self._send(200, text.encode("utf-8"), "text/plain; charset=utf-8")
             return
         if parsed.path == "/status":
@@ -3931,28 +4087,22 @@ class Handler(BaseHTTPRequestHandler):
                 self._send(404, b"job not found", "text/plain; charset=utf-8")
                 return
             fig_dir = (info["out"] / "results" / "figures").resolve()
-            target = next(
-                (p for p in fig_dir.rglob(name) if p.is_file()),
-                None,
-            )
-            if target is None:
+            candidate = (fig_dir / name).resolve()
+            if not candidate.is_relative_to(fig_dir) or not candidate.is_file():
                 self._send(404, b"figure not found", "text/plain; charset=utf-8")
                 return
+            target = candidate
             suffix = target.suffix.lower()
-            content_type = {
-                ".png": "image/png",
-                ".jpg": "image/jpeg",
-                ".jpeg": "image/jpeg",
-                ".svg": "image/svg+xml",
-                ".pdf": "application/pdf",
-            }.get(suffix, "application/octet-stream")
-            self._send(200, target.read_bytes(), content_type)
+            self._send_file(target, _content_type(suffix))
             return
         if parsed.path == "/report":
             query = parse_qs(parsed.query)
             job = query.get("job", [""])[0]
             output = query.get("output", [""])[0]
             info = JOBS.get(job) if job else None
+            if info is None and output and not _workdir_allowed(output):
+                self._send(403, b"output directory not allowed", "text/plain; charset=utf-8")
+                return
             target = (
                 _single_report_path(info)
                 if info is not None
@@ -3961,7 +4111,7 @@ class Handler(BaseHTTPRequestHandler):
             if not target:
                 self._send(404, b"report not found", "text/plain; charset=utf-8")
                 return
-            self._send(200, target.read_bytes(), "text/html; charset=utf-8")
+            self._send_file(target, "text/html; charset=utf-8")
             return
         if parsed.path == "/datasets/file":
             query = parse_qs(parsed.query)
@@ -3970,11 +4120,7 @@ class Handler(BaseHTTPRequestHandler):
             if not target:
                 self._send(404, b"file not found", "text/plain; charset=utf-8")
                 return
-            content_type = {
-                ".csv": "text/csv; charset=utf-8",
-                ".json": "application/json",
-            }.get(target.suffix.lower(), "application/octet-stream")
-            self._send(200, target.read_bytes(), content_type)
+            self._send_file(target, _content_type(target.suffix))
             return
         if parsed.path == "/datasets/download/status":
             query = parse_qs(parsed.query)
@@ -4065,19 +4211,7 @@ class Handler(BaseHTTPRequestHandler):
             if not target:
                 self._send(404, b"file not found", "text/plain; charset=utf-8")
                 return
-            content_type = {
-                ".png": "image/png",
-                ".jpg": "image/jpeg",
-                ".jpeg": "image/jpeg",
-                ".svg": "image/svg+xml",
-                ".pdf": "application/pdf",
-                ".csv": "text/csv; charset=utf-8",
-                ".xlsx": "application/vnd.openxmlformats-officedocument.spreadsheetml.sheet",
-                ".json": "application/json",
-                ".html": "text/html; charset=utf-8",
-                ".pdbqt": "chemical/x-pdbqt",
-            }.get(target.suffix.lower(), "application/octet-stream")
-            self._send(200, target.read_bytes(), content_type)
+            self._send_file(target, _content_type(target.suffix))
             return
         if parsed.path == "/molecular-docking/history":
             body = json.dumps(
@@ -4148,9 +4282,10 @@ class Handler(BaseHTTPRequestHandler):
             self._send(200, body, "application/json")
             return
         if parsed.path == "/tasks/notifications":
+            # Read-only peek: draining is a POST so a prefetch/retry cannot
+            # silently swallow notifications.
             with NOTIFY_LOCK:
                 items = FINISHED_NOTIFICATIONS[:]
-                FINISHED_NOTIFICATIONS.clear()
             body = json.dumps(
                 {"notifications": items},
                 ensure_ascii=False,
@@ -4196,6 +4331,9 @@ class Handler(BaseHTTPRequestHandler):
             if not workdir:
                 self._send(400, b"job or workdir required", "application/json")
                 return
+            if job not in FULL_JOBS and not _workdir_allowed(workdir):
+                self._send(403, b"workdir not allowed", "text/plain; charset=utf-8")
+                return
             body = json.dumps(
                 full_results(workdir),
                 ensure_ascii=False,
@@ -4211,24 +4349,14 @@ class Handler(BaseHTTPRequestHandler):
             if not workdir or not name:
                 self._send(400, b"workdir and name required", "text/plain; charset=utf-8")
                 return
+            if job not in FULL_JOBS and not _workdir_allowed(workdir):
+                self._send(403, b"workdir not allowed", "text/plain; charset=utf-8")
+                return
             target = _full_file_path(workdir, name)
             if not target:
                 self._send(404, b"file not found", "text/plain; charset=utf-8")
                 return
-            content_type = {
-                ".png": "image/png",
-                ".jpg": "image/jpeg",
-                ".jpeg": "image/jpeg",
-                ".svg": "image/svg+xml",
-                ".pdf": "application/pdf",
-                ".csv": "text/csv; charset=utf-8",
-                ".json": "application/json",
-                ".html": "text/html; charset=utf-8",
-                ".css": "text/css; charset=utf-8",
-                ".md": "text/markdown; charset=utf-8",
-                ".xlsx": "application/vnd.openxmlformats-officedocument.spreadsheetml.sheet",
-            }.get(target.suffix.lower(), "application/octet-stream")
-            self._send(200, target.read_bytes(), content_type)
+            self._send_file(target, _content_type(target.suffix))
             return
         if parsed.path == "/dock/results":
             query = parse_qs(parsed.query)
@@ -4255,18 +4383,7 @@ class Handler(BaseHTTPRequestHandler):
             if not target:
                 self._send(404, b"file not found", "text/plain; charset=utf-8")
                 return
-            content_type = {
-                ".png": "image/png",
-                ".jpg": "image/jpeg",
-                ".jpeg": "image/jpeg",
-                ".svg": "image/svg+xml",
-                ".pdf": "application/pdf",
-                ".csv": "text/csv; charset=utf-8",
-                ".xlsx": "application/vnd.openxmlformats-officedocument.spreadsheetml.sheet",
-                ".json": "application/json",
-                ".pdbqt": "chemical/x-pdbqt",
-            }.get(target.suffix.lower(), "application/octet-stream")
-            self._send(200, target.read_bytes(), content_type)
+            self._send_file(target, _content_type(target.suffix))
             return
         if parsed.path == "/dock/history":
             body = json.dumps(
@@ -4291,43 +4408,27 @@ class Handler(BaseHTTPRequestHandler):
                     "text/plain; charset=utf-8",
                 )
                 return
+            if not _workdir_allowed(workdir):
+                self._send(403, b"workdir not allowed", "text/plain; charset=utf-8")
+                return
             target = _analysis_file_path(workdir, name, kind)
             if not target:
                 self._send(404, b"file not found", "text/plain; charset=utf-8")
                 return
-            content_type = {
-                ".png": "image/png",
-                ".jpg": "image/jpeg",
-                ".jpeg": "image/jpeg",
-                ".svg": "image/svg+xml",
-                ".pdf": "application/pdf",
-                ".csv": "text/csv; charset=utf-8",
-                ".html": "text/html; charset=utf-8",
-                ".json": "application/json",
-                ".md": "text/markdown; charset=utf-8",
-                ".xlsx": "application/vnd.openxmlformats-officedocument.spreadsheetml.sheet",
-            }.get(target.suffix.lower(), "application/octet-stream")
-            self._send(200, target.read_bytes(), content_type)
+            self._send_file(target, _content_type(target.suffix))
             return
         if parsed.path == "/dock/knockout/file":
             query = parse_qs(parsed.query)
             workdir = query.get("workdir", [""])[0]
             name = query.get("name", [""])[0]
+            if not _workdir_allowed(workdir):
+                self._send(403, b"workdir not allowed", "text/plain; charset=utf-8")
+                return
             target = _ko_file_path(workdir, name)
             if not target:
                 self._send(404, b"file not found", "text/plain; charset=utf-8")
                 return
-            content_type = {
-                ".png": "image/png",
-                ".jpg": "image/jpeg",
-                ".jpeg": "image/jpeg",
-                ".svg": "image/svg+xml",
-                ".pdf": "application/pdf",
-                ".csv": "text/csv; charset=utf-8",
-                ".md": "text/markdown; charset=utf-8",
-                ".json": "application/json",
-            }.get(target.suffix.lower(), "application/octet-stream")
-            self._send(200, target.read_bytes(), content_type)
+            self._send_file(target, _content_type(target.suffix))
             return
         if parsed.path == "/dock/validation-report":
             body = json.dumps(
@@ -4439,20 +4540,15 @@ class Handler(BaseHTTPRequestHandler):
             if not target.is_file() or target.parent != STATIC_DIR.resolve():
                 self._send(404, b"file not found", "text/plain; charset=utf-8")
                 return
-            content_type = {
-                ".png": "image/png",
-                ".jpg": "image/jpeg",
-                ".svg": "image/svg+xml",
-                ".css": "text/css; charset=utf-8",
-                ".js": "text/javascript; charset=utf-8",
-                ".json": "application/json; charset=utf-8",
-            }.get(target.suffix.lower(), "application/octet-stream")
-            self._send(200, target.read_bytes(), content_type)
+            self._send_file(target, _content_type(target.suffix))
             return
         self._send(404, b"not found", "text/plain; charset=utf-8")
 
     def do_POST(self):
         parsed = urlparse(self.path)
+        if not _request_authorized(self):
+            self._send(403, b"unauthorized: invalid or missing token", "text/plain; charset=utf-8")
+            return
         if not _fetch_site_allowed(self.headers.get("Sec-Fetch-Site", "")):
             self._send(403, b"cross-site request blocked", "text/plain; charset=utf-8")
             return
@@ -4474,6 +4570,17 @@ class Handler(BaseHTTPRequestHandler):
             params = parse_qs(parsed.query)
             params.update(data)
             self._handle_heartbeat(params)
+            return
+
+        if parsed.path == "/tasks/notifications/clear":
+            with NOTIFY_LOCK:
+                items = FINISHED_NOTIFICATIONS[:]
+                FINISHED_NOTIFICATIONS.clear()
+            self._send(
+                200,
+                json.dumps({"cleared": len(items)}, ensure_ascii=False).encode("utf-8"),
+                "application/json",
+            )
             return
 
         if parsed.path == "/pause":
@@ -5125,13 +5232,27 @@ def main() -> int:
         action="store_true",
         help="start the server without opening a browser window",
     )
+    parser.add_argument(
+        "--allow-path",
+        action="append",
+        default=[],
+        metavar="DIR",
+        help=(
+            "additional directory the results browser may read from "
+            "(repeatable); by default only project output roots and workdirs "
+            "registered by jobs started in this console are allowed"
+        ),
+    )
     args = parser.parse_args()
+
+    for extra in args.allow_path:
+        EXTRA_WORKDIR_ROOTS.append(Path(extra).expanduser().resolve())
 
     if not _cleanup_stale_web_ui(args.host, args.port):
         print(f"ERROR: port {args.port} is still in use by another process.")
         return 1
 
-    INDEX_PATH.write_text(render_page(), encoding="utf-8")
+    token = _configure_runtime(args.host, args.port)
     # On Windows, SO_REUSEADDR allows a second instance to bind the same port
     # and steal incoming connections, which surfaces as "connection refused".
     ThreadingHTTPServer.allow_reuse_address = False
@@ -5142,6 +5263,12 @@ def main() -> int:
         return 1
     url = f"http://{args.host}:{args.port}"
     print(f"Web UI started: {url}")
+    if token:
+        print(
+            "Non-loopback bind: a session token is required. Open this URL:\n"
+            f"  {url}/?token={token}\n"
+            "or send the header 'X-Auth-Token: <token>' with every request."
+        )
     if args.host not in ("127.0.0.1", "localhost", "::1"):
         print(
             "WARNING: Web UI exposes pipeline command and file endpoints "

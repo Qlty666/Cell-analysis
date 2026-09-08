@@ -43,7 +43,8 @@ def detect_box_data(path: Path) -> tuple[list[float], list[float], str]:
     return center, size, mode
 
 
-def detect_and_update_config(cfg: ResolvedConfig, log):
+def detect_and_update_config(cfg: ResolvedConfig, log, save=None):
+    """Detect the box and persist it via ``save`` (defaults to save_config)."""
     detect_value = cfg.get("receptor", "detect_input")
     detect_path = (
         Path(detect_value) if detect_value else cfg.receptor_input()
@@ -53,7 +54,7 @@ def detect_and_update_config(cfg: ResolvedConfig, log):
     center, size, mode = detect_box_data(detect_path)
     cfg.data["receptor"]["center"] = center
     cfg.data["receptor"]["size"] = size
-    save_config(cfg, cfg.config_path)
+    (save or save_config)(cfg, cfg.config_path)
     log.info(
         "detect-box: mode=%s center=%s size=%s -> %s",
         mode,

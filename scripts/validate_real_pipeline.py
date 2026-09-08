@@ -2,6 +2,7 @@
 """Run 10 real liver-disease GEO datasets through the full pipeline."""
 
 import argparse
+import json
 import shutil
 import subprocess
 import sys
@@ -56,9 +57,50 @@ REQUIRED_FIGURES = [
 ]
 
 
+PNG_MAGIC = b"\x89PNG\r\n\x1a\n"
+JPEG_MAGIC = b"\xff\xd8\xff"
+
+
+def valid_output(path: Path) -> bool:
+    """Reject missing, zero-byte and obviously corrupt output files.
+
+    Images must carry a PNG/JPEG/SVG header, JSON must parse and HTML must
+    contain markup. Everything else only has to be non-empty.
+    """
+    try:
+        if not path.is_file() or path.stat().st_size <= 0:
+            return False
+    except OSError:
+        return False
+    suffix = path.suffix.lower()
+    try:
+        with path.open("rb") as handle:
+            head = handle.read(1024)
+    except OSError:
+        return False
+    if suffix == ".png":
+        return head.startswith(PNG_MAGIC)
+    if suffix in {".jpg", ".jpeg"}:
+        return head.startswith(JPEG_MAGIC)
+    if suffix == ".svg":
+        text = head.decode("utf-8", "replace").lstrip().lower()
+        return text.startswith("<?xml") or "<svg" in text
+    if suffix == ".json":
+        try:
+            json.loads(path.read_text(encoding="utf-8", errors="replace"))
+        except Exception:
+            return False
+        return True
+    if suffix in {".html", ".htm"}:
+        return b"<" in head
+    return True
+
+
 def verify_outputs(out: Path, accession: str) -> bool:
     def find_figure(fig_dir: Path, name: str) -> bool:
-        return any(p.is_file() for p in fig_dir.rglob(name))
+        return any(
+            valid_output(p) for p in fig_dir.rglob(name) if p.is_file()
+        )
 
     problems = []
     for rel in [
@@ -66,12 +108,12 @@ def verify_outputs(out: Path, accession: str) -> bool:
         "results/summary.json",
         "results/result_report.html",
     ]:
-        if not (out / rel).exists():
+        if not valid_output(out / rel):
             problems.append(rel)
     fig_dir = out / "results" / "figures"
     ml_summary = out / "results" / "data" / "07_ml" / "ml_model_summary.json"
     ml_skipped = False
-    if ml_summary.exists():
+    if valid_output(ml_summary):
         try:
             ml_skipped = (
                 json.loads(ml_summary.read_text(encoding="utf-8")).get("status")
@@ -140,7 +182,9 @@ def main() -> int:
             continue
         out = validation_root / accession
         print(f"[{accession}] {label}")
-        if (out / "results" / "pipeline_complete.json").exists() and verify_outputs(
+        if valid_output(
+            out / "results" / "pipeline_complete.json"
+        ) and verify_outputs(
             out, accession
         ):
             print(f"[{accession}] already passed, skipping")

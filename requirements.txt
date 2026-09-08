@@ -1,14 +1,16 @@
 # Python dependencies beyond the standard library.
-fpdf2
-numpy
-pandas
-matplotlib
-pyyaml
-openpyxl
-h5py
-scipy
-scikit-learn
-umap-learn
-scTenifoldpy>=0.3.0
+# Pinned for reproducibility; versions match the validated development
+# environment (Python 3.11).
+fpdf2==2.8.7
+numpy==2.4.4
+pandas==2.3.3
+matplotlib==3.10.9
+pyyaml==6.0.3
+openpyxl==3.1.5
+h5py==3.16.0
+scipy==1.17.1
+scikit-learn==1.9.0
+umap-learn==0.5.12
+scTenifoldpy==0.4.0
 # drugreflector is optional; it needs model checkpoints from Zenodo
 # pip install drugreflector

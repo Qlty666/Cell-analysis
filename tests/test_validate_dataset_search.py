@@ -4,6 +4,7 @@
 from __future__ import annotations
 
 import sys
+import tempfile
 import unittest
 from pathlib import Path
 from unittest.mock import patch
@@ -147,6 +148,26 @@ class TestValidateDatasetSearch(unittest.TestCase):
             )
         self.assertTrue(record["found"])
         self.assertEqual(record["found_source"], "manual")
+
+    def test_main_fails_when_nothing_found(self):
+        with tempfile.TemporaryDirectory() as tmp:
+            with patch.object(
+                validate_dataset_search.search_datasets,
+                "search_datasets",
+                return_value=[],
+            ):
+                self.assertEqual(
+                    validate_dataset_search.main(
+                        ["--rounds", "2", "--output-dir", tmp]
+                    ),
+                    1,
+                )
+                self.assertEqual(
+                    validate_dataset_search.main(
+                        ["--rounds", "2", "--output-dir", tmp, "--allow-empty"]
+                    ),
+                    0,
+                )
 
 
 if __name__ == "__main__":

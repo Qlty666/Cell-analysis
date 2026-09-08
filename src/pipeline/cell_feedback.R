@@ -205,6 +205,7 @@ colnames(expr_df) <- paste0("expr_", make.names(available))
 
 if (length(available) >= 3) {
   ctrl_n <- min(50, max(2, floor(ncol(obj) * 0.1)))
+  set.seed(42)
   module_added <- tryCatch({
     obj <- AddModuleScore(
       obj,

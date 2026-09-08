@@ -27,7 +27,176 @@ from data.geo_downloader import (  # noqa: E402
     _matrix_header_looks_single_cell,
     _refresh_manifest_mode,
     _select_files,
+    detect_organism_code,
+    ensure_geo_dataset,
 )
+from common.http import HttpError, http_download, http_get  # noqa: E402
+
+
+class _FakeResponse:
+    def __init__(self, chunks, *, status=200, content_length=None):
+        self._chunks = list(chunks)
+        self.status = status
+        self.headers = {}
+        if content_length is not None:
+            self.headers["Content-Length"] = str(content_length)
+
+    def __enter__(self):
+        return self
+
+    def __exit__(self, *args):
+        return False
+
+    def read(self, amount=None):
+        if not self._chunks:
+            return b""
+        chunk = self._chunks.pop(0)
+        if amount is not None and len(chunk) > amount:
+            self._chunks.insert(0, chunk[amount:])
+            return chunk[:amount]
+        return chunk
+
+
+class TestOrganismDetection(unittest.TestCase):
+    def test_maps_known_organisms_to_codes(self):
+        self.assertEqual(detect_organism_code("Homo sapiens liver"), "hs")
+        self.assertEqual(detect_organism_code("Mus musculus liver"), "mm")
+        self.assertEqual(detect_organism_code("Rattus norvegicus"), "rn")
+        self.assertEqual(detect_organism_code("Danio rerio embryos"), "dr")
+        self.assertEqual(detect_organism_code("Drosophila melanogaster"), "dm")
+
+    def test_returns_none_for_unknown_or_empty_text(self):
+        self.assertIsNone(detect_organism_code("Glycine max seed development"))
+        self.assertIsNone(detect_organism_code(""))
+        self.assertIsNone(detect_organism_code())
+
+    def test_word_boundaries_avoid_false_positives(self):
+        self.assertIsNone(
+            detect_organism_code("generated collaborative data")
+        )
+
+
+class TestEnsureGeoOrganism(unittest.TestCase):
+    def _run_ensure(self, tmp: str, series_body: str) -> dict:
+        root = Path(tmp) / "root"
+        cache = Path(tmp) / "cache"
+
+        def fake_fetch(url):
+            if url.endswith("/suppl/"):
+                return '<a href="GSE1_counts.txt.gz">GSE1_counts.txt.gz</a>'
+            if url.endswith("/matrix/"):
+                return '<a href="GSE1_series_matrix.txt.gz">x</a>'
+            return ""
+
+        def fake_download(url, out, log, force=False):
+            out.parent.mkdir(parents=True, exist_ok=True)
+            if out.name.endswith("series_matrix.txt.gz"):
+                with gzip.open(out, "wt", encoding="utf-8") as fh:
+                    fh.write(series_body)
+            else:
+                out.write_bytes(b"gene,cell\nA,1\n")
+
+        with (
+            mock.patch("data.geo_downloader._fetch", side_effect=fake_fetch),
+            mock.patch("data.geo_downloader._download", side_effect=fake_download),
+            mock.patch("data.geo_downloader.CACHE_ROOT", cache),
+        ):
+            return ensure_geo_dataset("GSE1", root, lambda _msg: None)
+
+    def test_detects_mouse_series_matrix(self):
+        with tempfile.TemporaryDirectory() as tmp:
+            manifest = self._run_ensure(tmp, "!Series_organism = Mus musculus\n")
+            self.assertEqual(manifest["organism"], "mm")
+
+    def test_unknown_organism_is_recorded_not_defaulted_to_human(self):
+        with tempfile.TemporaryDirectory() as tmp:
+            manifest = self._run_ensure(tmp, "!Series_organism = Glycine max\n")
+            self.assertEqual(manifest["organism"], "unknown")
+
+
+class TestHttpHelper(unittest.TestCase):
+    def test_http_get_retries_then_succeeds(self):
+        calls = {"count": 0}
+
+        def fake_urlopen(request, timeout=None):
+            calls["count"] += 1
+            if calls["count"] < 3:
+                raise OSError("connection reset")
+            return _FakeResponse([b"hello"], content_length=5)
+
+        with (
+            mock.patch(
+                "common.http.urllib.request.urlopen",
+                side_effect=fake_urlopen,
+            ),
+            mock.patch("common.http.time.sleep"),
+        ):
+            body = http_get("https://example.test/data", retries=3)
+
+        self.assertEqual(body, b"hello")
+        self.assertEqual(calls["count"], 3)
+
+    def test_http_get_rejects_oversized_response(self):
+        def fake_urlopen(request, timeout=None):
+            return _FakeResponse([b"x" * 50], content_length=50)
+
+        with (
+            mock.patch(
+                "common.http.urllib.request.urlopen",
+                side_effect=fake_urlopen,
+            ),
+            self.assertRaisesRegex(HttpError, "limit"),
+        ):
+            http_get("https://example.test/big", max_bytes=10, retries=1)
+
+    def test_http_get_sends_descriptive_user_agent(self):
+        seen = {}
+
+        def fake_urlopen(request, timeout=None):
+            seen["ua"] = request.headers.get("User-agent")
+            return _FakeResponse([b"ok"], content_length=2)
+
+        with mock.patch(
+            "common.http.urllib.request.urlopen",
+            side_effect=fake_urlopen,
+        ):
+            http_get("https://example.test/data")
+
+        self.assertIn("liver-cancer-pipeline", seen["ua"])
+        self.assertIn("mailto:", seen["ua"])
+
+    def test_http_download_writes_file(self):
+        def fake_urlopen(request, timeout=None):
+            return _FakeResponse([b"down", b"loaded"], content_length=10)
+
+        with tempfile.TemporaryDirectory() as tmp:
+            out = Path(tmp) / "file.bin"
+            with mock.patch(
+                "common.http.urllib.request.urlopen",
+                side_effect=fake_urlopen,
+            ):
+                http_download("https://example.test/file.bin", out)
+            self.assertEqual(out.read_bytes(), b"downloaded")
+
+    def test_http_download_resumes_partial_file(self):
+        with tempfile.TemporaryDirectory() as tmp:
+            out = Path(tmp) / "file.bin"
+            out.write_bytes(b"down")
+
+            def fake_urlopen(request, timeout=None):
+                self.assertEqual(
+                    request.headers.get("Range"),
+                    "bytes=4-",
+                )
+                return _FakeResponse([b"loaded"], status=206, content_length=6)
+
+            with mock.patch(
+                "common.http.urllib.request.urlopen",
+                side_effect=fake_urlopen,
+            ):
+                http_download("https://example.test/file.bin", out)
+            self.assertEqual(out.read_bytes(), b"downloaded")
+
 
 
 class TestCanonicalAccession(unittest.TestCase):

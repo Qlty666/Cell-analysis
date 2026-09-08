@@ -4,13 +4,13 @@
 from __future__ import annotations
 
 import html
-import json
 from pathlib import Path
 
 import pandas as pd
 
 from .config import ResolvedConfig
-from .utils import DockingError
+from .html_utils import esc as _esc
+from .utils import DockingError, read_json
 
 
 def generate_report(cfg: ResolvedConfig, log) -> Path:
@@ -103,13 +103,4 @@ th {{ background: #eef2f7; }}
 
 
 def _read_json(path: Path) -> dict:
-    if not path.exists():
-        return {}
-    try:
-        return json.loads(path.read_text(encoding="utf-8"))
-    except Exception:
-        return {}
-
-
-def _esc(value) -> str:
-    return html.escape(str(value if value is not None else ""))
+    return read_json(path, {}) or {}

@@ -145,14 +145,6 @@ figure_stage <- function(name) {
   return("00_other")
 }
 
-wrap_labels <- function(x, width = 20) {
-  vapply(
-    as.character(x),
-    function(s) paste(strwrap(s, width = width), collapse = "\n"),
-    character(1)
-  )
-}
-
 sample_short_label <- function(x) {
   sub(":.*$", "", trimws(as.character(x)))
 }
@@ -205,7 +197,10 @@ qc_max_ribo <- param_num("LIVER_QC_MAX_RIBO")
 qc_max_hb <- param_num("LIVER_QC_MAX_HB")
 cluster_resolution <- param_num("LIVER_CLUSTER_RESOLUTION")
 cluster_algorithm <- param_num("LIVER_CLUSTER_ALGORITHM")
+# Accept both the legacy "LIVER_DE_LOGFc" spelling and the canonical
+# "LIVER_DE_LOGFC"; the legacy name keeps working as a fallback.
 de_logfc <- param_num("LIVER_DE_LOGFc")
+if (is.na(de_logfc)) de_logfc <- param_num("LIVER_DE_LOGFC")
 de_padj <- param_num("LIVER_DE_PADJ")
 de_min_base_mean <- param_num("LIVER_DE_MIN_BASEMEAN")
 de_max_logfc <- param_num("LIVER_DE_MAX_LOGFC")
@@ -237,7 +232,9 @@ ensure_deg_columns <- function(deg) {
   required <- c("p_val", "avg_log2FC", "pct.1", "pct.2", "p_val_adj")
   for (col in required) {
     if (!col %in% colnames(deg)) {
-      deg[[col]] <- numeric(nrow(deg))
+      # Missing statistics must stay missing: filling p-values with 0 would
+      # silently mark every gene as significant.
+      deg[[col]] <- rep(NA_real_, nrow(deg))
     }
     if (is.list(deg[[col]])) {
       deg[[col]] <- vapply(
@@ -350,7 +347,9 @@ ckpt_path <- function(name) {
   file.path(ckpt_dir, name)
 }
 
-force <- "--force" %in% args
+# NOTE: the "--force" flag is handled by the Python orchestrator (it clears
+# stage markers); the R script always re-runs an enabled stage, so no local
+# force variable is needed.
 start_stage <- "01"
 for (arg in args) {
   if (startsWith(arg, "--start-stage=")) {
@@ -374,11 +373,17 @@ log_msg <- function(...) {
 
 mt_pattern <- "^MT-|^mt-"
 
-qc_percentage <- function(object, features) {
+qc_percentage <- function(object, features, label = "QC") {
   counts <- GetAssayData(object, assay = "RNA", layer = "counts")
   features <- intersect(features, rownames(counts))
   if (length(features) == 0 || ncol(counts) == 0) {
-    return(rep(0, ncol(object)))
+    # No matching features means the metric is undefined, not zero; returning 0
+    # would let every cell pass the QC filter for this metric.
+    log_msg(
+      "WARNING: no features matched for ", label,
+      "; setting ", label, " to NA for all cells"
+    )
+    return(rep(NA_real_, ncol(object)))
   }
   total_counts <- Matrix::colSums(counts)
   100 * Matrix::colSums(counts[features, , drop = FALSE]) /
@@ -403,6 +408,72 @@ hemoglobin_features <- function(object) {
     )
   }
   unique(unlist(lapply(patterns, grep, x = genes, value = TRUE)))
+}
+
+mt_features <- function(object) {
+  genes <- rownames(object)
+  hits <- grep(mt_pattern, genes, value = TRUE)
+  if (length(hits) > 0) {
+    return(hits)
+  }
+  # Ensembl-ID datasets (e.g. "ENSG00000198888") have no "MT-" symbols, so fall
+  # back to the organism annotation package and keep the CHR == "MT" genes.
+  ensembl <- genes[grepl("^(ENSG|ENSMUSG)", genes)]
+  if (length(ensembl) == 0) {
+    log_msg(
+      "WARNING: no mitochondrial features found (no MT- symbols, no Ensembl IDs)"
+    )
+    return(character(0))
+  }
+  org_db <- if (species == "mm") {
+    if (requireNamespace("org.Mm.eg.db", quietly = TRUE)) {
+      getExportedValue("org.Mm.eg.db", "org.Mm.eg.db")
+    } else {
+      NULL
+    }
+  } else if (requireNamespace("org.Hs.eg.db", quietly = TRUE)) {
+    getExportedValue("org.Hs.eg.db", "org.Hs.eg.db")
+  } else {
+    NULL
+  }
+  if (is.null(org_db)) {
+    log_msg(
+      "WARNING: no MT- features and organism annotation package unavailable; ",
+      "percent.mt will be NA"
+    )
+    return(character(0))
+  }
+  mapped <- tryCatch(
+    AnnotationDbi::select(
+      org_db,
+      keys = ensembl,
+      columns = "CHR",
+      keytype = "ENSEMBL"
+    ),
+    error = function(e) {
+      log_msg(
+        "WARNING: Ensembl MT annotation lookup failed: ",
+        conditionMessage(e)
+      )
+      NULL
+    }
+  )
+  if (is.null(mapped) || !"CHR" %in% colnames(mapped)) {
+    log_msg("WARNING: Ensembl MT annotation lookup returned no usable rows")
+    return(character(0))
+  }
+  mt_ids <- unique(as.character(mapped$ENSEMBL[
+    !is.na(mapped$CHR) & as.character(mapped$CHR) == "MT"
+  ]))
+  hits <- intersect(mt_ids, genes)
+  if (length(hits) == 0) {
+    log_msg(
+      "WARNING: no mitochondrial features detected; percent.mt will be NA"
+    )
+  } else {
+    log_msg("mitochondrial features resolved via Ensembl CHR=MT: ", length(hits))
+  }
+  hits
 }
 
 umi_feature_correlation_stats <- function(qc_frame, stage_label) {
@@ -466,6 +537,32 @@ run_stage <- function(name, expr) {
   log_msg("complete stage: ", name)
 }
 
+# Shared parser for GEO series-matrix "!Sample_*" rows. Defined once here and
+# used by both parse_series_matrix() and parse_series_generic(); the
+# data.table::fread route handles quoted fields that contain tabs.
+parse_values <- function(line) {
+  v <- sub("^![^\t]*\t", "", line)
+  tmp <- tempfile()
+  on.exit(unlink(tmp), add = TRUE)
+  writeLines(v, tmp)
+  tab <- tryCatch(
+    data.table::fread(
+      tmp,
+      header = FALSE,
+      sep = "\t",
+      quote = '"',
+      fill = TRUE,
+      colClasses = "character"
+    ),
+    error = function(e) NULL
+  )
+  if (is.null(tab) || ncol(tab) == 0) {
+    return(character())
+  }
+  vals <- unname(unlist(as.list(tab[1, ]), use.names = FALSE))
+  gsub('^"|"$', "", trimws(vals))
+}
+
 parse_series_matrix <- function() {
   files <- list.files(
     raw_dir,
@@ -482,12 +579,6 @@ parse_series_matrix <- function() {
 
     title_line <- lines[startsWith(lines, "!Sample_title")]
     char_line <- lines[startsWith(lines, "!Sample_characteristics_ch1")][1]
-
-    parse_values <- function(line) {
-      v <- sub("^![^\t]*\t", "", line)
-      v <- unlist(strsplit(v, "\t", fixed = TRUE))
-      gsub('^"|"$', "", trimws(v))
-    }
 
     titles <- parse_values(title_line[1])
     chars <- parse_values(char_line)
@@ -642,54 +733,147 @@ read_h5ad_matrix <- function(path) {
     }
   }, add = TRUE)
 
-  x_group <- h5[["X"]]
-  layers <- h5[["layers"]]
-  if (inherits(layers, "H5Group") &&
-      any(c("counts", "raw_counts", "count") %in% names(layers))) {
-    layer_name <- c("counts", "raw_counts", "count")[
-      c("counts", "raw_counts", "count") %in% names(layers)
-    ][1]
-    log_msg("h5ad: using layer ", layer_name, " from ", basename(path))
-    x_group <- layers[[layer_name]]
+  h5ad_read_group <- function(x_group, label) {
+    shape <- as.integer(x_group$attr_open("shape")$read())
+    if (length(shape) != 2) {
+      stop("h5ad ", label, " does not have a 2D shape: ", path)
+    }
+    attr_names <- tryCatch(
+      hdf5r::h5attr_names(x_group),
+      error = function(e) character()
+    )
+    encoding <- if ("encoding-type" %in% attr_names) {
+      as.character(x_group$attr_open("encoding-type")$read())
+    } else {
+      NULL
+    }
+    if ("data" %in% names(x_group)) {
+      data <- h5_vector(x_group[["data"]])
+      indices <- as.integer(h5_vector(x_group[["indices"]]))
+      indptr <- as.integer(h5_vector(x_group[["indptr"]]))
+      if (identical(encoding, "csc_matrix")) {
+        matrix_c <- new(
+          "dgCMatrix",
+          p = indptr,
+          i = indices,
+          x = as.numeric(data),
+          Dim = c(shape[1], shape[2])
+        )
+      } else {
+        # AnnData defaults to CSR when encoding-type is absent/unrecognised.
+        matrix_c <- new(
+          "dgRMatrix",
+          p = indptr,
+          j = indices,
+          x = as.numeric(data),
+          Dim = c(shape[1], shape[2])
+        )
+      }
+      rm(data, indices, indptr)
+      gc(FALSE)
+    } else {
+      dense <- h5_vector(x_group)
+      matrix_c <- Matrix::Matrix(
+        dense,
+        nrow = shape[1],
+        ncol = shape[2],
+        sparse = TRUE
+      )
+      rm(dense)
+      gc(FALSE)
+    }
+    # h5ad stores cells x genes; the pipeline needs genes x cells.
+    counts <- as(t(matrix_c), "CsparseMatrix")
+    rm(matrix_c)
+    gc(FALSE)
+    counts
   }
 
-  shape <- as.integer(x_group$attr_open("shape")$read())
-  if (length(shape) != 2) {
-    stop("h5ad X does not have a 2D shape: ", path)
+  h5ad_is_integer <- function(m) {
+    values <- as.numeric(m@x)
+    all(is.finite(values)) &&
+      all(values >= 0) &&
+      all(abs(values - round(values)) < 1e-8)
   }
-  if ("data" %in% names(x_group)) {
-    data <- h5_vector(x_group[["data"]])
-    indices <- as.integer(h5_vector(x_group[["indices"]]))
-    indptr <- as.integer(h5_vector(x_group[["indptr"]]))
-    matrix_r <- new(
-      "dgRMatrix",
-      p = indptr,
-      j = indices,
-      x = as.numeric(data),
-      Dim = c(shape[1], shape[2])
-    )
-    rm(data, indices, indptr)
-    gc(FALSE)
-    counts <- t(matrix_r)
-    rm(matrix_r)
-    gc(FALSE)
-  } else {
-    dense <- h5_vector(x_group)
-    counts <- as(
-      Matrix::Matrix(dense, nrow = shape[1], ncol = shape[2], sparse = TRUE),
-      "CsparseMatrix"
+
+  h5ad_candidates <- list()
+  layers <- tryCatch(h5[["layers"]], error = function(e) NULL)
+  if (inherits(layers, "H5Group")) {
+    layer_candidates <- c("counts", "raw_counts", "count")
+    layer_name <- layer_candidates[layer_candidates %in% names(layers)][1]
+    if (length(layer_name) == 1 && !is.na(layer_name)) {
+      h5ad_candidates[[length(h5ad_candidates) + 1L]] <- list(
+        group = layers[[layer_name]],
+        label = paste0("layers/", layer_name),
+        var_group = tryCatch(h5[["var"]], error = function(e) NULL)
+      )
+    }
+  }
+  raw_group <- tryCatch(h5[["raw"]], error = function(e) NULL)
+  if (inherits(raw_group, "H5Group") && "X" %in% names(raw_group)) {
+    h5ad_candidates[[length(h5ad_candidates) + 1L]] <- list(
+      group = raw_group[["X"]],
+      label = "raw/X",
+      var_group = if ("var" %in% names(raw_group)) {
+        raw_group[["var"]]
+      } else {
+        tryCatch(h5[["var"]], error = function(e) NULL)
+      }
     )
   }
+  x_main <- tryCatch(h5[["X"]], error = function(e) NULL)
+  if (!is.null(x_main)) {
+    h5ad_candidates[[length(h5ad_candidates) + 1L]] <- list(
+      group = x_main,
+      label = "X",
+      var_group = tryCatch(h5[["var"]], error = function(e) NULL)
+    )
+  }
+
+  # Precedence: layers["counts"] -> .raw/X -> X, but only matrices whose stored
+  # values are non-negative integers are accepted as counts. X is frequently
+  # log-normalized, so it must never be silently rounded into fake counts.
+  counts <- NULL
+  counts_label <- NULL
+  counts_var <- NULL
+  tried_labels <- character()
+  non_integer_labels <- character()
+  for (candidate in h5ad_candidates) {
+    tried_labels <- c(tried_labels, candidate$label)
+    candidate_counts <- h5ad_read_group(candidate$group, candidate$label)
+    if (h5ad_is_integer(candidate_counts)) {
+      counts <- candidate_counts
+      counts_label <- candidate$label
+      counts_var <- candidate$var_group
+      break
+    }
+    non_integer_labels <- c(non_integer_labels, candidate$label)
+    rm(candidate_counts)
+    gc(FALSE)
+  }
+  if (is.null(counts)) {
+    stop(
+      "No integer count matrix found in h5ad ", basename(path), ". Checked: ",
+      paste(tried_labels, collapse = ", "),
+      ". Non-integer (likely log-normalized) matrices: ",
+      paste(non_integer_labels, collapse = ", "),
+      ". Provide raw counts in layers['counts'] or .raw/X."
+    )
+  }
+  log_msg(
+    "h5ad: using ", counts_label, " as integer counts from ", basename(path)
+  )
 
   obs <- h5[["obs"]]
   index_name <- h5_index_name(obs)
+  n_cells <- ncol(counts)
   cells <- if (is.null(index_name)) {
-    rep("", shape[1])
+    rep("", n_cells)
   } else {
     h5_vector(obs[[index_name]])
   }
   if (length(cells) == 0 || all(!nzchar(cells))) {
-    cells <- paste0("Cell", seq_len(shape[1]))
+    cells <- paste0("Cell", seq_len(n_cells))
   }
   cells <- make.unique(as.character(cells))
 
@@ -705,7 +889,7 @@ read_h5ad_matrix <- function(path) {
     }
   }
 
-  var <- h5[["var"]]
+  var <- if (!is.null(counts_var)) counts_var else h5[["var"]]
   var_index <- h5_index_name(var)
   genes <- if (is.null(var_index)) {
     h5_vector(var[["gene_ids"]])
@@ -730,9 +914,6 @@ read_h5ad_matrix <- function(path) {
   genes <- normalize_ensembl_ids(genes)
   rownames(counts) <- make.unique(as.character(genes))
   colnames(counts) <- cells
-  if (ncol(counts) > 0 && length(rownames(counts)) > 0) {
-    counts@x <- round(counts@x)
-  }
 
   log_msg(
     "h5ad loaded: ", basename(path), " cells=", ncol(counts),
@@ -1274,29 +1455,6 @@ parse_series_generic <- function(manifest) {
     return(NULL)
   }
 
-  parse_values <- function(line) {
-    v <- sub("^![^\t]*\t", "", line)
-    tmp <- tempfile()
-    on.exit(unlink(tmp), add = TRUE)
-    writeLines(v, tmp)
-    tab <- tryCatch(
-      data.table::fread(
-        tmp,
-        header = FALSE,
-        sep = "\t",
-        quote = '"',
-        fill = TRUE,
-        colClasses = "character"
-      ),
-      error = function(e) NULL
-    )
-    if (is.null(tab) || ncol(tab) == 0) {
-      return(character())
-    }
-    vals <- unname(unlist(as.list(tab[1, ]), use.names = FALSE))
-    gsub('^"|"$', "", trimws(vals))
-  }
-
   out <- list()
   for (f in files) {
     con <- gzfile(file.path(raw_dir, f), "rt")
@@ -1431,8 +1589,37 @@ reduce_condition_to_two_groups <- function(vals) {
 
   tt <- sort(table(vals), decreasing = TRUE)
   if (length(tt) >= 2) {
+    # Behaviour choice: minority labels are kept as "Other" instead of being
+    # silently relabelled as the majority group, which would fabricate data.
     top2 <- names(tt)[1:2]
-    out <- ifelse(vals %in% top2, vals, top2[1])
+    out <- ifelse(vals %in% top2, vals, "Other")
+    other_counts <- sort(table(out[out == "Other"]))
+    log_msg(
+      "WARNING: condition column has more than two groups; keeping ",
+      paste(top2, collapse = ", "), " and labelling the remaining ",
+      sum(out == "Other"), " samples as 'Other'"
+    )
+    warn_path <- file.path(data_dir, "condition_warning.txt")
+    write(
+      paste0(
+        "condition_reduction: kept [", paste(top2, collapse = ", "),
+        "]; relabelled ", sum(out == "Other"), " samples as 'Other'",
+        if (length(other_counts) > 0) {
+          paste0(
+            " (original labels: ",
+            paste(
+              names(other_counts), as.integer(other_counts),
+              sep = "=", collapse = ", "
+            ),
+            ")"
+          )
+        } else {
+          ""
+        }
+      ),
+      file = warn_path,
+      append = file.exists(warn_path)
+    )
     return(out)
   }
   vals
@@ -1532,6 +1719,27 @@ normalize_condition <- function(meta) {
       )
     }
     keep <- cond %in% names(tt)[1:2]
+    dropped <- sort(table(cond[!keep]))
+    if (length(dropped) > 0) {
+      # Behaviour choice: samples outside the two largest condition groups are
+      # dropped explicitly (never relabelled into another group) and recorded.
+      log_msg(
+        "WARNING: dropping ", sum(dropped), " samples whose condition is not ",
+        "one of the two largest groups (",
+        paste(names(tt)[1:2], collapse = ", "), "): ",
+        paste(names(dropped), as.integer(dropped), sep = "=", collapse = ", ")
+      )
+      warn_path <- file.path(data_dir, "condition_warning.txt")
+      write(
+        paste0(
+          "condition_filter: dropped ", sum(dropped), " samples not in [",
+          paste(names(tt)[1:2], collapse = ", "), "]; dropped counts: ",
+          paste(names(dropped), as.integer(dropped), sep = "=", collapse = ", ")
+        ),
+        file = warn_path,
+        append = file.exists(warn_path)
+      )
+    }
   }
   meta <- meta[keep, , drop = FALSE]
   meta$condition <- factor(as.character(meta$condition))
@@ -1756,18 +1964,26 @@ if (stage_allowed("01")) run_stage("01_load_data", {
     project = accession
   )
   seurat_raw$orig.ident <- accession
-  seurat_raw[["percent.mt"]] <- PercentageFeatureSet(seurat_raw, pattern = mt_pattern)
+  mt_genes <- mt_features(seurat_raw)
+  seurat_raw[["percent.mt"]] <- qc_percentage(
+    seurat_raw,
+    mt_genes,
+    label = "percent.mt"
+  )
   seurat_raw[["percent.ribo"]] <- qc_percentage(
     seurat_raw,
-    ribo_features(seurat_raw)
+    ribo_features(seurat_raw),
+    label = "percent.ribo"
   )
   seurat_raw[["percent.hb"]] <- qc_percentage(
     seurat_raw,
-    hemoglobin_features(seurat_raw)
+    hemoglobin_features(seurat_raw),
+    label = "percent.hb"
   )
   log_msg(
     "QC contamination genes: ",
-    "ribo=", length(ribo_features(seurat_raw)),
+    "mt=", length(mt_genes),
+    ", ribo=", length(ribo_features(seurat_raw)),
     ", hemoglobin=", length(hemoglobin_features(seurat_raw))
   )
 
@@ -1787,13 +2003,15 @@ if (stage_allowed("02")) run_stage("02_qc_filter", {
   if (!"percent.ribo" %in% colnames(seurat_raw[[]])) {
     seurat_raw[["percent.ribo"]] <- qc_percentage(
       seurat_raw,
-      ribo_features(seurat_raw)
+      ribo_features(seurat_raw),
+      label = "percent.ribo"
     )
   }
   if (!"percent.hb" %in% colnames(seurat_raw[[]])) {
     seurat_raw[["percent.hb"]] <- qc_percentage(
       seurat_raw,
-      hemoglobin_features(seurat_raw)
+      hemoglobin_features(seurat_raw),
+      label = "percent.hb"
     )
   }
   qc_metric_cols <- c(
@@ -1895,6 +2113,19 @@ if (stage_allowed("02")) run_stage("02_qc_filter", {
 
   qc_diff_raw <- qc_pvalue_table(qc_data, "raw")
 
+  # Metrics can be entirely NA (e.g. no MT features in an Ensembl-ID dataset),
+  # so quantiles must ignore missing values instead of erroring out.
+  qc_quantile_upper <- function(vals, cap) {
+    vals <- as.numeric(vals)
+    vals <- vals[is.finite(vals)]
+    if (length(vals) == 0) return(NA_real_)
+    min(cap, as.numeric(quantile(vals, 0.99)))
+  }
+  qc_metric_removed <- function(vals, lo, hi) {
+    vals <- as.numeric(vals)
+    sum(!(is.na(vals) | (vals >= lo & vals <= hi)))
+  }
+
   if (dataset_mode == "sample_level") {
     lo_feature <- 0
     hi_feature <- max(qc_data$nFeature_RNA) + 1
@@ -1927,7 +2158,7 @@ if (stage_allowed("02")) run_stage("02_qc_filter", {
     hi_mt <- if (!is.na(qc_max_mt)) {
       qc_max_mt
     } else {
-      min(30, as.numeric(quantile(qc_data$percent.mt, 0.99)))
+      qc_quantile_upper(qc_data$percent.mt, 30)
     }
     hi_ribo <- if (!is.na(qc_max_ribo)) {
       qc_max_ribo
@@ -1937,8 +2168,30 @@ if (stage_allowed("02")) run_stage("02_qc_filter", {
     hi_hb <- if (!is.na(qc_max_hb)) {
       qc_max_hb
     } else {
-      min(25, as.numeric(quantile(qc_data$percent.hb, 0.99)))
+      qc_quantile_upper(qc_data$percent.hb, 25)
     }
+  }
+
+  if (!is.finite(hi_mt)) {
+    log_msg(
+      "WARNING: percent.mt is unavailable for this dataset (no mitochondrial ",
+      "features); MT filtering is disabled"
+    )
+    hi_mt <- 100
+  }
+  if (!is.finite(hi_ribo)) {
+    log_msg(
+      "WARNING: percent.ribo is unavailable for this dataset; ribo filtering ",
+      "is disabled"
+    )
+    hi_ribo <- 100
+  }
+  if (!is.finite(hi_hb)) {
+    log_msg(
+      "WARNING: percent.hb is unavailable for this dataset (no hemoglobin ",
+      "features); HB filtering is disabled"
+    )
+    hi_hb <- 100
   }
 
   if (
@@ -1971,15 +2224,15 @@ if (stage_allowed("02")) run_stage("02_qc_filter", {
     ", percent.hb <= ", round(hi_hb, 1)
   )
 
+  # NA metrics (unavailable features) always pass: an undefined percentage must
+  # not silently drop every cell.
   seurat_qc <- subset(
     seurat_raw,
-    subset = nFeature_RNA >= lo_feature &
-      nFeature_RNA <= hi_feature &
-      nCount_RNA >= lo_count &
-      nCount_RNA <= hi_count &
-      percent.mt <= hi_mt &
-      percent.ribo <= hi_ribo &
-      percent.hb <= hi_hb
+    subset = (is.na(nFeature_RNA) | (nFeature_RNA >= lo_feature & nFeature_RNA <= hi_feature)) &
+      (is.na(nCount_RNA) | (nCount_RNA >= lo_count & nCount_RNA <= hi_count)) &
+      (is.na(percent.mt) | percent.mt <= hi_mt) &
+      (is.na(percent.ribo) | percent.ribo <= hi_ribo) &
+      (is.na(percent.hb) | percent.hb <= hi_hb)
   )
 
   threshold_summary <- data.frame(
@@ -1990,17 +2243,11 @@ if (stage_allowed("02")) run_stage("02_qc_filter", {
     lower = c(lo_feature, lo_count, 0, 0, 0),
     upper = c(hi_feature, hi_count, hi_mt, hi_ribo, hi_hb),
     n_removed = c(
-      sum(
-        qc_data$nFeature_RNA < lo_feature |
-          qc_data$nFeature_RNA > hi_feature
-      ),
-      sum(
-        qc_data$nCount_RNA < lo_count |
-          qc_data$nCount_RNA > hi_count
-      ),
-      sum(qc_data$percent.mt > hi_mt),
-      sum(qc_data$percent.ribo > hi_ribo),
-      sum(qc_data$percent.hb > hi_hb)
+      qc_metric_removed(qc_data$nFeature_RNA, lo_feature, hi_feature),
+      qc_metric_removed(qc_data$nCount_RNA, lo_count, hi_count),
+      qc_metric_removed(qc_data$percent.mt, 0, hi_mt),
+      qc_metric_removed(qc_data$percent.ribo, 0, hi_ribo),
+      qc_metric_removed(qc_data$percent.hb, 0, hi_hb)
     ),
     stringsAsFactors = FALSE
   )
@@ -2180,10 +2427,28 @@ if (stage_allowed("03")) run_stage("03_doublets", {
       "singlet"
     )
   } else {
+    set.seed(42)
     sce <- tryCatch(
-      scDblFinder(sce, BPPARAM = BiocParallel::SerialParam()),
+      scDblFinder(
+        sce,
+        samples = "sample",
+        BPPARAM = BiocParallel::SerialParam()
+      ),
       error = function(e) {
-        log_msg("scDblFinder failed; marking all cells as singlet")
+        msg <- paste0(
+          "scDblFinder failed: ", conditionMessage(e),
+          "; marking all cells as singlet (doublet results unusable)"
+        )
+        log_msg("ERROR: ", msg)
+        status_path <- stage_data_file("scDblFinder_status.txt")
+        writeLines(
+          c(
+            paste0("status: failed"),
+            paste0("time: ", Sys.time()),
+            msg
+          ),
+          status_path
+        )
         sce$scDblFinder.score <- rep(0, ncol(sce))
         sce$scDblFinder.class <- rep("singlet", ncol(sce))
         sce
@@ -2272,6 +2537,7 @@ if (stage_allowed("04")) run_stage("04_cluster", {
     log_msg("sample-level mode: assigning sample-level clusters and embeddings")
     seurat$seurat_clusters <- as.character(seurat$sample)
     npcs <- min(30, max(1, ncol(seurat) - 1))
+    set.seed(42)
     emb_pca <- matrix(
       rnorm(ncol(seurat) * npcs),
       nrow = ncol(seurat),
@@ -2397,6 +2663,7 @@ if (stage_allowed("04")) run_stage("04_cluster", {
       RunPCA(seurat, npcs = npcs, verbose = FALSE),
       error = function(e) {
         log_msg("PCA failed; using dummy reduction: ", conditionMessage(e))
+        set.seed(42)
         emb <- matrix(
           rnorm(ncol(seurat) * max(1, npcs)),
           nrow = ncol(seurat),
@@ -2461,6 +2728,7 @@ if (stage_allowed("04")) run_stage("04_cluster", {
       ),
       error = function(e) {
         log_msg("UMAP failed; using dummy embedding: ", conditionMessage(e))
+        set.seed(42)
         emb <- matrix(
           rnorm(ncol(seurat) * 2),
           nrow = ncol(seurat),
@@ -3019,16 +3287,35 @@ if (stage_allowed("06")) run_stage("06_differential_expression", {
         return.seurat = FALSE
       )$RNA
       bulk_meta <- data.frame(row.names = colnames(bulk), stringsAsFactors = FALSE)
-      bulk_meta$sample <- gsub(
-        "-",
-        "_",
-        sub("_[^_]+$", "", colnames(bulk))
-      )
+      # AggregateExpression names columns "<sample>_<condition>"; only strip the
+      # trailing condition suffix. Rewriting "-" to "_" mangles GEO sample names
+      # and silently drops every pseudobulk row via the match below.
+      bulk_meta$sample <- sub("_[^_]+$", "", colnames(bulk))
       bulk_meta$condition <- sample_cond$condition[
         match(bulk_meta$sample, sample_cond$sample)
       ]
       bulk_meta$condition <- factor(bulk_meta$condition, levels = cond_levels)
+      n_before_drop <- nrow(bulk_meta)
+      all_bulk_rows <- rownames(bulk_meta)
       bulk_meta <- bulk_meta[!is.na(bulk_meta$condition), , drop = FALSE]
+      if (nrow(bulk_meta) < n_before_drop) {
+        dropped_samples <- setdiff(all_bulk_rows, rownames(bulk_meta))
+        log_msg(
+          "WARNING: dropped ", n_before_drop - nrow(bulk_meta),
+          " pseudobulk samples whose name did not match the sample metadata: ",
+          paste(head(dropped_samples, 20), collapse = ", ")
+        )
+        write(
+          paste0(
+            "pseudobulk_sample_match: dropped ",
+            n_before_drop - nrow(bulk_meta), " of ", n_before_drop,
+            " pseudobulk samples; unmatched columns: ",
+            paste(head(dropped_samples, 20), collapse = ", ")
+          ),
+          file = file.path(data_dir, "pseudobulk_sample_match_warning.txt"),
+          append = TRUE
+        )
+      }
       bulk <- bulk[, rownames(bulk_meta), drop = FALSE]
       if (sum(bulk) == 0 || nrow(bulk_meta) < 4) {
         use_pseudobulk <- FALSE
@@ -3170,7 +3457,10 @@ if (stage_allowed("06")) run_stage("06_differential_expression", {
       size = 3
     ) +
     labs(
-      x = "Average log2 fold change (HCC vs iCCA)",
+      x = paste0(
+        "Average log2 fold change (",
+        cond_levels[1], " vs ", cond_levels[2], ")"
+      ),
       y = "-log10 adjusted p value",
       title = paste0(
         "Differential expression volcano plot (",
@@ -3960,6 +4250,7 @@ if (stage_allowed("08")) run_stage("08_publication_analyses", {
     if (length(sig_features) > 0) {
       tryCatch(
         {
+      set.seed(42)
       seurat <- AddModuleScore(
         seurat,
         features = sig_features,
@@ -4083,18 +4374,34 @@ if (stage_allowed("08")) run_stage("08_publication_analyses", {
       org.Hs.eg.db
     }
     if (!is.null(org_db_cnv)) {
+      # Ensembl-ID datasets (e.g. "ENSG00000198888") cannot be mapped with
+      # keytype "SYMBOL"; fall back to "ENSEMBL" and use a stable key column.
+      cnv_keytype <- if (
+        any(grepl("^(ENSG|ENSMUSG)", rownames(seurat)))
+      ) {
+        "ENSEMBL"
+      } else {
+        "SYMBOL"
+      }
+      log_msg("CNV annotation keytype: ", cnv_keytype)
       mapped <- tryCatch(
         AnnotationDbi::select(
           org_db_cnv,
           keys = rownames(seurat),
           columns = c("CHR", "CHRLOC"),
-          keytype = "SYMBOL"
+          keytype = cnv_keytype
         ),
-        error = function(e) NULL
+        error = function(e) {
+          log_msg("CNV annotation lookup failed: ", conditionMessage(e))
+          NULL
+        }
       )
-      if (!is.null(mapped) && nrow(mapped) > 1000) {
+      if (!is.null(mapped) && cnv_keytype %in% colnames(mapped)) {
+        colnames(mapped)[colnames(mapped) == cnv_keytype] <- "gene_key"
+      }
+      if (!is.null(mapped) && nrow(mapped) > 1000 && "gene_key" %in% colnames(mapped)) {
         mapped <- mapped[
-          !is.na(mapped$SYMBOL) & !duplicated(mapped$SYMBOL),
+          !is.na(mapped$gene_key) & !duplicated(mapped$gene_key),
           , drop = FALSE
         ]
         mapped <- mapped[
@@ -4111,9 +4418,9 @@ if (stage_allowed("08")) run_stage("08_publication_analyses", {
           mapped <- mapped[!is.na(mapped$CHRLOC), , drop = FALSE]
           mapped <- mapped[order(mapped$chr_order, mapped$CHRLOC), , drop = FALSE]
         } else {
-          mapped <- mapped[order(mapped$chr_order, mapped$SYMBOL), , drop = FALSE]
+          mapped <- mapped[order(mapped$chr_order, mapped$gene_key), , drop = FALSE]
         }
-        cnv_genes <- intersect(mapped$SYMBOL, rownames(seurat))
+        cnv_genes <- intersect(mapped$gene_key, rownames(seurat))
         if (length(cnv_genes) >= 200) {
           set.seed(42)
           cell_idx <- unlist(lapply(unique(seurat$condition), function(cond) {
@@ -4146,7 +4453,7 @@ if (stage_allowed("08")) run_stage("08_publication_analyses", {
             mid <- floor((s + min(s + 99, length(cnv_genes))) / 2)
             paste0(
               "chr",
-              mapped$CHR[match(cnv_genes[mid], mapped$SYMBOL)]
+              mapped$CHR[match(cnv_genes[mid], mapped$gene_key)]
             )
           }, character(1))
           colnames(win_scores) <- paste0(

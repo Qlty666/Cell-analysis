@@ -6,9 +6,11 @@ import sys
 import tempfile
 from pathlib import Path
 
-SRC = Path(__file__).resolve().parent.parent / "src"
+ROOT = Path(__file__).resolve().parent.parent
+SRC = ROOT / "src"
 if str(SRC) not in sys.path:
     sys.path.insert(0, str(SRC))
+CONFIG_PATH = ROOT / "config" / "docking_config.json"
 
 from docking.analysis import analyze_results  # noqa: E402
 from docking.config import load_config, save_config  # noqa: E402
@@ -17,6 +19,9 @@ from docking.utils import setup_logging  # noqa: E402
 
 
 def main() -> int:
+    if not CONFIG_PATH.is_file():
+        print(f"missing docking config: {CONFIG_PATH}", file=sys.stderr)
+        return 1
     log = setup_logging(verbose=True)
     logging.getLogger("matplotlib").setLevel(logging.WARNING)
     logging.getLogger("PIL").setLevel(logging.WARNING)
@@ -45,7 +50,7 @@ def main() -> int:
         fake_vina.write_text(_FAKE_VINA, encoding="utf-8")
 
         cfg = load_config(
-            Path(__file__).resolve().parent / "config" / "docking_config.json",
+            CONFIG_PATH,
             {
                 "workdir": str(workdir),
                 "receptor": "data/receptors/receptor.pdbqt",
@@ -59,6 +64,12 @@ def main() -> int:
 
         run_docking(cfg, log)
         summary = analyze_results(cfg, log)
+        if not summary.get("total_docked"):
+            print(
+                "Validation FAILED: the docking summary contains no results.",
+                file=sys.stderr,
+            )
+            return 1
         log.info("validation passed: %s", summary)
         print(f"Validation passed. Output: {cfg.output_dir}")
         return 0

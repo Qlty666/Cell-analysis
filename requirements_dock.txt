@@ -1,11 +1,14 @@
-numpy
-pandas
-matplotlib
-pyyaml
-openpyxl
-py4cytoscape>=1.13.0
-rdkit
-meeko
-gemmi
-openbabel-wheel
-versioneer
+# Docking / virtual-screening Python dependencies.
+# Pinned for reproducibility; versions match the validated development
+# environment (Python 3.11).
+numpy==2.4.4
+pandas==2.3.3
+matplotlib==3.10.9
+pyyaml==6.0.3
+openpyxl==3.1.5
+py4cytoscape==1.13.0
+rdkit==2026.3.5
+meeko==0.7.1
+gemmi==0.7.5
+openbabel-wheel==3.1.1.23
+versioneer==0.29

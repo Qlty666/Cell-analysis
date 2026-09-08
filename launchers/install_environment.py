@@ -11,6 +11,7 @@ Examples:
 from __future__ import annotations
 
 import argparse
+import hashlib
 import importlib.util
 import os
 import re
@@ -24,6 +25,24 @@ if str(ROOT / "src") not in sys.path:
     sys.path.insert(0, str(ROOT / "src"))
 
 from common.env import find_rscript  # noqa: E402
+
+# Never let a child installer hang forever.
+SUBPROCESS_TIMEOUT_SECONDS = 3600
+DOWNLOAD_TIMEOUT_SECONDS = 300
+
+# Pinned Windows R release (current stable at the time of writing). The CRAN
+# md5 file is fetched at install time; R_WINDOWS_MD5 is the published value
+# used when that fetch is unavailable.
+R_VERSION = "4.6.1"
+R_WINDOWS_BASE_URL = "https://cran.r-project.org/bin/windows/base/"
+R_WINDOWS_INSTALLER = f"R-{R_VERSION}-win.exe"
+R_WINDOWS_URL = R_WINDOWS_BASE_URL + R_WINDOWS_INSTALLER
+R_WINDOWS_MD5_URL = R_WINDOWS_BASE_URL + f"md5sum.R-{R_VERSION}.txt"
+R_WINDOWS_MD5 = "7907f3a20ec8ec88cd0da279024b8e27"
+R_MANUAL_HINT = (
+    f"Install R {R_VERSION} manually from {R_WINDOWS_BASE_URL} "
+    "(or add an existing Rscript to PATH) and rerun the installer."
+)
 
 
 MODULES = {
@@ -160,11 +179,26 @@ def _cmd_text(cmd: list[str]) -> str:
     return " ".join(str(part) for part in cmd)
 
 
-def _run(cmd: list[str], dry_run: bool, env: dict[str, str] | None = None) -> int:
-    print(f"> {_cmd_text(cmd)}")
+def _run(
+    cmd: list[str],
+    dry_run: bool,
+    env: dict[str, str] | None = None,
+    timeout: int = SUBPROCESS_TIMEOUT_SECONDS,
+) -> int:
+    print(f"> {_cmd_text(cmd)} (timeout {timeout}s)")
     if dry_run:
         return 0
-    return subprocess.call(cmd, cwd=ROOT, env=env)
+    try:
+        return subprocess.run(cmd, cwd=ROOT, env=env, timeout=timeout).returncode
+    except subprocess.TimeoutExpired:
+        print(
+            f"command timed out after {timeout}s: {_cmd_text(cmd)}",
+            file=sys.stderr,
+        )
+        return 124
+    except OSError as exc:
+        print(f"could not run {_cmd_text(cmd)}: {exc}", file=sys.stderr)
+        return 1
 
 
 def _target_env(target: str) -> dict[str, str]:
@@ -204,7 +238,70 @@ def _run_project_script(
     )
 
 
+def sha256_file(path: Path) -> str:
+    """Return the hex sha256 digest of ``path``."""
+    digest = hashlib.sha256()
+    with Path(path).open("rb") as handle:
+        for chunk in iter(lambda: handle.read(1024 * 1024), b""):
+            digest.update(chunk)
+    return digest.hexdigest()
+
+
+def md5_file(path: Path) -> str:
+    """Return the hex md5 digest of ``path``."""
+    digest = hashlib.md5()
+    with Path(path).open("rb") as handle:
+        for chunk in iter(lambda: handle.read(1024 * 1024), b""):
+            digest.update(chunk)
+    return digest.hexdigest()
+
+
+def verify_checksum(path: Path, expected: str, algorithm: str = "sha256") -> bool:
+    """Return True when ``path`` matches ``expected`` for ``algorithm``.
+
+    A missing file, an empty/unsupported algorithm or a zero-length expected
+    digest is always a failure: callers must fail closed on bad checksums.
+    """
+    path = Path(path)
+    expected = str(expected or "").strip().lower()
+    if not expected or not path.is_file():
+        return False
+    if algorithm == "sha256":
+        actual = sha256_file(path)
+    elif algorithm == "md5":
+        actual = md5_file(path)
+    else:
+        raise ValueError(f"unsupported checksum algorithm: {algorithm}")
+    return actual == expected
+
+
+def _published_md5(url: str, filename: str) -> str | None:
+    """Fetch a CRAN-style md5sum file and return the digest for filename."""
+    request = urllib.request.Request(
+        url,
+        headers={"User-Agent": "Mozilla/5.0 liver-cancer-pipeline-env"},
+    )
+    try:
+        with urllib.request.urlopen(
+            request, timeout=DOWNLOAD_TIMEOUT_SECONDS
+        ) as resp:
+            text = resp.read().decode("utf-8", "replace")
+    except Exception as exc:
+        print(f"could not download {url}: {exc}", file=sys.stderr)
+        return None
+    for line in text.splitlines():
+        parts = line.split()
+        if len(parts) < 2:
+            continue
+        digest = parts[0].strip().lower()
+        name = parts[-1].lstrip("*").strip()
+        if name == filename and re.fullmatch(r"[0-9a-f]{32}", digest):
+            return digest
+    return None
+
+
 def _download(url: str, dest: Path) -> bool:
+    dest = Path(dest)
     dest.parent.mkdir(parents=True, exist_ok=True)
     print(f"Downloading {url}")
     request = urllib.request.Request(
@@ -212,9 +309,9 @@ def _download(url: str, dest: Path) -> bool:
         headers={"User-Agent": "Mozilla/5.0 liver-cancer-pipeline-env"},
     )
     try:
-        with urllib.request.urlopen(request, timeout=120) as resp, dest.open(
-            "wb"
-        ) as handle:
+        with urllib.request.urlopen(
+            request, timeout=DOWNLOAD_TIMEOUT_SECONDS
+        ) as resp, dest.open("wb") as handle:
             while True:
                 chunk = resp.read(1024 * 256)
                 if not chunk:
@@ -222,8 +319,15 @@ def _download(url: str, dest: Path) -> bool:
                 handle.write(chunk)
     except Exception as exc:
         print(f"download failed: {exc}", file=sys.stderr)
+        if dest.exists():
+            dest.unlink()
         return False
-    return dest.is_file()
+    if not dest.is_file() or dest.stat().st_size == 0:
+        print(f"download produced no data: {dest}", file=sys.stderr)
+        if dest.exists():
+            dest.unlink()
+        return False
+    return True
 
 
 def _bootstrap_r(auto_install: bool, dry_run: bool) -> str | None:
@@ -235,46 +339,63 @@ def _bootstrap_r(auto_install: bool, dry_run: bool) -> str | None:
         return "Rscript.exe"
     if not auto_install:
         print(
-            "Rscript not found. Install R 4.5+ from https://cran.r-project.org/ "
-            "or rerun with R in PATH.",
+            f"Rscript not found. {R_MANUAL_HINT}",
             file=sys.stderr,
         )
         return None
     if os.name != "nt":
         print(
             "Automatic R installation is only implemented on Windows. "
-            "Install R 4.5+ manually.",
+            f"{R_MANUAL_HINT}",
             file=sys.stderr,
         )
         return None
 
-    base_url = "https://cran.r-project.org/bin/windows/base/"
-    try:
-        request = urllib.request.Request(
-            base_url,
-            headers={"User-Agent": "Mozilla/5.0 liver-cancer-pipeline-env"},
-        )
-        with urllib.request.urlopen(request, timeout=60) as resp:
-            html = resp.read().decode("utf-8", "replace")
-    except Exception as exc:
-        print(f"could not query CRAN R releases: {exc}", file=sys.stderr)
-        return None
-    match = re.search(r'href="(R-([0-9.]+)-win\.exe)"', html)
-    if not match:
-        print("could not find the latest R Windows installer on CRAN", file=sys.stderr)
-        return None
-    filename = match.group(1)
-    version = match.group(2)
-    installer_url = base_url + filename
+    installer_url = R_WINDOWS_URL
+    filename = R_WINDOWS_INSTALLER
     installers_dir = ROOT / "data_cache" / "installers"
     installer_path = installers_dir / filename
+    expected_md5 = _published_md5(R_WINDOWS_MD5_URL, filename)
+    if expected_md5 is None:
+        expected_md5 = R_WINDOWS_MD5
+        print(
+            f"could not read the published CRAN md5sum for {filename}; "
+            f"falling back to the pinned digest {R_WINDOWS_MD5}",
+            file=sys.stderr,
+        )
+    if installer_path.is_file() and not verify_checksum(
+        installer_path,
+        expected_md5,
+        "md5",
+    ):
+        print(
+            f"discarding cached installer with a bad checksum: "
+            f"{installer_path}",
+            file=sys.stderr,
+        )
+        installer_path.unlink()
     if not installer_path.is_file():
         if not _download(installer_url, installer_path):
+            print(
+                f"could not download the R installer. {R_MANUAL_HINT}",
+                file=sys.stderr,
+            )
             return None
+    if not verify_checksum(installer_path, expected_md5, "md5"):
+        actual = md5_file(installer_path)
+        installer_path.unlink()
+        print(
+            f"checksum verification failed for the R installer: "
+            f"expected md5 {expected_md5}, got {actual}. "
+            f"Deleted the bad download. {R_MANUAL_HINT}",
+            file=sys.stderr,
+        )
+        return None
+    print(f"Verified R installer md5 {expected_md5}")
 
     local = Path(os.environ.get("LOCALAPPDATA", Path.home() / "AppData" / "Local"))
-    install_dir = local / "Programs" / "R" / f"R-{version}"
-    print(f"Installing R {version} to {install_dir}")
+    install_dir = local / "Programs" / "R" / f"R-{R_VERSION}"
+    print(f"Installing R {R_VERSION} to {install_dir}")
     code = _run(
         [
             str(installer_path),

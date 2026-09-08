@@ -36,6 +36,9 @@ EXCLUDE_DIRS = {
     "venv",
     ".venv",
 }
+# Never ship credentials or private keys, even in the non-git fallback path.
+SECRET_SUFFIXES = {".pem", ".p12", ".key", ".pfx"}
+SECRET_NAMES = {".env"}
 
 
 def project_version() -> str:
@@ -106,13 +109,15 @@ def source_files() -> list[Path]:
 
 def _excluded(path: Path) -> bool:
     relative = path.relative_to(ROOT).as_posix()
-    parts = set(relative.split("/"))
-    if parts & {
+    parts = relative.split("/")
+    if set(parts) & {
         "__pycache__",
         ".pytest_cache",
         ".mypy_cache",
         ".ruff_cache",
     }:
+        return True
+    if any(part.endswith(".egg-info") for part in parts):
         return True
     if any(
         relative == item or relative.startswith(item + "/")
@@ -121,7 +126,12 @@ def _excluded(path: Path) -> bool:
         return True
     if path.suffix.lower() in {".pyc", ".pyo", ".log"}:
         return True
-    if relative.endswith((".egg-info/",)):
+    if path.suffix.lower() in SECRET_SUFFIXES:
+        return True
+    name = path.name.lower()
+    if name in SECRET_NAMES or any(
+        name.startswith(secret + ".") for secret in SECRET_NAMES
+    ):
         return True
     return False
 
@@ -145,12 +155,21 @@ More details: NEW_COMPUTER_SETUP.md and README.md
 """
 
 
-def build_package(output: Path, dry_run: bool = False) -> Path:
+def build_package(
+    output: Path,
+    dry_run: bool = False,
+    force: bool = False,
+) -> Path:
     files = source_files()
     if not files:
         raise SystemExit("no source files found to package")
     output.parent.mkdir(parents=True, exist_ok=True)
     archive_path = output.resolve()
+    if archive_path.exists() and not force and not dry_run:
+        raise SystemExit(
+            f"output archive already exists: {archive_path}\n"
+            "Pass --force to overwrite it."
+        )
     print(f"Packaging {len(files)} tracked/source files -> {archive_path}")
     if dry_run:
         return archive_path
@@ -182,8 +201,17 @@ def main(argv: list[str] | None = None) -> int:
         action="store_true",
         help="print the planned package without writing it",
     )
+    parser.add_argument(
+        "--force",
+        action="store_true",
+        help="overwrite the output zip when it already exists",
+    )
     args = parser.parse_args(argv)
-    build_package(Path(args.output), dry_run=args.dry_run)
+    build_package(
+        Path(args.output),
+        dry_run=args.dry_run,
+        force=args.force,
+    )
     return 0
 
 

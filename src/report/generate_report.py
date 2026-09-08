@@ -2,14 +2,23 @@
 """Generate a self-contained HTML report from pipeline outputs."""
 
 import csv
-import html
 import json
+import logging
+import math
 import os
 import re
 import statistics
 import sys
 from collections import Counter
 from pathlib import Path
+
+_SRC_ROOT = Path(__file__).resolve().parent.parent
+if str(_SRC_ROOT) not in sys.path:
+    sys.path.insert(0, str(_SRC_ROOT))
+
+from common.html_utils import esc  # noqa: E402
+
+log = logging.getLogger("generate_report")
 
 ROOT = Path(__file__).resolve().parent.parent.parent
 OUTPUT_ROOT = Path(
@@ -392,10 +401,6 @@ FIGURE_DATA_MAP = {
 }
 
 
-def esc(value) -> str:
-    return html.escape(str(value))
-
-
 def read_table(path: Path) -> list[dict]:
     if not path.exists():
         return []
@@ -515,6 +520,15 @@ def figure_title(name: str) -> str:
     return stem.title()
 
 
+def _finite_float(value) -> float | None:
+    """Parse a numeric cell, rejecting blanks, 'nan'/'NA' and infinities."""
+    try:
+        number = float(value)
+    except (TypeError, ValueError):
+        return None
+    return number if math.isfinite(number) else None
+
+
 def analyze_delimited(path: Path, delimiter: str = ",") -> dict:
     findings = []
     preview = []
@@ -523,6 +537,7 @@ def analyze_delimited(path: Path, delimiter: str = ",") -> dict:
     numeric_values = {}
     counts = Counter()
     sample_values = {}
+    truncated = False
 
     with path.open("r", encoding="utf-8", errors="replace", newline="") as fh:
         reader = csv.DictReader(fh, delimiter=delimiter)
@@ -568,21 +583,24 @@ def analyze_delimited(path: Path, delimiter: str = ",") -> dict:
                 preview.append(
                     {c: row.get(c, "") for c in fieldnames[:MAX_PREVIEW_COLS]}
                 )
-            for c in numeric_fields:
-                try:
-                    numeric_values[c].append(float(row.get(c)))
-                except (TypeError, ValueError):
-                    pass
-            if p_col:
-                try:
-                    p_values.append(float(row.get(p_col)))
-                except (TypeError, ValueError):
-                    pass
-            if fc_col:
-                try:
-                    fc_values.append(float(row.get(fc_col)))
-                except (TypeError, ValueError):
-                    pass
+            # Bound memory on very large tables: the descriptive statistics are
+            # computed on the first MAX_ANALYSIS_SAMPLE_ROWS rows only. Counts
+            # and unique-value sets below still cover the whole file.
+            if total_rows > MAX_ANALYSIS_SAMPLE_ROWS:
+                truncated = True
+            else:
+                for c in numeric_fields:
+                    number = _finite_float(row.get(c))
+                    if number is not None:
+                        numeric_values[c].append(number)
+                if p_col:
+                    number = _finite_float(row.get(p_col))
+                    if number is not None:
+                        p_values.append(number)
+                if fc_col:
+                    number = _finite_float(row.get(fc_col))
+                    if number is not None:
+                        fc_values.append(number)
             if sig_col:
                 counts[("significant", str(row.get(sig_col)).strip().lower())] += 1
             if direction_col:
@@ -616,6 +634,17 @@ def analyze_delimited(path: Path, delimiter: str = ",") -> dict:
         if len(fieldnames) > 10:
             preview_cols += " 等"
         findings.append(f"主要字段：{preview_cols}。")
+        if truncated:
+            findings.append(
+                f"文件行数超过 {MAX_ANALYSIS_SAMPLE_ROWS} 行，"
+                f"数值统计仅使用前 {MAX_ANALYSIS_SAMPLE_ROWS} 行。"
+            )
+            log.warning(
+                "%s has %s rows; descriptive statistics limited to the first %s",
+                path,
+                total_rows,
+                MAX_ANALYSIS_SAMPLE_ROWS,
+            )
 
     for c in numeric_fields[:MAX_STAT_COLS]:
         values = numeric_values[c]
@@ -749,8 +778,8 @@ def analyze_figure(path: Path, rel: str) -> dict:
         from PIL import Image
         with Image.open(path) as img:
             findings.append(f"图像尺寸：{img.width} × {img.height} 像素。")
-    except Exception:
-        pass
+    except Exception as exc:  # noqa: BLE001
+        log.warning("could not read image dimensions for %s: %s", path, exc)
     lower = name.lower()
     if "volcano" in lower:
         findings.append("重点观察显著上调和下调基因的数量、分布对称性和离群点。")
@@ -883,6 +912,18 @@ def sample_level_mode(summary: dict) -> bool:
     return str(summary.get("dataset_mode", "single_cell")) != "single_cell"
 
 
+def _deg_up_down(summary: dict) -> tuple[int, int]:
+    """Return (significant up, significant down) DEG counts as integers."""
+
+    def _as_int(value) -> int:
+        try:
+            return int(float(value))
+        except (TypeError, ValueError):
+            return 0
+
+    return _as_int(summary.get("deg_up", 0)), _as_int(summary.get("deg_down", 0))
+
+
 def joint_conclusions(
     fig_name: str,
     companions: list[dict],
@@ -914,8 +955,9 @@ def joint_conclusions(
                 )
     if fig_name == "fig_08_volcano.png" and summary.get("deg_total") is not None:
         items.append(
-            f"差异表达汇总：共 {summary.get('deg_total')} 个，"
-            f"上调 {summary.get('deg_up', 0)} 个，下调 {summary.get('deg_down', 0)} 个。"
+            f"差异表达汇总：受检基因 {summary.get('deg_total')} 个，"
+            f"其中显著上调 {summary.get('deg_up', 0)} 个、"
+            f"下调 {summary.get('deg_down', 0)} 个。"
         )
     if fig_name in (
         "fig_08_volcano.png",
@@ -1165,8 +1207,8 @@ def render_overall_conclusion(
             )
     if summary.get("deg_total") is not None:
         items.append(
-            f"差异表达：共 {summary.get('deg_total')} 个，上调 "
-            f"{summary.get('deg_up', 0)} 个，下调 {summary.get('deg_down', 0)} 个。"
+            f"差异表达：受检基因 {summary.get('deg_total')} 个，其中显著上调 "
+            f"{summary.get('deg_up', 0)} 个、下调 {summary.get('deg_down', 0)} 个。"
         )
     if go_up:
         items.append(f"上调基因 GO 富集 {len(go_up)} 条。")
