@@ -33,6 +33,26 @@ REQUIRED_DRIVER_FUNCTIONS = (
     "normalize_ensembl_ids",
 )
 
+# Packages the driver loads before any stage block runs.
+REQUIRED_DRIVER_PACKAGES = (
+    "Seurat",
+    "Matrix",
+    "data.table",
+    "dplyr",
+    "ggplot2",
+    "patchwork",
+    "jsonlite",
+    "ggrepel",
+    "pheatmap",
+    "scDblFinder",
+    "SingleCellExperiment",
+    "BiocParallel",
+    "clusterProfiler",
+    "org.Hs.eg.db",
+    "enrichplot",
+    "DESeq2",
+)
+
 
 def _r_string(value: str) -> str:
     """Return an R string literal for *value* (paths are made POSIX first)."""
@@ -110,6 +130,30 @@ def _run_r_script(
     )
 
 
+_R_DRIVER_DEPS_OK: bool | None = None
+
+
+def _driver_deps_available() -> bool:
+    """Whether the optional R packages needed to source the driver exist."""
+    global _R_DRIVER_DEPS_OK
+    if _R_DRIVER_DEPS_OK is not None:
+        return _R_DRIVER_DEPS_OK
+    names = ", ".join(_r_string(name) for name in REQUIRED_DRIVER_PACKAGES)
+    code = (
+        f"packages <- c({names})\n"
+        "missing <- packages[!vapply(packages, requireNamespace, "
+        "logical(1), quietly = TRUE)]\n"
+        "if (length(missing) > 0) quit(status = 2)\n"
+    )
+    try:
+        proc = _run_r(code, timeout=120)
+    except (OSError, subprocess.TimeoutExpired):
+        _R_DRIVER_DEPS_OK = False
+        return False
+    _R_DRIVER_DEPS_OK = proc.returncode == 0
+    return _R_DRIVER_DEPS_OK
+
+
 @unittest.skipUnless(RSCRIPT, "Rscript not installed")
 class TestRPipelineSyntax(unittest.TestCase):
     def test_every_r_script_parses(self):
@@ -131,6 +175,8 @@ class TestRPipelineSyntax(unittest.TestCase):
                 )
 
     def test_driver_sources_and_defines_helpers(self):
+        if not _driver_deps_available():
+            self.skipTest("optional R analysis packages not installed")
         checks = ", ".join(
             f'"{name}" = exists("{name}", mode = "function")'
             for name in REQUIRED_DRIVER_FUNCTIONS
@@ -201,6 +247,8 @@ class TestRPipelineSyntax(unittest.TestCase):
         modules = _module_scripts()
         if not modules:
             self.skipTest("no src/analysis/R module directory yet")
+        if not _driver_deps_available():
+            self.skipTest("optional R analysis packages not installed")
         with tempfile.TemporaryDirectory() as tmp:
             logs = Path(tmp) / "logs"
             logs.mkdir()
