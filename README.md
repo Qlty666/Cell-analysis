@@ -206,18 +206,18 @@ liverbio package
 
 ### 2.9 与本地 Codex 分析工作区对接
 
-本项目的运行结果可一键导出到本地 Codex 分析工作区（例如 `D:\AAA analysis`），
+本项目的运行结果可一键导出到本地 Codex 分析工作区（例如 `<ANALYSIS_ROOT>`），
 写入该工作区约定的 `data/imported_results/<数据集编号>/`，并调用其
 `scripts/identify_imported_results.ps1` 刷新 `_inventory.json`，之后可直接进入
 `analysis/<任务名>` 做下游分析。导出命令：
 
 ```text
 liverbio analysis-export ^
-  --source D:\AAA Liver cancer\y2\GSE125449 ^
-  --analysis-root D:\AAA analysis
+  --source <OUTPUT_DIR>\GSE125449 ^
+  --analysis-root <ANALYSIS_ROOT>
 ```
 
-如果 `D:\AAA analysis\config\local_projects.json` 已登记该数据集的输出根目录，
+如果 `<ANALYSIS_ROOT>\config\local_projects.json` 已登记该数据集的输出根目录，
 可直接用数据集编号：
 
 ```text
@@ -226,14 +226,15 @@ launchers\export_to_analysis.bat GSE125449
 ```
 
 若本机固定使用同一分析工作区，可在 `config/analysis_workspace.json` 中写入
-`analysis_root`；该文件不入库，也可改用 `LIVER_ANALYSIS_ROOT` 环境变量。
+`analysis_root`；该文件不入库（参考 `config/analysis_workspace.example.json`），
+也可改用 `LIVER_ANALYSIS_ROOT` 环境变量。
 命令只做增量同步，不删除分析工作区里已经生成的 `analysis_report.md` 等说明文件。
 
 第一次使用时可直接记住分析工作区，之后只填数据集编号：
 
 ```text
 liverbio analysis-export GSE125449 ^
-  --analysis-root D:\AAA analysis ^
+  --analysis-root <ANALYSIS_ROOT> ^
   --remember-analysis-root
 liverbio analysis-export GSE125449
 ```

@@ -2,10 +2,13 @@
 """Export the pipeline report as DOCX and optionally PDF."""
 
 import json
+import logging
 import sys
 import textwrap
 import zipfile
 from pathlib import Path
+
+log = logging.getLogger("report.export_report")
 
 
 def escape_xml(text: str) -> str:
@@ -65,11 +68,13 @@ def write_docx(path: Path, title: str, lines: list[str], rows: list[list[str]]) 
         zf.writestr("word/document.xml", document)
 
 
-def write_pdf(path: Path, title: str, lines: list[str]) -> None:
+def write_pdf(path: Path, title: str, lines: list[str]) -> bool:
+    """Write a PDF report; return False when fpdf2 is unavailable."""
     try:
         from fpdf import FPDF
-    except Exception:
-        return
+    except Exception as exc:  # noqa: BLE001 - optional dependency
+        log.warning("fpdf2 is not available; PDF export skipped: %s", exc)
+        return False
     pdf = FPDF()
     pdf.add_page()
     pdf.set_auto_page_break(auto=True, margin=15)
@@ -82,6 +87,7 @@ def write_pdf(path: Path, title: str, lines: list[str]) -> None:
         for wrapped in textwrap.wrap(line, width=90) or [line]:
             pdf.multi_cell(width, 6, wrapped)
     pdf.output(str(path))
+    return path.exists()
 
 
 def main() -> int:
@@ -143,11 +149,13 @@ def main() -> int:
         else "Sample-Level Expression Analysis Report"
     )
     write_docx(root / "results" / "result_report.docx", report_title, lines, rows)
-    write_pdf(root / "results" / "result_report.pdf", report_title, lines)
-    (root / "results" / "export_status.txt").write_text(
-        "DOCX/PDF export completed",
-        encoding="utf-8",
-    )
+    pdf_written = write_pdf(root / "results" / "result_report.pdf", report_title, lines)
+    status = "DOCX export completed"
+    if pdf_written:
+        status += "; PDF export completed"
+    else:
+        status += "; PDF export skipped (fpdf2 not installed)"
+    (root / "results" / "export_status.txt").write_text(status, encoding="utf-8")
     return 0
 
 

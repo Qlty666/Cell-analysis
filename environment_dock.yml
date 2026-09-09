@@ -10,5 +10,12 @@ dependencies:
   - openpyxl
   - rdkit
   - meeko
+  - gemmi
   - openbabel
   - autodock-vina
+  - pip
+  - pip:
+      # pip-only extras, mirrored from requirements_dock.txt
+      - py4cytoscape>=1.13.0
+      - versioneer
+      - networkx

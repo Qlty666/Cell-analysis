@@ -10,6 +10,9 @@ openpyxl==3.1.5
 h5py==3.16.0
 scipy==1.17.1
 scikit-learn==1.9.0
+joblib==1.5.3
+pillow==12.2.0
+psutil==7.2.2
 umap-learn==0.5.12
 scTenifoldpy==0.4.0
 # drugreflector is optional; it needs model checkpoints from Zenodo
