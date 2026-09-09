@@ -331,7 +331,7 @@ if (stage_allowed("02")) run_stage("02_qc_filter", {
   )
   p_raw <- VlnPlot(
     seurat_raw,
-    features = qc_metric_cols,
+    features = qc_plot_features(seurat_raw, qc_metric_cols),
     group.by = "condition",
     ncol = 3,
     pt.size = 0
@@ -568,18 +568,26 @@ if (stage_allowed("02")) run_stage("02_qc_filter", {
   )
   log_msg(
     "hemoglobin-filtered cells: ",
-    sum(qc_data$percent.hb > hi_hb),
+    sum(qc_data$percent.hb > hi_hb, na.rm = TRUE),
     "; ribosomal-filtered cells: ",
-    sum(qc_data$percent.ribo > hi_ribo)
+    sum(qc_data$percent.ribo > hi_ribo, na.rm = TRUE)
   )
 
-  qc_data$qc_kept <- qc_data$nFeature_RNA >= lo_feature &
-    qc_data$nFeature_RNA <= hi_feature &
-    qc_data$nCount_RNA >= lo_count &
-    qc_data$nCount_RNA <= hi_count &
-    qc_data$percent.mt <= hi_mt &
-    qc_data$percent.ribo <= hi_ribo &
-    qc_data$percent.hb <= hi_hb
+  # Undefined (all-NA) metrics always pass, matching the subset() above so the
+  # kept/removed status never becomes NA.
+  qc_data$qc_kept <- (
+    is.na(qc_data$nFeature_RNA) |
+      (qc_data$nFeature_RNA >= lo_feature & qc_data$nFeature_RNA <= hi_feature)
+  ) & (
+    is.na(qc_data$nCount_RNA) |
+      (qc_data$nCount_RNA >= lo_count & qc_data$nCount_RNA <= hi_count)
+  ) & (
+    is.na(qc_data$percent.mt) | qc_data$percent.mt <= hi_mt
+  ) & (
+    is.na(qc_data$percent.ribo) | qc_data$percent.ribo <= hi_ribo
+  ) & (
+    is.na(qc_data$percent.hb) | qc_data$percent.hb <= hi_hb
+  )
   qc_data$qc_status <- ifelse(
     qc_data$qc_kept,
     "Kept after QC",
@@ -693,7 +701,7 @@ if (stage_allowed("02")) run_stage("02_qc_filter", {
 
   p_qc <- VlnPlot(
     seurat_qc,
-    features = qc_metric_cols,
+    features = qc_plot_features(seurat_qc, qc_metric_cols),
     group.by = "condition",
     ncol = 3,
     pt.size = 0

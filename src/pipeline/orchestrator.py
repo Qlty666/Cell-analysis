@@ -362,7 +362,7 @@ def generate_report() -> None:
         env=env,
         check=True,
     )
-    subprocess.run(
+    export = subprocess.run(
         [
             sys.executable,
             str(ROOT / "src" / "report" / "export_report.py"),
@@ -372,6 +372,8 @@ def generate_report() -> None:
         env=env,
         check=False,
     )
+    if export.returncode != 0:
+        log(f"warning: DOCX/PDF export failed (exit {export.returncode})")
 
 
 def run_cellchat(species: str) -> None:
@@ -392,7 +394,7 @@ def run_ml_analysis(ml_model: str = "xgb") -> None:
     log("running optional ML analysis")
     env = os.environ.copy()
     env["LIVER_ML_MODEL"] = ml_model
-    subprocess.run(
+    result = subprocess.run(
         [
             sys.executable,
             str(ROOT / "src" / "analysis" / "ml_analysis.py"),
@@ -402,6 +404,8 @@ def run_ml_analysis(ml_model: str = "xgb") -> None:
         env=env,
         check=False,
     )
+    if result.returncode != 0:
+        log(f"warning: optional ML analysis failed (exit {result.returncode})")
 
 
 def run_pipeline(

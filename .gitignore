@@ -78,6 +78,10 @@ portable/
 # Validation artifacts
 *.log
 *.tmp
+validation_output/
+
+# Local analysis workspace settings written by `liverbio analysis-export`
+config/analysis_workspace.json
 
 # Scratch / helper files that must never be committed
 scripts/_test_h5ad_reader.R

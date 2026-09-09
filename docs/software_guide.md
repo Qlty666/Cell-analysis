@@ -56,15 +56,15 @@ python scripts\search_datasets.py --help
 
 ### 导出到本地分析工作区
 
-第一次使用 `--remember-analysis-root` 记住 `D:\AAA analysis`，之后只需要数据集编号：
+第一次使用 `--remember-analysis-root` 记住 `<ANALYSIS_ROOT>`，之后只需要数据集编号：
 
 ```text
-liverbio analysis-export GSE235863 --analysis-root D:\AAA analysis --remember-analysis-root
+liverbio analysis-export GSE235863 --analysis-root <ANALYSIS_ROOT> --remember-analysis-root
 liverbio analysis-export GSE235863
 launchers\export_to_analysis.bat GSE235863
 ```
 
-命令会从 `D:\AAA analysis\config\local_projects.json` 已登记的 `output_roots`
+命令会从 `<ANALYSIS_ROOT>\config\local_projects.json` 已登记的 `output_roots`
 自动定位运行目录，把结果增量写入 `data/imported_results`，并刷新 `_inventory.json`。
 
 ## 常用工作流

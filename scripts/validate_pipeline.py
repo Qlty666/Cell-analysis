@@ -1,6 +1,7 @@
 #!/usr/bin/env python3
 """Run 10 synthetic single-cell datasets through the full pipeline."""
 
+import argparse
 import json
 import shutil
 import subprocess
@@ -137,7 +138,23 @@ def verify_outputs(out: Path, accession: str) -> bool:
     return True
 
 
+def build_parser() -> argparse.ArgumentParser:
+    parser = argparse.ArgumentParser(
+        description=(
+            "Generate synthetic datasets under validation_output/ and run the "
+            "full expression pipeline over each of them."
+        ),
+    )
+    parser.add_argument(
+        "--keep-output",
+        action="store_true",
+        help="keep validation_output/ after a successful run (default: delete)",
+    )
+    return parser
+
+
 def main() -> int:
+    args = build_parser().parse_args()
     validation_root = ROOT / "validation_output"
     validation_root.mkdir(parents=True, exist_ok=True)
     success = False
@@ -205,7 +222,7 @@ def main() -> int:
         success = True
         return 0
     finally:
-        if success and validation_root.exists():
+        if success and validation_root.exists() and not args.keep_output:
             shutil.rmtree(validation_root)
             print("Validation output cleaned.")
 

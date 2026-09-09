@@ -286,6 +286,35 @@ class TestRPipelineSyntax(unittest.TestCase):
             actual = proc.stdout.replace("\\", "/").lower()
             self.assertIn(expected, actual)
 
+    def test_qc_plot_features_drops_all_na_metrics(self):
+        """Regression: VlnPlot aborts when a QC metric is all NA.
+
+        Datasets without MT/ribo/hemoglobin features produce NA metrics; the
+        QC violin plots must drop them instead of failing the whole stage.
+        """
+        qc_r = R_MODULES_DIR / "qc.R"
+        if not qc_r.is_file():
+            self.skipTest("src/analysis/R/qc.R not present")
+        code = (
+            "log_msg <- function(...) invisible(NULL)\n"
+            f"source({_r_string(str(qc_r))}, local = globalenv())\n"
+            "`[[.fakeobj` <- function(x, i) x$meta\n"
+            "fake <- structure(list(meta = data.frame("
+            "percent.mt = c(1, 2), percent.ribo = c(NA, NA))), "
+            "class = 'fakeobj')\n"
+            "keep <- qc_plot_features(fake, c('percent.mt', 'percent.ribo'))\n"
+            'cat("KEEP", paste(keep, collapse = ","), "\\n")\n'
+            "if (!identical(keep, 'percent.mt')) quit(status = 6)\n"
+        )
+        with tempfile.TemporaryDirectory() as tmp:
+            proc = _run_r_script(code, cwd=Path(tmp), timeout=120)
+        self.assertEqual(
+            proc.returncode,
+            0,
+            msg=f"qc_plot_features failed:\n{proc.stderr or proc.stdout}",
+        )
+        self.assertIn("KEEP percent.mt", proc.stdout)
+
 
 if __name__ == "__main__":
     unittest.main()
