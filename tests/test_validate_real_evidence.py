@@ -21,8 +21,14 @@ class TestSkillNames(unittest.TestCase):
 
     def test_all_skill_names_resolve(self):
         skills = Path.home() / ".codex" / "skills"
-        for name in validate_real_evidence.SKILL_NAMES.values():
-            self.assertTrue((skills / name / "scripts" / "rest_request.py").exists())
+        scripts = [
+            skills / name / "scripts" / "rest_request.py"
+            for name in validate_real_evidence.SKILL_NAMES.values()
+        ]
+        if not any(script.exists() for script in scripts):
+            self.skipTest("Codex skill scripts are not installed")
+        for script in scripts:
+            self.assertTrue(script.exists())
 
     def test_call_skill_returns_failure_when_script_missing(self):
         with patch.object(validate_real_evidence.Path, "exists", return_value=False):

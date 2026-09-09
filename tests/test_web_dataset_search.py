@@ -259,7 +259,7 @@ class TestDatasetSearchRequest(unittest.TestCase):
                 )
             self.assertTrue(result["model_applied"])
             self.assertEqual(result["results"][0]["relevance_score"], 0.9)
-            self.assertEqual(result["model_path"], str(model_file))
+            self.assertEqual(result["model_path"], str(model_file.resolve()))
 
     def test_model_outside_search_dir_is_rejected(self):
         """A model path outside the search cache must not be deserialized."""

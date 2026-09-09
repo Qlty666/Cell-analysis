@@ -4,6 +4,7 @@
 from __future__ import annotations
 
 import argparse
+import importlib
 import json
 import sys
 import tempfile
@@ -53,6 +54,17 @@ from pipeline.cell_feedback import (  # noqa: E402
 )
 from pipeline import orchestrator  # noqa: E402
 import pipeline.integration as integration_module  # noqa: E402
+
+
+def _optional_importable(name: str) -> bool:
+    try:
+        importlib.import_module(name)
+    except ImportError:
+        return False
+    return True
+
+
+RDKIT_AVAILABLE = _optional_importable("rdkit")
 
 
 def _write_deg(root: Path) -> None:
@@ -245,6 +257,7 @@ class TestExtractKeyGenes(unittest.TestCase):
             self.assertGreater(len(result), 0)
 
 
+@unittest.skipUnless(RDKIT_AVAILABLE, "rdkit not installed")
 class TestCocrystalLigandFallback(unittest.TestCase):
     def test_extract_hetatm_ligand(self):
         with tempfile.TemporaryDirectory() as tmp:

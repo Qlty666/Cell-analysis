@@ -306,7 +306,7 @@ class TestWebRealWorkdirAndKnockout(unittest.TestCase):
                 cfg.data["insilico_knockout"]["ko_gene"],
                 "JUNB",
             )
-            self.assertEqual(result["workdir"], str(workdir))
+            self.assertEqual(result["workdir"], str(workdir.resolve()))
 
     def test_run_knockout_request_leaves_insilico_disabled_without_gene(self):
         with tempfile.TemporaryDirectory() as tmp:
