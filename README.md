@@ -229,6 +229,10 @@ liverbio package
 
 ### 环境要求
 
+按功能板块查看“运行哪个入口、需要哪些软件、Python 包、R 包和安装脚本”的总览见
+[docs/environment_requirements.md](docs/environment_requirements.md)；虚拟筛选专项环境清单见
+[VIRTUAL_SCREENING_REQUIREMENTS.md](VIRTUAL_SCREENING_REQUIREMENTS.md)。
+
 - Python 3.10+（推荐 3.11）。
 - R 4.5+（表达分析和伪 bulk 导出需要）。
 - AutoDock Vina（虚拟筛选需要，可放在 `dock/tools/vina.exe` 或加入 PATH）。

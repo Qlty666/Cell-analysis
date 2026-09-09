@@ -113,6 +113,8 @@ python launchers\install_environment.py check full
 
 表达分析补全时，如果 Windows 上找不到 `Rscript`，脚本会自动下载 R 到当前用户目录并安装 R 包；对接板块会自动补全 AutoDockTools 和 AutoDock Vina。ML/DL 依赖使用 `--with-ml` 额外安装。
 
+按功能板块查看“运行哪个入口、需要哪些软件和脚本”：`docs/environment_requirements.md`。
+
 ## Codex Skills
 
 `skills/` 目录保存按功能拆分的 Codex skill 定义：
