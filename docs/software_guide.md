@@ -39,6 +39,7 @@ liverbio full --accession GSE125449 --output ../liver_cancer --workdir ../liver_
 liverbio docking pipeline --config config/docking_config.json
 liverbio datasets --disease "liver cancer" --max-results 20
 liverbio web --page full
+liverbio analysis-export GSE235863
 liverbio doctor
 liverbio setup
 liverbio package
@@ -52,6 +53,19 @@ python scripts\run_docking.py <子命令> --help
 python scripts\run_full_pipeline.py --help
 python scripts\search_datasets.py --help
 ```
+
+### 导出到本地分析工作区
+
+第一次使用 `--remember-analysis-root` 记住 `D:\AAA analysis`，之后只需要数据集编号：
+
+```text
+liverbio analysis-export GSE235863 --analysis-root D:\AAA analysis --remember-analysis-root
+liverbio analysis-export GSE235863
+launchers\export_to_analysis.bat GSE235863
+```
+
+命令会从 `D:\AAA analysis\config\local_projects.json` 已登记的 `output_roots`
+自动定位运行目录，把结果增量写入 `data/imported_results`，并刷新 `_inventory.json`。
 
 ## 常用工作流
 

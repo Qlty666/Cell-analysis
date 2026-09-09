@@ -21,6 +21,7 @@ ENTRYPOINTS = {
     "full": ROOT / "scripts" / "run_full_pipeline.py",
     "datasets": ROOT / "scripts" / "search_datasets.py",
     "web": ROOT / "web" / "web_ui.py",
+    "analysis-export": ROOT / "scripts" / "export_to_analysis.py",
     "install-skills": ROOT / "scripts" / "install_codex_skills.py",
     "package": ROOT / "launchers" / "package_portable.py",
 }
@@ -37,6 +38,7 @@ FEATURE_SUMMARY = (
     "full:       integrated expression-to-docking pipeline\n"
     "datasets:   GEO / BioStudies / Expression Atlas search and download\n"
     "web:        local web console for the whole suite\n"
+    "analysis-export: export finished runs into a Codex analysis workspace\n"
     "doctor:     environment check (pipeline, docking, or all)\n"
     "install-skills: copy project Codex skills into the user skill root\n"
     "setup:      install the full environment for a new computer\n"
@@ -58,6 +60,7 @@ Examples:
   liverbio docking pipeline --config config/docking_config.json
   liverbio datasets --disease "liver cancer" --max-results 20
   liverbio web --page full
+  liverbio analysis-export --source ../y2/GSE125449 --analysis-root <LOCAL_ROOT> analysis
   liverbio doctor
   liverbio install-skills
   liverbio setup

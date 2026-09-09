@@ -204,6 +204,40 @@ liverbio package
 - 网页端：顶部导航“分子对接”独立页面，与“虚拟筛选”页面并存，支持任务日志、暂停/继续、设置保存/恢复、自动检测对接盒、结果表、图库、HTML 报告和 PDBQT 构象下载。
 - 结果目录：`molecular_docking/outputs/run_001/results/`，报告文件为 `molecular_docking_report.html`。
 
+### 2.9 与本地 Codex 分析工作区对接
+
+本项目的运行结果可一键导出到本地 Codex 分析工作区（例如 `D:\AAA analysis`），
+写入该工作区约定的 `data/imported_results/<数据集编号>/`，并调用其
+`scripts/identify_imported_results.ps1` 刷新 `_inventory.json`，之后可直接进入
+`analysis/<任务名>` 做下游分析。导出命令：
+
+```text
+liverbio analysis-export ^
+  --source D:\AAA Liver cancer\y2\GSE125449 ^
+  --analysis-root D:\AAA analysis
+```
+
+如果 `D:\AAA analysis\config\local_projects.json` 已登记该数据集的输出根目录，
+可直接用数据集编号：
+
+```text
+liverbio analysis-export GSE125449
+launchers\export_to_analysis.bat GSE125449
+```
+
+若本机固定使用同一分析工作区，可在 `config/analysis_workspace.json` 中写入
+`analysis_root`；该文件不入库，也可改用 `LIVER_ANALYSIS_ROOT` 环境变量。
+命令只做增量同步，不删除分析工作区里已经生成的 `analysis_report.md` 等说明文件。
+
+第一次使用时可直接记住分析工作区，之后只填数据集编号：
+
+```text
+liverbio analysis-export GSE125449 ^
+  --analysis-root D:\AAA analysis ^
+  --remember-analysis-root
+liverbio analysis-export GSE125449
+```
+
 ## 3. 安装方法
 
 ### 新电脑快速部署
@@ -734,6 +768,21 @@ liverbio doctor docking
 python scripts\install_codex_skills.py --list
 ```
 
+### 4.9 导出到本地 Codex 分析工作区
+
+```bash
+python scripts\export_to_analysis.py --source ../y2/GSE125449 --analysis-root <LOCAL_ROOT> analysis
+liverbio analysis-export --source ../y2/GSE125449 --analysis-root <LOCAL_ROOT> analysis
+liverbio analysis-export GSE125449
+```
+
+导出前可用 `--dry-run` 查看文件数量，使用 `--no-inventory` 跳过清单刷新；
+加 `--remember-analysis-root` 会把 `--analysis-root` 保存到本机
+`config/analysis_workspace.json`，之后无需再传该参数。
+导出成功后会在目标目录写入 `_source.json`，记录来源目录、数据集、运行类型、
+导出时间、项目版本和 Git revision。只填数据集编号时，命令会读取分析工作区
+`config/local_projects.json` 中登记的 `output_roots` 自动定位运行目录。
+
 ## 5. 输入输出示例
 
 ### 5.1 表达分析
@@ -824,6 +873,7 @@ python scripts\install_codex_skills.py --list
 | `scripts/run_docking.py` | 虚拟筛选 CLI 入口 |
 | `scripts/run_full_pipeline.py` | 全自动集成流水线 CLI 入口 |
 | `scripts/run_molecular_docking.py` | 独立分子对接 CLI 入口 |
+| `scripts/export_to_analysis.py` | 导出运行结果到本地 Codex 分析工作区 |
 | `scripts/liverbio.py` | 统一 CLI 入口，转发到各运行脚本 |
 | `scripts/install_codex_skills.py` | 安装 `skills/` 下的 Codex skill |
 | `scripts/run_web_full_new_datasets.py` | 通过网页端批量提交真实数据集全流程 |
@@ -846,6 +896,7 @@ python scripts\install_codex_skills.py --list
 | `launchers/run_docking.bat` | 虚拟筛选快捷入口 |
 | `launchers/run_full_pipeline.bat` | 全自动流水线快捷入口 |
 | `launchers/run_molecular_docking.bat` | 独立分子对接快捷入口 |
+| `launchers/export_to_analysis.bat` | 本地分析工作区导出快捷入口 |
 | `launchers/run_GSE125449.bat` | GSE125449 表达分析快捷入口 |
 | `launchers/run_pipeline_prompt.bat` | 交互式表达分析入口 |
 | `launchers/package_portable.py` | 生成干净源码 zip |

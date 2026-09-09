@@ -61,6 +61,7 @@ Script/
 | `scripts/run_docking.py` | 虚拟筛选 CLI |
 | `scripts/run_full_pipeline.py` | 全自动集成流水线 CLI |
 | `scripts/run_molecular_docking.py` | 独立分子对接 CLI |
+| `scripts/export_to_analysis.py` | 导出运行结果到本地 Codex 分析工作区 |
 | `scripts/search_datasets.py` | 多数据库数据集搜索与下载 |
 | `scripts/dataset_search_ml.py` | 搜索结果 ML/DL 相关性排序 |
 | `scripts/run_web_full_new_datasets.py` | 批量提交真实数据集全流程 |
@@ -87,6 +88,7 @@ Script/
 | 运行 | `run_docking.bat` | 虚拟筛选快捷入口 |
 | 运行 | `run_molecular_docking.bat` | 独立分子对接快捷入口 |
 | 运行 | `run_full_pipeline.bat` | 全自动流水线快捷入口 |
+| 运行 | `export_to_analysis.bat` | 导出运行结果到本地 Codex 分析工作区 |
 | 运行 | `run_GSE125449.bat` | GSE125449 快捷入口 |
 | 运行 | `run_pipeline_prompt.bat` | 交互式表达分析入口 |
 | 环境 | `check_dock_environment.bat/.py` | 对接环境检查 |
@@ -165,6 +167,7 @@ Script/
 | 文件 | 作用 |
 | --- | --- |
 | `cli.py` | `liverbio` 子命令路由 |
+| `analysis_export.py` | 分析工作区结果导出与来源登记 |
 
 ### 3.7 `src/pipeline`
 
