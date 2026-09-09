@@ -18,6 +18,28 @@ qc_percentage <- function(object, features, label = "QC") {
     pmax(total_counts, 1)
 }
 
+qc_plot_features <- function(object, cols) {
+  # All-NA QC metrics (no matching features) cannot be drawn by VlnPlot, which
+  # errors on `all(x == x[1])`; drop them from the figure and say so.
+  keep <- character(0)
+  dropped <- character(0)
+  for (col in cols) {
+    values <- object[[]][[col]]
+    if (length(values) == 0 || all(is.na(values))) {
+      dropped <- c(dropped, col)
+    } else {
+      keep <- c(keep, col)
+    }
+  }
+  if (length(dropped) > 0) {
+    log_msg(
+      "WARNING: skipping all-NA QC metric(s) in violin plots: ",
+      paste(dropped, collapse = ", ")
+    )
+  }
+  keep
+}
+
 ribo_features <- function(object) {
   grep("^(RP[SL]|Rp[ls])", rownames(object), value = TRUE)
 }

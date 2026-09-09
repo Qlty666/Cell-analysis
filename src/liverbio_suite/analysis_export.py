@@ -10,6 +10,7 @@ from __future__ import annotations
 
 import argparse
 import json
+import logging
 import os
 import re
 import shutil
@@ -20,6 +21,8 @@ from pathlib import Path
 
 ROOT = Path(__file__).resolve().parents[2]
 LOCAL_ANALYSIS_CONFIG = ROOT / "config" / "analysis_workspace.json"
+
+log = logging.getLogger("liverbio.analysis_export")
 
 SKIP_NAMES = {
     "__pycache__",
@@ -215,8 +218,8 @@ def resolve_analysis_config() -> dict:
         env = json.loads(os.environ.get("LIVER_ANALYSIS_CONFIG", "{}"))
         if isinstance(env, dict):
             data.update(env)
-    except Exception:
-        pass
+    except Exception as exc:  # noqa: BLE001 - env override is best effort
+        log.warning("ignoring invalid LIVER_ANALYSIS_CONFIG: %s", exc)
     return data
 
 
