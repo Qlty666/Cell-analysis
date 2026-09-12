@@ -182,6 +182,25 @@ class TestRPipelineSyntax(unittest.TestCase):
                     ),
                 )
 
+    def test_gse_kegg_call_avoids_unsupported_qvalue_cutoff(self):
+        source = R_PIPELINE.read_text(encoding="utf-8")
+        start = source.index("gseKEGG(")
+        end = source.index("\n      )", start)
+        call = source[start:end]
+        if "qvalueCutoff" not in call:
+            return
+        if not _driver_deps_available():
+            self.skipTest("optional R analysis packages not installed")
+        code = (
+            'supported <- "qvalueCutoff" %in% '
+            'names(formals(clusterProfiler::gseKEGG))\n'
+            'cat("Q_VALUE_SUPPORTED", supported, "\\n")\n'
+        )
+        with tempfile.TemporaryDirectory() as tmp:
+            proc = _run_r_script(code, cwd=Path(tmp), timeout=300)
+        self.assertEqual(proc.returncode, 0, msg=proc.stderr or proc.stdout)
+        self.assertIn("Q_VALUE_SUPPORTED TRUE", proc.stdout)
+
     def test_driver_sources_and_defines_helpers(self):
         if not _driver_deps_available():
             self.skipTest("optional R analysis packages not installed")

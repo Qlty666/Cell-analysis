@@ -32,6 +32,7 @@ OUT_DIR = ROOT / "dock" / "validation_real_random"
 DEFAULT_MIN_OK_TARGETS = 10
 DEFAULT_MIN_BOX_OK = 10
 DEFAULT_MIN_LIGANDS = 10
+PDB_DOWNLOAD_ATTEMPTS = 3
 POOL = [
     "1M17",
     "1XKK",
@@ -110,11 +111,31 @@ def fetch_bindingdb(pdb_id: str) -> dict:
     return result
 
 
-def download_pdb(pdb_id: str, dest: Path) -> None:
+def download_pdb(
+    pdb_id: str,
+    dest: Path,
+    timeout: int = 60,
+    attempts: int = PDB_DOWNLOAD_ATTEMPTS,
+) -> None:
     url = f"https://files.rcsb.org/download/{pdb_id}.pdb"
-    req = urllib.request.Request(url, headers={"User-Agent": "Codex"})
-    with urllib.request.urlopen(req, timeout=60) as resp:
-        dest.write_bytes(resp.read())
+    last_error: Exception | None = None
+    for attempt in range(1, attempts + 1):
+        try:
+            req = urllib.request.Request(url, headers={"User-Agent": "Codex"})
+            with urllib.request.urlopen(req, timeout=timeout) as resp:
+                payload = resp.read()
+            if not payload:
+                raise RuntimeError("empty download")
+            dest.write_bytes(payload)
+            return
+        except Exception as exc:  # noqa: BLE001
+            last_error = exc
+            dest.unlink(missing_ok=True)
+            if attempt < attempts:
+                time.sleep(2 * attempt)
+    raise RuntimeError(
+        f"PDB download failed after {attempts} attempts: {last_error}"
+    ) from last_error
 
 
 def main() -> int:

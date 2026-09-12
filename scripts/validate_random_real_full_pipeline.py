@@ -28,6 +28,7 @@ if str(ROOT / "src") not in sys.path:
     sys.path.insert(0, str(ROOT / "src"))
 
 from common.env import find_rscript as _common_find_rscript  # noqa: E402
+from common.validation_outputs import gsea_kegg_problem  # noqa: E402
 
 LOGGER = logging.getLogger(__name__)
 
@@ -231,6 +232,9 @@ def verify_passed(single_cell_root: Path, workdir: Path, skip_docking: bool) -> 
             missing.append(str(path.relative_to(workdir)))
     if not (single_cell_root / "results" / "pipeline_complete.json").exists():
         missing.append("single-cell pipeline_complete.json")
+    gsea_problem = gsea_kegg_problem(single_cell_root)
+    if gsea_problem:
+        missing.append(gsea_problem)
     return not missing, missing
 
 

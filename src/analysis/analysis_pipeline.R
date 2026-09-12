@@ -2393,10 +2393,18 @@ if (stage_allowed("07")) run_stage("07_enrichment", {
     log_msg("GSEA skipped by LIVER_SKIP_GSEA")
     gsea_go <- NULL
     gsea_kegg <- NULL
+    gsea_kegg_status <- list(
+      status = "skipped",
+      reason = "LIVER_SKIP_GSEA"
+    )
   } else if (nrow(eg_all) == 0) {
     log_msg("no Entrez mapping for GSEA; skipping")
     gsea_go <- NULL
     gsea_kegg <- NULL
+    gsea_kegg_status <- list(
+      status = "unavailable",
+      reason = "no Entrez mapping for GSEA"
+    )
   } else {
     ranked <- rank_vec[eg_all[[mapped_col]]]
     names(ranked) <- eg_all$ENTREZID
@@ -2435,15 +2443,29 @@ if (stage_allowed("07")) run_stage("07_enrichment", {
         minGSSize = 10,
         maxGSSize = 500,
         pvalueCutoff = 0.1,
-        qvalueCutoff = 0.2,
         verbose = FALSE
       )
     })
     if (is.null(gsea_kegg)) {
       log_msg("GSEA KEGG unavailable")
+      gsea_kegg_status <- list(
+        status = "unavailable",
+        reason = "gseKEGG returned no result"
+      )
+    } else {
+      gsea_kegg_status <- list(
+        status = "ok",
+        terms = nrow(as.data.frame(gsea_kegg))
+      )
     }
     log_msg("GSEA KEGG finished")
   }
+  jsonlite::write_json(
+    gsea_kegg_status,
+    stage_data_file("fig_21_gsea_kegg_status.json"),
+    auto_unbox = TRUE,
+    pretty = TRUE
+  )
 
   plot_gsea <- function(res, file, title) {
     if (is.null(res) || nrow(as.data.frame(res)) == 0) {

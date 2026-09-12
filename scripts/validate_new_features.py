@@ -745,7 +745,7 @@ def build_gse165816_dataset() -> dict:
     return summary
 
 
-def run_dataset(dataset: dict, gene_evidence: pd.DataFrame) -> dict:
+def run_dataset(dataset: dict) -> dict:
     dataset_id = dataset["dataset"]
     LOG.info("running knockout + validation for %s", dataset_id)
     out_dir = OUT_ROOT / dataset_id
@@ -816,7 +816,13 @@ def _rank_study(study: dict) -> tuple[int, dict] | None:
     return (normals, study) if has_os else None
 
 
-def main() -> int:
+def required_dataset_count(max_studies: int, skip_gse: bool) -> int:
+    """Return the number needed for a full or smoke-test validation run."""
+    requested = max_studies + (0 if skip_gse else 1)
+    return min(20, requested)
+
+
+def main(argv: list[str] | None = None) -> int:
     parser = argparse.ArgumentParser()
     parser.add_argument(
         "--max-studies",
@@ -830,7 +836,9 @@ def main() -> int:
         action="store_true",
         help="reuse already built datasets without network calls",
     )
-    args = parser.parse_args()
+    args = parser.parse_args(argv)
+    if args.max_studies < 1:
+        parser.error("--max-studies must be at least 1")
 
     logging.basicConfig(
         level=logging.INFO,
@@ -838,11 +846,11 @@ def main() -> int:
         datefmt="%H:%M:%S",
     )
     OUT_ROOT.mkdir(parents=True, exist_ok=True)
-    gene_map = fetch_gene_map()
-    gene_evidence = fetch_gene_evidence(gene_map)
 
     datasets: list[dict] = []
     if not args.skip_build:
+        gene_map = fetch_gene_map()
+        gene_evidence = fetch_gene_evidence(gene_map)
         studies = fetch_tcga_studies()
         from concurrent.futures import ThreadPoolExecutor
 
@@ -869,17 +877,23 @@ def main() -> int:
         if not args.skip_gse:
             datasets.append(build_gse165816_dataset())
     else:
-        for path in sorted(OUT_ROOT.glob("*/dataset_summary.json")):
+        summary_paths = sorted(OUT_ROOT.glob("*/dataset_summary.json"))
+        for path in summary_paths[: args.max_studies]:
             datasets.append(json.loads(path.read_text(encoding="utf-8")))
 
-    if len(datasets) < 20:
-        LOG.error("only %s datasets built; need at least 20", len(datasets))
+    minimum = required_dataset_count(args.max_studies, args.skip_gse)
+    if len(datasets) < minimum:
+        LOG.error(
+            "only %s datasets available; need at least %s for this run",
+            len(datasets),
+            minimum,
+        )
         return 2
 
     results: list[dict] = []
     for dataset in datasets:
         try:
-            result = run_dataset(dataset, gene_evidence)
+            result = run_dataset(dataset)
             results.append(result)
             LOG.info(
                 "OK %s: %s genes, classes=%s, multidim=%s",
@@ -906,8 +920,8 @@ def main() -> int:
         "",
         f"- Datasets attempted: {len(results)}",
         f"- Successful runs: {ok_count}",
-        "- Requirement: >= 20 real datasets",
-        f"- Result: {'PASS' if ok_count >= 20 else 'FAIL'}",
+        f"- Requirement: >= {minimum} real datasets for this run",
+        f"- Result: {'PASS' if ok_count >= minimum else 'FAIL'}",
         "",
         "## Per-dataset summary",
         "",
@@ -941,7 +955,7 @@ def main() -> int:
     print(f"Datasets attempted: {len(results)}")
     print(f"Successful runs: {ok_count}")
     print("OUTPUT", OUT_ROOT)
-    return 0 if ok_count >= 20 else 1
+    return 0 if ok_count >= minimum else 1
 
 
 if __name__ == "__main__":

@@ -12,6 +12,7 @@ ROOT = Path(__file__).resolve().parent.parent
 if str(ROOT / "src") not in sys.path:
     sys.path.insert(0, str(ROOT / "src"))
 
+from common.validation_outputs import gsea_kegg_problem  # noqa: E402
 from data.validation_generator import generate_dataset  # noqa: E402
 
 DATASETS = [
@@ -113,6 +114,9 @@ def verify_outputs(out: Path, accession: str) -> bool:
         problems.append("summary.json")
     if not valid_output(out / "results" / "result_report.html"):
         problems.append("result_report.html")
+    gsea_problem = gsea_kegg_problem(out)
+    if gsea_problem:
+        problems.append(gsea_problem)
     fig_dir = out / "results" / "figures"
     ml_summary = out / "results" / "data" / "07_ml" / "ml_model_summary.json"
     ml_skipped = False
