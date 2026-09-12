@@ -38,6 +38,8 @@ liverbio expression GSE125449 --output ../liver_cancer --species auto
 liverbio full --accession GSE125449 --output ../liver_cancer --workdir ../liver_cancer_full
 liverbio docking pipeline --config config/docking_config.json
 liverbio datasets --disease "liver cancer" --max-results 20
+liverbio advanced --config config/advanced_analysis.json --output <OUTPUT_DIR>\advanced
+liverbio mr --config config/mr_coloc.json --output <OUTPUT_DIR>\mr
 liverbio web --page full
 liverbio analysis-export GSE235863
 liverbio doctor
@@ -66,6 +68,12 @@ launchers\export_to_analysis.bat GSE235863
 
 命令会从 `<ANALYSIS_ROOT>\config\local_projects.json` 已登记的 `output_roots`
 自动定位运行目录，把结果增量写入 `data/imported_results`，并刷新 `_inventory.json`。
+
+### 高级多队列与 MR
+
+`liverbio advanced` 读取一个 discovery cohort 和任意数量的 validation cohorts，执行 ComBat/limma（R 可用时）、WGCNA、基因级多模型比较、外部验证、免疫和生存分析，并输出 `integrated_priority.csv`。最小配置可复制 `config/advanced_analysis.example.json`。
+
+`liverbio mr` 读取本地 eQTL 和 GWAS summary statistics，执行 IVW、weighted median、MR-Egger、异质性、Egger intercept 和 leave-one-out；R 包存在时追加 MendelianRandomization 和 coloc 结果。输入列映射见 `config/mr_coloc.example.json`。
 
 ## 常用工作流
 

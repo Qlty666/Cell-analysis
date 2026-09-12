@@ -183,6 +183,7 @@ DEFAULT_NETWORK_TOXICOLOGY = {
     "disease_name": None,
     "compound_targets_csv": None,
     "target_sources": None,
+    "target_sources_dir": None,
     "disease_genes_csv": None,
     "disease_gene_column": None,
     "ppi_network_csv": None,
@@ -193,6 +194,8 @@ DEFAULT_NETWORK_TOXICOLOGY = {
     "cytoscape_layout": "cose",
     "cytoscape_save_session": False,
     "max_ppi_edges": 2000,
+    "run_enrichment": False,
+    "enrichment_timeout": 900,
 }
 
 DEFAULT_FAERS = {
@@ -1241,11 +1244,64 @@ def extract_key_genes(
     frame["avg_log2fc"] = pd.to_numeric(frame["avg_log2fc"], errors="coerce")
     frame["p_val_adj"] = pd.to_numeric(frame["p_val_adj"], errors="coerce")
     frame["abs_log2fc"] = frame["avg_log2fc"].abs()
-    frame = frame.sort_values(
-        ["p_val_adj", "abs_log2fc"],
-        ascending=[True, False],
-        na_position="last",
-    ).reset_index(drop=True)
+    advanced_priority = os.environ.get(
+        "LIVER_ADVANCED_PRIORITY_CSV",
+        "",
+    ).strip()
+    if advanced_priority:
+        priority_path = Path(advanced_priority).expanduser()
+        if priority_path.exists():
+            try:
+                priority = pd.read_csv(priority_path)
+                gene_col = next(
+                    (
+                        column
+                        for column in ("gene", "symbol", "target")
+                        if column in priority.columns
+                    ),
+                    None,
+                )
+                if gene_col and "priority_score" in priority.columns:
+                    priority = priority[[gene_col, "priority_score"]].rename(
+                        columns={gene_col: "gene"}
+                    )
+                    priority["gene"] = priority["gene"].astype(str)
+                    priority["priority_score"] = pd.to_numeric(
+                        priority["priority_score"],
+                        errors="coerce",
+                    )
+                    frame = frame.merge(
+                        priority.drop_duplicates("gene", keep="first"),
+                        on="gene",
+                        how="left",
+                    )
+                    frame["advanced_priority_score"] = frame[
+                        "priority_score"
+                    ]
+                    frame = frame.drop(columns=["priority_score"])
+                else:
+                    log.warning(
+                        "advanced priority CSV has no gene/priority_score columns: %s",
+                        priority_path,
+                    )
+            except Exception as exc:
+                log.warning(
+                    "could not read advanced priority CSV %s: %s",
+                    priority_path,
+                    exc,
+                )
+    if "advanced_priority_score" in frame.columns:
+        frame = frame.sort_values(
+            ["advanced_priority_score", "p_val_adj", "abs_log2fc"],
+            ascending=[False, True, False],
+            na_position="last",
+        ).reset_index(drop=True)
+    else:
+        frame = frame.sort_values(
+            ["p_val_adj", "abs_log2fc"],
+            ascending=[True, False],
+            na_position="last",
+        ).reset_index(drop=True)
     frame = frame.drop_duplicates(subset=["gene"], keep="first").reset_index(drop=True)
     frame["deg_rank"] = np.arange(1, len(frame) + 1)
 
@@ -1283,6 +1339,7 @@ def extract_key_genes(
         "pct.2",
         "deg_rank",
         "ml_importance",
+        "advanced_priority_score",
     ]
     for col in out_cols:
         if col not in frame.columns:

@@ -237,6 +237,65 @@ class TestDockResumeFresh(unittest.TestCase):
             self.assertEqual(rows[0]["id"], "L1")
 
 
+class TestDockingReplicates(unittest.TestCase):
+    def test_replicates_and_positive_control(self):
+        with tempfile.TemporaryDirectory() as tmp:
+            tmp_path = Path(tmp)
+            workdir = tmp_path / "work"
+            (workdir / "data" / "receptors").mkdir(parents=True)
+            (workdir / "data" / "ligands" / "prepared").mkdir(parents=True)
+            receptor = workdir / "data" / "receptors" / "receptor.pdbqt"
+            receptor.write_text(
+                "ATOM      1  N   ALA A   1       0.000   0.000   0.000\n"
+                "TER\n",
+                encoding="utf-8",
+            )
+            lig_pdbqt = workdir / "data" / "ligands" / "prepared" / "L1.pdbqt"
+            lig_pdbqt.write_text(
+                "ATOM      1  C   LIG L   1       0.000   0.000   0.000\n",
+                encoding="utf-8",
+            )
+            control = workdir / "data" / "ligands" / "prepared" / "control.pdbqt"
+            control.write_text(
+                "ATOM      1  C   LIG L   1       0.000   0.000   0.000\n",
+                encoding="utf-8",
+            )
+            manifest = workdir / "data" / "ligands" / "prepared" / "manifest.csv"
+            manifest.write_text(
+                "id,smiles,heavy_atoms,rotatable_bonds,pdbqt,status,error\n"
+                f"L1,CCO,3,0,{lig_pdbqt},ok,\n",
+                encoding="utf-8",
+            )
+            fake_vina = tmp_path / "fake_vina.py"
+            fake_vina.write_text(_FAKE_VINA, encoding="utf-8")
+            cfg = load_config(
+                DEFAULT_CONFIG,
+                {
+                    "workdir": str(workdir),
+                    "outdir": "outputs/run_001",
+                    "receptor": "data/receptors/receptor.pdbqt",
+                    "ligand": "data/ligands/library.sdf",
+                    "executable": str(fake_vina),
+                    "max_workers": 1,
+                    "scoring": "",
+                    "replicates": 2,
+                    "seeds": [1, 2],
+                    "positive_control_pdbqt": str(control),
+                    "positive_control_max_affinity": -7.0,
+                },
+            )
+            summary = run_docking(cfg, LOG)
+            rows = list(csv.DictReader(cfg.results_path().open("r", newline="")))
+            self.assertEqual(len(rows), 2)
+            self.assertEqual({row["seed"] for row in rows}, {"1", "2"})
+            self.assertEqual(summary["positive_control"]["status"], "ok")
+            self.assertTrue(summary["positive_control"]["passed"])
+            positive = pd.read_csv(
+                cfg.docked_dir() / "positive_control_results.csv"
+            )
+            self.assertEqual(float(positive.iloc[0]["affinity"]), -8.3)
+
+
 class TestMLTorchFallback(unittest.TestCase):
     def test_torch_fallback_returns_sklearn_mlp(self):
         from sklearn.neural_network import MLPClassifier

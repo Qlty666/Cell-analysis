@@ -15,7 +15,11 @@ base outputs; networkx is used when available for betweenness/clustering.
 
 from __future__ import annotations
 
+import json
 import math
+import shutil
+import subprocess
+import sys
 from pathlib import Path
 
 import numpy as np
@@ -200,8 +204,29 @@ def read_target_table(
     p = Path(path)
     if not p.exists():
         raise DockingError(f"compound target file not found: {p}")
-    sep = "\t" if p.suffix.lower() in (".tsv", ".txt") else ","
-    df = pd.read_csv(p, sep=sep, dtype=str)
+    suffix = p.suffix.lower()
+    if suffix == ".json":
+        payload = json.loads(p.read_text(encoding="utf-8"))
+        if isinstance(payload, dict):
+            payload = (
+                payload.get("targets")
+                or payload.get("records")
+                or payload.get("data")
+                or []
+            )
+        if not isinstance(payload, list):
+            raise DockingError(f"JSON target file must contain a list: {p}")
+        df = pd.DataFrame(payload)
+    elif suffix in (".jsonl", ".ndjson"):
+        rows = [
+            json.loads(line)
+            for line in p.read_text(encoding="utf-8").splitlines()
+            if line.strip()
+        ]
+        df = pd.DataFrame(rows)
+    else:
+        sep = "\t" if suffix in (".tsv", ".txt") else ","
+        df = pd.read_csv(p, sep=sep, dtype=str)
     if df.empty:
         raise DockingError(f"compound target file is empty: {p}")
     column = gene_column
@@ -240,6 +265,9 @@ def load_target_sources(
         mapping.update({str(Path(str(p)).stem): str(p) for p in single})
     elif single:
         mapping = {"compound": str(single)}
+    if section.get("target_sources_dir"):
+        mapping = dict(mapping)
+        mapping["auto_discovered"] = str(section["target_sources_dir"])
 
     if not mapping:
         raise DockingError(
@@ -252,7 +280,25 @@ def load_target_sources(
             p = Path(str(path)).expanduser()
             if not p.is_absolute():
                 p = cfg.workdir / p
-            loaded[str(source)] = read_target_table(p, source_name=str(source))
+            if p.is_dir():
+                candidates = []
+                for pattern in ("*.csv", "*.tsv", "*.txt", "*.json", "*.jsonl"):
+                    candidates.extend(sorted(p.glob(pattern)))
+                if not candidates:
+                    raise DockingError(f"no target tables found in directory: {p}")
+                frames = [
+                    read_target_table(
+                        candidate,
+                        source_name=candidate.stem,
+                    )
+                    for candidate in candidates
+                ]
+                loaded[str(source)] = pd.concat(frames, ignore_index=True)
+            else:
+                loaded[str(source)] = read_target_table(
+                    p,
+                    source_name=str(source),
+                )
     if not loaded:
         raise DockingError("no compound target files could be loaded")
     return loaded
@@ -355,20 +401,45 @@ def ppi_hub_scores(
         graph.add_edges_from(
             zip(pair[col1].astype(str), pair[col2].astype(str))
         )
-        betweenness = pd.Series(
-            nx.betweenness_centrality(graph),
-            name="ppi_betweenness",
-        )
-        clustering = pd.Series(
-            nx.clustering(graph),
-            name="ppi_clustering",
-        )
-        result = result.join(betweenness, on="gene").join(
-            clustering,
+        metrics = {
+            "ppi_betweenness": nx.betweenness_centrality(graph),
+            "ppi_closeness": nx.closeness_centrality(graph),
+            "ppi_eigenvector": nx.eigenvector_centrality_numpy(graph),
+            "ppi_pagerank": nx.pagerank(graph),
+        }
+        for name, values in metrics.items():
+            result = result.join(
+                pd.Series(values, name=name),
+                on="gene",
+            )
+        # Maximum-clique centrality is expensive for large networks. Compute
+        # it only when the graph remains tractable; otherwise retain NaN and
+        # let the consensus score use the available topology metrics.
+        if graph.number_of_nodes() <= 300:
+            mcc = {node: 0.0 for node in graph.nodes}
+            try:
+                for clique in nx.find_cliques(graph):
+                    weight = math.factorial(max(0, len(clique) - 1))
+                    for node in clique:
+                        mcc[node] += weight
+            except Exception:
+                mcc = {node: float("nan") for node in graph.nodes}
+            result = result.join(
+                pd.Series(mcc, name="ppi_mcc"),
+                on="gene",
+            )
+        else:
+            result["ppi_mcc"] = np.nan
+        result = result.join(
+            pd.Series(nx.clustering(graph), name="ppi_clustering"),
             on="gene",
         )
     except Exception:
         result["ppi_betweenness"] = np.nan
+        result["ppi_closeness"] = np.nan
+        result["ppi_eigenvector"] = np.nan
+        result["ppi_pagerank"] = np.nan
+        result["ppi_mcc"] = np.nan
         result["ppi_clustering"] = np.nan
 
     if genes is not None:
@@ -383,12 +454,24 @@ def ppi_hub_scores(
             "ppi_clustering": 0.0,
         }
     )
-    result["ppi_hub_score"] = (
-        result["ppi_degree"]
-        .rank(pct=True)
-        .fillna(0.5)
-        .clip(0.0, 1.0)
-    )
+    metric_columns = [
+        column
+        for column in (
+            "ppi_degree",
+            "ppi_betweenness",
+            "ppi_closeness",
+            "ppi_eigenvector",
+            "ppi_pagerank",
+            "ppi_mcc",
+            "ppi_clustering",
+        )
+        if column in result.columns
+    ]
+    rank_frame = pd.DataFrame(index=result.index)
+    for column in metric_columns:
+        values = pd.to_numeric(result[column], errors="coerce")
+        rank_frame[column] = values.rank(pct=True)
+    result["ppi_hub_score"] = rank_frame.mean(axis=1).fillna(0.5).clip(0.0, 1.0)
     return result.reset_index(drop=True)
 
 
@@ -520,6 +603,10 @@ def write_ctpd_network(
         for column in (
             "ppi_degree",
             "ppi_betweenness",
+            "ppi_closeness",
+            "ppi_eigenvector",
+            "ppi_pagerank",
+            "ppi_mcc",
             "ppi_clustering",
             "ppi_hub_score",
             "n_sources",
@@ -674,6 +761,7 @@ def run_network_toxicology(cfg, log) -> dict:
         if max_ppi_edges_value not in (None, "")
         else None
     )
+    run_enrichment = bool(section.get("run_enrichment", False))
     out_dir = cfg._resolve(
         section.get("output_dir") or "outputs/run_001/network_toxicology",
         cfg.workdir,
@@ -741,6 +829,14 @@ def run_network_toxicology(cfg, log) -> dict:
         out_dir / "data",
         max_ppi_edges=max_ppi_edges,
     )
+    enrichment_result = {"status": "disabled"}
+    if run_enrichment and len(overlap) >= 3:
+        enrichment_result = _run_network_enrichment(
+            overlap["gene"].tolist(),
+            out_dir,
+            cfg,
+            log,
+        )
     cytoscape_result: dict = {"status": "off"}
     if cytoscape_mode != "off":
         cytoscape_result = export_network_to_cytoscape(
@@ -772,6 +868,7 @@ def run_network_toxicology(cfg, log) -> dict:
             "ppi_hub_csv": str(hub_path) if hub_frame is not None else "",
             "venn": venn_path or "",
             "ctpd": {k: str(v) for k, v in ctpd.items()},
+            "enrichment": enrichment_result,
         },
     }
     write_json(out_dir / "network_toxicology_summary.json", summary)
@@ -781,3 +878,51 @@ def run_network_toxicology(cfg, log) -> dict:
         out_dir,
     )
     return summary
+
+
+def _run_network_enrichment(
+    genes: list[str],
+    out_dir: Path,
+    cfg,
+    log,
+) -> dict:
+    """Run the existing clusterProfiler helper on the overlap gene set."""
+    rscript = shutil.which("Rscript") or shutil.which("Rscript.exe")
+    script = Path(__file__).resolve().parent / "insilico_enrichment.R"
+    if not rscript or not script.exists():
+        return {"status": "skipped", "reason": "Rscript or enrichment script unavailable"}
+    data_dir = out_dir / "data"
+    data_dir.mkdir(parents=True, exist_ok=True)
+    gene_csv = data_dir / "network_enrichment_input.csv"
+    pd.DataFrame({"gene": genes}).to_csv(gene_csv, index=False)
+    species = str((cfg.data.get("species") or "hs")).lower()
+    species = "mm" if species.startswith("mm") else "hs"
+    try:
+        proc = subprocess.run(
+            [rscript, str(script), str(gene_csv), str(data_dir), species],
+            cwd=cfg.workdir,
+            capture_output=True,
+            text=True,
+            encoding="utf-8",
+            errors="replace",
+            timeout=int(
+                (cfg.data.get("network_toxicology", {}) or {}).get(
+                    "enrichment_timeout",
+                    900,
+                )
+            ),
+        )
+    except Exception as exc:
+        return {"status": "failed", "reason": str(exc)}
+    if proc.returncode != 0:
+        return {
+            "status": "failed",
+            "reason": (proc.stderr or proc.stdout)[-2000:],
+        }
+    go_path = data_dir / "insilico_go_enrichment.csv"
+    kegg_path = data_dir / "insilico_kegg_enrichment.csv"
+    return {
+        "status": "completed",
+        "go_csv": str(go_path) if go_path.exists() else "",
+        "kegg_csv": str(kegg_path) if kegg_path.exists() else "",
+    }

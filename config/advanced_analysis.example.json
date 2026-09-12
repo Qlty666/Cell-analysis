@@ -1,0 +1,67 @@
+{
+  "primary": {
+    "name": "discovery",
+    "expression": "data/expression_discovery.csv",
+    "metadata": "data/metadata_discovery.csv",
+    "condition_column": "condition",
+    "gene_column": "gene",
+    "case_label": "Disease",
+    "control_label": "Control"
+  },
+  "validation": [
+    {
+      "name": "external_validation",
+      "expression": "data/expression_validation.csv",
+      "metadata": "data/metadata_validation.csv",
+      "condition_column": "condition",
+      "gene_column": "gene",
+      "case_label": "Disease",
+      "control_label": "Control"
+    }
+  ],
+  "normalization": {
+    "quantile": false
+  },
+  "batch": {
+    "enabled": true,
+    "covariates": []
+  },
+  "wgcna": {
+    "enabled": true,
+    "top_genes": 8000,
+    "min_module_size": 30,
+    "merge_cut_height": 0.25,
+    "kme_cutoff": 0.8
+  },
+  "ml": {
+    "enabled": true,
+    "top_genes": 500,
+    "feature_cap": 80,
+    "cv_folds": 5,
+    "cv_repeats": 5,
+    "shap": true,
+    "seed": 42
+  },
+  "immune": {
+    "enabled": true,
+    "method": "ssgsea"
+  },
+  "survival": {
+    "enabled": false,
+    "time_column": "OS.time",
+    "event_column": "OS"
+  },
+  "evidence_files": {
+    "network_hub_score": "data/ppi_hub_scores.csv",
+    "prognosis_score": "data/prognosis.csv"
+  },
+  "integration": {
+    "weights": {
+      "deg_score": 1.0,
+      "wgcna_score": 1.0,
+      "ml_score": 1.0,
+      "network_hub_score": 0.8,
+      "prognosis_score": 0.8
+    }
+  }
+}

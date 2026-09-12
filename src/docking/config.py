@@ -50,6 +50,11 @@ DEFAULTS = {
         "cpu": 4,
         "max_workers": 4,
         "seed": 42,
+        "seeds": [],
+        "replicates": 1,
+        "positive_control_pdbqt": None,
+        "positive_control_id": "positive_control",
+        "positive_control_max_affinity": None,
         "timeout_seconds": 600,
         "resume": True,
     },
@@ -112,6 +117,8 @@ DEFAULTS = {
         "maxwarn": 20,
         "contact_cutoff_nm": 0.6,
         "equilibrate_fraction": 0.5,
+        "mmpbsa_command": None,
+        "mmpbsa_timeout_seconds": 7200,
         "rmsd_stable_std_nm": 0.15,
         "rg_stable_std_nm": 0.05,
         "sasa_stable_std_nm2": 1.0,
@@ -524,6 +531,14 @@ def apply_overrides(cfg: ResolvedConfig, overrides: dict) -> ResolvedConfig:
         "cpu": ("docking", "cpu"),
         "max_workers": ("docking", "max_workers"),
         "seed": ("docking", "seed"),
+        "seeds": ("docking", "seeds"),
+        "replicates": ("docking", "replicates"),
+        "positive_control_pdbqt": ("docking", "positive_control_pdbqt"),
+        "positive_control_id": ("docking", "positive_control_id"),
+        "positive_control_max_affinity": (
+            "docking",
+            "positive_control_max_affinity",
+        ),
         "scoring": ("docking", "scoring"),
         "executable": ("docking", "executable"),
         "max_ligands": ("ligand", "max_ligands"),
@@ -681,6 +696,23 @@ def save_config(
             "cpu": cfg.get("docking", "cpu", 4),
             "max_workers": cfg.get("docking", "max_workers", 4),
             "seed": cfg.get("docking", "seed", 42),
+            "seeds": cfg.get("docking", "seeds", []),
+            "replicates": cfg.get("docking", "replicates", 1),
+            "positive_control_pdbqt": cfg.get(
+                "docking",
+                "positive_control_pdbqt",
+                None,
+            ),
+            "positive_control_id": cfg.get(
+                "docking",
+                "positive_control_id",
+                "positive_control",
+            ),
+            "positive_control_max_affinity": cfg.get(
+                "docking",
+                "positive_control_max_affinity",
+                None,
+            ),
             "timeout_seconds": cfg.get("docking", "timeout_seconds", 600),
             "resume": cfg.get("docking", "resume", True),
         },
@@ -756,6 +788,12 @@ def save_config(
             ),
             "equilibrate_fraction": cfg.get(
                 "md_simulation", "equilibrate_fraction", 0.5
+            ),
+            "mmpbsa_command": cfg.get(
+                "md_simulation", "mmpbsa_command", None
+            ),
+            "mmpbsa_timeout_seconds": cfg.get(
+                "md_simulation", "mmpbsa_timeout_seconds", 7200
             ),
             "rmsd_stable_std_nm": cfg.get(
                 "md_simulation", "rmsd_stable_std_nm", 0.15

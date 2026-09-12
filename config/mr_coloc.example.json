@@ -1,0 +1,36 @@
+{
+  "exposure": {
+    "name": "TGFBR1",
+    "file": "data/tgfbr1_eqtl.csv",
+    "snp": "SNP",
+    "beta": "BETA",
+    "se": "SE",
+    "effect_allele": "EA",
+    "other_allele": "OA",
+    "pval": "P",
+    "eaf": "EAF",
+    "chromosome": "CHR",
+    "position": "BP"
+  },
+  "outcome": {
+    "name": "Liver disease",
+    "file": "data/liver_disease_gwas.csv",
+    "snp": "SNP",
+    "beta": "BETA",
+    "se": "SE",
+    "effect_allele": "EA",
+    "other_allele": "OA",
+    "pval": "P",
+    "eaf": "EAF",
+    "chromosome": "CHR",
+    "position": "BP"
+  },
+  "p_threshold": 5e-6,
+  "coloc": {
+    "enabled": true,
+    "exposure_n": 31684,
+    "outcome_n": 100000,
+    "p12": 1e-5
+  },
+  "timeout_seconds": 3600
+}

@@ -43,6 +43,9 @@
     "cytoscape_layout": "cose",
     "cytoscape_save_session": false,
     "max_ppi_edges": 2000,
+    "run_enrichment": false,
+    "target_sources_dir": null,
+    "enrichment_timeout": 900,
     "output_dir": "outputs/run_001/network_toxicology"
   },
   "faers": {

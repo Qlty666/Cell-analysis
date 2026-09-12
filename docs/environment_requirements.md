@@ -49,10 +49,26 @@ launchers\install_pipeline_dependencies.bat
 
 实际安装清单以 `src/analysis/install_deps.R` 为准，主要包括：
 
-- CRAN：`Seurat`、`dplyr`、`ggplot2`、`patchwork`、`Matrix`、`data.table`、`jsonlite`、`ggrepel`、`pheatmap`、`RColorBrewer`、`harmony`、`R.utils`
-- Bioconductor：`BiocManager`、`scDblFinder`、`SingleCellExperiment`、`clusterProfiler`、`org.Hs.eg.db`、`org.Mm.eg.db`、`enrichplot`、`BiocParallel`、`SingleR`、`celldex`、`DESeq2`、`hdf5r`
+- CRAN：`Seurat`、`dplyr`、`ggplot2`、`patchwork`、`Matrix`、`data.table`、`jsonlite`、`ggrepel`、`pheatmap`、`RColorBrewer`、`harmony`、`R.utils`、`WGCNA`、`survival`、`survminer`、`timeROC`、`glmnet`
+- Bioconductor：`BiocManager`、`scDblFinder`、`SingleCellExperiment`、`clusterProfiler`、`org.Hs.eg.db`、`org.Mm.eg.db`、`enrichplot`、`BiocParallel`、`SingleR`、`celldex`、`DESeq2`、`hdf5r`、`limma`、`edgeR`、`sva`、`GSVA`、`celda`
 
-可选功能：CellChat（`LIVER_RUN_CELLCHAT=yes`）与 slingshot 拟时序（`LIVER_RUN_TRAJECTORY=yes`）需要额外单独安装对应 R 包。
+可选功能：CellChat（`LIVER_RUN_CELLCHAT=yes`）、slingshot 拟时序（`LIVER_RUN_TRAJECTORY=yes`）、decontX（`LIVER_DECONTX=yes`）和指定细胞类型再聚类（`LIVER_SUBCLUSTER_CELLTYPES=...`）需要额外单独安装对应 R 包。
+
+多队列、WGCNA、基因级 ML、免疫浸润和生存分析入口：
+
+```bat
+python scripts\run_advanced_analysis.py --config config\advanced_analysis.json --output <OUTPUT_DIR>\advanced
+liverbio advanced --config config\advanced_analysis.json --output <OUTPUT_DIR>\advanced
+```
+
+本地 MR/共定位入口：
+
+```bat
+python scripts\run_mr_coloc.py --config config\mr_coloc.json --output <OUTPUT_DIR>\mr
+liverbio mr --config config\mr_coloc.json --output <OUTPUT_DIR>\mr
+```
+
+MR 的 R 后端可选依赖 `MendelianRandomization` 和 `coloc`；未安装时 Python 会输出 IVW、weighted median、MR-Egger、异质性和 leave-one-out 结果。
 
 **检查：**
 
@@ -168,6 +184,11 @@ python scripts\run_molecular_docking.py check-env
 - 配体参数化二选一：
   - ACPYPE + AmberTools：`conda install -c conda-forge gromacs ambertools`，再 `python -m pip install acpype`
   - 预生成 `<id>.itp` 与 `<id>.gro` 放入 `md_simulation.topology_dir`
+
+可选结合自由能与构象分析：
+
+- `md_simulation.mmpbsa_command`：配置本地 gmx_MMPBSA 或 Amber MM/PBSA 命令，支持 `{run_dir}`、`{tpr}`、`{trajectory}`、`{topology}`、`{index}` 占位符。
+- 蛋白 PCA/FEL 会在 GROMACS 命令可用时自动尝试，并输出 `pca_fel.csv` 与对应指标。
 
 ## 6. 全自动集成流水线
 
