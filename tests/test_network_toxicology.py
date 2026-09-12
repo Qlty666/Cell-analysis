@@ -4,6 +4,7 @@
 from __future__ import annotations
 
 import logging
+import json
 import sys
 import tempfile
 import unittest
@@ -103,6 +104,55 @@ class TestNetworkToxicology(unittest.TestCase):
         self.assertEqual(len(overlap), 3)
         alb = overlap[overlap["gene"] == "ALB"].iloc[0]
         self.assertEqual(alb["n_sources"], 2)
+
+    def test_compound_target_count_is_unique_union(self):
+        with tempfile.TemporaryDirectory() as tmp:
+            workdir = Path(tmp) / "work"
+            data_dir = workdir / "data" / "network"
+            data_dir.mkdir(parents=True)
+            pd.DataFrame({"gene": ["A", "B"]}).to_csv(
+                data_dir / "t1.csv",
+                index=False,
+            )
+            pd.DataFrame({"gene": ["A", "C"]}).to_csv(
+                data_dir / "t2.csv",
+                index=False,
+            )
+            pd.DataFrame({"gene": ["A", "B", "C"]}).to_csv(
+                data_dir / "disease.csv",
+                index=False,
+            )
+            config_path = workdir / "config.json"
+            config_path.write_text(
+                json.dumps(
+                    {
+                        "name": "network-test",
+                        "workdir": str(workdir),
+                        "output_dir": "outputs/run",
+                        "receptor": {
+                            "input": "receptor.pdb",
+                            "output": "receptor.pdbqt",
+                            "center": [0, 0, 0],
+                            "size": [20, 20, 20],
+                        },
+                        "ligand": {"input": "ligands.sdf"},
+                        "network_toxicology": {
+                            "compound_targets_csv": None,
+                            "target_sources": {
+                                "s1": str(data_dir / "t1.csv"),
+                                "s2": str(data_dir / "t2.csv"),
+                            },
+                            "disease_genes_csv": str(data_dir / "disease.csv"),
+                            "output_dir": "outputs/network",
+                            "cytoscape": "off",
+                        },
+                    }
+                ),
+                encoding="utf-8",
+            )
+            cfg = load_config(config_path)
+            summary = run_network_toxicology(cfg, LOG)
+            self.assertEqual(summary["compound_targets"], 3)
 
     def test_ppi_hub_scores(self):
         with tempfile.TemporaryDirectory() as tmp:

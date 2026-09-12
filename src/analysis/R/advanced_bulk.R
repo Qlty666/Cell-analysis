@@ -253,6 +253,7 @@ if (requireNamespace("limma", quietly = TRUE)) {
       as.character(primary$labels),
       unlist(lapply(validation, function(x) as.character(x$labels)))
     )
+    n_primary <- ncol(primary_matrix)
     keep <- stats::complete.cases(t(combined))
     combined <- combined[, keep, drop = FALSE]
     batch <- batch[keep]
@@ -266,12 +267,37 @@ if (requireNamespace("limma", quietly = TRUE)) {
         par.prior = TRUE,
         prior.plots = FALSE
       )
-      corrected <- corrected_all[, seq_len(ncol(primary_matrix)), drop = FALSE]
-      write_matrix(corrected, file.path(out_dir, "expression_primary_corrected.csv"))
+      primary_keep <- keep[seq_len(n_primary)]
+      if (!any(primary_keep)) {
+        stop("ComBat removed every discovery sample; check missing values")
+      }
+      corrected <- corrected_all[
+        ,
+        which(primary_keep),
+        drop = FALSE
+      ]
+      colnames(corrected) <- colnames(primary_matrix)[primary_keep]
+      primary_matrix <- corrected
+      primary$expression <- primary$expression[
+        ,
+        primary_keep,
+        drop = FALSE
+      ]
+      primary$metadata <- primary$metadata[
+        primary_keep,
+        ,
+        drop = FALSE
+      ]
+      primary$labels <- primary$labels[primary_keep]
+      write_matrix(
+        primary_matrix,
+        file.path(out_dir, "expression_primary_corrected.csv")
+      )
       r_summary$batch_correction <- list(
         status = "completed",
         method = "ComBat",
-        cohorts = unique(batch)
+        cohorts = unique(batch),
+        discovery_samples_removed = sum(!primary_keep)
       )
     }
   }

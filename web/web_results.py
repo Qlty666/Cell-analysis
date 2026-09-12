@@ -7,6 +7,7 @@ stage labels in :mod:`web_data`, so they can live outside ``web_ui.py``.
 from __future__ import annotations
 
 import json
+import logging
 import re
 import time
 from pathlib import Path

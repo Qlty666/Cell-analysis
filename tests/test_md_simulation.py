@@ -5,6 +5,7 @@ from __future__ import annotations
 
 import csv
 import logging
+import os
 import sys
 import tempfile
 import unittest
@@ -30,6 +31,7 @@ from docking.md_simulation import (  # noqa: E402
     _store_mean_tail,
     _gmx_env,
     _normalize_ligand_itp,
+    _split_external_command,
     _write_first_pdbqt_model,
     parse_xvg,
     run_md_simulation,
@@ -325,6 +327,25 @@ class TestMdSimulation(unittest.TestCase):
                     run_md_simulation(cfg, LOG, mode="auto")
             summary_path = cfg.md_dir() / "md_simulation_summary.json"
             self.assertTrue(summary_path.exists())
+
+
+class TestExternalCommandParsing(unittest.TestCase):
+    @unittest.skipUnless(os.name == "nt", "Windows path parsing")
+    def test_windows_path_is_not_mangled(self):
+        command = _split_external_command(
+            "\"C:\\Program Files\\gmx_MMPBSA.exe\" {run_dir}"
+        )
+        self.assertEqual(
+            command,
+            [
+                r"C:\Program Files\gmx_MMPBSA.exe",
+                "{run_dir}",
+            ],
+        )
+
+    def test_argument_list_is_preserved(self):
+        command = _split_external_command(["gmx_MMPBSA", "--version"])
+        self.assertEqual(command, ["gmx_MMPBSA", "--version"])
 
 
 class TestMdWeb(unittest.TestCase):

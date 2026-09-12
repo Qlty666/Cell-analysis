@@ -3,6 +3,7 @@
 
 from __future__ import annotations
 
+import json
 import sys
 import tempfile
 import unittest
@@ -17,6 +18,8 @@ if str(APP_ROOT / "src") not in sys.path:
     sys.path.insert(0, str(APP_ROOT / "src"))
 
 from analysis.advanced_analysis import (  # noqa: E402
+    _evaluate_models,
+    _load_optional_evidence,
     differential_expression,
     integrate_priorities,
     normalize_expression,
@@ -112,6 +115,70 @@ class TestAdvancedBulkHelpers(unittest.TestCase):
             self.assertEqual(run(args), 0)
             self.assertTrue((root / "out" / "ml_model_comparison.csv").exists())
             self.assertTrue((root / "out" / "integrated_priority.csv").exists())
+
+    def test_case_label_sort_order_does_not_invert_metrics(self):
+        with tempfile.TemporaryDirectory() as tmp:
+            root = Path(tmp)
+            rng = np.random.default_rng(12)
+            genes = [f"G{i}" for i in range(8)]
+            samples = [f"S{i}" for i in range(24)]
+            matrix = rng.normal(size=(8, 24))
+            matrix[:4, 12:] += 3.0
+            expression = pd.DataFrame(
+                matrix,
+                index=genes,
+                columns=samples,
+            )
+            labels = pd.Series(
+                ["A"] * 12 + ["B"] * 12,
+                index=samples,
+            )
+            comparison, _, _ = _evaluate_models(
+                expression,
+                labels,
+                genes,
+                {
+                    "case_label": "A",
+                    "cv_folds": 3,
+                    "cv_repeats": 1,
+                    "seed": 7,
+                    "feature_cap": 8,
+                },
+                root,
+            )
+            self.assertGreater(
+                float(comparison.iloc[0]["cv_auc_mean"]),
+                0.8,
+            )
+            summary = json.loads(
+                (root / "ml_summary.json").read_text(encoding="utf-8")
+            )
+            self.assertGreater(float(summary["cv_auc"]), 0.8)
+            self.assertEqual(summary["positive_class"], "A")
+
+    def test_explicit_evidence_score_column(self):
+        with tempfile.TemporaryDirectory() as tmp:
+            root = Path(tmp)
+            evidence = root / "ppi_hub_scores.csv"
+            pd.DataFrame(
+                {
+                    "gene": ["A", "B"],
+                    "ppi_degree": [99, 1],
+                    "ppi_hub_score": [0.2, 0.9],
+                }
+            ).to_csv(evidence, index=False)
+            frame = _load_optional_evidence(
+                {
+                    "network_hub_score": {
+                        "path": str(evidence),
+                        "score_column": "ppi_hub_score",
+                    }
+                },
+                root,
+                ["A", "B"],
+            )
+            self.assertAlmostEqual(frame.loc["A", "network_hub_score"], 0.2)
+            self.assertAlmostEqual(frame.loc["B", "network_hub_score"], 0.9)
 
 
 if __name__ == "__main__":

@@ -15,6 +15,7 @@ import math
 import shutil
 import subprocess
 import sys
+import tempfile
 from pathlib import Path
 from typing import Any
 
@@ -147,6 +148,55 @@ def harmonise(exposure: pd.DataFrame, outcome: pd.DataFrame) -> pd.DataFrame:
         merged["effect_allele_exposure"].isin(["C", "G"])
         & merged["other_allele_exposure"].isin(["C", "G"])
     )
+    has_eaf = {"eaf_exposure", "eaf_outcome"}.issubset(merged.columns)
+    merged["strand_status"] = "not_palindromic"
+    merged["harmonisation_keep"] = merged["allele_status"].isin(
+        ["aligned", "flipped"]
+    )
+    missing_eaf = int(0)
+    ambiguous_palindromic = int(0)
+    if has_eaf:
+        eaf_exposure = pd.to_numeric(
+            merged["eaf_exposure"],
+            errors="coerce",
+        )
+        eaf_outcome = pd.to_numeric(
+            merged["eaf_outcome"],
+            errors="coerce",
+        )
+        eaf_outcome_aligned = eaf_outcome.where(~flipped, 1.0 - eaf_outcome)
+        ambiguous = (
+            eaf_exposure.between(0.42, 0.58)
+            | eaf_outcome_aligned.between(0.42, 0.58)
+            | (
+                (eaf_exposure > 0.5)
+                != (eaf_outcome_aligned > 0.5)
+            )
+            | eaf_exposure.isna()
+            | eaf_outcome_aligned.isna()
+        )
+        merged.loc[merged["palindromic"] & ambiguous, "strand_status"] = (
+            "ambiguous_palindromic"
+        )
+        merged.loc[
+            merged["palindromic"] & ambiguous,
+            "harmonisation_keep",
+        ] = False
+        ambiguous_palindromic = int(
+            (merged["palindromic"] & ambiguous).sum()
+        )
+    else:
+        missing_eaf = int(
+            (merged["palindromic"] & merged["harmonisation_keep"]).sum()
+        )
+        merged.loc[
+            merged["palindromic"] & merged["harmonisation_keep"],
+            "strand_status",
+        ] = "ambiguous_no_eaf"
+        merged.loc[
+            merged["palindromic"] & merged["harmonisation_keep"],
+            "harmonisation_keep",
+        ] = False
     merged["f_statistic"] = (
         pd.to_numeric(merged["beta_exposure"], errors="coerce")
         / pd.to_numeric(merged["se_exposure"], errors="coerce")
@@ -155,10 +205,131 @@ def harmonise(exposure: pd.DataFrame, outcome: pd.DataFrame) -> pd.DataFrame:
         pd.to_numeric(merged["beta_outcome"], errors="coerce")
         / pd.to_numeric(merged["beta_exposure"], errors="coerce")
     )
-    return merged[
-        merged["allele_status"].isin(["aligned", "flipped"])
+    incompatible = int(
+        (~merged["allele_status"].isin(["aligned", "flipped"])).sum()
+    )
+    result = merged[
+        merged["harmonisation_keep"]
         & np.isfinite(merged["ratio"])
     ].reset_index(drop=True)
+    result.attrs["incompatible_snps"] = incompatible
+    result.attrs["ambiguous_palindromic_snps"] = ambiguous_palindromic
+    result.attrs["missing_eaf_palindromic_snps"] = missing_eaf
+    return result
+
+
+def _distance_clump(
+    frame: pd.DataFrame,
+    distance_kb: float,
+) -> tuple[pd.DataFrame, str, int]:
+    """Greedy distance pruning when no LD reference panel is configured."""
+    if "chromosome" not in frame.columns or "position" not in frame.columns:
+        return frame, "not_available_no_position", 0
+    ordered = frame.sort_values(
+        ["pval", "snp"],
+        ascending=[True, True],
+    ).copy()
+    ordered["position"] = pd.to_numeric(
+        ordered["position"],
+        errors="coerce",
+    )
+    ordered = ordered[
+        ordered["chromosome"].notna()
+        & np.isfinite(ordered["position"])
+    ]
+    selected_indices: list[int] = []
+    distance_bp = max(1.0, float(distance_kb) * 1000.0)
+    for index, row in ordered.iterrows():
+        chromosome = str(row.get("chromosome", ""))
+        position = float(row["position"])
+        if any(
+            str(ordered.loc[selected, "chromosome"]) == chromosome
+            and abs(float(ordered.loc[selected, "position"]) - position)
+            < distance_bp
+            for selected in selected_indices
+        ):
+            continue
+        selected_indices.append(index)
+    return (
+        ordered.loc[selected_indices].reset_index(drop=True),
+        "distance_pruning_no_ld_reference",
+        int(len(ordered) - len(selected_indices)),
+    )
+
+
+def _plink_clump(
+    frame: pd.DataFrame,
+    clump_config: dict,
+) -> tuple[pd.DataFrame, dict]:
+    """Use PLINK for LD clumping when a local reference panel is configured."""
+    executable = clump_config.get("plink_executable")
+    bfile = clump_config.get("bfile")
+    if not executable or not bfile:
+        return frame, {
+            "enabled": bool(clump_config.get("enabled", False)),
+            "status": "not_configured",
+            "method": "distance_pruning_no_ld_reference",
+        }
+    resolved_executable = shutil.which(str(executable)) or str(executable)
+    if not Path(resolved_executable).exists() and shutil.which(resolved_executable) is None:
+        return frame, {
+            "enabled": True,
+            "status": "failed",
+            "method": "plink",
+            "reason": f"PLINK executable not found: {executable}",
+        }
+    with tempfile.TemporaryDirectory(prefix="mr_clump_") as tmp:
+        tmp_dir = Path(tmp)
+        snp_file = tmp_dir / "instruments.txt"
+        out_prefix = tmp_dir / "clump"
+        snp_file.write_text(
+            "\n".join(frame["snp"].astype(str)) + "\n",
+            encoding="utf-8",
+        )
+        command = [
+            resolved_executable,
+            "--bfile",
+            str(bfile),
+            "--clump",
+            str(snp_file),
+            "--clump-p1",
+            str(clump_config.get("p1", 1.0)),
+            "--clump-p2",
+            str(clump_config.get("p2", 1.0)),
+            "--clump-r2",
+            str(clump_config.get("r2", 0.001)),
+            "--clump-kb",
+            str(clump_config.get("distance_kb", 10000)),
+            "--out",
+            str(out_prefix),
+        ]
+        proc = subprocess.run(
+            command,
+            capture_output=True,
+            text=True,
+            encoding="utf-8",
+            errors="replace",
+            timeout=int(clump_config.get("timeout_seconds", 1800)),
+        )
+        clumped_path = out_prefix.with_suffix(".clumped")
+        if proc.returncode != 0 or not clumped_path.exists():
+            return frame, {
+                "enabled": True,
+                "status": "failed",
+                "method": "plink",
+                "reason": (proc.stderr or proc.stdout)[-2000:],
+            }
+        clumped = pd.read_csv(clumped_path, sep=r"\s+")
+        keep_snps = set(clumped["SNP"].astype(str))
+        result = frame[frame["snp"].astype(str).isin(keep_snps)].copy()
+        return result.reset_index(drop=True), {
+            "enabled": True,
+            "status": "completed",
+            "method": "plink_ld_clump",
+            "r2": float(clump_config.get("r2", 0.001)),
+            "distance_kb": float(clump_config.get("distance_kb", 10000)),
+            "removed": int(len(frame) - len(result)),
+        }
 
 
 def _ivw(frame: pd.DataFrame) -> dict:
@@ -341,6 +512,31 @@ def run(config: dict, out_dir: Path, skip_r: bool = False) -> dict:
             f"no exposure instruments passed p <= {p_threshold}; "
             "relax p_threshold or provide pre-selected SNPs"
         )
+    clump_config = config.get("clump", {}) or {}
+    clump_summary: dict
+    if clump_config.get("enabled", True):
+        if clump_config.get("bfile"):
+            exposure, clump_summary = _plink_clump(exposure, clump_config)
+        else:
+            exposure, clump_method, removed = _distance_clump(
+                exposure,
+                float(clump_config.get("distance_kb", 10000)),
+            )
+            clump_summary = {
+                "enabled": True,
+                "status": (
+                    "completed"
+                    if clump_method != "not_available_no_position"
+                    else "not_available"
+                ),
+                "method": clump_method,
+                "removed": int(removed),
+                "distance_kb": float(
+                    clump_config.get("distance_kb", 10000)
+                ),
+            }
+    else:
+        clump_summary = {"enabled": False, "status": "disabled", "removed": 0}
     harmonised = harmonise(exposure, outcome)
     if len(harmonised) < 2:
         raise ValueError("fewer than two valid instruments after harmonisation")
@@ -379,11 +575,16 @@ def run(config: dict, out_dir: Path, skip_r: bool = False) -> dict:
         "status": "completed",
         "n_exposure_snps": int(len(exposure)),
         "n_harmonised_snps": int(len(harmonised)),
+        "clumping": clump_summary,
         "incompatible_snps": int(
-            (harmonised.get("allele_status", "") == "incompatible").sum()
-        )
-        if "allele_status" in harmonised.columns
-        else 0,
+            harmonised.attrs.get("incompatible_snps", 0)
+        ),
+        "ambiguous_palindromic_snps": int(
+            harmonised.attrs.get("ambiguous_palindromic_snps", 0)
+        ),
+        "missing_eaf_palindromic_snps": int(
+            harmonised.attrs.get("missing_eaf_palindromic_snps", 0)
+        ),
         "p_threshold": p_threshold,
         "primary": ivw,
         "methods": methods.to_dict(orient="records"),

@@ -68,7 +68,7 @@ python scripts\run_mr_coloc.py --config config\mr_coloc.json --output <OUTPUT_DI
 liverbio mr --config config\mr_coloc.json --output <OUTPUT_DIR>\mr
 ```
 
-MR 的 R 后端可选依赖 `MendelianRandomization` 和 `coloc`；未安装时 Python 会输出 IVW、weighted median、MR-Egger、异质性和 leave-one-out 结果。
+MR 的 R 后端可选依赖 `MendelianRandomization` 和 `coloc`；未安装时 Python 会输出 IVW、weighted median、MR-Egger、异质性和 leave-one-out 结果。配置 `clump.bfile` 与 `clump.plink_executable` 时需要本地 PLINK 1.9 和 LD 参考数据；否则使用透明标记的距离剪枝，并自动剔除链方向不确定的回文 SNP。
 
 **检查：**
 

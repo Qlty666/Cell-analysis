@@ -264,9 +264,11 @@ set LIVER_MR_CONFIG=config\mr_coloc.json
 - 基因级模型比较：Elastic Net、LASSO、Random Forest、GBM、SVM、MLP，以及可选的 XGBoost。
 - 重复分层交叉验证、独立队列外部验证、ROC 95% 置信区间、校准曲线、决策曲线、Brier score 和可选 SHAP。
 - 可选 immune deconvolution、Cox 生存分析和 `integrated_priority.csv` 证据综合排序。
-- 支持 `evidence_files`，把 PPI hub、预后、免疫相关性等外部证据按权重并入最终候选靶点排序。
+- 支持 `evidence_files`，把 PPI hub、预后、免疫相关性等外部证据按权重并入最终候选靶点排序；推荐使用 `{"path": "...", "score_column": "ppi_hub_score"}` 明确指定评分列，避免误用第一个数值列。
 
-本地孟德尔随机化和共定位模块 `liverbio mr` 接受导出的 eQTL/GWAS summary statistics，输出 harmonised instruments、IVW、weighted median、MR-Egger、Cochran Q、Egger intercept、leave-one-out、MR-PRESSO/coloc 的 R 后端结果（依赖安装时可用）。输入格式和数据列映射见 `config/mr_coloc.example.json`。
+本地孟德尔随机化和共定位模块 `liverbio mr` 接受导出的 eQTL/GWAS summary statistics，输出 harmonised instruments、IVW、weighted median、MR-Egger、Cochran Q、Egger intercept、leave-one-out 和可选 coloc 结果。默认会做距离剪枝；配置 `clump.bfile` 和 `clump.plink_executable` 时会改用真实 LD clumping。回文 SNP 缺少 EAF 或处于链方向不确定区时会被明确剔除并记录，不再静默纳入 MR。输入格式和数据列映射见 `config/mr_coloc.example.json`。
+
+GEO 下载器在没有补充 count matrix 时会回退解析 `series_matrix` 表达表，输出 gene x sample TSV 并按 normalized/microarray 路径处理；如果补充 count matrix 存在，仍优先使用 count matrix。
 
 单细胞流程还增加了以下可选能力：
 

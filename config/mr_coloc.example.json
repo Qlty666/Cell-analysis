@@ -26,6 +26,13 @@
     "position": "BP"
   },
   "p_threshold": 5e-6,
+  "clump": {
+    "enabled": true,
+    "distance_kb": 10000,
+    "r2": 0.001,
+    "bfile": null,
+    "plink_executable": null
+  },
   "coloc": {
     "enabled": true,
     "exposure_n": 31684,
