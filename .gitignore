@@ -25,9 +25,19 @@ Thumbs.db
 # Local environment and secrets
 .env
 .env.*
+.git-credentials
+.netrc
+.npmrc
+.pypirc
 *.pem
 *.p12
 *.key
+*.crt
+*.cer
+*.der
+*.jks
+*.keystore
+*.kdbx
 
 # Web runtime files
 web/history.json
@@ -75,7 +85,9 @@ portable/
 # Validation artifacts
 *.log
 *.tmp
+validation_output/
 
 # Scratch / helper files that must never be committed
 scripts/_test_h5ad_reader.R
+scripts/_test_*.R
 .tmp_*
