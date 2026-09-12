@@ -1,4 +1,4 @@
 {
-  "analysis_root": "D:\\analysis_workspace",
-  "inventory_script": "D:\\analysis_workspace\\scripts\\identify_imported_results.ps1"
+  "analysis_root": "<ANALYSIS_ROOT>",
+  "inventory_script": "<ANALYSIS_ROOT>/scripts/identify_imported_results.ps1"
 }

@@ -30,7 +30,7 @@
 **软件：**
 
 - Python 3.10+，推荐 3.11。
-- R 4.5+，且 `Rscript.exe` 已加入 `PATH`。若 R 装在 `D:\R\R-4.5.1` 等非默认目录，需要把 `D:\R\R-4.5.1\bin` 加入 `PATH`。
+- R 4.5+，且 `Rscript.exe` 已加入 `PATH`。若 R 安装在自定义目录，需要把对应的 `bin` 目录加入 `PATH`。
 - 能访问 NCBI GEO / EBI 的网络连接（下载数据用）。
 
 **Python 包：**
