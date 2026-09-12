@@ -408,6 +408,55 @@ def run_ml_analysis(ml_model: str = "xgb") -> None:
         log(f"warning: optional ML analysis failed (exit {result.returncode})")
 
 
+def run_advanced_analysis() -> None:
+    """Run the optional multi-cohort analysis when a config is supplied."""
+    config_path = os.environ.get("LIVER_ADVANCED_CONFIG", "").strip()
+    if not config_path:
+        return
+    log("running optional advanced multi-cohort analysis")
+    result = subprocess.run(
+        [
+            sys.executable,
+            str(ROOT / "scripts" / "run_advanced_analysis.py"),
+            "--config",
+            config_path,
+            "--output",
+            str(OUTPUT_ROOT / "results" / "advanced"),
+        ],
+        cwd=ROOT,
+        env=os.environ.copy(),
+        check=False,
+    )
+    if result.returncode != 0:
+        log(
+            "warning: optional advanced analysis failed "
+            f"(exit {result.returncode})"
+        )
+
+
+def run_mr_coloc() -> None:
+    """Run the optional local MR/colocalisation module."""
+    config_path = os.environ.get("LIVER_MR_CONFIG", "").strip()
+    if not config_path:
+        return
+    log("running optional MR/colocalisation analysis")
+    result = subprocess.run(
+        [
+            sys.executable,
+            str(ROOT / "scripts" / "run_mr_coloc.py"),
+            "--config",
+            config_path,
+            "--output",
+            str(OUTPUT_ROOT / "results" / "mr_coloc"),
+        ],
+        cwd=ROOT,
+        env=os.environ.copy(),
+        check=False,
+    )
+    if result.returncode != 0:
+        log(f"warning: optional MR analysis failed (exit {result.returncode})")
+
+
 def run_pipeline(
     force: bool,
     skip_download: bool,
@@ -508,6 +557,8 @@ def run_pipeline(
 
     verify_outputs()
     run_ml_analysis(ml_model)
+    run_advanced_analysis()
+    run_mr_coloc()
     if os.environ.get("LIVER_RUN_CELLCHAT", "").lower() == "yes":
         run_cellchat(species)
     generate_report()

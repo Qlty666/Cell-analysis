@@ -28,7 +28,10 @@ def run_redock(cfg: ResolvedConfig, log) -> dict:
         row["id"]: row for row in _read_csv(manifest)
         if row.get("pdbqt") and Path(row["pdbqt"]).exists()
     }
-    tasks = [manifest_rows[i] for i in top_ids if i in manifest_rows]
+    selected_manifest = {
+        key: value for key, value in manifest_rows.items() if key in top_ids
+    }
+    tasks = list(selected_manifest.values())
     if not tasks:
         raise DockingError("no prepared PDBQT files found for top hits")
 
@@ -43,15 +46,31 @@ def run_redock(cfg: ResolvedConfig, log) -> dict:
     if not cfg.get("redock", "resume", True) and results_path.exists():
         results_path.unlink()
 
-    done: set[str] = set()
+    done: set[tuple[str, str]] = set()
     if cfg.get("redock", "resume", True) and results_path.exists():
         done = {
-            row["id"] for row in _read_csv(results_path)
+            (
+                str(row.get("id", "")),
+                str(row.get("replicate", "1") or "1"),
+            )
+            for row in _read_csv(results_path)
             if row.get("status") == "ok"
         }
 
     max_workers = int(cfg.get("redock", "max_workers", 4))
-    pending = [row for row in tasks if row["id"] not in done]
+    tasks = []
+    for row in selected_manifest.values():
+        task = dict(row)
+        task.setdefault("replicate", 1)
+        task.setdefault("seed", cfg.get("redock", "seed", cfg.get("docking", "seed", 42)))
+        tasks.append(task)
+    pending = [
+        row for row in tasks
+        if (
+            str(row.get("id", "")),
+            str(row.get("replicate", "1")),
+        ) not in done
+    ]
     log.info(
         "redocking %s top hits with exhaustiveness %s",
         len(pending),

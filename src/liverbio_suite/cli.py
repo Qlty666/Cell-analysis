@@ -20,6 +20,8 @@ ENTRYPOINTS = {
     "docking": ROOT / "scripts" / "run_docking.py",
     "full": ROOT / "scripts" / "run_full_pipeline.py",
     "datasets": ROOT / "scripts" / "search_datasets.py",
+    "advanced": ROOT / "scripts" / "run_advanced_analysis.py",
+    "mr": ROOT / "scripts" / "run_mr_coloc.py",
     "web": ROOT / "web" / "web_ui.py",
     "analysis-export": ROOT / "scripts" / "export_to_analysis.py",
     "install-skills": ROOT / "scripts" / "install_codex_skills.py",
@@ -37,6 +39,8 @@ FEATURE_SUMMARY = (
     "docking:    virtual screening, knockout, network and FAERS commands\n"
     "full:       integrated expression-to-docking pipeline\n"
     "datasets:   GEO / BioStudies / Expression Atlas search and download\n"
+    "advanced:   multi-cohort WGCNA, gene-level ML, immune/survival analysis\n"
+    "mr:         local MR/IVW/weighted-median/Egger and colocalisation\n"
     "web:        local web console for the whole suite\n"
     "analysis-export: export finished runs into a Codex analysis workspace\n"
     "doctor:     environment check (pipeline, docking, or all)\n"
@@ -59,6 +63,8 @@ Examples:
   liverbio full --accession GSE125449 --output ../liver_cancer
   liverbio docking pipeline --config config/docking_config.json
   liverbio datasets --disease "liver cancer" --max-results 20
+  liverbio advanced --config config/advanced_analysis.json --output ../advanced_run
+  liverbio mr --config config/mr_coloc.json --output ../mr_run
   liverbio web --page full
   liverbio analysis-export --source ../y2/GSE125449 --analysis-root <LOCAL_ROOT> analysis
   liverbio doctor

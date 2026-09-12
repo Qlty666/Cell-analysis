@@ -18,7 +18,9 @@ from __future__ import annotations
 import html
 import logging
 import os
+import re
 import shutil
+import shlex
 import subprocess
 from pathlib import Path
 
@@ -65,6 +67,11 @@ def _empty_md_metrics() -> dict:
         "hbonds_protein_ligand_tail_std": "",
         "rmsf_contact_residue_mean_nm": "",
         "binding_site_residues": "",
+        "pca_eigenvalue_top1_nm2": "",
+        "pca_eigenvalue_top2_nm2": "",
+        "fel_min_kj_mol": "",
+        "mmpbsa_delta_total_kj_mol": "",
+        "mmpbsa_status": "not_configured",
         "stability_label": "",
         "equil_ns": "",
         "prod_ns": "",
@@ -1029,6 +1036,24 @@ def _analyze_gromacs_output(cfg: ResolvedConfig, run_dir: Path) -> dict:
                     float(contact_mean), 6
                 )
         metrics["stability_label"] = _stability_label(metrics, cfg)
+        try:
+            metrics.update(
+                _analyze_pca_fel(
+                    cfg,
+                    run_dir,
+                    gmx,
+                    tpr,
+                    xtc,
+                    ndx,
+                )
+            )
+        except Exception as exc:
+            LOG.warning("PCA/FEL analysis failed for %s: %s", run_dir, exc)
+        try:
+            metrics.update(_run_mmpbsa(cfg, run_dir, tpr, xtc))
+        except Exception as exc:
+            metrics["mmpbsa_status"] = "failed"
+            LOG.warning("MM/PBSA analysis failed for %s: %s", run_dir, exc)
     if metrics.get("time_ns") == "" and protein_last_time is not None:
         metrics["time_ns"] = protein_last_time
     if cfg.get("md_simulation", "figures", True):
@@ -1056,7 +1081,188 @@ def _store_mean_tail(
     metrics[f"{key}_mean{unit}"] = float(np.mean(values))
     if len(tail):
         metrics[f"{key}_tail_mean{unit}"] = float(np.mean(tail))
-        metrics[f"{key}_tail_std{unit}"] = float(np.std(tail))
+    metrics[f"{key}_tail_std{unit}"] = float(np.std(tail))
+
+
+def _analyze_pca_fel(
+    cfg: ResolvedConfig,
+    run_dir: Path,
+    gmx: str,
+    tpr: Path,
+    xtc: Path,
+    ndx: Path,
+) -> dict:
+    """Compute protein PCA projections and a small Gibbs free-energy surface."""
+    if not ndx.exists():
+        return {}
+    eigenval = run_dir / "pca_eigenvalues.xvg"
+    eigenvec = run_dir / "pca_eigenvectors.trr"
+    average = run_dir / "pca_average.pdb"
+    covar = run_command(
+        [
+            gmx,
+            "covar",
+            "-s",
+            str(tpr),
+            "-f",
+            str(xtc),
+            "-n",
+            str(ndx),
+            "-o",
+            str(eigenval),
+            "-v",
+            str(eigenvec),
+            "-av",
+            str(average),
+        ],
+        timeout=_timeout(cfg),
+        cwd=run_dir,
+        env=_gmx_env(gmx, cfg),
+        stdin_text="Protein\nProtein\n",
+    )
+    if covar.returncode != 0 or not eigenval.exists():
+        return {}
+    projection = run_dir / "pca_projection_2d.xvg"
+    anaeig = run_command(
+        [
+            gmx,
+            "anaeig",
+            "-s",
+            str(tpr),
+            "-f",
+            str(xtc),
+            "-n",
+            str(ndx),
+            "-eig",
+            str(eigenval),
+            "-v",
+            str(eigenvec),
+            "-2d",
+            str(projection),
+            "-first",
+            "1",
+            "-last",
+            "2",
+        ],
+        timeout=_timeout(cfg),
+        cwd=run_dir,
+        env=_gmx_env(gmx, cfg),
+        stdin_text="Protein\n",
+    )
+    if anaeig.returncode != 0 or not projection.exists():
+        return {}
+    data = parse_xvg(projection)
+    if data is None or len(data) < 5 or data.shape[1] < 3:
+        return {}
+    pc1 = data[:, 1].astype(float)
+    pc2 = data[:, 2].astype(float)
+    valid = np.isfinite(pc1) & np.isfinite(pc2)
+    if valid.sum() < 5:
+        return {}
+    hist, x_edges, y_edges = np.histogram2d(
+        pc1[valid],
+        pc2[valid],
+        bins=max(10, min(40, int(np.sqrt(valid.sum())))),
+    )
+    probability = hist / max(hist.sum(), 1.0)
+    with np.errstate(divide="ignore", invalid="ignore"):
+        free_energy = -2.494 * np.log(
+            probability / max(probability[probability > 0].max(), 1e-300)
+        )
+    free_energy[~np.isfinite(free_energy)] = np.nan
+    centers_x = (x_edges[:-1] + x_edges[1:]) / 2.0
+    centers_y = (y_edges[:-1] + y_edges[1:]) / 2.0
+    rows = []
+    for i, x_value in enumerate(centers_x):
+        for j, y_value in enumerate(centers_y):
+            if np.isfinite(free_energy[i, j]):
+                rows.append(
+                    {
+                        "PC1_nm": float(x_value),
+                        "PC2_nm": float(y_value),
+                        "Gibbs_kJ_mol": float(free_energy[i, j]),
+                    }
+                )
+    if rows:
+        pd.DataFrame(rows).to_csv(run_dir / "pca_fel.csv", index=False)
+    eigen = parse_xvg(eigenval)
+    top1 = ""
+    top2 = ""
+    if eigen is not None and len(eigen) >= 1:
+        top1 = float(eigen[0, 1])
+    if eigen is not None and len(eigen) >= 2:
+        top2 = float(eigen[1, 1])
+    metrics = {
+        "pca_eigenvalue_top1_nm2": top1,
+        "pca_eigenvalue_top2_nm2": top2,
+        "fel_min_kj_mol": (
+            float(np.nanmin(free_energy)) if np.isfinite(free_energy).any() else ""
+        ),
+    }
+    return metrics
+
+
+def _run_mmpbsa(
+    cfg: ResolvedConfig,
+    run_dir: Path,
+    tpr: Path,
+    xtc: Path,
+) -> dict:
+    """Run an optional external MM/PBSA command and parse its total energy."""
+    command_value = cfg.get("md_simulation", "mmpbsa_command")
+    if not command_value:
+        return {"mmpbsa_status": "not_configured"}
+    if isinstance(command_value, (list, tuple)):
+        command = [str(part) for part in command_value]
+    else:
+        command = shlex.split(str(command_value))
+    replacements = {
+        "{run_dir}": str(run_dir),
+        "{tpr}": str(tpr),
+        "{trajectory}": str(xtc),
+        "{topology}": str(run_dir / "topol.top"),
+        "{index}": str(run_dir / "index.ndx"),
+    }
+    command = [
+        part.format(**replacements)
+        if "{" in part
+        else part
+        for part in command
+    ]
+    result = run_command(
+        command,
+        timeout=int(
+            cfg.get("md_simulation", "mmpbsa_timeout_seconds", _timeout(cfg))
+        ),
+        cwd=run_dir,
+        env=_gmx_env(command[0], cfg),
+    )
+    log_path = run_dir / "mmpbsa.log"
+    log_path.write_text(
+        (result.stdout or "") + "\n" + (result.stderr or ""),
+        encoding="utf-8",
+    )
+    if result.returncode != 0:
+        return {"mmpbsa_status": "failed"}
+    text = (result.stdout or "") + "\n" + (result.stderr or "")
+    patterns = [
+        r"Delta\s+TOTAL\s+(-?\d+(?:\.\d+)?)",
+        r"ΔTOTAL\s+(-?\d+(?:\.\d+)?)",
+        r"TOTAL\s+(-?\d+(?:\.\d+)?)",
+    ]
+    value = ""
+    for pattern in patterns:
+        match = re.search(pattern, text, flags=re.IGNORECASE)
+        if match:
+            raw = float(match.group(1))
+            # Common gmx_MMPBSA output is kcal/mol; normalise when needed.
+            value = raw * 4.184 if "kcal" in text.lower() else raw
+            break
+    return {
+        "mmpbsa_status": "completed",
+        "mmpbsa_delta_total_kj_mol": value,
+        "mmpbsa_log": str(log_path),
+    }
 
 
 def _run_gmx_metric(

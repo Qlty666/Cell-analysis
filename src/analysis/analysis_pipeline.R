@@ -22,6 +22,73 @@ suppressWarnings(suppressPackageStartupMessages({
 options(timeout = 600)
 options(future.globals.maxSize = 10 * 1024^3)
 
+# Data-aware helpers used by bulk and pseudobulk stages. Raw count matrices
+# must use count-based models; normalised/microarray matrices must not be
+# rounded and passed to DESeq2.
+liver_is_count_matrix <- function(mat) {
+  values <- tryCatch(
+    if (inherits(mat, "sparseMatrix")) mat@x else as.numeric(mat),
+    error = function(e) numeric()
+  )
+  values <- values[is.finite(values)]
+  if (length(values) == 0 || min(values) < 0) return(FALSE)
+  all(abs(values - round(values)) < 1e-6)
+}
+
+liver_limma_de <- function(mat, meta, cond_levels, method = "limma") {
+  if (!requireNamespace("limma", quietly = TRUE)) {
+    stop("limma is required for normalised/microarray differential expression")
+  }
+  x <- as.matrix(mat)
+  x[!is.finite(x)] <- 0
+  meta$condition <- factor(
+    as.character(meta$condition),
+    levels = c(cond_levels[2], cond_levels[1])
+  )
+  if (identical(method, "limma-voom")) {
+    if (!requireNamespace("edgeR", quietly = TRUE)) {
+      stop("edgeR is required for limma-voom differential expression")
+    }
+    dge <- edgeR::DGEList(counts = round(x))
+    keep <- edgeR::filterByExpr(dge, group = meta$condition)
+    dge <- dge[keep, , keep.lib.sizes = FALSE]
+    dge <- edgeR::calcNormFactors(dge)
+    design <- model.matrix(~ condition, data = meta)
+    voom_fit <- limma::voom(dge, design, plot = FALSE)
+    fit <- limma::lmFit(voom_fit, design)
+  } else {
+    # Already-log2 arrays stay on their original scale. Raw intensity or
+    # positive non-count matrices are transformed before linear modelling.
+    if (min(x, na.rm = TRUE) >= 0 && max(x, na.rm = TRUE) > 50) {
+      x <- log2(x + 1)
+    }
+    if (requireNamespace("limma", quietly = TRUE)) {
+      x <- tryCatch(
+        limma::normalizeBetweenArrays(x),
+        error = function(e) x
+      )
+    }
+    design <- model.matrix(~ condition, data = meta)
+    fit <- limma::lmFit(x, design)
+  }
+  fit <- limma::eBayes(fit)
+  coef_name <- colnames(design)[ncol(design)]
+  top <- limma::topTable(
+    fit,
+    coef = coef_name,
+    number = Inf,
+    sort.by = "P"
+  )
+  top$gene <- rownames(top)
+  top$avg_log2FC <- top$logFC
+  top$p_val <- top$P.Value
+  top$p_val_adj <- top$adj.P.Val
+  top$baseMean <- NA_real_
+  top$pct.1 <- NA_real_
+  top$pct.2 <- NA_real_
+  top
+}
+
 # ---------------------------------------------------------------------------
 # Module loading. Top-level function definitions live in src/analysis/R/*.R.
 # The modules are located from, in order: LIVER_R_MODULES_DIR, the directory
@@ -194,9 +261,16 @@ for (arg in args) {
 }
 
 dataset_mode <- "single_cell"
+sample_level_data_type <- "unknown"
 dataset_mode_path <- ckpt_path("dataset_mode.txt")
 if (file.exists(dataset_mode_path)) {
   dataset_mode <- trimws(readLines(dataset_mode_path, warn = FALSE)[1])
+}
+sample_level_data_type_path <- ckpt_path("sample_level_data_type.txt")
+if (file.exists(sample_level_data_type_path)) {
+  sample_level_data_type <- trimws(
+    readLines(sample_level_data_type_path, warn = FALSE)[1]
+  )
 }
 
 stage_allowed <- function(code) {
@@ -252,6 +326,20 @@ if (stage_allowed("01")) run_stage("01_load_data", {
     generic <- read_generic_dataset(manifest)
     counts <- generic$counts
     meta <- generic$meta
+    sample_level_data_type <- if (
+      identical(manifest$mode, "single_cell")
+    ) {
+      "single_cell_counts"
+    } else if (liver_is_count_matrix(counts)) {
+      "counts"
+    } else {
+      "normalized_or_microarray"
+    }
+    writeLines(
+      sample_level_data_type,
+      ckpt_path("sample_level_data_type.txt")
+    )
+    log_msg("sample-level data type: ", sample_level_data_type)
     ann <- generic$ann
     if (is.null(ann)) {
       ann <- data.frame(
@@ -727,6 +815,65 @@ if (stage_allowed("03")) run_stage("03_doublets", {
   )
   colData(sce)$sample <- seurat_qc$sample
   colData(sce)$condition <- seurat_qc$condition
+
+  if (
+    dataset_mode == "single_cell" &&
+    flag_on("LIVER_DECONTX", "no") &&
+    requireNamespace("decontX", quietly = TRUE)
+  ) {
+    decontx_threshold <- param_num("LIVER_DECONTX_MAX_CONTAMINATION")
+    if (is.na(decontx_threshold)) decontx_threshold <- 0.5
+    set.seed(42)
+    sce <- tryCatch(
+      decontX::decontX(sce, batch = colData(sce)$sample),
+      error = function(e) {
+        log_msg("decontX failed: ", conditionMessage(e))
+        sce
+      }
+    )
+    if ("decontX_contamination" %in% colnames(colData(sce))) {
+      contamination <- as.numeric(sce$decontX_contamination)
+      contamination[!is.finite(contamination)] <- 0
+      contamination_table <- data.frame(
+        cell = colnames(sce),
+        sample = sce$sample,
+        condition = sce$condition,
+        contamination = contamination,
+        stringsAsFactors = FALSE
+      )
+      write.csv(
+        contamination_table,
+        stage_data_file("fig_69_decontx_contamination.csv"),
+        row.names = FALSE
+      )
+      keep_decontx <- contamination <= decontx_threshold
+      if (any(keep_decontx)) {
+        sce <- sce[, keep_decontx, drop = FALSE]
+        seurat_qc <- subset(
+          seurat_qc,
+          cells = colnames(sce)
+        )
+        log_msg(
+          "decontX retained ",
+          ncol(sce),
+          " cells with contamination <= ",
+          decontx_threshold
+        )
+      } else {
+        log_msg(
+          "decontX threshold removed every cell; retaining cells and ",
+          "marking contamination results for review"
+        )
+      }
+    } else {
+      log_msg("decontX did not return contamination scores; continuing")
+    }
+  } else if (
+    dataset_mode == "single_cell" &&
+    flag_on("LIVER_DECONTX", "no")
+  ) {
+    log_msg("decontX requested but package is not installed")
+  }
 
   if (dataset_mode == "sample_level") {
     log_msg("sample-level mode: skipping doublet detection")
@@ -1515,6 +1662,7 @@ if (stage_allowed("06")) run_stage("06_differential_expression", {
     stringsAsFactors = FALSE
   ))
   sample_counts <- table(sample_cond$condition)
+  deg <- NULL
   # Sample-level datasets already contain one column per biological sample,
   # so differential expression must be computed on the raw sample counts
   # directly instead of aggregating them into a pseudobulk matrix.
@@ -1538,54 +1686,76 @@ if (stage_allowed("06")) run_stage("06_differential_expression", {
       sample_meta$condition,
       levels = cond_levels
     )
-    dds <- tryCatch(
-      {
-        d <- DESeqDataSetFromMatrix(
-          countData = round(count_mat),
-          colData = sample_meta,
-          design = ~ condition
-        )
-        DESeq(d, quiet = TRUE)
-      },
-      error = function(e) {
-        log_msg("sample-level DESeq2 failed: ", conditionMessage(e))
-        NULL
-      }
+    de_method <- tolower(
+      Sys.getenv("LIVER_BULK_DE_METHOD", unset = "auto")
     )
-    if (!is.null(dds)) {
-      res <- results(
-        dds,
-        contrast = c("condition", cond_levels[1], cond_levels[2]),
-        alpha = de_padj,
-        independentFiltering = TRUE
+    if (!de_method %in% c("auto", "deseq2", "limma", "limma-voom")) {
+      de_method <- "auto"
+    }
+    if (de_method == "auto") {
+      de_method <- if (liver_is_count_matrix(count_mat)) {
+        "deseq2"
+      } else {
+        "limma"
+      }
+    }
+    if (de_method %in% c("limma", "limma-voom")) {
+      log_msg(
+        "sample-level dataset: using ",
+        de_method,
+        " differential expression"
       )
-      deg <- as.data.frame(res)
-      deg$gene <- rownames(deg)
-      deg$avg_log2FC <- deg$log2FoldChange
-      deg$p_val <- deg$pvalue
-      deg$p_val_adj <- deg$padj
-      deg$pct.1 <- NA_real_
-      deg$pct.2 <- NA_real_
+      deg <- liver_limma_de(count_mat, sample_meta, cond_levels, de_method)
     } else {
-      log_msg("sample-level DESeq2 failed; falling back to Seurat Wilcoxon")
-      writeLines(
-        "DESeq2 failed on sample-level counts; used Seurat Wilcoxon",
-        file.path(data_dir, "pseudobulk_warning.txt")
+      dds <- tryCatch(
+        {
+          d <- DESeqDataSetFromMatrix(
+            countData = round(count_mat),
+            colData = sample_meta,
+            design = ~ condition
+          )
+          DESeq(d, quiet = TRUE)
+        },
+        error = function(e) {
+          log_msg("sample-level DESeq2 failed: ", conditionMessage(e))
+          NULL
+        }
       )
-      deg <- tryCatch(
-        FindMarkers(
-          seurat,
-          ident.1 = cond_levels[1],
-          ident.2 = cond_levels[2],
-          test.use = "wilcox",
-          max.cells.per.ident = 3000,
-          logfc.threshold = 0,
-          min.pct = 0,
-          only.pos = FALSE,
-          verbose = FALSE
-        ),
-        error = function(e) NULL
-      )
+      if (!is.null(dds)) {
+        res <- results(
+          dds,
+          contrast = c("condition", cond_levels[1], cond_levels[2]),
+          alpha = de_padj,
+          independentFiltering = TRUE
+        )
+        deg <- as.data.frame(res)
+        deg$gene <- rownames(deg)
+        deg$avg_log2FC <- deg$log2FoldChange
+        deg$p_val <- deg$pvalue
+        deg$p_val_adj <- deg$padj
+        deg$pct.1 <- NA_real_
+        deg$pct.2 <- NA_real_
+      } else {
+        log_msg("sample-level DESeq2 failed; falling back to Seurat Wilcoxon")
+        writeLines(
+          "DESeq2 failed on sample-level counts; used Seurat Wilcoxon",
+          file.path(data_dir, "pseudobulk_warning.txt")
+        )
+        deg <- tryCatch(
+          FindMarkers(
+            seurat,
+            ident.1 = cond_levels[1],
+            ident.2 = cond_levels[2],
+            test.use = "wilcox",
+            max.cells.per.ident = 3000,
+            logfc.threshold = 0,
+            min.pct = 0,
+            only.pos = FALSE,
+            verbose = FALSE
+          ),
+          error = function(e) NULL
+        )
+      }
     }
   } else {
     use_pseudobulk <- nrow(sample_cond) >= 4 && all(sample_counts >= 2)
@@ -1643,6 +1813,37 @@ if (stage_allowed("06")) run_stage("06_differential_expression", {
       }
     }
 
+    pseudobulk_de_method <- tolower(
+      Sys.getenv("LIVER_BULK_DE_METHOD", unset = "auto")
+    )
+    if (!pseudobulk_de_method %in% c("auto", "deseq2", "limma", "limma-voom")) {
+      pseudobulk_de_method <- "auto"
+    }
+    if (pseudobulk_de_method == "auto") {
+      pseudobulk_de_method <- if (liver_is_count_matrix(bulk)) {
+        "deseq2"
+      } else {
+        "limma"
+      }
+    }
+    if (
+      use_pseudobulk &&
+      pseudobulk_de_method %in% c("limma", "limma-voom")
+    ) {
+      log_msg(
+        "using ",
+        pseudobulk_de_method,
+        " pseudobulk differential expression"
+      )
+      deg <- liver_limma_de(
+        bulk,
+        bulk_meta,
+        cond_levels,
+        pseudobulk_de_method
+      )
+      use_pseudobulk <- FALSE
+    }
+
     if (use_pseudobulk) {
       dds <- DESeqDataSetFromMatrix(
         countData = round(as.matrix(bulk)),
@@ -1679,6 +1880,8 @@ if (stage_allowed("06")) run_stage("06_differential_expression", {
       deg$p_val_adj <- deg$padj
       deg$pct.1 <- NA_real_
       deg$pct.2 <- NA_real_
+    } else if (exists("deg") && !is.null(deg)) {
+      log_msg("pseudobulk differential expression already computed")
     } else {
       log_msg("using Seurat Wilcoxon with downsampling")
       writeLines(
@@ -2020,7 +2223,7 @@ if (stage_allowed("07")) run_stage("07_enrichment", {
         gene = eg$ENTREZID,
         OrgDb = org_db,
         keyType = "ENTREZID",
-        ont = "BP",
+        ont = "ALL",
         pAdjustMethod = "BH",
         pvalueCutoff = 0.1,
         qvalueCutoff = 0.2,
@@ -2033,7 +2236,8 @@ if (stage_allowed("07")) run_stage("07_enrichment", {
       enrichKEGG(
         gene = eg$ENTREZID,
         organism = kegg_org,
-        pvalueCutoff = 0.1
+        pvalueCutoff = 0.1,
+        qvalueCutoff = 0.2
       )
     })
     if (is.null(kegg)) {
@@ -2133,7 +2337,7 @@ if (stage_allowed("07")) run_stage("07_enrichment", {
         geneList = ranked,
         OrgDb = org_db,
         keyType = "ENTREZID",
-        ont = "BP",
+        ont = "ALL",
         minGSSize = 10,
         maxGSSize = 500,
         pvalueCutoff = 0.1,
@@ -2150,6 +2354,7 @@ if (stage_allowed("07")) run_stage("07_enrichment", {
         minGSSize = 10,
         maxGSSize = 500,
         pvalueCutoff = 0.1,
+        qvalueCutoff = 0.2,
         verbose = FALSE
       )
     })
@@ -3021,6 +3226,138 @@ if (stage_allowed("08")) run_stage("08_publication_analyses", {
     }
   }
 
+  }
+
+  subcluster_types <- Sys.getenv(
+    "LIVER_SUBCLUSTER_CELLTYPES",
+    unset = ""
+  )
+  if (dataset_mode == "single_cell" && nzchar(trimws(subcluster_types))) {
+    requested_subclusters <- trimws(
+      strsplit(subcluster_types, ",", fixed = TRUE)[[1]]
+    )
+    requested_subclusters <- requested_subclusters[
+      nzchar(requested_subclusters)
+    ]
+    available_subclusters <- intersect(
+      requested_subclusters,
+      unique(as.character(seurat$celltype_annot))
+    )
+    subcluster_resolution <- param_num("LIVER_SUBCLUSTER_RESOLUTION")
+    if (is.na(subcluster_resolution)) subcluster_resolution <- 0.4
+    for (subcluster_type in available_subclusters) {
+      safe_subcluster <- gsub(
+        "[^A-Za-z0-9]+",
+        "_",
+        subcluster_type
+      )
+      subset_obj <- tryCatch(
+        subset(
+          seurat,
+          subset = celltype_annot == subcluster_type
+        ),
+        error = function(e) NULL
+      )
+      if (is.null(subset_obj) || ncol(subset_obj) < 50) {
+        log_msg(
+          "subcluster skipped for ",
+          subcluster_type,
+          ": fewer than 50 cells"
+        )
+        next
+      }
+      tryCatch(
+        {
+          subset_obj <- NormalizeData(subset_obj, verbose = FALSE)
+          subset_obj <- FindVariableFeatures(
+            subset_obj,
+            nfeatures = min(2000, max(10, nrow(subset_obj) - 1)),
+            verbose = FALSE
+          )
+          subset_obj <- ScaleData(
+            subset_obj,
+            features = VariableFeatures(subset_obj),
+            verbose = FALSE
+          )
+          subset_obj <- RunPCA(
+            subset_obj,
+            npcs = min(30, ncol(subset_obj) - 1),
+            verbose = FALSE
+          )
+          subcluster_dims <- seq_len(
+            max(1, min(20, ncol(subset_obj) - 1))
+          )
+          subset_obj <- FindNeighbors(
+            subset_obj,
+            dims = subcluster_dims,
+            verbose = FALSE
+          )
+          subset_obj <- FindClusters(
+            subset_obj,
+            resolution = subcluster_resolution,
+            verbose = FALSE
+          )
+          subset_obj <- RunUMAP(
+            subset_obj,
+            dims = subcluster_dims,
+            seed.use = 42,
+            verbose = FALSE
+          )
+          p_subcluster <- DimPlot(
+            subset_obj,
+            reduction = "umap",
+            group.by = "seurat_clusters",
+            label = TRUE
+          ) +
+            ggtitle(paste0(subcluster_type, " subclusters"))
+          save_fig(
+            file.path(
+              fig_dir,
+              paste0("fig_69_subcluster_", safe_subcluster, "_umap.png")
+            ),
+            p_subcluster,
+            width = 8,
+            height = 7,
+            dpi = 150
+          )
+          markers <- FindAllMarkers(
+            subset_obj,
+            only.pos = TRUE,
+            min.pct = 0.1,
+            logfc.threshold = 0.25,
+            verbose = FALSE
+          )
+          if (nrow(markers) > 0) {
+            write.csv(
+              markers,
+              stage_data_file(
+                paste0(
+                  "fig_69_subcluster_",
+                  safe_subcluster,
+                  "_markers.csv"
+                )
+              ),
+              row.names = FALSE
+            )
+          }
+          log_msg(
+            "subcluster analysis complete for ",
+            subcluster_type,
+            ": ",
+            length(unique(subset_obj$seurat_clusters)),
+            " clusters"
+          )
+        },
+        error = function(e) {
+          log_msg(
+            "subcluster analysis failed for ",
+            subcluster_type,
+            ": ",
+            conditionMessage(e)
+          )
+        }
+      )
+    }
   }
 
   saveRDS(seurat, ckpt_path("seurat_annotated.rds"))

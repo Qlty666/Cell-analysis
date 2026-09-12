@@ -85,6 +85,11 @@ def main(argv: list[str] | None = None) -> int:
         "cpu": args.cpu,
         "max_workers": args.max_workers,
         "seed": args.seed,
+        "seeds": args.seeds,
+        "replicates": args.replicates,
+        "positive_control_pdbqt": args.positive_control_pdbqt,
+        "positive_control_id": args.positive_control_id,
+        "positive_control_max_affinity": args.positive_control_max_affinity,
         "max_ligands": args.max_ligands,
         "cutoff": args.cutoff,
         "moderate_cutoff": args.moderate_cutoff,
@@ -275,6 +280,23 @@ def _add_common(
     sub.add_argument("--cpu", type=int)
     sub.add_argument("--max-workers", type=int)
     sub.add_argument("--seed", type=int)
+    sub.add_argument(
+        "--seeds",
+        nargs="+",
+        type=int,
+        help="seed list used across replicate docking runs",
+    )
+    sub.add_argument("--replicates", type=int, help="docking replicates per ligand")
+    sub.add_argument(
+        "--positive-control-pdbqt",
+        help="prepared known ligand used for docking calibration",
+    )
+    sub.add_argument("--positive-control-id", help="positive-control display id")
+    sub.add_argument(
+        "--positive-control-max-affinity",
+        type=float,
+        help="maximum acceptable positive-control Vina affinity",
+    )
     sub.add_argument("--max-ligands", type=int)
     sub.add_argument("--cutoff", type=float)
     sub.add_argument("--moderate-cutoff", type=float)

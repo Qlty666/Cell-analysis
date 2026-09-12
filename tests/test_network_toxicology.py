@@ -119,6 +119,41 @@ class TestNetworkToxicology(unittest.TestCase):
                 frame.loc[frame["gene"] == "A", "ppi_hub_score"].iloc[0],
                 frame.loc[frame["gene"] == "E", "ppi_hub_score"].iloc[0],
             )
+            self.assertIn("ppi_pagerank", frame.columns)
+            self.assertIn("ppi_mcc", frame.columns)
+
+    def test_ppi_consensus_metrics(self):
+        with tempfile.TemporaryDirectory() as tmp:
+            path = Path(tmp) / "edges.tsv"
+            pd.DataFrame(
+                {
+                    "protein1": ["A", "A", "B", "C"],
+                    "protein2": ["B", "C", "D", "D"],
+                }
+            ).to_csv(path, sep="\t", index=False)
+            frame = ppi_hub_scores(path, genes=["A", "B", "C", "D"])
+            expected = {
+                "ppi_degree",
+                "ppi_betweenness",
+                "ppi_closeness",
+                "ppi_eigenvector",
+                "ppi_pagerank",
+                "ppi_mcc",
+                "ppi_clustering",
+                "ppi_hub_score",
+            }
+            self.assertTrue(expected.issubset(frame.columns))
+
+    def test_json_target_table(self):
+        with tempfile.TemporaryDirectory() as tmp:
+            path = Path(tmp) / "targets.json"
+            path.write_text(
+                '[{"gene": "ALB", "source": "CTD"}]',
+                encoding="utf-8",
+            )
+            frame = read_target_table(path)
+            self.assertEqual(frame.iloc[0]["gene"], "ALB")
+            self.assertEqual(frame.iloc[0]["source"], "CTD")
 
     def test_gene_column_prefers_gene_names_over_source(self):
         with tempfile.TemporaryDirectory() as tmp:

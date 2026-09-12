@@ -34,6 +34,11 @@
     "cpu": 4,
     "max_workers": 4,
     "seed": 42,
+    "seeds": [],
+    "replicates": 1,
+    "positive_control_pdbqt": null,
+    "positive_control_id": "positive_control",
+    "positive_control_max_affinity": null,
     "timeout_seconds": 600,
     "resume": true
   },
@@ -72,6 +77,8 @@
     "maxwarn": 20,
     "contact_cutoff_nm": 0.6,
     "equilibrate_fraction": 0.5,
+    "mmpbsa_command": null,
+    "mmpbsa_timeout_seconds": 7200,
     "rmsd_stable_std_nm": 0.15,
     "rg_stable_std_nm": 0.05,
     "sasa_stable_std_nm2": 1.0

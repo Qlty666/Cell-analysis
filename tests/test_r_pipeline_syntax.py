@@ -71,7 +71,15 @@ def _r_scripts() -> list[Path]:
 def _module_scripts() -> list[Path]:
     if not R_MODULES_DIR.is_dir():
         return []
-    return sorted(R_MODULES_DIR.glob("*.R"))
+    # Some files in this directory are standalone entry points rather than
+    # sourceable helper modules. They are syntax-checked by the orchestration
+    # tests and by Rscript parsing, but must not be sourced without args.
+    entrypoints = {"advanced_bulk.R", "mr_coloc.R"}
+    return sorted(
+        path
+        for path in R_MODULES_DIR.glob("*.R")
+        if path.name not in entrypoints
+    )
 
 
 def _run_r(

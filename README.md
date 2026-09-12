@@ -8,6 +8,7 @@
 - 虚拟筛选（CADD）：靶点证据收集、受体/配体准备、AutoDock Vina 并行对接、命中排序、精细重对接、ML/DL 重打分和 MD/外部工具交接。
 - 独立分子对接：单独运行受体/配体准备、AutoDock Vina 对接、结果分析、精细重对接和 HTML 报告，不依赖虚拟筛选的旁路分析。
 - 全自动集成流水线：从表达分析直接筛选关键基因/蛋白，再自动完成证据富集、虚拟敲除、虚拟筛选、MD/ML/工具交接、网络毒理学/FAERS 和细胞反馈，最终输出集成报告和湿实验验证方案。
+- 高级多队列分析：样本级与基因级数据识别、limma/ComBat、WGCNA、多模型机器学习、外部验证、免疫浸润/生存分析和本地 MR/共定位。
 
 ## 1. 项目解决什么问题
 
@@ -238,6 +239,45 @@ liverbio analysis-export GSE125449 ^
   --remember-analysis-root
 liverbio analysis-export GSE125449
 ```
+
+### 2.10 高级多队列分析与 MR/共定位
+
+新增 `liverbio advanced`，用于单细胞流程之外的多队列、基因级验证。该模块不会把细胞类型比例误当作基因级分类特征，并会显式区分 raw counts、normalized 表达和 microarray：
+
+```text
+liverbio advanced --config config/advanced_analysis.json --output <OUTPUT_DIR>\advanced
+liverbio mr --config config/mr_coloc.json --output <OUTPUT_DIR>\mr
+```
+
+表达分析主流程也可通过环境变量自动衔接这两个可选模块：
+
+```text
+set LIVER_ADVANCED_CONFIG=config\advanced_analysis.json
+set LIVER_MR_CONFIG=config\mr_coloc.json
+```
+
+高级分析模块包含：
+
+- 发现有队列和独立验证队列读取、样本对齐、count / normalized / microarray 类型识别。
+- Python Welch 检验回退；R 可用时使用 limma，按需使用 `sva::ComBat`，并输出 `deg_primary.csv`。
+- WGCNA 软阈值、模块-性状相关、kME hub 基因和 `wgcna_hubs.csv`。
+- 基因级模型比较：Elastic Net、LASSO、Random Forest、GBM、SVM、MLP，以及可选的 XGBoost。
+- 重复分层交叉验证、独立队列外部验证、ROC 95% 置信区间、校准曲线、决策曲线、Brier score 和可选 SHAP。
+- 可选 immune deconvolution、Cox 生存分析和 `integrated_priority.csv` 证据综合排序。
+- 支持 `evidence_files`，把 PPI hub、预后、免疫相关性等外部证据按权重并入最终候选靶点排序。
+
+本地孟德尔随机化和共定位模块 `liverbio mr` 接受导出的 eQTL/GWAS summary statistics，输出 harmonised instruments、IVW、weighted median、MR-Egger、Cochran Q、Egger intercept、leave-one-out、MR-PRESSO/coloc 的 R 后端结果（依赖安装时可用）。输入格式和数据列映射见 `config/mr_coloc.example.json`。
+
+单细胞流程还增加了以下可选能力：
+
+- `LIVER_DECONTX=yes` 时执行 ambient RNA 校正并输出 `fig_69_decontx_contamination.csv`。
+- `LIVER_SUBCLUSTER_CELLTYPES=Fibroblast,Hepatocyte` 时对指定细胞类型重新聚类并输出 UMAP 与 marker 表。
+- CellChat 在存在两个条件时自动生成条件特异通讯网络、差异互作、通路排名和 centrality 表。
+- sample-level 数据可通过 `LIVER_BULK_DE_METHOD=auto|deseq2|limma|limma-voom` 明确选择差异表达方法，避免把标准化表达矩阵强行四舍五入后送入 DESeq2。
+
+网络毒理学现在支持 CSV、TSV、JSON、JSONL 和目录自动发现，并增加 closeness、eigenvector、PageRank、MCC 和 consensus PPI hub 评分；设置 `network_toxicology.run_enrichment=true` 可对交集基因运行 GO/KEGG。
+
+虚拟筛选默认保持单次运行；在配置中设置 `docking.seeds` 和 `docking.replicates` 可执行多随机种子重复，分析阶段会输出中位亲和力、标准差、重复稳定性和 consensus rank。`docking.positive_control_pdbqt` 与 `docking.positive_control_max_affinity` 可执行已知配体对照。MD 可选执行蛋白 PCA/FEL，并通过 `md_simulation.mmpbsa_command` 接入本地 gmx_MMPBSA 或 Amber MM/PBSA 命令。
 
 ## 3. 安装方法
 

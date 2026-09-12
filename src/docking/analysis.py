@@ -61,7 +61,46 @@ def analyze_results(cfg: ResolvedConfig, log):
     ok = df[
         (df.get("status", "") == "ok") & df["affinity"].notna()
     ].copy()
-    ok = ok.sort_values("affinity", na_position="last")
+    has_replicates = (
+        "replicate" in ok.columns
+        and ok["replicate"].astype(str).nunique(dropna=False) > 1
+    ) or ok["id"].astype(str).duplicated().any()
+    if has_replicates:
+        stats = (
+            ok.groupby("id", dropna=False)["affinity"]
+            .agg(
+                affinity_median="median",
+                affinity_best="min",
+                affinity_sd="std",
+                n_replicates="count",
+            )
+            .reset_index()
+        )
+        ok = (
+            ok.sort_values(["id", "affinity"], na_position="last")
+            .drop_duplicates("id", keep="first")
+            .merge(stats, on="id", how="left")
+        )
+        ok["affinity"] = pd.to_numeric(
+            ok["affinity_median"],
+            errors="coerce",
+        )
+        ok["affinity_sd"] = pd.to_numeric(
+            ok["affinity_sd"],
+            errors="coerce",
+        ).fillna(0.0)
+        ok["replicate_stability"] = 1.0 / (1.0 + ok["affinity_sd"])
+    else:
+        ok["affinity_best"] = ok["affinity"]
+        ok["affinity_median"] = ok["affinity"]
+        ok["affinity_sd"] = 0.0
+        ok["n_replicates"] = 1
+        ok["replicate_stability"] = 1.0
+    ok = ok.sort_values(
+        ["affinity", "replicate_stability", "id"],
+        ascending=[True, False, True],
+        na_position="last",
+    )
     ok["rank"] = np.arange(1, len(ok) + 1)
 
     cutoff = float(cfg.get("analysis", "cutoff", -7.0))
@@ -129,8 +168,13 @@ def analyze_results(cfg: ResolvedConfig, log):
             ).sum()
         ),
         "weak_hits": int((ok["affinity"] > moderate_cutoff).sum()),
-        "best_affinity": float(ok["affinity"].min()) if len(ok) else None,
+        "best_affinity": (
+            float(pd.to_numeric(ok["affinity_best"], errors="coerce").min())
+            if len(ok)
+            else None
+        ),
         "median_affinity": float(ok["affinity"].median()) if len(ok) else None,
+        "replicate_consensus": bool(has_replicates),
         "reports_dir": str(reports_dir),
     }
     write_json(reports_dir / "summary.json", summary)
