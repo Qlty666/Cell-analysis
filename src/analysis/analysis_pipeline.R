@@ -330,6 +330,15 @@ if (stage_allowed("01")) run_stage("01_load_data", {
       identical(manifest$mode, "single_cell")
     ) {
       "single_cell_counts"
+    } else if (
+      identical(
+        as.character(
+          if (is.null(manifest$data_type)) "" else manifest$data_type
+        ),
+        "microarray_or_normalized"
+      )
+    ) {
+      "normalized_or_microarray"
     } else if (liver_is_count_matrix(counts)) {
       "counts"
     } else {
@@ -1539,25 +1548,97 @@ if (stage_allowed("05")) run_stage("05_annotation", {
   ))
   prop_mat <- as.matrix(xtabs(Freq ~ CellType + Condition, data = prop_tbl))
   cond_names <- colnames(prop_mat)
+  sample_condition <- unique(data.frame(
+    sample = as.character(seurat$sample),
+    condition = as.character(seurat$condition),
+    stringsAsFactors = FALSE
+  ))
+  sample_condition <- sample_condition[
+    !duplicated(sample_condition$sample),
+    ,
+    drop = FALSE
+  ]
+  rownames(sample_condition) <- sample_condition$sample
+  sample_celltype_counts <- table(
+    sample = as.character(seurat$sample),
+    celltype = as.character(seurat$celltype_annot)
+  )
+  sample_totals <- rowSums(sample_celltype_counts)
+  sample_props <- sweep(
+    as.matrix(sample_celltype_counts),
+    1,
+    pmax(sample_totals, 1),
+    "/"
+  )
   prop_stats <- lapply(rownames(prop_mat), function(ct) {
     row <- prop_mat[ct, , drop = TRUE]
     total <- colSums(prop_mat)
     tbl <- rbind(row, total - row)
-    ft <- tryCatch(
-      fisher.test(tbl),
-      error = function(e) NULL
-    )
+    ct_props <- if (ct %in% colnames(sample_props)) {
+      sample_props[, ct]
+    } else {
+      rep(0, nrow(sample_condition))
+    }
+    names(ct_props) <- rownames(sample_condition)
+    props_a <- ct_props[
+      sample_condition$condition == cond_names[1] &
+        !is.na(sample_condition$condition)
+    ]
+    props_b <- ct_props[
+      sample_condition$condition == cond_names[2] &
+        !is.na(sample_condition$condition)
+    ]
+    method <- "sample_level_wilcoxon"
+    pvalue <- NA_real_
+    odds_ratio <- NA_real_
+    if (
+      length(props_a) >= 2 &&
+      length(props_b) >= 2 &&
+      length(unique(c(props_a, props_b))) > 1
+    ) {
+      test <- tryCatch(
+        suppressWarnings(
+          wilcox.test(props_a, props_b, exact = FALSE)
+        ),
+        error = function(e) NULL
+      )
+      pvalue <- if (is.null(test)) NA_real_ else test$p.value
+      odds_ratio <- (
+        (mean(props_a, na.rm = TRUE) + 1e-6) /
+          (mean(props_b, na.rm = TRUE) + 1e-6)
+      )
+    } else {
+      method <- "cell_level_fisher_fallback"
+      ft <- tryCatch(fisher.test(tbl), error = function(e) NULL)
+      pvalue <- if (is.null(ft)) NA_real_ else ft$p.value
+      odds_ratio <- if (is.null(ft)) {
+        NA_real_
+      } else {
+        as.numeric(ft$estimate)
+      }
+    }
     data.frame(
       CellType = ct,
       CountA = row[1],
       CountB = row[2],
-      Pvalue = if (is.null(ft)) NA_real_ else ft$p.value,
-      OddsRatio = if (is.null(ft)) NA_real_ else as.numeric(ft$estimate),
+      MeanProportionA = mean(props_a, na.rm = TRUE),
+      MeanProportionB = mean(props_b, na.rm = TRUE),
+      SamplesA = sum(!is.na(props_a)),
+      SamplesB = sum(!is.na(props_b)),
+      Pvalue = pvalue,
+      OddsRatio = odds_ratio,
+      Method = method,
       stringsAsFactors = FALSE
     )
   })
   prop_stats_df <- do.call(rbind, prop_stats)
   prop_stats_df$Padj <- p.adjust(prop_stats_df$Pvalue, method = "BH")
+  if (any(prop_stats_df$Method == "cell_level_fisher_fallback", na.rm = TRUE)) {
+    log_msg(
+      "WARNING: some cell-type proportion tests used cell-level Fisher ",
+      "fallback because fewer than two samples or no variation were available"
+    )
+  }
   write.csv(
     prop_stats_df,
     stage_data_file("fig_18_19_celltype_proportion_stats.csv"),

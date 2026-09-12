@@ -207,9 +207,17 @@ def run_knockout(cfg: ResolvedConfig, log) -> dict:
     cell_type_specificity, specificity_score = _specificity_scores(
         mat, cell_types, log
     )
-    prognosis_hr, prognosis_score = _prognosis_scores(
-        cfg, mat.index, expression, ko, log
-    )
+    if case_cols and normal_cols:
+        prognosis_hr, prognosis_score = _prognosis_scores(
+            cfg, mat.index, expression, ko, log
+        )
+    else:
+        prognosis_hr, prognosis_score = None, None
+        if _resolve_path(cfg, ko.get("prognosis_csv")) is not None:
+            log.warning(
+                "prognosis scoring skipped: case/normal groups were not "
+                "detected, so expression direction is undefined"
+            )
     druggable_hits, druggability_score = _druggability_scores(
         cfg, mat.index, ko, log
     )

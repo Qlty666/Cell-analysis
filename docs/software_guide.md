@@ -71,9 +71,9 @@ launchers\export_to_analysis.bat GSE235863
 
 ### 高级多队列与 MR
 
-`liverbio advanced` 读取一个 discovery cohort 和任意数量的 validation cohorts，执行 ComBat/limma（R 可用时）、WGCNA、基因级多模型比较、外部验证、免疫和生存分析，并输出 `integrated_priority.csv`。最小配置可复制 `config/advanced_analysis.example.json`。
+`liverbio advanced` 读取一个 discovery cohort 和任意数量的 validation cohorts，执行 ComBat/limma（R 可用时）、WGCNA、基因级多模型比较、外部验证、免疫和生存分析，并输出 `integrated_priority.csv`。证据文件建议显式填写 `score_column`，最小配置可复制 `config/advanced_analysis.example.json`。
 
-`liverbio mr` 读取本地 eQTL 和 GWAS summary statistics，执行 IVW、weighted median、MR-Egger、异质性、Egger intercept 和 leave-one-out；R 包存在时追加 MendelianRandomization 和 coloc 结果。输入列映射见 `config/mr_coloc.example.json`。
+`liverbio mr` 读取本地 eQTL 和 GWAS summary statistics，执行距离剪枝或 PLINK LD clumping，并处理回文 SNP 的链方向问题；随后执行 IVW、weighted median、MR-Egger、异质性、Egger intercept 和 leave-one-out，R 包存在时追加 MendelianRandomization 和 coloc 结果。输入列映射见 `config/mr_coloc.example.json`。
 
 ## 常用工作流
 

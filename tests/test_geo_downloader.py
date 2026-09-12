@@ -114,6 +114,66 @@ class TestEnsureGeoOrganism(unittest.TestCase):
             self.assertEqual(manifest["organism"], "unknown")
 
 
+class TestSeriesMatrixFallback(unittest.TestCase):
+    def test_series_matrix_becomes_sample_level_matrix(self):
+        series_body = (
+            "!Series_organism = Homo sapiens\n"
+            "!series_matrix_table_begin\n"
+            "\"ID_REF\"\t\"GSM1\"\t\"GSM2\"\n"
+            "\"1007_s_at\"\t\"8.2\"\t\"7.9\"\n"
+            "\"1053_at\"\t\"6.1\"\t\"6.4\"\n"
+            "!series_matrix_table_end\n"
+        )
+
+        def fake_fetch(url):
+            if url.endswith("/suppl/"):
+                return ""
+            if url.endswith("/matrix/"):
+                return '<a href="GSE2_series_matrix.txt.gz">x</a>'
+            return ""
+
+        def fake_download(url, out, log, force=False):
+            out.parent.mkdir(parents=True, exist_ok=True)
+            with gzip.open(out, "wt", encoding="utf-8") as fh:
+                fh.write(series_body)
+
+        with tempfile.TemporaryDirectory() as tmp:
+            root = Path(tmp) / "root"
+            with (
+                mock.patch("data.geo_downloader._fetch", side_effect=fake_fetch),
+                mock.patch(
+                    "data.geo_downloader._download",
+                    side_effect=fake_download,
+                ),
+                mock.patch(
+                    "data.geo_downloader.CACHE_ROOT",
+                    Path(tmp) / "cache",
+                ),
+            ):
+                manifest = ensure_geo_dataset(
+                    "GSE2",
+                    root,
+                    lambda _message: None,
+                )
+            self.assertEqual(manifest["mode"], "bulk")
+            self.assertEqual(
+                manifest["data_type"],
+                "microarray_or_normalized",
+            )
+            self.assertEqual(
+                len(manifest["files"]["matrix"]),
+                1,
+            )
+            matrix_path = (
+                root
+                / "data"
+                / "raw"
+                / "GSE2"
+                / manifest["files"]["matrix"][0]
+            )
+            self.assertTrue(matrix_path.exists())
+
+
 class TestHttpHelper(unittest.TestCase):
     def test_http_get_retries_then_succeeds(self):
         calls = {"count": 0}

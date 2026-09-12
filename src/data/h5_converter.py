@@ -204,6 +204,16 @@ def convert_h5ad(path: Path) -> dict:
         )
         if not genes:
             genes = _fallback_names("Gene", matrix.shape[0], warnings_out)
+        if len(cells) != matrix.shape[1]:
+            raise ValueError(
+                f"obs names ({len(cells)}) do not match matrix columns "
+                f"({matrix.shape[1]})"
+            )
+        if len(genes) != matrix.shape[0]:
+            raise ValueError(
+                f"var names ({len(genes)}) do not match matrix rows "
+                f"({matrix.shape[0]})"
+            )
 
     prefix = path.with_name(path.stem + ".matrix.mtx.gz")
     _write_mtx(prefix, matrix, genes, cells)
@@ -247,6 +257,16 @@ def convert_loom(path: Path) -> dict:
             genes = _fallback_names("Gene", matrix.shape[0], warnings_out)
         if not cells:
             cells = _fallback_names("Cell", matrix.shape[1], warnings_out)
+        if len(cells) != matrix.shape[1]:
+            raise ValueError(
+                f"col names ({len(cells)}) do not match matrix columns "
+                f"({matrix.shape[1]})"
+            )
+        if len(genes) != matrix.shape[0]:
+            raise ValueError(
+                f"row names ({len(genes)}) do not match matrix rows "
+                f"({matrix.shape[0]})"
+            )
 
     prefix = path.with_name(path.stem + ".matrix.mtx.gz")
     _write_mtx(prefix, matrix, genes, cells)

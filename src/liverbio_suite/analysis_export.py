@@ -33,6 +33,11 @@ SKIP_NAMES = {
 }
 
 
+def _safe_export_name(value: str) -> str:
+    """Return a single safe directory name for exported results."""
+    return re.sub(r"[^A-Za-z0-9._-]+", "_", str(value).strip()).strip("._")
+
+
 def project_version() -> str:
     """Read the suite version from the docking package without importing."""
     init_path = ROOT / "src" / "docking" / "__init__.py"
@@ -410,7 +415,14 @@ def main(argv: list[str] | None = None) -> int:
 
     accession = detect_accession(source)
     fallback = run_value.upper() if not Path(run_value).is_dir() else accession
-    name = (args.name or accession or fallback or source.name).strip().replace("/", "_")
+    raw_name = (args.name or accession or fallback or source.name).strip()
+    name = _safe_export_name(raw_name)
+    if not name or name in {".", ".."}:
+        print(
+            "name must contain at least one safe filename character",
+            file=sys.stderr,
+        )
+        return 2
     destination = analysis_root / "data" / "imported_results" / name
     kind = detect_run_kind(source)
 

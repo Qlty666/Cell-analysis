@@ -205,6 +205,36 @@ class TestH5adConversion(unittest.TestCase):
             with self.assertRaisesRegex(ValueError, "integer count matrix"):
                 convert_h5ad(path)
 
+    def test_rejects_obs_name_count_mismatch(self):
+        with tempfile.TemporaryDirectory() as tmp:
+            path = Path(tmp) / "bad_obs.h5ad"
+            with h5py.File(path, "w") as f:
+                _create_sparse_group(f, "X", [1.0, 2.0], [0, 1], [0, 1, 2], (2, 2))
+                obs = f.create_group("obs")
+                obs.create_dataset("_index", data=np.array([b"ONE-1"], dtype="S5"))
+                var = f.create_group("var")
+                var.create_dataset(
+                    "_index",
+                    data=np.array([b"GENE1", b"GENE2"], dtype="S5"),
+                )
+            with self.assertRaisesRegex(ValueError, "obs names"):
+                convert_h5ad(path)
+
+    def test_rejects_var_name_count_mismatch(self):
+        with tempfile.TemporaryDirectory() as tmp:
+            path = Path(tmp) / "bad_var.h5ad"
+            with h5py.File(path, "w") as f:
+                _create_sparse_group(f, "X", [1.0, 2.0], [0, 1], [0, 1, 2], (2, 2))
+                obs = f.create_group("obs")
+                obs.create_dataset(
+                    "_index",
+                    data=np.array([b"CELL-1", b"CELL-2"], dtype="S6"),
+                )
+                var = f.create_group("var")
+                var.create_dataset("_index", data=np.array([b"GENE1"], dtype="S5"))
+            with self.assertRaisesRegex(ValueError, "var names"):
+                convert_h5ad(path)
+
     def test_prefers_raw_counts_over_normalized_x(self):
         with tempfile.TemporaryDirectory() as tmp:
             path = Path(tmp) / "raw.h5ad"

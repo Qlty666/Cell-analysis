@@ -401,17 +401,37 @@ def ppi_hub_scores(
         graph.add_edges_from(
             zip(pair[col1].astype(str), pair[col2].astype(str))
         )
-        metrics = {
-            "ppi_betweenness": nx.betweenness_centrality(graph),
-            "ppi_closeness": nx.closeness_centrality(graph),
-            "ppi_eigenvector": nx.eigenvector_centrality_numpy(graph),
-            "ppi_pagerank": nx.pagerank(graph),
-        }
-        for name, values in metrics.items():
-            result = result.join(
-                pd.Series(values, name=name),
-                on="gene",
-            )
+
+        def add_metric(name: str, compute) -> None:
+            try:
+                values = compute()
+                result[name] = result["gene"].map(
+                    pd.Series(values, dtype=float)
+                )
+            except Exception:
+                result[name] = np.nan
+
+        add_metric(
+            "ppi_betweenness",
+            lambda: nx.betweenness_centrality(graph),
+        )
+        add_metric(
+            "ppi_closeness",
+            lambda: nx.closeness_centrality(graph),
+        )
+        add_metric(
+            "ppi_eigenvector",
+            lambda: nx.eigenvector_centrality_numpy(graph),
+        )
+        add_metric(
+            "ppi_pagerank",
+            lambda: nx.pagerank(graph),
+        )
+        add_metric(
+            "ppi_clustering",
+            lambda: nx.clustering(graph),
+        )
+
         # Maximum-clique centrality is expensive for large networks. Compute
         # it only when the graph remains tractable; otherwise retain NaN and
         # let the consensus score use the available topology metrics.
@@ -424,23 +444,19 @@ def ppi_hub_scores(
                         mcc[node] += weight
             except Exception:
                 mcc = {node: float("nan") for node in graph.nodes}
-            result = result.join(
-                pd.Series(mcc, name="ppi_mcc"),
-                on="gene",
-            )
+            add_metric("ppi_mcc", lambda: mcc)
         else:
             result["ppi_mcc"] = np.nan
-        result = result.join(
-            pd.Series(nx.clustering(graph), name="ppi_clustering"),
-            on="gene",
-        )
-    except Exception:
-        result["ppi_betweenness"] = np.nan
-        result["ppi_closeness"] = np.nan
-        result["ppi_eigenvector"] = np.nan
-        result["ppi_pagerank"] = np.nan
-        result["ppi_mcc"] = np.nan
-        result["ppi_clustering"] = np.nan
+    except ImportError:
+        for name in (
+            "ppi_betweenness",
+            "ppi_closeness",
+            "ppi_eigenvector",
+            "ppi_pagerank",
+            "ppi_mcc",
+            "ppi_clustering",
+        ):
+            result[name] = np.nan
 
     if genes is not None:
         wanted = pd.Index(genes).astype(str).str.upper()
@@ -855,10 +871,13 @@ def run_network_toxicology(cfg, log) -> dict:
         for key, value in list(cytoscape_result.items()):
             if isinstance(value, Path):
                 cytoscape_result[key] = str(value)
+    all_compound_targets: set[str] = set()
+    for frame in target_sources.values():
+        all_compound_targets.update(frame["gene"].astype(str))
     summary = {
         "compound_name": compound_name,
         "disease_name": disease_name,
-        "compound_targets": int(sum(len(set(f["gene"])) for f in target_sources.values())),
+        "compound_targets": int(len(all_compound_targets)),
         "disease_genes": int(len(disease_genes)),
         "overlap_genes": int(len(overlap)),
         "ppi_hub_scored": bool(hub_frame is not None),

@@ -13,6 +13,11 @@ import tarfile
 
 from common.http import DEFAULT_USER_AGENT, HttpError, http_download, http_get
 
+try:
+    from .series_matrix import series_matrix_to_tsv
+except ImportError:  # pragma: no cover - direct script execution fallback
+    from series_matrix import series_matrix_to_tsv
+
 logger = logging.getLogger(__name__)
 
 USER_AGENT = DEFAULT_USER_AGENT
@@ -725,15 +730,10 @@ def ensure_geo_dataset(accession: str, root: Path, log) -> dict:
     downloaded = _expand_archive_files(downloaded, raw_dir, log)
     downloaded["bulk"] = bool(selected["bulk"])
 
-    if not downloaded["matrix"]:
-        archive_names = [
-            n for n in names if re.search(r"\.tar(\.gz)?$", n, re.IGNORECASE)
-        ]
-        if not archive_names:
-            raise RuntimeError(
-                f"No count matrix files found for {acc}; "
-                "this dataset may require additional manual configuration."
-            )
+    archive_names = [
+        n for n in names if re.search(r"\.tar(\.gz)?$", n, re.IGNORECASE)
+    ]
+    if not downloaded["matrix"] and archive_names:
         archive_name = Path(archive_names[0]).name
         archive_path = raw_dir / archive_name
         extract_dir = raw_dir / "_extracted"
@@ -759,6 +759,11 @@ def ensure_geo_dataset(accession: str, root: Path, log) -> dict:
         downloaded["bulk"] = bool(inner["bulk"])
         downloaded = _convert_downloaded(downloaded, raw_dir)
         log(f"found {len(downloaded['matrix'])} matrix files inside archive")
+    if not downloaded["matrix"] and not series_files:
+        raise RuntimeError(
+            f"No count matrix files found for {acc}; "
+            "this dataset may require additional manual configuration."
+        )
 
     series_paths = []
     for name in series_files:
@@ -766,6 +771,28 @@ def ensure_geo_dataset(accession: str, root: Path, log) -> dict:
         out = raw_dir / safe_name
         _download(matrix_url + name, out, log)
         series_paths.append(safe_name)
+
+    series_matrix_fallback = False
+    if not downloaded["matrix"] and series_paths:
+        for series_name in series_paths:
+            source = raw_dir / series_name
+            destination = raw_dir / (
+                Path(series_name).name.replace(".txt.gz", "")
+                + ".expression.tsv.gz"
+            )
+            try:
+                series_matrix_to_tsv(source, destination)
+            except (OSError, ValueError) as exc:
+                log(f"could not parse series matrix {series_name}: {exc}")
+                continue
+            downloaded["matrix"].append(destination.name)
+            series_matrix_fallback = True
+        if series_matrix_fallback:
+            downloaded["bulk"] = True
+            log(
+                f"using {len(downloaded['matrix'])} series-matrix expression "
+                "table(s) because no supplementary count matrix was found"
+            )
 
     organism_texts: list[str] = []
     for name in series_paths:
@@ -808,6 +835,13 @@ def ensure_geo_dataset(accession: str, root: Path, log) -> dict:
     }
     manifest = _refresh_manifest_mode(manifest, raw_dir)
     manifest = _prefer_single_cell_matrices(manifest, raw_dir)
+    if series_matrix_fallback and not any(
+        str(name).lower().endswith((".h5ad", ".h5ad.gz", ".h5", ".loom", ".rds"))
+        for name in manifest["files"]["matrix"]
+    ):
+        manifest["mode"] = "bulk"
+        manifest["single_cell_hint"] = False
+        manifest["data_type"] = "microarray_or_normalized"
     manifest_path.write_text(
         json.dumps(manifest, indent=2, ensure_ascii=False),
         encoding="utf-8",

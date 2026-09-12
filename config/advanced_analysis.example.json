@@ -52,8 +52,14 @@
     "event_column": "OS"
   },
   "evidence_files": {
-    "network_hub_score": "data/ppi_hub_scores.csv",
-    "prognosis_score": "data/prognosis.csv"
+    "network_hub_score": {
+      "path": "data/ppi_hub_scores.csv",
+      "score_column": "ppi_hub_score"
+    },
+    "prognosis_score": {
+      "path": "data/prognosis.csv",
+      "score_column": "hr"
+    }
   },
   "integration": {
     "weights": {

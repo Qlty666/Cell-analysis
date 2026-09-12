@@ -689,8 +689,23 @@ def _evaluate_models(
     y_text = labels.astype(str)
     encoder = LabelEncoder()
     y = encoder.fit_transform(y_text)
-    positive_label = int(np.where(encoder.classes_ == str(config.get("case_label")))[0][0])
+    positive_hits = np.where(
+        encoder.classes_ == str(config.get("case_label"))
+    )[0]
+    if len(positive_hits) == 0:
+        raise ValueError(
+            "case_label is not present after label encoding: "
+            f"{config.get('case_label')!r}"
+        )
+    positive_label = int(positive_hits[0])
+    y_positive = (y == positive_label).astype(int)
     min_class = int(pd.Series(y).value_counts().min())
+    if min_class < 2:
+        raise ValueError(
+            "each class needs at least two samples for stratified model "
+            f"evaluation; observed class counts: "
+            f"{pd.Series(y).value_counts().to_dict()}"
+        )
     n_splits = max(2, min(int(config.get("cv_folds", 5)), min_class))
     n_repeats = max(1, int(config.get("cv_repeats", 5)))
     cv = RepeatedStratifiedKFold(
@@ -730,7 +745,14 @@ def _evaluate_models(
                 positive_label,
             )
             if len(np.unique(y[test_idx])) >= 2:
-                aucs.append(float(roc_auc_score(y[test_idx], positive)))
+                aucs.append(
+                    float(
+                        roc_auc_score(
+                            y_positive[test_idx],
+                            positive,
+                        )
+                    )
+                )
             accuracies.append(
                 float(accuracy_score(y[test_idx], fold_model.predict(X.iloc[test_idx])))
             )
@@ -798,13 +820,13 @@ def _evaluate_models(
 
     if best_name in oof_store:
         probabilities = oof_store[best_name]
-        auc_value = float(roc_auc_score(y, probabilities))
+        auc_value = float(roc_auc_score(y_positive, probabilities))
         lower, upper = _bootstrap_auc_ci(
-            y,
+            y_positive,
             probabilities,
             int(config.get("seed", 42)),
         )
-        fpr, tpr, _ = roc_curve(y, probabilities)
+        fpr, tpr, _ = roc_curve(y_positive, probabilities)
         plt.figure(figsize=(5.5, 5.0))
         plt.plot(fpr, tpr, label=f"AUC={auc_value:.3f}")
         plt.plot([0, 1], [0, 1], "--", color="grey")
@@ -817,7 +839,7 @@ def _evaluate_models(
         plt.close()
 
         prob_true, prob_pred = calibration_curve(
-            y,
+            y_positive,
             probabilities,
             n_bins=max(3, min(8, int(np.ceil(np.sqrt(len(y)))))),
         )
@@ -831,16 +853,19 @@ def _evaluate_models(
         plt.tight_layout()
         plt.savefig(out_dir / "ml_calibration.png", dpi=160)
         plt.close()
-        _decision_curve(y, probabilities).to_csv(
+        _decision_curve(y_positive, probabilities).to_csv(
             out_dir / "ml_decision_curve.csv",
             index=False,
         )
         try:
-            cm = confusion_matrix(y, (probabilities >= 0.5).astype(int))
+            cm = confusion_matrix(
+                y_positive,
+                (probabilities >= 0.5).astype(int),
+            )
             pd.DataFrame(
                 cm,
-                index=[f"true_{label}" for label in encoder.classes_],
-                columns=[f"pred_{label}" for label in encoder.classes_],
+                index=["true_control", "true_case"],
+                columns=["pred_control", "pred_case"],
             ).to_csv(out_dir / "ml_confusion_matrix.csv")
         except Exception:
             pass
@@ -852,9 +877,12 @@ def _evaluate_models(
                 "cv_auc": auc_value,
                 "cv_auc_ci95": [lower, upper],
                 "average_precision": float(
-                    average_precision_score(y, probabilities)
+                    average_precision_score(y_positive, probabilities)
                 ),
-                "brier_score": float(brier_score_loss(y, probabilities)),
+                "brier_score": float(
+                    brier_score_loss(y_positive, probabilities)
+                ),
+                "positive_class": str(config.get("case_label")),
                 "selected_features": selected_genes,
                 "external_validation_generated": True,
             },
@@ -987,13 +1015,18 @@ def _external_validation(
 
 
 def _load_optional_evidence(
-    files: dict[str, str],
+    files: dict[str, str | dict],
     base: Path,
     genes: list[str],
 ) -> pd.DataFrame:
     output = pd.DataFrame(index=pd.Index(genes, name="gene"))
     for name, value in files.items():
-        path = _resolve(base, value)
+        explicit_column = None
+        path_value = value
+        if isinstance(value, dict):
+            path_value = value.get("path") or value.get("file")
+            explicit_column = value.get("score_column")
+        path = _resolve(base, path_value)
         if path is None or not path.exists():
             continue
         try:
@@ -1012,7 +1045,33 @@ def _load_optional_evidence(
             ]
             if not numeric_cols:
                 continue
-            score_col = numeric_cols[0]
+            if explicit_column and explicit_column in frame.columns:
+                if str(explicit_column) not in numeric_cols:
+                    raise ValueError(
+                        f"score_column {explicit_column!r} is not numeric in {path}"
+                    )
+                score_col = str(explicit_column)
+            else:
+                preferred = []
+                lower_name = name.lower()
+                if "hub" in lower_name or "network" in lower_name:
+                    preferred.extend(
+                        ["ppi_hub_score", "hub_score", "score"]
+                    )
+                elif "prognos" in lower_name:
+                    preferred.extend(
+                        ["hr", "hazard_ratio", "hazardratio", "cox_hr"]
+                    )
+                elif "immune" in lower_name:
+                    preferred.extend(["immune_score", "correlation", "score"])
+                score_col = next(
+                    (
+                        column
+                        for column in preferred
+                        if column in frame.columns
+                    ),
+                    numeric_cols[0],
+                )
             normalized = frame.assign(
                 **{
                     gene_col: frame[gene_col].astype(str).str.upper(),

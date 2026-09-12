@@ -8,6 +8,7 @@ from pathlib import Path
 import joblib
 import numpy as np
 import pandas as pd
+from sklearn.base import BaseEstimator, TransformerMixin
 from sklearn.ensemble import (
     GradientBoostingClassifier,
     GradientBoostingRegressor,
@@ -26,6 +27,7 @@ from sklearn.metrics import (
 )
 from sklearn.model_selection import train_test_split
 from sklearn.neural_network import MLPClassifier, MLPRegressor
+from sklearn.pipeline import Pipeline
 from sklearn.preprocessing import LabelEncoder, StandardScaler
 from sklearn.svm import SVC
 
@@ -42,6 +44,61 @@ DESCRIPTOR_NAMES = [
     "AromaticRings",
     "HeavyAtoms",
 ]
+
+
+class _LassoRfeSelector(BaseEstimator, TransformerMixin):
+    """Persistable LASSO + SVM-RFE feature selector."""
+
+    def __init__(self, n_features_cap: int = 15, random_state: int = 42) -> None:
+        self.n_features_cap = n_features_cap
+        self.random_state = random_state
+
+    def fit(self, X, y):
+        X = np.asarray(X, dtype=float)
+        lasso = SelectFromModel(
+            LogisticRegression(
+                penalty="l1",
+                solver="liblinear",
+                C=1.0,
+                max_iter=1000,
+                random_state=self.random_state,
+            )
+        )
+        lasso.fit(X, y)
+        self.lasso_support_ = lasso.get_support()
+        if self.lasso_support_.sum() < 1:
+            self.lasso_support_ = np.zeros(X.shape[1], dtype=bool)
+            self.lasso_support_[: min(5, X.shape[1])] = True
+        reduced = X[:, self.lasso_support_]
+        if reduced.shape[1] >= 2:
+            rfe = RFE(
+                SVC(
+                    kernel="linear",
+                    probability=True,
+                    random_state=self.random_state,
+                ),
+                n_features_to_select=max(
+                    2,
+                    min(self.n_features_cap, reduced.shape[1]),
+                ),
+            )
+            rfe.fit(reduced, y)
+            self.rfe_support_ = rfe.get_support()
+        else:
+            self.rfe_support_ = np.ones(reduced.shape[1], dtype=bool)
+        self.n_features_in_ = X.shape[1]
+        return self
+
+    def transform(self, X):
+        X = np.asarray(X, dtype=float)
+        return X[:, self.lasso_support_][:, self.rfe_support_]
+
+    def selected_columns(self, columns) -> list:
+        return list(
+            np.asarray(list(columns), dtype=object)[self.lasso_support_][
+                self.rfe_support_
+            ]
+        )
 
 
 def _features(smiles: str):
@@ -114,44 +171,33 @@ def train_ml(
     if model_type == "lasso_svm":
         if task != "classification":
             raise DockingError("lasso_svm is only supported for classification")
-        lasso_selector = SelectFromModel(
-            LogisticRegression(
-                penalty="l1",
-                solver="liblinear",
-                C=1.0,
-                max_iter=1000,
-                random_state=int(cfg.get("ml", "random_state", 42)),
-            )
+        selector = _LassoRfeSelector(
+            random_state=int(cfg.get("ml", "random_state", 42))
         )
-        lasso_selector.fit(X_train, y_train)
-        X_train = lasso_selector.transform(X_train)
-        X_test = lasso_selector.transform(X_test)
-        selected_feature_names = np.asarray(all_feature_names)[
-            lasso_selector.get_support()
-        ].tolist()
-        if X_train.shape[1] >= 2:
-            n_features = max(2, min(15, X_train.shape[1]))
-            rfe = RFE(
-                SVC(kernel="linear", probability=True, random_state=42),
-                n_features_to_select=n_features,
-            )
-            rfe.fit(X_train, y_train)
-            keep = rfe.get_support()
-            X_train = X_train[:, keep]
-            X_test = X_test[:, keep]
-            selected_feature_names = np.asarray(selected_feature_names)[
-                keep
-            ].tolist()
-        model_type = "svm_linear"
-
-    model = _build_model(
-        model_type,
-        task,
-        int(cfg.get("ml", "hidden_size", 128)),
-        int(cfg.get("ml", "epochs", 80)),
-        int(cfg.get("ml", "random_state", 42)),
-    )
-    model.fit(X_train, y_train)
+        model = Pipeline(
+            [
+                ("select", selector),
+                (
+                    "clf",
+                    SVC(
+                        kernel="linear",
+                        probability=True,
+                        random_state=int(cfg.get("ml", "random_state", 42)),
+                    ),
+                ),
+            ]
+        )
+        model.fit(X_train, y_train)
+        selected_feature_names = selector.selected_columns(all_feature_names)
+    else:
+        model = _build_model(
+            model_type,
+            task,
+            int(cfg.get("ml", "hidden_size", 128)),
+            int(cfg.get("ml", "epochs", 80)),
+            int(cfg.get("ml", "random_state", 42)),
+        )
+        model.fit(X_train, y_train)
 
     reports = cfg.ml_dir()
     (reports / "data").mkdir(parents=True, exist_ok=True)
@@ -164,9 +210,7 @@ def train_ml(
         "ml_model.pt" if is_torch else "ml_model.joblib"
     )
     if is_torch:
-        import torch
-
-        torch.save(model, model_file)
+        _save_torch_model(model, model_file)
     else:
         joblib.dump(model, model_file)
 
@@ -190,6 +234,12 @@ def train_ml(
         _save_importance(model, X.shape[1], reports)
     elif hasattr(model, "coef_"):
         _save_coefficients(model, selected_feature_names, reports)
+    elif model_type == "lasso_svm":
+        _save_coefficients(
+            model.named_steps["clf"],
+            selected_feature_names,
+            reports,
+        )
     if task == "classification" and hasattr(model, "predict_proba"):
         _save_roc(model, X_test, y_test, reports)
 
@@ -220,9 +270,7 @@ def predict_ml(cfg: ResolvedConfig, log) -> dict:
     if not model_file.exists():
         raise DockingError(f"model file not found: {model_file}")
     if info["model_type"] == "torch":
-        import torch
-
-        model = torch.load(model_file, weights_only=False)
+        model = _load_torch_model(model_file)
     else:
         model = joblib.load(model_file)
     task = info["task"]
@@ -335,6 +383,7 @@ class _TorchMLP:
         import torch
 
         self.torch = torch
+        self.hidden = int(hidden)
         self.task = task
         self.epochs = epochs
         self.random_state = random_state
@@ -351,11 +400,11 @@ class _TorchMLP:
         self.n_features = X.shape[1]
         out_units = 2 if self.task == "classification" else 1
         self.net = nn.Sequential(
-            nn.Linear(self.n_features, 128),
+            nn.Linear(self.n_features, self.hidden),
             nn.ReLU(),
-            nn.Linear(128, 128),
+            nn.Linear(self.hidden, self.hidden),
             nn.ReLU(),
-            nn.Linear(128, out_units),
+            nn.Linear(self.hidden, out_units),
         )
         Xs = self.scaler.fit_transform(X).astype("float32")
         if self.task == "classification":
@@ -397,6 +446,79 @@ class _TorchMLP:
         if self.task == "classification":
             return proba.argmax(axis=1)
         return proba
+
+
+def _save_torch_model(model: _TorchMLP, path: Path) -> None:
+    """Save only tensors and plain scalars, never a pickled Python object."""
+    import torch
+
+    if model.net is None or model.n_features is None:
+        raise DockingError("cannot save an unfitted torch model")
+    payload = {
+        "format": "liverbio_torch_mlp_v1",
+        "state_dict": model.net.state_dict(),
+        "hidden": int(model.hidden),
+        "task": str(model.task),
+        "n_features": int(model.n_features),
+        "epochs": int(model.epochs),
+        "random_state": int(model.random_state),
+        "scaler_mean": np.asarray(
+            model.scaler.mean_,
+            dtype=float,
+        ).tolist(),
+        "scaler_scale": np.asarray(
+            model.scaler.scale_,
+            dtype=float,
+        ).tolist(),
+    }
+    torch.save(payload, path)
+
+
+def _load_torch_model(path: Path) -> _TorchMLP:
+    """Load a safe tensor-only torch checkpoint."""
+    import torch
+    from torch import nn
+
+    try:
+        payload = torch.load(
+            path,
+            map_location="cpu",
+            weights_only=True,
+        )
+    except Exception as exc:
+        raise DockingError(
+            "torch model is not in the safe tensor-only format; retrain with "
+            f"ml-train: {exc}"
+        ) from exc
+    if (
+        not isinstance(payload, dict)
+        or payload.get("format") != "liverbio_torch_mlp_v1"
+    ):
+        raise DockingError(
+            "torch model has an unsupported or unsafe checkpoint format; "
+            "retrain with ml-train"
+        )
+    model = _TorchMLP(
+        hidden=int(payload["hidden"]),
+        task=str(payload["task"]),
+        epochs=int(payload["epochs"]),
+        random_state=int(payload["random_state"]),
+    )
+    model.n_features = int(payload["n_features"])
+    out_units = 2 if model.task == "classification" else 1
+    model.net = nn.Sequential(
+        nn.Linear(model.n_features, model.hidden),
+        nn.ReLU(),
+        nn.Linear(model.hidden, model.hidden),
+        nn.ReLU(),
+        nn.Linear(model.hidden, out_units),
+    )
+    model.net.load_state_dict(payload["state_dict"])
+    model.net.eval()
+    model.scaler.mean_ = np.asarray(payload["scaler_mean"], dtype=float)
+    model.scaler.scale_ = np.asarray(payload["scaler_scale"], dtype=float)
+    model.scaler.n_features_in_ = model.n_features
+    return model
 
 
 def _evaluate(model, X_test, y_test, task, encoder=None):

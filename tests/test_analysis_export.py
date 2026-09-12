@@ -30,6 +30,14 @@ def _write_fake_run(source: Path) -> None:
 
 
 class TestAnalysisExport(unittest.TestCase):
+    def test_safe_export_name_cannot_escape_directory(self):
+        self.assertEqual(
+            analysis_export._safe_export_name(r"..\..\outside"),
+            "outside",
+        )
+        self.assertNotIn("/", analysis_export._safe_export_name("../evil"))
+        self.assertNotIn(":", analysis_export._safe_export_name("C:\\evil"))
+
     def test_detect_accession_and_run_kind(self):
         with tempfile.TemporaryDirectory() as tmp:
             source = Path(tmp) / "run"

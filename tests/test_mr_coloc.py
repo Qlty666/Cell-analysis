@@ -45,6 +45,85 @@ class TestMRColoc(unittest.TestCase):
         self.assertTrue((merged["allele_status"] == "flipped").all())
         self.assertLess(float(merged["ratio"].mean()), 0.0)
 
+    def test_palindromic_snp_without_eaf_is_removed(self):
+        exposure = pd.DataFrame(
+            {
+                "snp": ["rs1"],
+                "beta": [0.2],
+                "se": [0.02],
+                "effect_allele": ["A"],
+                "other_allele": ["T"],
+                "pval": [1e-8],
+            }
+        )
+        outcome = exposure.copy()
+        merged = harmonise(exposure, outcome)
+        self.assertTrue(merged.empty)
+        self.assertEqual(merged.attrs["missing_eaf_palindromic_snps"], 1)
+
+    def test_distance_clumping_removes_correlated_neighbor(self):
+        exposure = pd.DataFrame(
+            {
+                "snp": ["rs1", "rs2", "rs3"],
+                "beta": [0.2, 0.2, 0.2],
+                "se": [0.02, 0.02, 0.02],
+                "effect_allele": ["A", "A", "A"],
+                "other_allele": ["G", "G", "G"],
+                "pval": [1e-8, 2e-8, 1e-9],
+                "chromosome": ["1", "1", "2"],
+                "position": [1000, 2000, 1000],
+            }
+        )
+        # Exercise the public run path with a 10 kb distance.
+        with tempfile.TemporaryDirectory() as tmp:
+            root = Path(tmp)
+            exposure.to_csv(root / "exposure.csv", index=False)
+            pd.DataFrame(
+                {
+                    **{
+                        column: exposure[column]
+                        for column in exposure.columns
+                    },
+                    "pval": [0.2, 0.2, 0.2],
+                }
+            ).to_csv(root / "outcome.csv", index=False)
+            config = {
+                "_config_dir": str(root),
+                "exposure": {
+                    "file": "exposure.csv",
+                    "snp": "snp",
+                    "beta": "beta",
+                    "se": "se",
+                    "effect_allele": "effect_allele",
+                    "other_allele": "other_allele",
+                    "pval": "pval",
+                    "chromosome": "chromosome",
+                    "position": "position",
+                },
+                "outcome": {
+                    "file": "outcome.csv",
+                    "snp": "snp",
+                    "beta": "beta",
+                    "se": "se",
+                    "effect_allele": "effect_allele",
+                    "other_allele": "other_allele",
+                    "pval": "pval",
+                },
+                "p_threshold": 1.0,
+                "clump": {
+                    "enabled": True,
+                    "distance_kb": 10,
+                },
+                "coloc": {"enabled": False},
+            }
+            summary = run(config, root / "out", skip_r=True)
+            self.assertEqual(summary["n_harmonised_snps"], 2)
+            self.assertEqual(
+                summary["clumping"]["method"],
+                "distance_pruning_no_ld_reference",
+            )
+            self.assertEqual(summary["clumping"]["removed"], 1)
+
     def test_ivw_and_full_run(self):
         with tempfile.TemporaryDirectory() as tmp:
             root = Path(tmp)

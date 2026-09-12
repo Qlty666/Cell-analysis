@@ -1215,7 +1215,7 @@ def _run_mmpbsa(
     if isinstance(command_value, (list, tuple)):
         command = [str(part) for part in command_value]
     else:
-        command = shlex.split(str(command_value))
+        command = _split_external_command(command_value)
     replacements = {
         "{run_dir}": str(run_dir),
         "{tpr}": str(tpr),
@@ -1263,6 +1263,22 @@ def _run_mmpbsa(
         "mmpbsa_delta_total_kj_mol": value,
         "mmpbsa_log": str(log_path),
     }
+
+
+def _split_external_command(value) -> list[str]:
+    """Split a user command without mangling Windows backslash paths."""
+    if isinstance(value, (list, tuple)):
+        return [str(part) for part in value]
+    tokens = shlex.split(
+        str(value),
+        posix=os.name != "nt",
+    )
+    return [
+        token[1:-1]
+        if len(token) >= 2 and token[0] == token[-1] and token[0] in "\"'"
+        else token
+        for token in tokens
+    ]
 
 
 def _run_gmx_metric(

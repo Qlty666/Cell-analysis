@@ -11,6 +11,7 @@ import unittest
 from unittest import mock
 from pathlib import Path
 
+import numpy as np
 import pandas as pd
 
 APP_ROOT = Path(__file__).resolve().parent.parent
@@ -92,6 +93,7 @@ class TestCommandBuild(unittest.TestCase):
         )
         self.assertIn("--center_x", cmd)
         self.assertIn("10.0", cmd)
+        self.assertEqual(cmd[cmd.index("--cpu") + 1], "4")
         self.assertTrue(Path(cmd[0]).name.lower().startswith("python"))
 
 
@@ -313,6 +315,75 @@ class TestMLTorchFallback(unittest.TestCase):
                 random_state=42,
             )
         self.assertIsInstance(model, MLPClassifier)
+
+
+class TestDockingMLPersistence(unittest.TestCase):
+    def test_lasso_svm_train_and_predict_roundtrip(self):
+        with tempfile.TemporaryDirectory() as tmp:
+            root = Path(tmp)
+            training = root / "training.csv"
+            pd.DataFrame(
+                {
+                    "smiles": [
+                        "CCO",
+                        "CCN",
+                        "CCC",
+                        "c1ccccc1",
+                        "CCCl",
+                        "CCOC",
+                        "CCBr",
+                        "CCF",
+                        "CCCO",
+                        "CCCC",
+                    ],
+                    "active": [0, 1] * 5,
+                }
+            ).to_csv(training, index=False)
+            cfg = load_config(
+                DEFAULT_CONFIG,
+                {
+                    "workdir": str(root),
+                    "model": "lasso_svm",
+                    "training_csv": str(training),
+                },
+            )
+            docking_ml.train_ml(cfg, LOG)
+            cfg.results_path().parent.mkdir(parents=True, exist_ok=True)
+            pd.DataFrame(
+                {
+                    "id": ["a", "b"],
+                    "smiles": ["CCO", "CCN"],
+                    "affinity": [-7.0, -6.0],
+                    "status": ["ok", "ok"],
+                }
+            ).to_csv(cfg.results_path(), index=False)
+            summary = docking_ml.predict_ml(cfg, LOG)
+            self.assertEqual(summary["scored"], 2)
+            ranked = cfg.ml_dir() / "data" / "ml_ranked_results.csv"
+            self.assertTrue(ranked.exists())
+
+    def test_torch_checkpoint_roundtrip_is_tensor_only(self):
+        try:
+            import torch  # noqa: F401
+        except ImportError:
+            self.skipTest("torch not installed")
+        rng = np.random.default_rng(3)
+        X = rng.normal(size=(20, 4))
+        y = (X[:, 0] > 0).astype(int)
+        model = docking_ml._TorchMLP(
+            hidden=8,
+            task="classification",
+            epochs=3,
+            random_state=4,
+        )
+        model.fit(X, y)
+        with tempfile.TemporaryDirectory() as tmp:
+            path = Path(tmp) / "model.pt"
+            docking_ml._save_torch_model(model, path)
+            loaded = docking_ml._load_torch_model(path)
+            before = model.predict_proba(X)
+            after = loaded.predict_proba(X)
+            np.testing.assert_allclose(before, after, rtol=1e-5, atol=1e-6)
 
 
 _FAKE_VINA = r"""

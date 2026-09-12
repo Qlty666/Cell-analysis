@@ -310,7 +310,7 @@ def build_vina_command(
         "--exhaustiveness", str(int(cfg.get("docking", "exhaustiveness", 8))),
         "--num_modes", str(int(cfg.get("docking", "num_modes", 9))),
         "--energy_range", str(float(cfg.get("docking", "energy_range", 3.0))),
-        "--cpu", "1",
+        "--cpu", str(max(1, int(cfg.get("docking", "cpu", 1) or 1))),
         "--seed", str(
             int(seed)
             if seed not in (None, "")
