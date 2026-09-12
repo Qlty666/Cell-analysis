@@ -25,9 +25,19 @@ Thumbs.db
 # Local environment and secrets
 .env
 .env.*
+.git-credentials
+.netrc
+.npmrc
+.pypirc
 *.pem
 *.p12
 *.key
+*.crt
+*.cer
+*.der
+*.jks
+*.keystore
+*.kdbx
 
 # Local analysis workspace handoff
 /config/analysis_workspace.json
@@ -85,4 +95,5 @@ config/analysis_workspace.json
 
 # Scratch / helper files that must never be committed
 scripts/_test_h5ad_reader.R
+scripts/_test_*.R
 .tmp_*
