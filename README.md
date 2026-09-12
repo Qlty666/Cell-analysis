@@ -214,7 +214,7 @@ liverbio package
 
 ```text
 liverbio analysis-export ^
-  --source <OUTPUT_DIR>\GSE125449 ^
+  --source <RUN_OUTPUT> ^
   --analysis-root <ANALYSIS_ROOT>
 ```
 
@@ -814,8 +814,8 @@ python scripts\install_codex_skills.py --list
 ### 4.9 导出到本地 Codex 分析工作区
 
 ```bash
-python scripts\export_to_analysis.py --source ../y2/GSE125449 --analysis-root <LOCAL_ROOT> analysis
-liverbio analysis-export --source ../y2/GSE125449 --analysis-root <LOCAL_ROOT> analysis
+python scripts\export_to_analysis.py --source <SOURCE_DIR>/GSE125449 --analysis-root <ANALYSIS_ROOT>
+liverbio analysis-export --source <SOURCE_DIR>/GSE125449 --analysis-root <ANALYSIS_ROOT>
 liverbio analysis-export GSE125449
 ```
 

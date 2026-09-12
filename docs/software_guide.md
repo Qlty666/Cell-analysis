@@ -38,8 +38,8 @@ liverbio expression GSE125449 --output ../liver_cancer --species auto
 liverbio full --accession GSE125449 --output ../liver_cancer --workdir ../liver_cancer_full
 liverbio docking pipeline --config config/docking_config.json
 liverbio datasets --disease "liver cancer" --max-results 20
-liverbio advanced --config config/advanced_analysis.json --output <OUTPUT_DIR>\advanced
-liverbio mr --config config/mr_coloc.json --output <OUTPUT_DIR>\mr
+liverbio advanced --config config/advanced_analysis.json --output <OUTPUT_DIR>/advanced
+liverbio mr --config config/mr_coloc.json --output <OUTPUT_DIR>/mr
 liverbio web --page full
 liverbio analysis-export GSE235863
 liverbio doctor
