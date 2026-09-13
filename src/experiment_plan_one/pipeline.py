@@ -41,6 +41,7 @@ from .common import (
     write_json,
 )
 from .classify import classify_experiment_plan_results
+from .figure_audit import audit_figures
 from .docking_md import prepare_or_run_md, run_docking_for_targets
 from .enrichment import run_go_kegg
 from .ml import run_ml_validation
@@ -74,6 +75,7 @@ STAGES = (
     "docking",
     "md",
     "classify",
+    "figure_audit",
     "report",
 )
 
@@ -182,7 +184,7 @@ def default_config() -> dict[str, Any]:
                 "species": "hs",
             },
         },
-        "ppi": {"required_score": 700, "top_n": 20},
+        "ppi": {"required_score": 700, "top_n": 20, "add_nodes": 50},
         "ml": {"cv_folds": 5, "seed": 42},
         "single_cell": {
             "mouse": {"max_cells": 5000},
@@ -267,6 +269,7 @@ class ExperimentPlanOne:
             "docking": self.stage_docking,
             "md": self.stage_md,
             "classify": self.stage_classify,
+            "figure_audit": self.stage_figure_audit,
             "report": self.stage_report,
         }
         for stage in stages:
@@ -508,11 +511,14 @@ class ExperimentPlanOne:
             out_dir,
             required_score=int(self.context.config["ppi"]["required_score"]),
             top_n=int(self.context.config["ppi"]["top_n"]),
+            add_nodes=int(self.context.config["ppi"].get("add_nodes", 50)),
+            force=self.context.force,
         )
         enrichment = run_go_kegg(
             analysis_genes,
             out_dir / "enrichment",
             species="hs",
+            force=self.context.force,
         )
         return {
             "overlap": str(out_dir / "compound_disease_overlap.csv"),
@@ -729,6 +735,10 @@ class ExperimentPlanOne:
             source = out_dir / source_name
             if source.exists():
                 shutil.copy2(source, out_dir / target_name)
+                for suffix in (".pdf", ".svg"):
+                    vector = source.with_suffix(suffix)
+                    if vector.exists():
+                        shutil.copy2(vector, (out_dir / target_name).with_suffix(suffix))
         core_genes = list(
             dict.fromkeys(
                 list(result["core_genes"]) + ppi.head(5)["gene"].astype(str).tolist()
@@ -931,6 +941,10 @@ class ExperimentPlanOne:
 
     def stage_classify(self) -> dict[str, Any]:
         result = classify_experiment_plan_results(self.context.output_root)
+        return _serializable(result)
+
+    def stage_figure_audit(self) -> dict[str, Any]:
+        result = audit_figures(self.context.output_root)
         return _serializable(result)
 
     def _core_candidate_genes(self) -> list[str]:
@@ -1559,6 +1573,31 @@ def _render_results_summary(
                 f"| {row.gene} | {structure_label} | "
                 f"{float(row.best_affinity_kcal_mol):.3f} |"
             )
+    audit_path = (
+        context.output_root
+        / "10_reports"
+        / "figure_quality_audit"
+        / "figure_quality_audit.json"
+    )
+    if audit_path.exists():
+        audit = read_json(audit_path, {})
+        lines += [
+            "",
+            "## Figure Audit",
+            "",
+            f"- Overall verdict: **{audit.get('overall_verdict', 'unknown')}**",
+            f"- Available panels: {audit.get('available_panels', 0)}/46",
+            f"- Median DPI: {audit.get('median_dpi_x', 'NA')}",
+            f"- Major issues: {audit.get('major_issue_count', 0)}",
+            (
+                "- Resolution/vector issues: "
+                f"{audit.get('resolution_or_vector_issue_count', 0)}"
+            ),
+            (
+                "- Detailed review: "
+                "`10_reports/figure_quality_audit/figure_quality_audit.md`"
+            ),
+        ]
     lines += [
         "",
         "## Important Limits",

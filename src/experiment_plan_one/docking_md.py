@@ -500,8 +500,29 @@ def _plot_docking_heatmap(scores: pd.DataFrame, output: Path) -> None:
     ax.set_xticklabels(["Vina affinity"])
     ax.set_yticks(range(len(frame)))
     ax.set_yticklabels(frame["gene"])
-    for row, value in enumerate(frame["best_affinity_kcal_mol"]):
-        ax.text(0, row, f"{value:.2f}", ha="center", va="center", color="white", fontsize=8)
+    values = frame["best_affinity_kcal_mol"].to_numpy(dtype=float)
+    value_min = float(np.nanmin(values))
+    value_max = float(np.nanmax(values))
+    for row, value in enumerate(values):
+        normalized = (
+            (float(value) - value_min) / (value_max - value_min)
+            if value_max > value_min
+            else 0.5
+        )
+        rgba = plt.get_cmap("YlGnBu_r")(normalized)
+        luminance = (
+            0.2126 * rgba[0] + 0.7152 * rgba[1] + 0.0722 * rgba[2]
+        )
+        ax.text(
+            0,
+            row,
+            f"{value:.2f}",
+            ha="center",
+            va="center",
+            color="#111111" if luminance > 0.55 else "white",
+            fontsize=7,
+            fontweight="bold",
+        )
     ax.set_title("6PPD-Q docking affinity", fontweight="bold")
     fig.colorbar(image, ax=ax, label="kcal/mol", shrink=0.7)
     save_figure(fig, output)
@@ -532,7 +553,7 @@ def _write_interaction_figure(target_dir: Path, output: Path, gene: str) -> None
     ligand_atoms = _parse_pdbqt_coordinates(pose_path)
     contacts = _receptor_contacts(receptor, ligand_atoms)
     contacts.to_csv(output.with_suffix(".csv"), index=False)
-    fig, ax = plt.subplots(figsize=(7.6, 5.2))
+    fig, ax = plt.subplots(figsize=(7.2, 5.2))
     ax.axis("off")
     ax.text(
         0.5,

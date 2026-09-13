@@ -19,13 +19,15 @@ def run_go_kegg(
     output_dir: Path,
     *,
     species: str = "hs",
+    force: bool = False,
     timeout: int = 1200,
 ) -> dict[str, Any]:
     ensure_dir(output_dir)
     genes = sorted(set(str(gene).upper() for gene in genes if str(gene).strip()))
     cached = read_json(output_dir / "enrichment_summary.json", None)
     if (
-        isinstance(cached, dict)
+        not force
+        and isinstance(cached, dict)
         and cached.get("status") == "completed"
         and int(cached.get("genes") or -1) == len(genes)
     ):
@@ -94,7 +96,7 @@ def _plot_enrichment(frame: pd.DataFrame, output: Path, title: str) -> None:
         count = pd.Series(np.ones(len(values)), index=values.index)
     size = 30 + 14 * count.to_numpy()
     negative_log10 = -np.log10(values["p.adjust"].clip(lower=1e-300))
-    fig, ax = plt.subplots(figsize=(8, max(4.2, len(values) * 0.42)))
+    fig, ax = plt.subplots(figsize=(7.2, max(3.8, len(values) * 0.38)))
     scatter = ax.scatter(
         negative_log10,
         np.arange(len(values)),
@@ -105,7 +107,7 @@ def _plot_enrichment(frame: pd.DataFrame, output: Path, title: str) -> None:
         linewidths=0.6,
     )
     ax.set_yticks(np.arange(len(values)))
-    ax.set_yticklabels(values["Description"].astype(str))
+    ax.set_yticklabels(values["Description"].astype(str), fontsize=5.8)
     ax.invert_yaxis()
     ax.set_xlabel("-log10(adjusted P)")
     ax.set_title(title, fontweight="bold")

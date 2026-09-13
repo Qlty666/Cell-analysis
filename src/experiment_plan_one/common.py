@@ -43,6 +43,7 @@ def configure_logging(log_path: Path | None = None, verbose: bool = False) -> No
             format="%(asctime)s [%(levelname)s] %(message)s",
         )
     root.setLevel(level)
+    logging.getLogger("fontTools.subset").setLevel(logging.WARNING)
     if log_path is not None:
         log_path.parent.mkdir(parents=True, exist_ok=True)
         targets = {Path(handler.baseFilename) for handler in root.handlers if hasattr(handler, "baseFilename")}
@@ -454,15 +455,26 @@ def figure_style() -> None:
     plt.rcParams.update(
         {
             "figure.dpi": 120,
-            "savefig.dpi": 320,
-            "font.family": "DejaVu Sans",
-            "axes.titlesize": 11,
-            "axes.labelsize": 9,
-            "xtick.labelsize": 8,
-            "ytick.labelsize": 8,
-            "legend.fontsize": 8,
+            "figure.facecolor": "white",
+            "savefig.dpi": 600,
+            "savefig.transparent": False,
+            "savefig.facecolor": "white",
+            "font.family": "sans-serif",
+            "font.sans-serif": ["Arial", "Helvetica", "DejaVu Sans"],
+            "font.size": 7,
+            "axes.titlesize": 7,
+            "axes.labelsize": 7,
+            "xtick.labelsize": 6,
+            "ytick.labelsize": 6,
+            "legend.fontsize": 6,
+            "axes.linewidth": 0.6,
+            "lines.linewidth": 1.0,
             "axes.spines.top": False,
             "axes.spines.right": False,
+            "axes.axisbelow": True,
+            "pdf.fonttype": 42,
+            "ps.fonttype": 42,
+            "svg.fonttype": "none",
         }
     )
 
@@ -471,9 +483,28 @@ def save_figure(fig: plt.Figure, path: Path, *, tight: bool = True) -> Path:
     ensure_dir(path.parent)
     if tight:
         fig.tight_layout()
-    fig.savefig(path, bbox_inches="tight", facecolor="white")
+    save_kwargs = {
+        "dpi": 600,
+        "bbox_inches": "tight",
+        "facecolor": "white",
+        "metadata": {
+            "Software": "experiment_plan_one",
+            "Title": path.stem,
+        },
+    }
+    fig.savefig(path, **save_kwargs)
+    if path.suffix.lower() == ".png":
+        for suffix in (".pdf", ".svg"):
+            fig.savefig(
+                path.with_suffix(suffix),
+                bbox_inches="tight",
+                facecolor="white",
+            )
     plt.close(fig)
     return path
+
+
+figure_style()
 
 
 def bh_fdr(values: Iterable[float]) -> np.ndarray:

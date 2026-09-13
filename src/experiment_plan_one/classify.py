@@ -10,6 +10,7 @@ from pathlib import Path
 from typing import Any, Iterable
 
 import pandas as pd
+from PIL import Image, UnidentifiedImageError
 
 from .common import ensure_dir, write_json
 
@@ -492,8 +493,9 @@ def classify_experiment_plan_results(
     for alias in PANEL_ALIASES:
         source = (output_root / alias.source).resolve()
         destination = target / alias.figure / alias.destination
+        destinations: list[Path] = []
         if source.exists():
-            _link_or_copy(source, destination)
+            destinations.extend(_link_alias_variants(source, destination))
             actual_status = alias.status
             note = ""
         else:
@@ -503,7 +505,9 @@ def classify_experiment_plan_results(
             "分类": alias.figure,
             "方案Panel": alias.panel,
             "方案内容": alias.description,
-            "分类文件": str(destination.relative_to(target)) if source.exists() else "",
+            "分类文件": ";".join(
+                str(path.relative_to(target)) for path in destinations
+            ),
             "原文件": str(source),
             "状态": actual_status,
             "说明": note,
@@ -542,6 +546,42 @@ def _link_or_copy(source: Path, destination: Path) -> None:
         os.link(source, destination)
     except OSError:
         shutil.copy2(source, destination)
+
+
+def _link_alias_variants(source: Path, destination: Path) -> list[Path]:
+    """Expose PNG, vector PDF when available, and an LZW TIFF derivative."""
+    outputs: list[Path] = []
+    _link_or_copy(source, destination)
+    outputs.append(destination)
+    for suffix in (".pdf", ".svg"):
+        vector_source = source.with_suffix(suffix)
+        if not vector_source.exists():
+            continue
+        vector_destination = destination.with_suffix(suffix)
+        _link_or_copy(vector_source, vector_destination)
+        outputs.append(vector_destination)
+    if source.suffix.lower() == ".png":
+        tiff_destination = destination.with_suffix(".tiff")
+        ensure_dir(tiff_destination.parent)
+        if tiff_destination.exists():
+            tiff_destination.unlink()
+        try:
+            with Image.open(source) as image:
+                source_dpi = image.info.get("dpi", (600.0, 600.0))
+                dpi = (
+                    float(source_dpi[0]) if len(source_dpi) >= 2 else 600.0,
+                    float(source_dpi[1]) if len(source_dpi) >= 2 else 600.0,
+                )
+                image.convert("RGB").save(
+                    tiff_destination,
+                    format="TIFF",
+                    compression="tiff_lzw",
+                    dpi=dpi,
+                )
+            outputs.append(tiff_destination)
+        except (UnidentifiedImageError, OSError):
+            tiff_destination.unlink(missing_ok=True)
+    return outputs
 
 
 def _manifest_row(

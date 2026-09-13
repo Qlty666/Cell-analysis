@@ -27,11 +27,13 @@ def fetch_string_network(
     *,
     species: int = 9606,
     required_score: int = 700,
+    add_nodes: int = 50,
+    force: bool = False,
     timeout: int = 180,
 ) -> pd.DataFrame:
     """Fetch a high-confidence STRING network and normalize its columns."""
     ensure_dir(output_path.parent)
-    if output_path.exists():
+    if output_path.exists() and not force:
         return pd.read_csv(output_path, sep="\t")
     identifiers = "\r".join(sorted(set(gene.upper() for gene in genes if gene)))
     params = urllib.parse.urlencode(
@@ -39,6 +41,7 @@ def fetch_string_network(
             "identifiers": identifiers,
             "species": str(species),
             "required_score": str(required_score),
+            "add_nodes": str(max(0, int(add_nodes))),
             "caller_identity": "liver-cancer-experiment-plan-one",
         }
     )
@@ -85,7 +88,6 @@ def ppi_hub_metrics(edges: pd.DataFrame, genes: list[str] | None = None) -> pd.D
     nodes = [node for node in nodes if node in graph]
     if not nodes:
         raise ValueError("none of the requested genes are present in the PPI graph")
-    graph = graph.subgraph(nodes).copy()
     degree = dict(graph.degree())
     betweenness = nx.betweenness_centrality(graph, weight=None)
     closeness = nx.closeness_centrality(graph)
@@ -131,35 +133,19 @@ def _maximum_clique_centrality(graph: nx.Graph) -> dict[str, float]:
     return scores
 
 
-def markov_clusters(graph: nx.Graph, inflation: float = 2.0) -> list[set[str]]:
-    """Small, dependency-free Markov clustering implementation."""
-    nodes = list(graph.nodes())
-    if not nodes:
+def louvain_clusters(graph: nx.Graph) -> list[set[str]]:
+    """Return deterministic Louvain communities for a weighted PPI network."""
+    if graph.number_of_nodes() == 0:
         return []
-    index = {node: idx for idx, node in enumerate(nodes)}
-    matrix = nx.to_numpy_array(graph, nodelist=nodes, weight="weight", dtype=float)
-    matrix = np.maximum(matrix, matrix.T)
-    np.fill_diagonal(matrix, 1.0)
-    columns = matrix.sum(axis=0, keepdims=True)
-    columns[columns == 0] = 1.0
-    matrix = matrix / columns
-    for _ in range(40):
-        matrix = np.linalg.matrix_power(matrix, 2)
-        matrix = np.power(matrix, inflation)
-        columns = matrix.sum(axis=0, keepdims=True)
-        columns[columns == 0] = 1.0
-        matrix = matrix / columns
-    matrix[matrix < 1e-3] = 0.0
-    clustered = nx.from_numpy_array(matrix)
-    mapping = {idx: node for node, idx in index.items()}
-    clusters = [
-        {mapping[idx] for idx in component}
-        for component in nx.connected_components(clustered)
-        if len(component) > 1
+    communities = nx.community.louvain_communities(
+        graph,
+        weight="weight",
+        seed=42,
+    )
+    return [
+        set(str(node) for node in community)
+        for community in sorted(communities, key=len, reverse=True)
     ]
-    assigned = set().union(*clusters) if clusters else set()
-    clusters.extend([{node} for node in nodes if node not in assigned])
-    return clusters
 
 
 def run_ppi_analysis(
@@ -168,12 +154,16 @@ def run_ppi_analysis(
     *,
     required_score: int = 700,
     top_n: int = 20,
+    add_nodes: int = 50,
+    force: bool = False,
 ) -> dict[str, Any]:
     ensure_dir(output_dir)
     edges = fetch_string_network(
         genes,
         output_dir / "string_edges.tsv",
         required_score=required_score,
+        add_nodes=add_nodes,
+        force=force,
     )
     metrics = ppi_hub_metrics(edges, genes=genes)
     metrics.to_csv(output_dir / "ppi_hub_metrics.csv", index=False)
@@ -184,12 +174,22 @@ def run_ppi_analysis(
             str(row.node2).upper(),
             weight=float(row.score) / 1000.0,
         )
-    graph = graph.subgraph(metrics["gene"]).copy()
-    clusters = markov_clusters(graph)
+    clusters = louvain_clusters(graph)
+    major_clusters = [cluster for cluster in clusters if len(cluster) >= 3]
+    assigned_major = set().union(*major_clusters) if major_clusters else set()
+    clusters_for_output = major_clusters + [
+        {node} for node in graph.nodes if node not in assigned_major
+    ]
     cluster_map = {
-        node: f"M{index + 1}" for index, cluster in enumerate(clusters) for node in cluster
+        node: f"M{index + 1}"
+        for index, cluster in enumerate(major_clusters)
+        for node in cluster
     }
-    metrics["module"] = metrics["gene"].map(cluster_map).fillna("M1")
+    node_modules = {
+        node: cluster_map.get(node, "Other")
+        for node in graph.nodes()
+    }
+    metrics["module"] = metrics["gene"].map(cluster_map).fillna("Other")
     metrics.to_csv(output_dir / "ppi_hub_metrics.csv", index=False)
 
     _draw_network(
@@ -198,13 +198,16 @@ def run_ppi_analysis(
         output_dir / "fig2a_string_network.png",
         title=f"STRING PPI network | score >= {required_score / 1000:.2f}",
         node_color="#3f7f93",
+        focus_genes=set(metrics["gene"]),
     )
     _draw_network(
         graph,
         metrics,
         output_dir / "fig2b_cytoscape_module_network.png",
-        title="PPI modules (Markov clustering)",
+        title="PPI modules (Louvain communities)",
         node_color=None,
+        focus_genes=set(metrics["gene"]),
+        node_modules=node_modules,
     )
     _bar_rank(
         metrics,
@@ -235,7 +238,11 @@ def run_ppi_analysis(
             "network_nodes": int(graph.number_of_nodes()),
             "network_edges": int(graph.number_of_edges()),
             "required_score": required_score,
-            "modules": {f"M{i + 1}": sorted(cluster) for i, cluster in enumerate(clusters)},
+            "module_method": "Louvain",
+            "modules": {
+                f"M{i + 1}": sorted(cluster)
+                for i, cluster in enumerate(major_clusters)
+            },
             "top_consensus": metrics.head(10).to_dict(orient="records"),
         },
     )
@@ -244,7 +251,7 @@ def run_ppi_analysis(
         "metrics": output_dir / "ppi_hub_metrics.csv",
         "top_genes": metrics["gene"].head(top_n).tolist(),
         "top3": metrics["gene"].head(3).tolist(),
-        "modules": clusters,
+        "modules": clusters_for_output,
     }
 
 
@@ -255,27 +262,56 @@ def _draw_network(
     *,
     title: str,
     node_color: str | None,
+    focus_genes: set[str] | None = None,
+    node_modules: dict[str, str] | None = None,
 ) -> None:
     if graph.number_of_nodes() == 0:
         raise ValueError("cannot draw an empty PPI graph")
     position = nx.spring_layout(graph, seed=42, weight="weight", k=1.2 / np.sqrt(max(graph.number_of_nodes(), 1)))
     degree = dict(graph.degree())
-    sizes = [110 + 34 * degree.get(node, 0) for node in graph.nodes()]
+    focus_genes = set(focus_genes or ())
+    sizes = [180 + 42 * degree.get(node, 0) for node in graph.nodes()]
     if node_color is None:
-        module_column = metrics.set_index("gene")["module"]
-        modules = sorted(module_column.unique())
+        module_column = (
+            pd.Series(node_modules)
+            if node_modules
+            else metrics.set_index("gene")["module"]
+        )
+        module_values = [
+            module_column.get(node, "Other") for node in graph.nodes()
+        ]
+        modules = [
+            module
+            for module, count in pd.Series(module_values).value_counts().items()
+            if module == "Other" or count >= 3
+        ][:10]
         palette = cm.get_cmap("tab20", max(len(modules), 1))
-        colors = [palette(modules.index(module_column.get(node, modules[0]))) for node in graph.nodes()]
+        color_map = {
+            module: palette(index)
+            for index, module in enumerate(modules)
+        }
+        colors = [
+            color_map.get(module_column.get(node, "Other"), "#b8bec5")
+            for node in graph.nodes()
+        ]
         legend_handles = [
-            plt.Line2D([0], [0], marker="o", color="none", markerfacecolor=palette(i), markersize=7, label=module)
-            for i, module in enumerate(modules)
+            plt.Line2D(
+                [0],
+                [0],
+                marker="o",
+                color="none",
+                markerfacecolor=color_map[module],
+                markersize=7,
+                label=module,
+            )
+            for module in modules
         ]
     else:
         colors = [node_color] * graph.number_of_nodes()
         legend_handles = []
-    fig, ax = plt.subplots(figsize=(10, 8))
+    fig, ax = plt.subplots(figsize=(7.2, 5.8))
     widths = [
-        0.5 + 3.0 * float(data.get("weight", 0.7))
+        0.8 + 4.0 * float(data.get("weight", 0.7))
         for _, _, data in graph.edges(data=True)
     ]
     nx.draw_networkx_edges(
@@ -283,22 +319,99 @@ def _draw_network(
         position,
         ax=ax,
         width=widths,
-        alpha=0.3,
+        alpha=0.42,
         edge_color="#66737f",
     )
-    nx.draw_networkx_nodes(
-        graph,
-        position,
-        ax=ax,
-        node_size=sizes,
-        node_color=colors,
-        linewidths=0.6,
-        edgecolors="white",
-    )
-    nx.draw_networkx_labels(graph, position, ax=ax, font_size=6.5)
+    node_order = list(graph.nodes())
+    if node_color is not None and focus_genes:
+        background = [node for node in node_order if node not in focus_genes]
+        highlighted = [node for node in node_order if node in focus_genes]
+        if background:
+            nx.draw_networkx_nodes(
+                graph,
+                position,
+                ax=ax,
+                nodelist=background,
+                node_size=[sizes[node_order.index(node)] for node in background],
+                node_color="#aebac3",
+                linewidths=0.5,
+                edgecolors="white",
+            )
+        nx.draw_networkx_nodes(
+            graph,
+            position,
+            ax=ax,
+            nodelist=highlighted,
+            node_size=[sizes[node_order.index(node)] for node in highlighted],
+            node_color=node_color,
+            linewidths=0.7,
+            edgecolors="white",
+        )
+        legend_handles = [
+            plt.Line2D(
+                [0],
+                [0],
+                marker="o",
+                color="none",
+                markerfacecolor=node_color,
+                markersize=7,
+                label="Seeded overlap genes",
+            ),
+            plt.Line2D(
+                [0],
+                [0],
+                marker="o",
+                color="none",
+                markerfacecolor="#aebac3",
+                markersize=7,
+                label="STRING context nodes",
+            ),
+        ]
+    else:
+        nx.draw_networkx_nodes(
+            graph,
+            position,
+            ax=ax,
+            node_size=sizes,
+            node_color=colors,
+            linewidths=0.6,
+            edgecolors="white",
+        )
+    ranked_context_labels = sorted(
+        (node for node in node_order if node not in focus_genes),
+        key=lambda node: degree.get(node, 0),
+        reverse=True,
+    )[:8]
+    if focus_genes:
+        nx.draw_networkx_labels(
+            graph,
+            position,
+            ax=ax,
+            labels={node: node for node in graph.nodes() if node in focus_genes},
+            font_size=6.8,
+            font_family="Arial",
+            font_weight="bold",
+            font_color="#102b3d",
+        )
+    if ranked_context_labels:
+        nx.draw_networkx_labels(
+            graph,
+            position,
+            ax=ax,
+            labels={node: node for node in ranked_context_labels},
+            font_size=5.2,
+            font_family="Arial",
+            font_color="#53616d",
+        )
     if legend_handles:
-        ax.legend(handles=legend_handles, loc="upper left", bbox_to_anchor=(1.01, 1))
-    ax.set_title(title, fontsize=12, fontweight="bold")
+        ax.legend(
+            handles=legend_handles,
+            loc="lower left",
+            bbox_to_anchor=(0.0, -0.03),
+            frameon=False,
+            fontsize=6,
+        )
+    ax.set_title(title, fontsize=8, fontweight="bold")
     ax.axis("off")
     save_figure(fig, output)
 

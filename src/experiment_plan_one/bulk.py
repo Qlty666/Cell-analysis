@@ -14,6 +14,7 @@ from typing import Any
 import matplotlib.pyplot as plt
 import numpy as np
 import pandas as pd
+from matplotlib.colors import ListedColormap
 from scipy import stats
 from scipy.cluster.hierarchy import leaves_list, linkage
 from scipy.spatial.distance import pdist
@@ -432,12 +433,43 @@ def candidate_heatmap(
     if selected.shape[0] > 2:
         row_order = leaves_list(linkage(selected.to_numpy(), method="average"))
         selected = selected.iloc[row_order]
-    fig, ax = plt.subplots(figsize=(max(8, selected.shape[1] * 0.22), max(4, selected.shape[0] * 0.24)))
+    fig, (group_ax, ax) = plt.subplots(
+        2,
+        1,
+        figsize=(7.2, max(3.8, selected.shape[0] * 0.18)),
+        gridspec_kw={"height_ratios": [0.08, 1.0]},
+        sharex=True,
+    )
+    group_colors = [plt.get_cmap("tab10")(idx) for idx, _ in enumerate(order)]
+    group_lookup = {group: color for group, color in zip(order, group_colors)}
+    group_strip = np.array(
+        [
+            [
+                order.index(group) if group in order else -1
+                for group in metadata[condition_column].astype(str)
+            ]
+        ],
+        dtype=float,
+    )
+    group_ax.imshow(
+        group_strip,
+        aspect="auto",
+        interpolation="nearest",
+        cmap=ListedColormap(group_colors),
+        vmin=0,
+        vmax=max(len(order) - 1, 1),
+    )
+    group_ax.set_yticks([])
+    group_ax.set_ylabel("Group", rotation=0, ha="right", va="center")
     image = ax.imshow(selected.to_numpy(), aspect="auto", cmap="RdBu_r", vmin=-2, vmax=2)
     ax.set_xticks(np.arange(selected.shape[1]))
-    ax.set_xticklabels(selected.columns, rotation=90, fontsize=6)
+    if selected.shape[1] <= 32:
+        ax.set_xticklabels(selected.columns, rotation=90, fontsize=5.5)
+    else:
+        ax.set_xticklabels([])
+        ax.set_xlabel("Samples ordered within condition")
     ax.set_yticks(np.arange(selected.shape[0]))
-    ax.set_yticklabels(selected.index, fontsize=7)
+    ax.set_yticklabels(selected.index, fontsize=6)
     boundaries = []
     last = None
     for index, group in enumerate(metadata[condition_column].astype(str)):
@@ -447,13 +479,19 @@ def candidate_heatmap(
     for boundary in boundaries:
         ax.axvline(boundary, color="black", linewidth=0.8)
     handles = [
-        plt.Line2D([0], [0], color=plt.get_cmap("tab10")(idx), lw=5, label=group)
-        for idx, group in enumerate(order)
+        plt.Line2D([0], [0], color=group_lookup[group], lw=5, label=group)
+        for group in order
     ]
     group_sizes = metadata[condition_column].astype(str).value_counts()
     for handle, group in zip(handles, order):
         handle.set_label(f"{group} (n={int(group_sizes.get(group, 0))})")
-    ax.legend(handles=handles, loc="upper left", bbox_to_anchor=(1.01, 1))
+    ax.legend(
+        handles=handles,
+        loc="upper left",
+        bbox_to_anchor=(1.01, 1),
+        frameon=False,
+        fontsize=5.5,
+    )
     ax.set_title("Candidate-gene expression in GSE89632")
     fig.colorbar(image, ax=ax, shrink=0.4, label="Row z-score")
     save_figure(fig, output_path)
@@ -493,7 +531,12 @@ def validation_boxplots(
     labels = [comparisons[0], comparisons[1]]
     n_cols = min(3, len(wanted))
     n_rows = math.ceil(len(wanted) / n_cols)
-    fig, axes = plt.subplots(n_rows, n_cols, figsize=(4.2 * n_cols, 3.5 * n_rows), squeeze=False)
+    fig, axes = plt.subplots(
+        n_rows,
+        n_cols,
+        figsize=(7.2, 2.9 * n_rows),
+        squeeze=False,
+    )
     rows: list[dict[str, Any]] = []
     for index, gene in enumerate(wanted):
         ax = axes.flat[index]
@@ -540,11 +583,20 @@ def validation_boxplots(
                 "p_value": p_value,
             }
         )
-        ax.set_title(gene, fontsize=10, fontweight="bold")
-        ax.set_ylabel("Expression")
-        ax.tick_params(axis="x", rotation=20)
+        ax.set_title(gene, fontsize=7, fontweight="bold")
+        ax.set_ylabel("Expression", fontsize=6)
+        ax.tick_params(axis="x", rotation=25, labelsize=5.5)
+        ax.tick_params(axis="y", labelsize=5.5)
         p_text = "NA" if not np.isfinite(p_value) else f"p={p_value:.3g}"
-        ax.text(0.98, 0.98, p_text, transform=ax.transAxes, ha="right", va="top", fontsize=8)
+        ax.text(
+            0.98,
+            0.98,
+            p_text,
+            transform=ax.transAxes,
+            ha="right",
+            va="top",
+            fontsize=5.5,
+        )
     for index in range(len(wanted), n_rows * n_cols):
         axes.flat[index].axis("off")
     save_figure(fig, output_dir / f"{prefix}_candidate_boxplots.png")

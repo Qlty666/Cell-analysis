@@ -24,12 +24,14 @@ import numpy as np
 import pandas as pd
 import matplotlib.pyplot as plt
 from bs4 import BeautifulSoup
+from PIL import Image
 
 from .common import (
     LOG,
     ensure_dir,
     get_json,
     read_json,
+    save_figure,
     split_gene_symbol,
     write_json,
 )
@@ -114,11 +116,21 @@ def write_compound_figures(
         raise ValueError(f"invalid SMILES: {smiles}")
 
     path_2d = out_dir / "fig1b_compound_2d.png"
-    drawer = Draw.MolDraw2DCairo(1400, 950)
+    drawer = Draw.MolDraw2DCairo(2800, 1900)
     drawer.drawOptions().useBWAtomPalette()
     Draw.rdMolDraw2D.PrepareAndDrawMolecule(drawer, molecule)
     drawer.FinishDrawing()
     path_2d.write_bytes(drawer.GetDrawingText())
+    with Image.open(path_2d) as image:
+        image.save(path_2d, format="PNG", dpi=(600, 600))
+    svg_drawer = Draw.MolDraw2DSVG(2800, 1900)
+    svg_drawer.drawOptions().useBWAtomPalette()
+    Draw.rdMolDraw2D.PrepareAndDrawMolecule(svg_drawer, molecule)
+    svg_drawer.FinishDrawing()
+    path_2d.with_suffix(".svg").write_text(
+        svg_drawer.GetDrawingText(),
+        encoding="utf-8",
+    )
 
     path_3d = out_dir / "fig1c_compound_3d.png"
     molecule_3d = Chem.AddHs(molecule)
@@ -168,8 +180,7 @@ def write_compound_figures(
     ax.set_axis_off()
     ax.view_init(elev=18, azim=32)
     ax.set_title("6PPD-Q 3D conformer")
-    fig.savefig(path_3d, dpi=320, bbox_inches="tight", facecolor="white")
-    plt.close(fig)
+    save_figure(fig, path_3d)
 
     path_props = out_dir / "fig1c_physicochemical_properties.png"
     values = [
@@ -208,8 +219,7 @@ def write_compound_figures(
         fontsize=7.5,
         color="#5d6670",
     )
-    fig.savefig(path_props, dpi=320, bbox_inches="tight", facecolor="white")
-    plt.close(fig)
+    save_figure(fig, path_props)
     return {"structure_2d": path_2d, "structure_3d": path_3d, "properties": path_props}
 
 
@@ -965,8 +975,7 @@ def make_venn_figure(
     ax.set_xlim(-2.3, 2.3)
     ax.set_ylim(-2.1, 2.4)
     output.parent.mkdir(parents=True, exist_ok=True)
-    fig.savefig(output, dpi=320, bbox_inches="tight", facecolor="white")
-    plt.close(fig)
+    save_figure(fig, output)
     return output
 
 
@@ -985,7 +994,7 @@ def make_workflow_figure(output: Path) -> Path:
         (0.24, 0.05, 0.22, 0.15, "Molecular docking\nVina", "#e6ddec"),
         (0.54, 0.05, 0.22, 0.15, "100 ns MD\n+ MM-PBSA prep", "#eadfdc"),
     ]
-    fig, ax = plt.subplots(figsize=(11.5, 5.6))
+    fig, ax = plt.subplots(figsize=(7.2, 5.4))
     ax.set_xlim(0, 1)
     ax.set_ylim(0, 1)
     ax.axis("off")
@@ -1001,7 +1010,14 @@ def make_workflow_figure(output: Path) -> Path:
             linewidth=1.1,
         )
         ax.add_patch(patch)
-        ax.text(x + width / 2, y + height / 2, label, ha="center", va="center", fontsize=8.8)
+        ax.text(
+            x + width / 2,
+            y + height / 2,
+            label,
+            ha="center",
+            va="center",
+            fontsize=6.4,
+        )
         centers[index] = (x + width / 2, y + height / 2)
     arrows = [
         (0, 2),
@@ -1033,8 +1049,7 @@ def make_workflow_figure(output: Path) -> Path:
         ax.add_patch(arrow)
     ax.set_title("Experiment plan one computational workflow", fontsize=13, fontweight="bold")
     output.parent.mkdir(parents=True, exist_ok=True)
-    fig.savefig(output, dpi=320, bbox_inches="tight", facecolor="white")
-    plt.close(fig)
+    save_figure(fig, output)
     return output
 
 

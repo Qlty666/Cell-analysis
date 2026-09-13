@@ -465,12 +465,12 @@ def _plot_auc_heatmap(performance: pd.DataFrame, output: Path) -> None:
     if frame.empty:
         return
     matrix = frame.pivot(index="feature_set", columns="model", values="cv_auc_mean")
-    fig, ax = plt.subplots(figsize=(max(9, matrix.shape[1] * 0.75), max(4, matrix.shape[0] * 0.7)))
+    fig, ax = plt.subplots(figsize=(7.2, max(3.8, matrix.shape[0] * 0.7)))
     image = ax.imshow(matrix.to_numpy(), cmap="YlGnBu", vmin=0.5, vmax=1.0)
     ax.set_xticks(np.arange(matrix.shape[1]))
-    ax.set_xticklabels(matrix.columns, rotation=45, ha="right")
+    ax.set_xticklabels(matrix.columns, rotation=45, ha="right", fontsize=5.8)
     ax.set_yticks(np.arange(matrix.shape[0]))
-    ax.set_yticklabels(matrix.index)
+    ax.set_yticklabels(matrix.index, fontsize=6)
     for row in range(matrix.shape[0]):
         for column in range(matrix.shape[1]):
             value = matrix.iloc[row, column]

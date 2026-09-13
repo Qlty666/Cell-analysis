@@ -357,6 +357,7 @@ def run_mouse_single_cell(
         lr["interactions"].to_csv(interaction_path, index=False)
         lr["pathways"].to_csv(pathway_path, index=False)
     _plot_cell_communication(
+        lr["interactions"],
         lr["pathways"],
         output_dir / "fig4f_cellchat_network.png",
     )
@@ -414,7 +415,7 @@ def _plot_umap(
     categories = sorted(frame[color].unique())
     palette = plt.get_cmap("tab20", max(len(categories), 1))
     color_map = {category: palette(index) for index, category in enumerate(categories)}
-    fig, ax = plt.subplots(figsize=(8.4, 6.6))
+    fig, ax = plt.subplots(figsize=(7.2, 5.6))
     for category in categories:
         subset = frame[frame[color] == category]
         ax.scatter(
@@ -469,7 +470,9 @@ def _plot_marker_dotplot(
                     }
                 )
     frame = pd.DataFrame(rows)
-    fig, ax = plt.subplots(figsize=(max(10, frame["gene"].nunique() * 0.35), 5.5))
+    fig, ax = plt.subplots(
+        figsize=(7.2, max(4.2, frame["cell_type"].nunique() * 0.42))
+    )
     cell_order = sorted(frame["cell_type"].unique())
     gene_order = list(dict.fromkeys(frame["gene"]))
     x = {gene: index for index, gene in enumerate(gene_order)}
@@ -484,9 +487,11 @@ def _plot_marker_dotplot(
         linewidths=0.3,
     )
     ax.set_xticks(range(len(gene_order)))
-    ax.set_xticklabels(gene_order, rotation=90, fontsize=7)
+    ax.set_xticklabels(gene_order, rotation=90, fontsize=6.2)
     ax.set_yticks(range(len(cell_order)))
-    ax.set_yticklabels(cell_order, fontsize=8)
+    ax.set_yticklabels(cell_order, fontsize=6)
+    ax.set_xlabel("Canonical marker gene")
+    ax.set_ylabel("Cell type")
     ax.set_title("Canonical marker expression", fontweight="bold")
     save_figure(fig, output)
 
@@ -496,7 +501,12 @@ def _plot_core_violin(gene_expression: pd.DataFrame, output: Path) -> None:
     if frame.empty:
         return
     genes = list(dict.fromkeys(frame["gene"]))
-    fig, axes = plt.subplots(1, len(genes), figsize=(3.3 * len(genes), 3.8), squeeze=False)
+    fig, axes = plt.subplots(
+        1,
+        len(genes),
+        figsize=(7.2, 3.6),
+        squeeze=False,
+    )
     for index, gene in enumerate(genes):
         ax = axes.flat[index]
         subset = frame[frame["gene"] == gene]
@@ -522,7 +532,12 @@ def _plot_feature_grid(data: ad.AnnData, genes: list[str], output: Path) -> None
     if not genes:
         return
     coords = data.obsm["X_umap"]
-    fig, axes = plt.subplots(1, len(genes), figsize=(4.4 * len(genes), 3.8), squeeze=False)
+    fig, axes = plt.subplots(
+        1,
+        len(genes),
+        figsize=(7.2, 3.6),
+        squeeze=False,
+    )
     for ax, gene in zip(axes.flat, genes):
         values = _expression_vector(data, gene)
         points = ax.scatter(coords[:, 0], coords[:, 1], c=values, s=4, cmap="viridis", linewidths=0)
@@ -543,7 +558,7 @@ def _plot_composition(composition: pd.DataFrame, output: Path) -> None:
     if frame.empty:
         return
     proportions = frame.div(frame.sum(axis=1), axis=0)
-    fig, ax = plt.subplots(figsize=(7, 4.8))
+    fig, ax = plt.subplots(figsize=(7.2, 5.4))
     bottom = np.zeros(len(proportions))
     colors = plt.get_cmap("tab20", frame.shape[1])
     for index, cell_type in enumerate(frame.columns):
@@ -552,7 +567,13 @@ def _plot_composition(composition: pd.DataFrame, output: Path) -> None:
         bottom += values
     ax.set_ylabel("Cell fraction")
     ax.set_title("Cell composition in mouse liver", fontweight="bold")
-    ax.legend(bbox_to_anchor=(1.01, 1), loc="upper left", frameon=False)
+    ax.legend(
+        bbox_to_anchor=(0.5, -0.22),
+        loc="upper center",
+        ncol=2,
+        frameon=False,
+        fontsize=6,
+    )
     save_figure(fig, output)
 
 
@@ -628,17 +649,114 @@ def _gene_matrix_column(matrix: Any, var_names: pd.Index, gene: str) -> np.ndarr
     return np.asarray(values).ravel()
 
 
-def _plot_cell_communication(pathways: pd.DataFrame, output: Path) -> None:
+def _plot_cell_communication(
+    interactions: pd.DataFrame,
+    pathways: pd.DataFrame,
+    output: Path,
+) -> None:
     if pathways.empty:
         return
-    top = pathways.head(15).sort_values("delta_HFD_NCD", ascending=True)
-    fig, ax = plt.subplots(figsize=(6.6, max(4, len(top) * 0.34)))
-    colors = ["#c05b4d" if value > 0 else "#5b7a9d" for value in top["delta_HFD_NCD"]]
-    ax.barh(top["pathway"], top["delta_HFD_NCD"], color=colors)
-    ax.axvline(0, color="#333333", linewidth=0.8)
-    ax.set_xlabel("Communication score change (HFD - NCD)")
-    ax.set_ylabel("")
-    ax.set_title("CellChat-like pathway changes", fontweight="bold")
+    if interactions.empty or "delta_HFD_NCD" not in interactions.columns:
+        return
+    import networkx as nx
+
+    frame = interactions.copy()
+    frame["absolute_delta"] = pd.to_numeric(
+        frame["delta_HFD_NCD"],
+        errors="coerce",
+    ).abs()
+    frame = frame.dropna(subset=["absolute_delta"]).sort_values(
+        "absolute_delta",
+        ascending=False,
+    )
+    selected = frame.drop_duplicates(
+        subset=["pathway", "source", "target"],
+        keep="first",
+    ).head(16)
+    graph = nx.DiGraph()
+    for row in selected.itertuples(index=False):
+        source = str(row.source)
+        target = str(row.target)
+        pathway = str(row.pathway)
+        delta = float(row.delta_HFD_NCD)
+        pathway_node = f"P:{pathway}"
+        graph.add_node(source, node_kind="cell")
+        graph.add_node(target, node_kind="cell")
+        graph.add_node(pathway_node, node_kind="pathway")
+        width = 0.6 + 3.0 * min(abs(delta), 1.0)
+        color = "#c05b4d" if delta >= 0 else "#4f7fa8"
+        graph.add_edge(source, pathway_node, width=width, color=color)
+        graph.add_edge(pathway_node, target, width=width, color=color)
+    if graph.number_of_nodes() == 0:
+        return
+    position = nx.spring_layout(graph, seed=42, k=1.5 / (graph.number_of_nodes() ** 0.5))
+    fig, ax = plt.subplots(figsize=(7.2, 5.8))
+    cells = [
+        node
+        for node, data in graph.nodes(data=True)
+        if data.get("node_kind") == "cell"
+    ]
+    pathway_nodes = [node for node in graph.nodes if node.startswith("P:")]
+    cell_colors = {
+        node: plt.get_cmap("tab10")(index % 10)
+        for index, node in enumerate(sorted(cells))
+    }
+    nx.draw_networkx_nodes(
+        graph,
+        position,
+        nodelist=cells,
+        node_size=[360 + 80 * graph.degree(node) for node in cells],
+        node_color=[cell_colors[node] for node in cells],
+        edgecolors="white",
+        linewidths=1.0,
+        ax=ax,
+    )
+    nx.draw_networkx_nodes(
+        graph,
+        position,
+        nodelist=pathway_nodes,
+        node_size=[220 + 45 * graph.degree(node) for node in pathway_nodes],
+        node_shape="D",
+        node_color="#e8c66a",
+        edgecolors="#6c5a2c",
+        linewidths=0.8,
+        ax=ax,
+    )
+    for source, target, data in graph.edges(data=True):
+        ax.annotate(
+            "",
+            xy=position[target],
+            xytext=position[source],
+            arrowprops={
+                "arrowstyle": "-|>",
+                "color": data["color"],
+                "linewidth": data["width"],
+                "alpha": 0.55,
+                "connectionstyle": "arc3,rad=0.08",
+            },
+        )
+    nx.draw_networkx_labels(
+        graph,
+        position,
+        labels={
+            node: node.replace("P:", "")[:28]
+            for node in graph.nodes
+        },
+        font_size=6.2,
+        font_family="Arial",
+        font_color="#1f2933",
+        ax=ax,
+    )
+    handles = [
+        plt.Line2D([0], [0], color="#c05b4d", lw=3, label="HFD > NCD"),
+        plt.Line2D([0], [0], color="#4f7fa8", lw=3, label="HFD < NCD"),
+    ]
+    ax.legend(handles=handles, loc="upper right", frameon=False)
+    ax.set_title(
+        "Ligand-receptor communication network (CellChat-like scoring)",
+        fontweight="bold",
+    )
+    ax.axis("off")
     save_figure(fig, output)
 
 
@@ -813,45 +931,153 @@ def _plot_human_core_genes(expression: pd.DataFrame, output: Path) -> None:
         .head(10)
         .index.tolist()
     )
-    fig, axes = plt.subplots(
-        len(genes),
-        len(cell_types),
-        figsize=(max(2.35 * len(cell_types), 8), max(2.8 * len(genes), 4)),
-        squeeze=False,
-        sharey="row",
-    )
     condition_order = ["Healthy", "MASLD", "MASH", "MASH cirrhosis"]
-    colors = {
-        "Healthy": "#6b9ac4",
-        "MASLD": "#91aa6b",
-        "MASH": "#d08a45",
-        "MASH cirrhosis": "#b34f45",
-    }
-    for row, gene in enumerate(genes):
-        for column, cell_type in enumerate(cell_types):
-            ax = axes[row, column]
+    disease_conditions = condition_order[1:]
+    rows: list[dict[str, Any]] = []
+    for gene in genes:
+        for cell_type in cell_types:
             subset = data[(data["gene"] == gene) & (data["cell_type"] == cell_type)]
-            values = [
-                subset.loc[subset["condition"] == condition, "expression"].to_numpy()
+            values = {
+                condition: pd.to_numeric(
+                    subset.loc[subset["condition"] == condition, "expression"],
+                    errors="coerce",
+                ).dropna()
                 for condition in condition_order
+            }
+            healthy = values["Healthy"]
+            if healthy.empty:
+                continue
+            healthy_median = float(healthy.median())
+            nonempty = [
+                values_group
+                for values_group in values.values()
+                if len(values_group) >= 2
             ]
-            positions = np.arange(1, len(condition_order) + 1)
-            bp = ax.boxplot(
-                values,
-                positions=positions,
-                widths=0.55,
-                patch_artist=True,
-                showfliers=False,
+            p_value = (
+                stats.kruskal(*nonempty).pvalue if len(nonempty) >= 2 else np.nan
             )
-            for patch, condition in zip(bp["boxes"], condition_order):
-                patch.set_facecolor(colors[condition])
-                patch.set_alpha(0.75)
-            if row == 0:
-                ax.set_title(cell_type, fontsize=8, fontweight="bold")
-            if column == 0:
-                ax.set_ylabel(gene, fontsize=9, fontweight="bold")
-            ax.set_xticks(positions)
-            ax.set_xticklabels(condition_order, rotation=45, ha="right", fontsize=6)
+            for condition in disease_conditions:
+                values_group = values[condition]
+                rows.append(
+                    {
+                        "gene": gene,
+                        "cell_type": cell_type,
+                        "condition": condition,
+                        "n_healthy": int(len(healthy)),
+                        "n_condition": int(len(values_group)),
+                        "healthy_median": healthy_median,
+                        "condition_median": (
+                            float(values_group.median())
+                            if not values_group.empty
+                            else np.nan
+                        ),
+                        "median_difference_vs_healthy": (
+                            float(values_group.median()) - healthy_median
+                            if not values_group.empty
+                            else np.nan
+                        ),
+                        "kruskal_p_value": p_value,
+                    }
+                )
+    statistics = pd.DataFrame(rows)
+    if statistics.empty:
+        return
+    unique_tests = (
+        statistics[["gene", "cell_type", "kruskal_p_value"]]
+        .drop_duplicates(subset=["gene", "cell_type"])
+        .copy()
+    )
+    unique_tests["kruskal_fdr"] = bh_fdr(unique_tests["kruskal_p_value"])
+    statistics = statistics.drop(columns=["kruskal_fdr"], errors="ignore").merge(
+        unique_tests[["gene", "cell_type", "kruskal_fdr"]],
+        on=["gene", "cell_type"],
+        how="left",
+    )
+    statistics.to_csv(output.with_suffix(".csv"), index=False)
+
+    matrix = (
+        statistics.pivot(
+            index=["gene", "condition"],
+            columns="cell_type",
+            values="median_difference_vs_healthy",
+        )
+        .reindex(
+            pd.MultiIndex.from_product(
+                [genes, disease_conditions],
+                names=["gene", "condition"],
+            )
+        )
+        .reindex(columns=cell_types)
+    )
+    fdr = (
+        statistics.pivot(
+            index=["gene", "condition"],
+            columns="cell_type",
+            values="kruskal_fdr",
+        )
+        .reindex(matrix.index)
+    )
+    finite = np.abs(matrix.to_numpy(dtype=float))
+    vmax = max(0.5, float(np.nanpercentile(finite, 95))) if np.isfinite(finite).any() else 1.0
+    fig, ax = plt.subplots(figsize=(7.2, max(4.6, len(matrix) * 0.42)))
+    image = ax.imshow(
+        matrix.to_numpy(dtype=float),
+        aspect="auto",
+        cmap="RdBu_r",
+        vmin=-vmax,
+        vmax=vmax,
+        interpolation="nearest",
+    )
+    ax.set_xticks(np.arange(matrix.shape[1]))
+    ax.set_xticklabels(matrix.columns, rotation=45, ha="right", fontsize=5.5)
+    ax.set_yticks(np.arange(matrix.shape[0]))
+    ax.set_yticklabels(
+        [f"{gene} | {condition}" for gene, condition in matrix.index],
+        fontsize=5.8,
+    )
+    for row in range(matrix.shape[0]):
+        for column in range(matrix.shape[1]):
+            value = float(matrix.iloc[row, column])
+            if not np.isfinite(value):
+                continue
+            fdr_value = float(fdr.iloc[row, column])
+            marker = (
+                "***"
+                if np.isfinite(fdr_value) and fdr_value <= 0.001
+                else "**"
+                if np.isfinite(fdr_value) and fdr_value <= 0.01
+                else "*"
+                if np.isfinite(fdr_value) and fdr_value <= 0.05
+                else ""
+            )
+            ax.text(
+                column,
+                row,
+                marker,
+                ha="center",
+                va="center",
+                fontsize=7,
+                fontweight="bold",
+                color="white" if abs(value) > 0.55 * vmax else "#20262d",
+            )
+    ax.set_xlabel("Cell type")
+    ax.set_ylabel("Core gene | disease stage")
+    ax.set_title(
+        "Core-gene expression shifts across human MASLD stages",
+        fontweight="bold",
+    )
+    colorbar = fig.colorbar(image, ax=ax, shrink=0.72, pad=0.02)
+    colorbar.set_label("Median expression difference vs Healthy")
+    ax.text(
+        1.0,
+        -0.34,
+        "*FDR<0.05  **FDR<0.01  ***FDR<0.001 (Kruskal-Wallis)",
+        transform=ax.transAxes,
+        ha="right",
+        va="top",
+        fontsize=5.2,
+        color="#4a5560",
+    )
     save_figure(fig, output)
 
 
