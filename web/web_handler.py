@@ -27,6 +27,7 @@ from web_results import (
     task_history_data,
 )
 from web_state import (
+    ANALYSIS_JOBS,
     DOCK_JOBS,
     FINISHED_NOTIFICATIONS,
     FULL_JOBS,
@@ -156,6 +157,13 @@ class Handler(BaseHTTPRequestHandler):
                 "text/html; charset=utf-8",
             )
             return
+        if parsed.path == "/analysis":
+            self._send(
+                200,
+                _ui.render_analysis_page().encode("utf-8"),
+                "text/html; charset=utf-8",
+            )
+            return
         if parsed.path == "/molecular-docking":
             self._send(
                 200,
@@ -268,11 +276,7 @@ class Handler(BaseHTTPRequestHandler):
             if not info:
                 self._send(404, b"job not found", "text/plain; charset=utf-8")
                 return
-            text = (
-                info["log"].read_text(encoding="utf-8", errors="replace")
-                if info["log"].exists()
-                else ""
-            )
+            text = _ui._log_tail(info["log"], 1_000_000)
             self._send(200, text.encode("utf-8"), "text/plain; charset=utf-8")
             return
         if parsed.path == "/dock/status":
@@ -446,6 +450,60 @@ class Handler(BaseHTTPRequestHandler):
             body = json.dumps(_ui._full_status(info)).encode("utf-8")
             self._send(200, body, "application/json")
             return
+        if parsed.path == "/analysis/log":
+            query = parse_qs(parsed.query)
+            job = query.get("job", [""])[0]
+            info = ANALYSIS_JOBS.get(job)
+            if not info:
+                self._send(404, b"job not found", "text/plain; charset=utf-8")
+                return
+            text = (
+                info["log"].read_text(encoding="utf-8", errors="replace")
+                if info["log"].exists()
+                else ""
+            )
+            self._send(200, text.encode("utf-8"), "text/plain; charset=utf-8")
+            return
+        if parsed.path == "/analysis/status":
+            query = parse_qs(parsed.query)
+            job = query.get("job", [""])[0]
+            info = ANALYSIS_JOBS.get(job)
+            if not info:
+                self._send(404, b"job not found", "application/json")
+                return
+            body = json.dumps(
+                _ui._analysis_status(info),
+                ensure_ascii=False,
+            ).encode("utf-8")
+            self._send(200, body, "application/json")
+            return
+        if parsed.path == "/analysis/files":
+            query = parse_qs(parsed.query)
+            job = query.get("job", [""])[0]
+            info = ANALYSIS_JOBS.get(job)
+            if not info:
+                self._send(404, b"job not found", "application/json")
+                return
+            body = json.dumps(
+                _ui.analysis_results(info),
+                ensure_ascii=False,
+            ).encode("utf-8")
+            self._send(200, body, "application/json")
+            return
+        if parsed.path == "/analysis/file":
+            query = parse_qs(parsed.query)
+            job = query.get("job", [""])[0]
+            name = query.get("name", [""])[0]
+            info = ANALYSIS_JOBS.get(job)
+            if not info:
+                self._send(404, b"job not found", "text/plain; charset=utf-8")
+                return
+            target = _ui._advanced_analysis_file_path(info, name)
+            if not target:
+                self._send(404, b"file not found", "text/plain; charset=utf-8")
+                return
+            self._send_file(target, _ui._content_type(target.suffix))
+            return
         if parsed.path == "/full/results":
             query = parse_qs(parsed.query)
             job = query.get("job", [""])[0]
@@ -554,10 +612,13 @@ class Handler(BaseHTTPRequestHandler):
             self._send_file(target, _ui._content_type(target.suffix))
             return
         if parsed.path == "/dock/validation-report":
+            query = parse_qs(parsed.query)
+            mode = query.get("mode", ["random"])[0]
             body = json.dumps(
                 {
-                    "report": _ui.validation_report_text(),
-                    "exists": _ui.VALIDATION_REPORT_PATH.exists(),
+                    "report": _ui.validation_report_text(mode),
+                    "exists": _ui._validation_report_path(mode).exists(),
+                    "mode": mode,
                 },
                 ensure_ascii=False,
             ).encode("utf-8")
@@ -920,6 +981,23 @@ class Handler(BaseHTTPRequestHandler):
                 self._send(
                     400,
                     json.dumps({"error": str(exc)}).encode("utf-8"),
+                    "application/json",
+                )
+            return
+        if parsed.path == "/analysis/start":
+            try:
+                result = _ui.start_analysis_job(data)
+                self._send(
+                    200,
+                    json.dumps(result, ensure_ascii=False).encode("utf-8"),
+                    "application/json",
+                )
+            except Exception as exc:
+                self._send(
+                    400,
+                    json.dumps({"error": str(exc)}, ensure_ascii=False).encode(
+                        "utf-8"
+                    ),
                     "application/json",
                 )
             return

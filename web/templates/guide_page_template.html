@@ -143,7 +143,8 @@ launchers\run_web_ui.bat</pre>
           <tr><td>虚拟敲除</td><td><code>/knockout</code></td><td>基因优先级评分与单细胞虚拟敲除</td></tr>
           <tr><td>网络毒理学</td><td><code>/network</code></td><td>化合物-疾病靶点交集与 PPI 网络分析</td></tr>
           <tr><td>FAERS</td><td><code>/faers</code></td><td>药物-事件表不相称性信号检测</td></tr>
-          <tr><td>真实数据验证</td><td><code>/validation</code></td><td>随机真实 GEO 数据验证全流程</td></tr>
+          <tr><td>真实数据验证</td><td><code>/validation</code></td><td>随机全流程、多队列靶点、真实 PDB 证据与对接盒验证</td></tr>
+          <tr><td>高级分析</td><td><code>/analysis</code></td><td>多队列分析、MR/共定位与分析工作区导出</td></tr>
           <tr><td>结果清单</td><td><code>/results</code></td><td>汇总可交付结果图与数据，联动判读指南</td></tr>
           <tr><td>任务进度</td><td><code>/tasks</code></td><td>集中查看排队、运行和暂停的任务</td></tr>
           <tr><td>使用教程</td><td><code>/guide</code></td><td>本页面</td></tr>
@@ -225,7 +226,15 @@ launchers\run_web_ui.bat</pre>
         <ul>
           <li>“虚拟筛选”页适合从证据收集、受体/配体准备到对接分析的全流程；无输入数据时会明确提示缺失文件。</li>
           <li>“分子对接”页使用独立工作目录，适合单独准备受体、配体库并运行 Vina。</li>
-          <li>工作目录中填写相对路径时，文件需位于该工作目录下；对接结果会按亲和力排序并可下载 PDBQT。</li>
+          <li>工作目录中填写相对路径时，文件需位于该工作目录下；对接结果会按亲和力排序并可下载 PDBQT，重复对接、阳性对照、PCA/FEL 与 MM/PBSA 参数可在对应页面设置。</li>
+        </ul>
+      </div>
+      <div class="workflow-item">
+        <h3>多队列、MR 与结果导出</h3>
+        <ul>
+          <li>“高级分析”页可独立运行多队列 WGCNA/ML/免疫/生存整合，以及 MR/共定位。</li>
+          <li>全自动流水线页可填写多队列和 MR 配置，在表达分析完成后自动衔接运行，并可用已有 <code>integrated_priority.csv</code> 调整关键基因排序。</li>
+          <li>同一页面可将已完成结果导出到本地 Codex 分析工作区，并支持 dry-run。</li>
         </ul>
       </div>
       <div class="workflow-item">

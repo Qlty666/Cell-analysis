@@ -73,6 +73,7 @@ class TestWebServerSmoke(unittest.TestCase):
             "/network",
             "/faers",
             "/validation",
+            "/analysis",
             "/molecular-docking",
             "/full",
             "/results",

@@ -256,6 +256,30 @@ class TestExtractKeyGenes(unittest.TestCase):
             self.assertEqual(result.iloc[0]["gene"], "GENE1")
             self.assertGreater(len(result), 0)
 
+    def test_advanced_priority_csv_orders_key_genes(self):
+        with tempfile.TemporaryDirectory() as tmp:
+            root = Path(tmp) / "single_cell"
+            root.mkdir(parents=True)
+            _write_deg(root)
+            priority = Path(tmp) / "integrated_priority.csv"
+            pd.DataFrame(
+                {
+                    "gene": ["GENE2", "GENE3", "GENE1"],
+                    "priority_score": [0.95, 0.70, 0.20],
+                }
+            ).to_csv(priority, index=False)
+            result = extract_key_genes(
+                root,
+                root / "integration_out",
+                top_n=10,
+                advanced_priority_csv=priority,
+            )
+            self.assertEqual(result.iloc[0]["gene"], "GENE2")
+            self.assertAlmostEqual(
+                float(result.iloc[0]["advanced_priority_score"]),
+                0.95,
+            )
+
 
 @unittest.skipUnless(RDKIT_AVAILABLE, "rdkit not installed")
 class TestCocrystalLigandFallback(unittest.TestCase):

@@ -46,6 +46,7 @@ Thumbs.db
 web/history.json
 web/dock_history.json
 web/molecular_docking_history.json
+web/analysis_history.json
 web/task_history.json
 web/install_log.txt
 web/validation_run.log

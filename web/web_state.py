@@ -49,13 +49,24 @@ MOLECULAR_DOCK_HISTORY_LOCK = threading.RLock()
 FULL_JOBS = {}
 FULL_QUEUE = []
 FULL_QUEUE_LOCK = threading.RLock()
+ANALYSIS_JOBS = {}
+ANALYSIS_QUEUE = []
+ANALYSIS_QUEUE_LOCK = threading.RLock()
+ANALYSIS_HISTORY_PATH = WEB_DIR / "analysis_history.json"
+ANALYSIS_HISTORY_LOCK = threading.RLock()
 DATASET_DOWNLOAD_JOBS = {}
 DATASET_DOWNLOAD_LOCK = threading.Lock()
 VALIDATION_JOB = {"proc": None, "log": None, "handle": None, "started": None}
 
 
 def _has_active_jobs() -> bool:
-    for store in (JOBS, DOCK_JOBS, MOLECULAR_DOCK_JOBS, FULL_JOBS):
+    for store in (
+        JOBS,
+        DOCK_JOBS,
+        MOLECULAR_DOCK_JOBS,
+        FULL_JOBS,
+        ANALYSIS_JOBS,
+    ):
         # Iterate over a snapshot: handlers insert into these dicts from other
         # threads without holding a lock.
         for info in list(store.values()):
@@ -81,7 +92,13 @@ def _prune_job_stores(max_records: int = JOB_STORE_MAX_RECORDS) -> None:
 
     Running/queued/paused jobs are never removed.
     """
-    for store in (JOBS, DOCK_JOBS, MOLECULAR_DOCK_JOBS, FULL_JOBS):
+    for store in (
+        JOBS,
+        DOCK_JOBS,
+        MOLECULAR_DOCK_JOBS,
+        FULL_JOBS,
+        ANALYSIS_JOBS,
+    ):
         if len(store) <= max_records:
             continue
         removable: list[str] = []
@@ -160,6 +177,14 @@ def save_molecular_docking_history(records: list[dict]) -> None:
     )
 
 
+def load_analysis_history() -> list[dict]:
+    return _read_history_file(ANALYSIS_HISTORY_PATH, ANALYSIS_HISTORY_LOCK)
+
+
+def save_analysis_history(records: list[dict]) -> None:
+    _write_history_file(ANALYSIS_HISTORY_PATH, records, ANALYSIS_HISTORY_LOCK)
+
+
 def _load_task_history() -> list[dict]:
     return _read_history_file(TASK_HISTORY_PATH, TASK_HISTORY_LOCK)
 
@@ -171,16 +196,20 @@ def _save_task_history(records: list[dict]) -> None:
 def _spawn_process(info: dict) -> None:
     """Launch a queued job process; identical for every job domain."""
     log_handle = info["log"].open("w", encoding="utf-8", errors="replace")
-    proc = subprocess.Popen(
-        info["cmd"],
-        cwd=APP_ROOT,
-        env=info["env"],
-        stdout=log_handle,
-        stderr=subprocess.STDOUT,
-        text=True,
-        encoding="utf-8",
-        errors="replace",
-    )
+    try:
+        proc = subprocess.Popen(
+            info["cmd"],
+            cwd=APP_ROOT,
+            env=info["env"],
+            stdout=log_handle,
+            stderr=subprocess.STDOUT,
+            text=True,
+            encoding="utf-8",
+            errors="replace",
+        )
+    except Exception:
+        log_handle.close()
+        raise
     info["proc"] = proc
     info["queued"] = False
     info["started"] = time.time()

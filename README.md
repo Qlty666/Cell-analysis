@@ -142,7 +142,7 @@
 
 ### 2.5 网页版统一界面
 
-`web/web_ui.py`（配合 `web/web_handler.py` 请求处理、`web/web_data.py` 静态数据表、`web/web_state.py` 运行时状态和 `web/web_results.py` 结果读取）提供本地网页端。除全自动流水线保留集成入口外，其余分析工具按功能拆成独立页面，顶部导航顺序为全自动流水线、环境补全、表达分析、数据集搜索、虚拟筛选、分子动力学、分子对接、虚拟敲除、网络毒理学、FAERS、真实数据验证、结果清单、使用教程，“任务进度”固定在右上角：
+`web/web_ui.py`（配合 `web/web_handler.py` 请求处理、`web/web_data.py` 静态数据表、`web/web_state.py` 运行时状态和 `web/web_results.py` 结果读取）提供本地网页端。除全自动流水线保留集成入口外，其余分析工具按功能拆成独立页面，顶部导航顺序为全自动流水线、环境补全、表达分析、数据集搜索、虚拟筛选、分子动力学、分子对接、虚拟敲除、网络毒理学、FAERS、真实数据验证、高级分析、结果清单、使用教程，“任务进度”固定在右上角：
 
 - 全自动流水线：`/full`
 - 环境补全：`/environment`
@@ -169,7 +169,8 @@
 网页版整体布局优化：各页面统一页头与快捷入口、表单按“基础/分析/运行”分组折叠、全自动流水线与表达分析表单支持设置保存/恢复/重置、结果区增加统计卡片、任务页增加数量统计、结果清单页支持按文件名/用途筛选，并可按结果图名或完整本地路径直接定位、只显示命中的清单。
 虚拟筛选页只保留 AutoDock Vina 对接、重打分和结果浏览；分子动力学、虚拟敲除、网络毒理学、FAERS 与真实数据验证分别使用独立页面，避免所有 CADD 模块堆在同一个“虚拟筛选”入口下。结果清单页与结果图指南同步补充这些输出路径、用途与判读标准。
 各功能板块已完成参数分组与使用优化：虚拟筛选、分子动力学、虚拟敲除、网络毒理学和 FAERS 页均支持保存/恢复/重置表单设置；虚拟敲除页可按需调整建模基因数、细胞数、传播轮数、DrugReflector checkpoint 与 GO/KEGG 开关；网络毒理学可指定疾病基因列并控制 Venn 与 Cytoscape 输出；真实数据验证页可设置随机数据集数与种子并实时查看运行状态。
-近期功能已全部接入网页端：表达分析页支持 `xgb` / `rf` / `gbm` / `mlp` / `lasso_svm` ML 模型选择；全自动流水线页新增 ML 模型、DepMap 依赖表和 PPI 网络边表；虚拟筛选页新增重打分 ML 模型/训练 CSV/标签列；虚拟敲除页支持 PPI 边表、scTenifoldKnk 引擎与原始计数开关；结果清单补充 ML 校准曲线与 `lasso_svm` 选定特征表。
+真实数据验证页现可选择随机真实 GSE 全流程、TCGA/GSE165816 多队列靶点功能验证、真实 PDB 证据验证和随机真实证据/对接盒验证，并读取对应任务的报告、日志和完成状态。
+近期功能已全部接入网页端：表达分析页支持 `xgb` / `rf` / `gbm` / `mlp` / `lasso_svm` ML 模型选择；全自动流水线页新增 ML 模型、DepMap 依赖表、PPI 网络边表、Advanced/MR 配置衔接、高级分析优先级表，以及网络毒理学的多来源目录和 GO/KEGG 开关；虚拟筛选页新增重打分 ML 模型/训练 CSV/标签列，并支持重复对接、随机种子列表、阳性对照和阈值判定；分子动力学页支持速度生成种子、MM/PBSA 命令与超时，结果表同步展示 PCA/FEL 和 MM/PBSA 指标；虚拟敲除页支持 PPI 边表、scTenifoldKnk 引擎与原始计数开关；网络毒理学页支持多来源自动发现、7 类 PPI hub 指标和交集基因富集；高级分析页支持多队列分析、MR/共定位、分析工作区导出、任务日志和结果文件下载；结果清单补充 ML 校准曲线、`lasso_svm` 选定特征表、KEGG GSEA 状态及高级分析/MR/网络/对接/MD 输出。
 
 ### 2.6 真实数据验证与可复现性
 
@@ -256,6 +257,8 @@ set LIVER_ADVANCED_CONFIG=config\advanced_analysis.json
 set LIVER_MR_CONFIG=config\mr_coloc.json
 ```
 
+全自动流水线可通过 `--advanced-priority-csv <integrated_priority.csv>` 使用上一轮高级分析的候选排序重新排列关键基因；配置文件中对应字段为 `advanced_priority_csv`。
+
 高级分析模块包含：
 
 - 发现有队列和独立验证队列读取、样本对齐、count / normalized / microarray 类型识别。
@@ -337,6 +340,7 @@ liverbio package
 
 ```bat
 python launchers\install_environment.py install expression
+python launchers\install_environment.py install analysis
 python launchers\install_environment.py install docking --with-ml
 python launchers\install_environment.py check full
 python launchers\install_environment.py list
@@ -1068,6 +1072,12 @@ GSE165816 和 TCGA PanCancer Atlas 仅用于真实数据验证。
 MIT License. See `LICENSE` for details.
 
 ## 9. 更新日志
+
+### 未发布
+
+- 将 v1.6.0 新增的高级分析、MR/共定位、分析工作区导出、多队列验证、网络多来源靶点、重复对接、阳性对照、PCA/FEL、MM/PBSA 和 KEGG GSEA 状态同步到网页端。
+- 新增网页版“高级分析”页，支持任务日志、状态轮询、历史记录和结果文件下载；全自动流水线页可配置 Advanced/MR 并衔接高级分析优先级表。
+- 真实数据验证页新增随机全流程、多队列靶点、真实 PDB 证据和随机证据/对接盒四类验证入口。
 
 ### v1.6.0
 

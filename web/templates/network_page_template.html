@@ -41,7 +41,10 @@
           <input name="net_disease_name" placeholder="Hepatocellular Carcinoma">
         </label>
         <label>化合物靶点 CSV（相对工作目录）
-          <input name="net_compound_targets" placeholder="data/network/compound_targets.csv" required>
+          <input name="net_compound_targets" placeholder="data/network/compound_targets.csv">
+        </label>
+        <label>多来源靶点目录（相对工作目录）
+          <input name="net_target_sources_dir" placeholder="data/network/targets">
         </label>
         <label>疾病基因 CSV（相对工作目录）
           <input name="net_disease_genes" placeholder="data/network/disease_genes.csv" required>
@@ -69,6 +72,10 @@
         <label>PPI 网络最大边数
           <input name="net_max_ppi_edges" type="number" min="0" value="2000">
         </label>
+        <label>GO/KEGG 富集超时（秒）
+          <input name="net_enrichment_timeout" type="number" min="1" value="900">
+        </label>
+        <label class="toggle"><input type="checkbox" name="net_run_enrichment" value="1"> 对交集基因运行 GO/KEGG 富集</label>
         <label class="toggle"><input type="checkbox" name="net_cytoscape_session" value="1"> 同时保存 .cys 会话</label>
       </div>
       </details>

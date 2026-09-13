@@ -339,7 +339,9 @@ footer { color: #64748b; font-size: 12px; margin: 30px 0 8px; }
   <div class="tree">&lt;output&gt;/                        # 单细胞分析输出根目录
 └─ results/
    ├─ figures/                  # 单细胞结果图（01_qc-09_cellchat）
-   └─ data/                     # 单细胞结果数据（01_qc-09_cellchat + Seurat 对象）
+   ├─ data/                     # 单细胞结果数据（01_qc-09_cellchat + Seurat 对象）
+   ├─ advanced/                 # 多队列分析与靶点优先级
+   └─ mr_coloc/                 # MR 与共定位
 
 &lt;workdir&gt;/                       # 全自动流水线工作目录
 ├─ data/knockout/               # 04 阶段敲除输入（不列入结果清单）
@@ -459,6 +461,7 @@ footer { color: #64748b; font-size: 12px; margin: 30px 0 8px; }
       <tr><td><code>data/06_enrichment/fig_11_enrichment_down_go.csv</code></td><td>下调基因 GO 富集表</td><td><span class="badge data">结果数据</span></td><td>通路结果表</td></tr>
       <tr><td><code>data/06_enrichment/fig_12_enrichment_up_kegg.csv</code></td><td>上调基因 KEGG 富集表</td><td><span class="badge data">结果数据</span></td><td>通路结果表</td></tr>
       <tr><td><code>data/06_enrichment/fig_13_enrichment_down_kegg.csv</code></td><td>下调基因 KEGG 富集表</td><td><span class="badge data">结果数据</span></td><td>通路结果表</td></tr>
+      <tr><td><code>data/06_enrichment/fig_21_gsea_kegg_status.json</code></td><td>KEGG GSEA 状态</td><td><span class="badge data">结果数据</span></td><td>完成、跳过或失败原因及条目数</td></tr>
       <tr><td><code>data/04_annotation/fig_16_17_31_32_cluster_markers.csv</code></td><td>聚类 marker 基因</td><td><span class="badge data">结果数据</span></td><td>marker 列表 <span class="badge opt">LIVER_RUN_CLUSTER_MARKERS=yes</span></td></tr>
       <tr><td><code>data/08_publication/fig_26_27_cell_cycle_scores.csv</code></td><td>细胞周期评分</td><td><span class="badge data">结果数据</span></td><td>每细胞周期评分 <span class="badge opt">LIVER_RUN_CELLCYCLE=yes</span></td></tr>
       <tr><td><code>data/08_publication/fig_29_doublet_rate_by_sample.csv</code></td><td>样本双细胞率</td><td><span class="badge data">结果数据</span></td><td>样本质量统计</td></tr>
@@ -541,7 +544,8 @@ footer { color: #64748b; font-size: 12px; margin: 30px 0 8px; }
     <thead><tr><th>文件</th><th>内容</th><th>类型</th><th>用途</th></tr></thead>
     <tbody>
       <tr><td><code>outputs/integration/docking_targets.csv</code></td><td>每靶点状态、PDB、配体数、命中数与最佳亲和力</td><td><span class="badge data">结果数据</span></td><td>汇总各靶点对接结果</td></tr>
-      <tr><td><code>docked/results.csv</code></td><td>Vina 原始对接结果</td><td><span class="badge data">结果数据</span></td><td>每配体亲和力与模式</td></tr>
+      <tr><td><code>docked/results.csv</code></td><td>Vina 原始对接结果</td><td><span class="badge data">结果数据</span></td><td>每配体、重复与随机种子对应的亲和力</td></tr>
+      <tr><td><code>docked/positive_control_results.csv</code></td><td>阳性对照对接与阈值判定</td><td><span class="badge data">结果数据</span></td><td>检查对接收敛性 <span class="badge opt">需配置阳性对照</span></td></tr>
       <tr><td><code>results/01_analysis/figures/fig_46_affinity_distribution.png</code></td><td>对接亲和力分布图</td><td><span class="badge fig">结果图</span></td><td>查看打分分布</td></tr>
       <tr><td><code>results/01_analysis/figures/fig_47_top_hits.png</code></td><td>Top 命中图</td><td><span class="badge fig">结果图</span></td><td>查看最优命中</td></tr>
       <tr><td><code>results/01_analysis/figures/fig_48_diverse_hits.png</code></td><td>多样性命中图</td><td><span class="badge fig">结果图</span></td><td>查看结构多样候选</td></tr>
@@ -559,7 +563,9 @@ footer { color: #64748b; font-size: 12px; margin: 30px 0 8px; }
       <tr><td><code>results/03_ml/data/ml_ranked_results.csv</code></td><td>ML 重打分排序结果</td><td><span class="badge data">结果数据</span></td><td>融合亲和力与 ML 排名 <span class="badge opt">ml-train</span></td></tr>
       <tr><td><code>results/06_md/&lt;ligand&gt;/md_rmsd_rmsf.png</code></td><td>MD 蛋白/配体 RMSD 与配体 RMSF</td><td><span class="badge fig">结果图</span></td><td>检查复合物稳定性和构象收敛 <span class="badge opt">md-simulation auto</span></td></tr>
       <tr><td><code>results/06_md/&lt;ligand&gt;/md_stability_dynamics.png</code></td><td>MD Rg/SASA/氢键/残基 RMSF 动态图</td><td><span class="badge fig">结果图</span></td><td>结合口袋残基高亮 <span class="badge opt">md-simulation auto</span></td></tr>
-      <tr><td><code>results/06_md/md_simulation_results.csv</code></td><td>MD 每配体状态与动态均值指标</td><td><span class="badge data">结果数据</span></td><td>查看时长、RMSD、Rg、SASA、氢键、口袋 RMSF <span class="badge opt">md-simulation</span></td></tr>
+      <tr><td><code>results/06_md/&lt;ligand&gt;/pca_fel.csv</code></td><td>PC1/PC2 构象投影与 Gibbs 自由能面数据</td><td><span class="badge data">结果数据</span></td><td>查看主要构象状态和最低自由能区域 <span class="badge opt">MD 指标与 index 可用</span></td></tr>
+      <tr><td><code>results/06_md/&lt;ligand&gt;/mmpbsa.log</code></td><td>外部 MM/PBSA 命令日志</td><td><span class="badge data">结果数据</span></td><td>复核结合自由能与命令状态 <span class="badge opt">需配置 MM/PBSA 命令</span></td></tr>
+      <tr><td><code>results/06_md/md_simulation_results.csv</code></td><td>MD 每配体状态与动态均值指标</td><td><span class="badge data">结果数据</span></td><td>查看时长、RMSD、Rg、SASA、氢键、口袋 RMSF、PCA/FEL 与 MM/PBSA <span class="badge opt">md-simulation</span></td></tr>
     </tbody>
   </table>
 </div>
@@ -585,7 +591,9 @@ footer { color: #64748b; font-size: 12px; margin: 30px 0 8px; }
     <thead><tr><th>文件</th><th>内容</th><th>类型</th><th>用途</th></tr></thead>
     <tbody>
       <tr><td><code>network_toxicology/data/compound_disease_overlap.csv</code></td><td>化合物靶点与疾病基因交集表</td><td><span class="badge data">结果数据</span></td><td>核心交集靶点及来源数</td></tr>
-      <tr><td><code>network_toxicology/data/ppi_hub_scores.csv</code></td><td>STRING PPI degree/betweenness/clustering 评分</td><td><span class="badge data">结果数据</span></td><td>PPI hub 靶点评分 <span class="badge opt">需 --ppi-network-csv</span></td></tr>
+      <tr><td><code>network_toxicology/data/ppi_hub_scores.csv</code></td><td>STRING PPI degree、betweenness、closeness、eigenvector、PageRank、MCC、clustering 与 consensus hub 评分</td><td><span class="badge data">结果数据</span></td><td>PPI hub 靶点评分 <span class="badge opt">需 --ppi-network-csv</span></td></tr>
+      <tr><td><code>network_toxicology/data/insilico_go_enrichment.csv</code></td><td>网络交集基因 GO 富集表</td><td><span class="badge data">结果数据</span></td><td>查看交集靶点 GO 通路 <span class="badge opt">需启用富集且交集基因≥3</span></td></tr>
+      <tr><td><code>network_toxicology/data/insilico_kegg_enrichment.csv</code></td><td>网络交集基因 KEGG 富集表</td><td><span class="badge data">结果数据</span></td><td>查看交集靶点 KEGG 通路 <span class="badge opt">需启用富集且 R 环境可用</span></td></tr>
       <tr><td><code>network_toxicology/data/ctpd_nodes.csv</code></td><td>C-T-P-D 网络节点表</td><td><span class="badge data">结果数据</span></td><td>化合物、靶点、疾病节点</td></tr>
       <tr><td><code>network_toxicology/data/ctpd_edges.csv</code></td><td>C-T-P-D 网络边表</td><td><span class="badge data">结果数据</span></td><td>化合物-靶点、靶点-疾病、PPI 边</td></tr>
       <tr><td><code>network_toxicology/data/ctpd_network.html</code></td><td>C-T-P-D 网络可视化页</td><td><span class="badge data">结果数据</span></td><td>快速查看网络关系</td></tr>
@@ -632,6 +640,28 @@ footer { color: #64748b; font-size: 12px; margin: 30px 0 8px; }
   <h2>11 集成报告与溯源</h2>
   <p class="muted">位置：<span class="path">&lt;workdir&gt;/outputs/integration/</span></p>
   <p class="muted">无结果图/结果数据。本阶段仅生成 HTML 报告、汇总与溯源文件，不列入本清单。</p>
+</div>
+
+<div class="card">
+  <h2>高级分析、MR 与工作区导出</h2>
+  <p class="muted">位置：独立高级分析任务的输出目录，以及全自动流水线下的 <span class="path">&lt;output&gt;/results/advanced/</span> 与 <span class="path">&lt;output&gt;/results/mr_coloc/</span>。</p>
+  <table>
+    <thead><tr><th>文件</th><th>内容</th><th>类型</th><th>用途</th></tr></thead>
+    <tbody>
+      <tr><td><code>advanced/integrated_priority.csv</code></td><td>多队列整合后的基因优先级表</td><td><span class="badge data">结果数据</span></td><td>查看综合评分、证据计数和主要表达指标</td></tr>
+      <tr><td><code>advanced/advanced_analysis_summary.json</code></td><td>多队列、R、ML、免疫和生存分析汇总</td><td><span class="badge data">结果数据</span></td><td>查看各分析模块状态与输出路径</td></tr>
+      <tr><td><code>advanced/ml_model_comparison.csv</code></td><td>基因级 ML 模型交叉验证比较</td><td><span class="badge data">结果数据</span></td><td>比较不同模型的排序性能</td></tr>
+      <tr><td><code>advanced/ml_external_validation.csv</code></td><td>验证队列上的模型表现</td><td><span class="badge data">结果数据</span></td><td>检查跨队列泛化和阈值稳定性</td></tr>
+      <tr><td><code>advanced/ml_feature_importance.csv</code></td><td>ML 特征重要性表</td><td><span class="badge data">结果数据</span></td><td>查看模型依赖的基因特征</td></tr>
+      <tr><td><code>advanced/ml_shap.png</code></td><td>SHAP 模型解释图</td><td><span class="badge fig">结果图</span></td><td>解释候选基因对模型输出的贡献</td></tr>
+      <tr><td><code>mr_coloc/harmonised_instruments.csv</code></td><td>暴露与结局协调后的工具变量表</td><td><span class="badge data">结果数据</span></td><td>检查 SNP、效应方向和 F 统计量</td></tr>
+      <tr><td><code>mr_coloc/mr_methods.csv</code></td><td>IVW、加权中位数和 MR-Egger 结果</td><td><span class="badge data">结果数据</span></td><td>比较不同 MR 方法的方向与显著性</td></tr>
+      <tr><td><code>mr_coloc/mr_leave_one_out.csv</code></td><td>留一法敏感性分析</td><td><span class="badge data">结果数据</span></td><td>判断结果是否由单个 SNP 驱动</td></tr>
+      <tr><td><code>mr_coloc/mr_summary.json</code></td><td>MR 汇总与 R 后端状态</td><td><span class="badge data">结果数据</span></td><td>查看主要估计、异质性和共定位状态</td></tr>
+      <tr><td><code>mr_coloc/coloc_posterior.csv</code></td><td>共定位后验概率表</td><td><span class="badge data">结果数据</span></td><td>查看 PP.H4 与共享因果变量证据 <span class="badge opt">需 R coloc</span></td></tr>
+      <tr><td><code>&lt;analysis-workspace&gt;/data/imported_results/</code></td><td>导出后的运行结果副本</td><td><span class="badge data">结果数据</span></td><td>供本地 Codex 分析工作区继续分析</td></tr>
+    </tbody>
+  </table>
 </div>
 
 <div class="card">

@@ -20,6 +20,7 @@ NAV_HTML = (
     '<a href="/network">网络毒理学</a>'
     '<a href="/faers">FAERS</a>'
     '<a href="/validation">真实数据验证</a>'
+    '<a href="/analysis">高级分析</a>'
     '<a href="/results">结果清单</a>'
     '<a href="/guide">使用教程</a>'
     '<a href="/tasks" class="nav-right">任务进度</a>'
@@ -39,6 +40,13 @@ NAV_CSS = (
     "font-size:12px;font-weight:700;line-height:1;}"
     ".topnav a .nav-count[hidden]{display:none;}"
     ".topnav .nav-right{margin-left:auto;}"
+    "@media (max-width:900px){"
+    ".topnav{flex-wrap:nowrap;gap:6px;padding:7px 12px;overflow-x:auto;"
+    "scrollbar-width:none;-webkit-overflow-scrolling:touch;}"
+    ".topnav::-webkit-scrollbar{display:none;}"
+    ".topnav a{flex:0 0 auto;padding:5px 10px;font-size:13px;}"
+    ".topnav .nav-right{margin-left:0;}"
+    "}"
 )
 
 ENV_MODULES = {
@@ -64,6 +72,19 @@ ENV_MODULES = {
         "install_bat": "launchers/install_datasets_environment.bat",
         "check_bat": None,
         "note": "自动安装 numpy、pandas、scikit-learn 与 joblib 等搜索/重排依赖。",
+    },
+    "analysis": {
+        "title": "高级分析与 MR/共定位",
+        "summary": (
+            "多队列 WGCNA、基因级 ML、免疫/生存整合、MR、共定位"
+            "与分析工作区导出依赖。"
+        ),
+        "r_deps": True,
+        "dock_tools": False,
+        "skills": False,
+        "install_bat": "launchers/install_analysis_environment.bat",
+        "check_bat": "launchers/check_analysis_environment.bat",
+        "note": "R 后端可选；未安装时仍可使用 Python 版 MR 和共定位回退。",
     },
     "docking": {
         "title": "虚拟筛选 / 对接",

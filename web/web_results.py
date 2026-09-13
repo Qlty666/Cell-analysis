@@ -14,6 +14,7 @@ from pathlib import Path
 
 from web_data import FULL_STAGE_LABELS, SINGLE_STAGE_LABELS
 from web_state import (
+    ANALYSIS_HISTORY_LOCK,
     DOCK_HISTORY_LOCK,
     FINISHED_NOTIFICATIONS,
     HISTORY_LOCK,
@@ -22,11 +23,13 @@ from web_state import (
     TASK_HISTORY_LOCK,
     _load_task_history,
     _save_task_history,
+    load_analysis_history,
     load_dock_history,
     load_history,
     load_molecular_docking_history,
     save_dock_history,
     save_history,
+    save_analysis_history,
     save_molecular_docking_history,
 )
 
@@ -274,6 +277,26 @@ def record_molecular_docking_job(info: dict, ok: bool) -> None:
             },
         )
         save_molecular_docking_history(records)
+
+
+def record_analysis_job(info: dict, ok: bool) -> None:
+    with ANALYSIS_HISTORY_LOCK:
+        records = load_analysis_history()
+        records.insert(
+            0,
+            {
+                "job": info.get("job_id", ""),
+                "kind": info.get("kind", ""),
+                "title": info.get("title", "高级分析"),
+                "output": str(info.get("output", "")),
+                "status": "success" if ok else "failed",
+                "started": info.get("started"),
+                "finished": time.time(),
+            },
+        )
+        if len(records) > 100:
+            del records[100:]
+        save_analysis_history(records)
 
 
 def _full_log_paths(info: dict) -> list[Path]:

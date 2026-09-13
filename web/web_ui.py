@@ -72,6 +72,9 @@ from web_state import (  # noqa: E402
     FULL_JOBS,
     FULL_QUEUE,
     FULL_QUEUE_LOCK,
+    ANALYSIS_JOBS,
+    ANALYSIS_QUEUE,
+    ANALYSIS_QUEUE_LOCK,
     DATASET_DOWNLOAD_JOBS,
     DATASET_DOWNLOAD_LOCK,
     VALIDATION_JOB,
@@ -107,6 +110,7 @@ from web_results import (  # noqa: E402
     record_job,
     record_dock_job,
     record_molecular_docking_job,
+    record_analysis_job,
     _full_log_paths,
     _single_cell_root_from_workdir,
     _read_json,
@@ -126,6 +130,8 @@ RESULT_GUIDE_PATH = APP_ROOT / "docs" / "result_figure_guide.md"
 RESULT_DETAILS_PATH = STATIC_DIR / "result_details.json"
 TASKS_TEMPLATE_PATH = TEMPLATE_DIR / "tasks_template.html"
 DATASET_TEMPLATE_PATH = TEMPLATE_DIR / "datasets_template.html"
+ANALYSIS_TEMPLATE_PATH = TEMPLATE_DIR / "analysis_tools_page_template.html"
+ANALYSIS_LOG_DIR = APP_ROOT / "logs" / "analysis"
 DATASET_SEARCH_DIR = APP_ROOT / "data_cache" / "dataset_search"
 DATASET_DATABASES = ("geo", "biostudies", "atlas")
 VALIDATION_ROOT = Path(
@@ -137,6 +143,13 @@ VALIDATION_ROOT = Path(
 VALIDATION_REPORT_DIR = VALIDATION_ROOT / "validation"
 VALIDATION_REPORT_PATH = VALIDATION_REPORT_DIR / "validation_summary.json"
 VALIDATION_LOG = WEB_DIR / "validation_run.log"
+VALIDATION_FEATURES_ROOT = (
+    APP_ROOT / "dock" / "validation_real" / "pan_cancer_20"
+)
+VALIDATION_EVIDENCE_ROOT = APP_ROOT / "dock" / "validation_real"
+VALIDATION_RANDOM_EVIDENCE_ROOT = (
+    APP_ROOT / "dock" / "validation_real_random"
+)
 MAX_POST_BODY_BYTES = 1_000_000
 MAX_SERVED_FILE_BYTES = 64 * 1024 * 1024
 LOCAL_ORIGIN_HOSTS = {"127.0.0.1", "localhost", "[::1]", "::1"}
@@ -1219,6 +1232,301 @@ def render_datasets_page() -> str:
     )
 
 
+def render_analysis_page() -> str:
+    return _render_template(
+        ANALYSIS_TEMPLATE_PATH,
+        "advanced analysis template missing",
+    )
+
+
+ANALYSIS_KIND_LABELS = {
+    "advanced": "多队列分析与靶点排序",
+    "mr": "孟德尔随机化与共定位",
+    "export": "分析工作区导出",
+}
+
+
+def _cli_path(value: str) -> str:
+    """Return an absolute CLI path while preserving an empty argument."""
+    value = str(value or "").strip()
+    if not value:
+        return ""
+    path = Path(value).expanduser()
+    if not path.is_absolute():
+        path = APP_ROOT / path
+    return str(path.resolve())
+
+
+def _analysis_output_path(data: dict, kind: str) -> Path:
+    if kind == "export":
+        value = _first(data, "analysis_root", "").strip()
+    else:
+        value = _first(data, "output", "").strip()
+    if not value:
+        field = "分析工作区根目录" if kind == "export" else "输出目录"
+        raise ValueError(f"{field}不能为空")
+    output = Path(value).expanduser()
+    if not output.is_absolute():
+        output = APP_ROOT / output
+    return output.resolve()
+
+
+def _analysis_flags(data: dict, names: tuple[str, ...]) -> list[str]:
+    flags = []
+    for name in names:
+        if _first(data, name, "").strip().lower() in (
+            "1",
+            "true",
+            "on",
+            "yes",
+        ):
+            flags.append("--" + name.replace("_", "-"))
+    return flags
+
+
+def _require_existing_path(value: str, label: str) -> str:
+    resolved = _cli_path(value)
+    if not Path(resolved).is_file():
+        raise ValueError(f"{label}不存在：{value}")
+    return resolved
+
+
+def start_analysis_job(data: dict) -> dict:
+    """Start an Advanced, MR/coloc or analysis-export job."""
+    kind = _first(data, "kind", "").strip().lower()
+    if kind not in ANALYSIS_KIND_LABELS:
+        raise ValueError("分析类型必须是 advanced、mr 或 export")
+    output = _analysis_output_path(data, kind)
+    dry_run = _first(data, "dry_run", "").strip().lower() in (
+        "1",
+        "true",
+        "on",
+        "yes",
+    )
+
+    if kind == "advanced":
+        cmd = [
+            sys.executable,
+            str(SCRIPTS_DIR / "run_advanced_analysis.py"),
+            "--output",
+            str(output),
+        ]
+        config = _cli_path(_first(data, "config", ""))
+        expression = _first(data, "expression", "").strip()
+        if not config and not expression:
+            raise ValueError("请填写高级分析配置文件或发现队列表达矩阵")
+        if config:
+            config = _require_existing_path(config, "高级分析配置文件")
+            cmd += ["--config", config]
+        for key in (
+            "expression",
+            "metadata",
+            "cohort_name",
+            "condition_column",
+            "gene_column",
+            "case_label",
+            "control_label",
+        ):
+            value = _first(data, key, "").strip()
+            if value:
+                if key in {"expression", "metadata"}:
+                    value = _require_existing_path(value, "发现队列表")
+                cmd += ["--" + key.replace("_", "-"), value]
+        for key in ("feature_cap", "cv_folds", "cv_repeats", "seed"):
+            value = _int_field(data, key)
+            if value is not None:
+                cmd += ["--" + key.replace("_", "-"), str(value)]
+        cmd += _analysis_flags(
+            data,
+            ("skip_r", "skip_ml", "skip_wgcna", "skip_immune", "skip_survival", "verbose"),
+        )
+    elif kind == "mr":
+        config = _cli_path(_first(data, "config", ""))
+        if not config:
+            raise ValueError("MR/共定位配置文件不能为空")
+        config = _require_existing_path(config, "MR/共定位配置文件")
+        cmd = [
+            sys.executable,
+            str(SCRIPTS_DIR / "run_mr_coloc.py"),
+            "--config",
+            config,
+            "--output",
+            str(output),
+        ]
+        cmd += _analysis_flags(data, ("skip_r", "verbose"))
+    else:
+        cmd = [sys.executable, str(SCRIPTS_DIR / "export_to_analysis.py")]
+        source = _first(data, "source", "").strip()
+        run = _first(data, "run", "").strip()
+        if source:
+            source_path = Path(_cli_path(source))
+            if not source_path.exists():
+                raise ValueError(f"运行结果目录不存在：{source}")
+            cmd += ["--source", str(source_path)]
+        elif run:
+            cmd.append(run)
+        else:
+            raise ValueError("请填写数据集编号、运行目录或来源目录")
+        cmd += ["--analysis-root", str(output)]
+        name = _first(data, "name", "").strip()
+        if name:
+            cmd += ["--name", name]
+        inventory_script = _first(data, "inventory_script", "").strip()
+        if inventory_script:
+            cmd += [
+                "--inventory-script",
+                _require_existing_path(inventory_script, "清单脚本"),
+            ]
+        cmd += _analysis_flags(
+            data,
+            ("remember_analysis_root", "no_inventory", "dry_run"),
+        )
+
+    if kind != "export" or not dry_run:
+        output.mkdir(parents=True, exist_ok=True)
+    ANALYSIS_LOG_DIR.mkdir(parents=True, exist_ok=True)
+    job_id = uuid.uuid4().hex[:8]
+    log_path = ANALYSIS_LOG_DIR / f"{kind}_{job_id}.log"
+    env = os.environ.copy()
+    env["PYTHONIOENCODING"] = "utf-8"
+    info = {
+        "job_id": job_id,
+        "kind": kind,
+        "title": ANALYSIS_KIND_LABELS[kind],
+        "log": log_path,
+        "proc": None,
+        "started": time.time(),
+        "output": output,
+        "cmd": cmd,
+        "env": env,
+        "queued": True,
+        "recorded": False,
+        "notified": False,
+    }
+    ANALYSIS_JOBS[job_id] = info
+    with ANALYSIS_QUEUE_LOCK:
+        ANALYSIS_QUEUE.append(info)
+    try:
+        _drain_analysis_queue()
+    except Exception:
+        with ANALYSIS_QUEUE_LOCK:
+            ANALYSIS_QUEUE[:] = [
+                item for item in ANALYSIS_QUEUE if item is not info
+            ]
+        ANALYSIS_JOBS.pop(job_id, None)
+        raise
+    return {
+        "job": job_id,
+        "log_url": f"/analysis/log?job={job_id}",
+        "status_url": f"/analysis/status?job={job_id}",
+    }
+
+
+def _drain_analysis_queue() -> None:
+    _drain_store(ANALYSIS_QUEUE, ANALYSIS_QUEUE_LOCK)
+
+
+def _analysis_status(info: dict) -> dict:
+    if info.get("proc") is None:
+        return {
+            "running": False,
+            "ok": False,
+            "queued": True,
+            "paused": False,
+            "stage": "排队中",
+            "error": "",
+            "kind": info.get("kind", ""),
+            "output": str(info.get("output", "")),
+        }
+    running = info["proc"].poll() is None
+    if running:
+        return {
+            "running": True,
+            "ok": False,
+            "queued": False,
+            "paused": False,
+            "stage": ANALYSIS_KIND_LABELS.get(info.get("kind", ""), "分析中"),
+            "error": "",
+            "kind": info.get("kind", ""),
+            "output": str(info.get("output", "")),
+        }
+    ok = info["proc"].returncode == 0
+    with JOB_RECORD_LOCK:
+        if not info.get("recorded"):
+            record_analysis_job(info, ok)
+            info["recorded"] = True
+    _drain_analysis_queue()
+    log_text = _log_tail(info["log"], 30000)
+    error = "" if ok else (
+        _extract_error(log_text) or "进程已退出，请查看日志"
+    )
+    _notify_finished(
+        info,
+        "analysis",
+        "高级分析",
+        info.get("title", "高级分析"),
+        "completed" if ok else "interrupted",
+        info.get("title", ""),
+        error,
+        exit_code=info["proc"].returncode,
+    )
+    return {
+        "running": False,
+        "ok": ok,
+        "queued": False,
+        "paused": False,
+        "stage": info.get("title", ""),
+        "error": error,
+        "kind": info.get("kind", ""),
+        "output": str(info.get("output", "")),
+    }
+
+
+def _analysis_result_root(info: dict) -> Path:
+    """Return the directory whose files are exposed by the analysis page."""
+    root = Path(info["output"]).resolve()
+    if info.get("kind") == "export":
+        imported = root / "data" / "imported_results"
+        if imported.is_dir():
+            return imported.resolve()
+    return root
+
+
+def analysis_results(info: dict) -> dict:
+    root = _analysis_result_root(info)
+    files = _analysis_files(root)
+    if len(files) > 500:
+        files = files[:500]
+    return {
+        "job": info.get("job_id", ""),
+        "kind": info.get("kind", ""),
+        "output": str(root),
+        "files": files,
+        "count": len(files),
+    }
+
+
+def _advanced_analysis_file_path(info: dict, name: str) -> Path | None:
+    root = _analysis_result_root(info)
+    relative = Path(name)
+    if relative.is_absolute() or ".." in relative.parts:
+        return None
+    target = (root / relative).resolve()
+    allowed_suffixes = RESULT_FILE_SUFFIXES | {
+        ".json",
+        ".md",
+        ".html",
+        ".txt",
+    }
+    if (
+        not target.is_relative_to(root)
+        or not target.is_file()
+        or target.suffix.lower() not in allowed_suffixes
+    ):
+        return None
+    return target
+
+
 def _first(data: dict, key: str, default: str = "") -> str:
     values = data.get(key)
     if not values:
@@ -1288,6 +1596,14 @@ def _float_field(data: dict, key: str):
     if str(value).strip() == "":
         return None
     return float(value)
+
+
+def _int_list_field(data: dict, key: str) -> list[int] | None:
+    value = _first(data, key, "")
+    if str(value).strip() == "":
+        return None
+    tokens = [part for part in re.split(r"[\s,;]+", str(value)) if part]
+    return [int(float(part)) for part in tokens]
 
 
 def _raw_count_flag(value: str) -> bool | None:
@@ -1606,6 +1922,19 @@ def start_dock_job(data: dict) -> dict:
         "num_modes": _int_field(data, "num_modes"),
         "energy_range": _float_field(data, "energy_range"),
         "max_workers": _int_field(data, "max_workers"),
+        "seed": _int_field(data, "docking_seed"),
+        "seeds": _int_list_field(data, "docking_seeds"),
+        "replicates": _int_field(data, "docking_replicates"),
+        "positive_control_pdbqt": (
+            _first(data, "docking_positive_control", "") or None
+        ),
+        "positive_control_id": (
+            _first(data, "docking_positive_control_id", "") or None
+        ),
+        "positive_control_max_affinity": _float_field(
+            data,
+            "docking_positive_control_max_affinity",
+        ),
         "cutoff": _float_field(data, "cutoff"),
         "moderate_cutoff": _float_field(data, "moderate_cutoff"),
         "top_n": _int_field(data, "top_n"),
@@ -1621,11 +1950,14 @@ def start_dock_job(data: dict) -> dict:
         "md_em_steps": _int_field(data, "md_em_steps"),
         "md_equil_steps": _int_field(data, "md_equil_steps"),
         "md_prod_steps": _int_field(data, "md_prod_steps"),
+        "md_gen_seed": _int_field(data, "md_gen_seed"),
         "md_temperature": _float_field(data, "md_temperature"),
         "md_ligand_charge": _int_field(data, "md_ligand_charge"),
         "md_cpu": _int_field(data, "md_cpu"),
         "md_gpu": _first(data, "md_gpu", "0") in ("1", "true", "on", "yes"),
         "md_topology_dir": _first(data, "md_topology_dir", "") or None,
+        "md_mmpbsa_command": _first(data, "md_mmpbsa_command", "") or None,
+        "md_mmpbsa_timeout": _int_field(data, "md_mmpbsa_timeout"),
     }
     cfg = load_config(APP_ROOT / "config" / "docking_config.json", overrides)
     save_config(cfg, cfg_path)
@@ -1966,6 +2298,12 @@ def start_full_job(data: dict) -> dict:
     ppi_network_csv = _first(data, "ppi_network_csv", "").strip()
     if ppi_network_csv:
         cmd += ["--ppi-network-csv", ppi_network_csv]
+    advanced_priority_csv = _first(data, "advanced_priority_csv", "").strip()
+    if advanced_priority_csv:
+        cmd += [
+            "--advanced-priority-csv",
+            _cli_path(advanced_priority_csv),
+        ]
     case_label = _first(data, "case_label", "").strip()
     if case_label:
         cmd += ["--case-label", case_label]
@@ -2021,6 +2359,7 @@ def start_full_job(data: dict) -> dict:
         "network_compound_targets_csv",
         "network_disease_genes_csv",
         "network_ppi_network_csv",
+        "network_target_sources_dir",
     ]:
         value = _first(data, attr, "").strip()
         if value:
@@ -2057,6 +2396,22 @@ def start_full_job(data: dict) -> dict:
     network_max_ppi_edges = _int_field(data, "network_max_ppi_edges")
     if network_max_ppi_edges is not None:
         cmd += ["--network-max-ppi-edges", str(network_max_ppi_edges)]
+    if _first(data, "network_run_enrichment", "") in (
+        "1",
+        "true",
+        "on",
+        "yes",
+    ):
+        cmd.append("--network-run-enrichment")
+    network_enrichment_timeout = _int_field(
+        data,
+        "network_enrichment_timeout",
+    )
+    if network_enrichment_timeout:
+        cmd += [
+            "--network-enrichment-timeout",
+            str(network_enrichment_timeout),
+        ]
     faers_input = _first(data, "faers_input", "").strip()
     if faers_input:
         cmd += ["--faers-input", faers_input]
@@ -2073,6 +2428,12 @@ def start_full_job(data: dict) -> dict:
 
     env = os.environ.copy()
     env["PYTHONIOENCODING"] = "utf-8"
+    advanced_config = _cli_path(_first(data, "advanced_config", ""))
+    if advanced_config:
+        env["LIVER_ADVANCED_CONFIG"] = advanced_config
+    mr_config = _cli_path(_first(data, "mr_config", ""))
+    if mr_config:
+        env["LIVER_MR_CONFIG"] = mr_config
     FULL_JOBS[job_id] = {
         "job_id": job_id,
         "log": log_path,
@@ -2452,6 +2813,31 @@ def running_tasks_data(include_logs: bool = True) -> dict:
             }
         )
 
+    for job_id, info in list(ANALYSIS_JOBS.items()):
+        status = _analysis_status(info)
+        if not (status.get("running") or status.get("queued")):
+            continue
+        state = "queued" if status.get("queued") else "running"
+        started = float(info.get("started") or now)
+        tasks.append(
+            {
+                "page": "analysis",
+                "page_label": "高级分析",
+                "job": job_id,
+                "url": (
+                    f"/analysis?kind={info.get('kind', '')}&job={job_id}"
+                ),
+                "title": info.get("title", "高级分析"),
+                "detail": str(info.get("output", "")),
+                "status": state,
+                "started": started,
+                "elapsed": int(now - started),
+                "progress": 0,
+                "stage_label": "排队中" if state == "queued" else "运行中",
+                "log_tail": _log_tail(info["log"]) if include_logs else "",
+            }
+        )
+
     tasks.sort(key=lambda item: float(item.get("started") or 0))
     return {"tasks": tasks}
 
@@ -2746,8 +3132,59 @@ def _full_file_path(workdir: Path, name: str) -> Path | None:
     return target
 
 
-def validation_report_text() -> str:
-    if VALIDATION_REPORT_PATH.exists():
+VALIDATION_KIND_LABELS = {
+    "random": "随机真实 GSE 全流程验证",
+    "features": "多队列靶点功能验证",
+    "evidence": "真实 PDB 证据验证",
+    "random-evidence": "随机真实证据与对接盒验证",
+}
+
+
+def _validation_mode(value: object = "random") -> str:
+    mode = str(value or "random").strip().lower()
+    return mode if mode in VALIDATION_KIND_LABELS else "random"
+
+
+def _validation_report_path(mode: str) -> Path:
+    mode = _validation_mode(mode)
+    if mode == "features":
+        return VALIDATION_FEATURES_ROOT / "validation_report.md"
+    if mode == "evidence":
+        return VALIDATION_EVIDENCE_ROOT / "summary.json"
+    if mode == "random-evidence":
+        return VALIDATION_RANDOM_EVIDENCE_ROOT / "summary.json"
+    return VALIDATION_REPORT_PATH
+
+
+def validation_report_text(mode: str = "random") -> str:
+    mode = _validation_mode(mode)
+    report_path = _validation_report_path(mode)
+    if mode in {"evidence", "random-evidence"} and report_path.exists():
+        try:
+            data = json.loads(
+                report_path.read_text(encoding="utf-8", errors="replace")
+            )
+        except Exception:
+            data = {}
+        lines = [
+            f"# {VALIDATION_KIND_LABELS[mode]}",
+            "",
+            f"- 状态：{data.get('status', '')}",
+            f"- 通过：{data.get('passed', '')}",
+            f"- 最少成功靶点：{data.get('min_ok_targets', '')}",
+            f"- 最少配体记录：{data.get('min_ligands', '')}",
+            f"- 完成时间：{data.get('finished_at', '')}",
+            "",
+            "## 原始汇总",
+            "",
+            "```json",
+            json.dumps(data, ensure_ascii=False, indent=2)[-30000:],
+            "```",
+        ]
+        return "\n".join(lines)
+    if mode == "features" and report_path.exists():
+        return report_path.read_text(encoding="utf-8", errors="replace")
+    if mode == "random" and VALIDATION_REPORT_PATH.exists():
         try:
             data = json.loads(
                 VALIDATION_REPORT_PATH.read_text(encoding="utf-8", errors="replace")
@@ -2773,8 +3210,7 @@ def validation_report_text() -> str:
         return "\n".join(lines)
     return (
         "报告尚未生成。\n"
-        "请在网页版点击“重新运行随机真实 GSE 验证”，"
-        "或在命令行运行：python scripts\\validate_random_real_full_pipeline.py --count 10"
+        f"请运行“{VALIDATION_KIND_LABELS[mode]}”，或在命令行运行对应验证脚本。"
     )
 
 
@@ -2782,17 +3218,22 @@ def start_validation_job(data: dict | None = None) -> dict:
     proc = VALIDATION_JOB.get("proc")
     if proc is not None and proc.poll() is None:
         return {"running": True, "message": "验证任务已在运行"}
-    count = _int_field(data or {}, "count") or 10
-    count = max(1, min(30, count))
-    raw_seed = _first(data or {}, "seed", "20260813") or "20260813"
+    old_handle = VALIDATION_JOB.get("handle")
+    if old_handle is not None and not old_handle.closed:
+        old_handle.close()
+    payload = data or {}
+    mode = _validation_mode(_first(payload, "mode", "random"))
+    count = _int_field(payload, "count") or 10
+    count = max(1, min(20 if mode == "features" else 30, count))
+    raw_seed = _first(payload, "seed", "20260813") or "20260813"
     try:
         seed = int(raw_seed)
     except (TypeError, ValueError):
         seed = 20260813
     VALIDATION_LOG.parent.mkdir(parents=True, exist_ok=True)
     handle = VALIDATION_LOG.open("w", encoding="utf-8", errors="replace")
-    proc = subprocess.Popen(
-        [
+    if mode == "random":
+        cmd = [
             sys.executable,
             str(SCRIPTS_DIR / "validate_random_real_full_pipeline.py"),
             "--result-root",
@@ -2801,30 +3242,74 @@ def start_validation_job(data: dict | None = None) -> dict:
             str(count),
             "--seed",
             str(seed),
-        ],
-        cwd=APP_ROOT,
-        stdout=handle,
-        stderr=subprocess.STDOUT,
-        text=True,
-        encoding="utf-8",
-        errors="replace",
-    )
+        ]
+    elif mode == "features":
+        cmd = [
+            sys.executable,
+            str(SCRIPTS_DIR / "validate_new_features.py"),
+            "--max-studies",
+            str(count),
+        ]
+        if _first(payload, "skip_gse", "") in ("1", "true", "on", "yes"):
+            cmd.append("--skip-gse")
+        if _first(payload, "skip_build", "") in ("1", "true", "on", "yes"):
+            cmd.append("--skip-build")
+    elif mode == "evidence":
+        cmd = [
+            sys.executable,
+            str(SCRIPTS_DIR / "validate_real_evidence.py"),
+        ]
+    else:
+        cmd = [
+            sys.executable,
+            str(SCRIPTS_DIR / "validate_real_random.py"),
+        ]
+    try:
+        proc = subprocess.Popen(
+            cmd,
+            cwd=APP_ROOT,
+            stdout=handle,
+            stderr=subprocess.STDOUT,
+            text=True,
+            encoding="utf-8",
+            errors="replace",
+        )
+    except Exception:
+        handle.close()
+        raise
     VALIDATION_JOB.update(
         {
             "proc": proc,
             "log": VALIDATION_LOG,
             "handle": handle,
             "started": time.time(),
+            "mode": mode,
+            "label": VALIDATION_KIND_LABELS[mode],
         }
     )
-    return {"running": True, "job": "validation"}
+    return {
+        "running": True,
+        "job": "validation",
+        "mode": mode,
+        "label": VALIDATION_KIND_LABELS[mode],
+    }
 
 
 def validation_job_status() -> dict:
     proc = VALIDATION_JOB.get("proc")
     if proc is None:
-        return {"running": False, "ok": False, "started": False, "log": ""}
+        return {
+            "running": False,
+            "ok": False,
+            "started": False,
+            "log": "",
+            "mode": "",
+            "label": "",
+        }
     running = proc.poll() is None
+    handle = VALIDATION_JOB.get("handle")
+    if not running and handle is not None and not handle.closed:
+        handle.close()
     log_text = ""
     if VALIDATION_LOG.exists():
         log_text = VALIDATION_LOG.read_text(
@@ -2835,6 +3320,11 @@ def validation_job_status() -> dict:
         "ok": not running and proc.returncode == 0,
         "started": True,
         "log": log_text,
+        "mode": VALIDATION_JOB.get("mode", "random"),
+        "label": VALIDATION_JOB.get(
+            "label",
+            VALIDATION_KIND_LABELS["random"],
+        ),
     }
 
 
@@ -3118,6 +3608,9 @@ def run_network_request(data: dict) -> dict:
         "compound_targets_csv": (
             _first(data, "net_compound_targets", "") or None
         ),
+        "target_sources_dir": (
+            _first(data, "net_target_sources_dir", "") or None
+        ),
         "disease_genes_csv": _first(data, "net_disease_genes", "") or None,
         "disease_gene_column": (
             _first(data, "net_disease_gene_column", "") or None
@@ -3140,6 +3633,12 @@ def run_network_request(data: dict) -> dict:
         )
         in ("1", "true", "on", "yes"),
         "network_max_ppi_edges": _int_field(data, "net_max_ppi_edges"),
+        "run_enrichment": _first(data, "net_run_enrichment", "")
+        in ("1", "true", "on", "yes"),
+        "enrichment_timeout": _int_field(
+            data,
+            "net_enrichment_timeout",
+        ),
     }
     cfg = load_config(
         APP_ROOT / "config" / "docking_config.json",
@@ -3385,6 +3884,7 @@ def main() -> int:
             "network",
             "faers",
             "validation",
+            "analysis",
             "full",
             "results",
             "tasks",
@@ -3463,6 +3963,8 @@ def main() -> int:
         open_url = url + "/faers"
     elif args.page == "validation":
         open_url = url + "/validation"
+    elif args.page == "analysis":
+        open_url = url + "/analysis"
     elif args.page == "full":
         open_url = url + "/full"
     elif args.page == "results":

@@ -75,6 +75,21 @@ MODULES = {
         "skills": False,
         "check": "datasets",
     },
+    "analysis": {
+        "label": "Advanced analysis and MR/colocalisation",
+        "aliases": ("advanced", "mr", "colocalisation", "mr-coloc"),
+        "entrypoints": (
+            "scripts/run_advanced_analysis.py",
+            "scripts/run_mr_coloc.py",
+            "scripts/export_to_analysis.py",
+        ),
+        "pip_requirements": ("requirements.txt",),
+        "pip_packages": ("joblib",),
+        "r_deps": True,
+        "dock_installer": False,
+        "skills": False,
+        "check": "pipeline",
+    },
     "docking": {
         "label": "Virtual screening / docking",
         "aliases": ("dock", "virtual-screening", "cadd"),

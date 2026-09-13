@@ -19,6 +19,7 @@ if str(APP_ROOT / "web") not in sys.path:
 import web_ui as web_ui_module  # noqa: E402
 
 from web_ui import (  # noqa: E402
+    ANALYSIS_JOBS,
     DOCK_JOBS,
     FINISHED_NOTIFICATIONS,
     FULL_JOBS,
@@ -27,6 +28,8 @@ from web_ui import (  # noqa: E402
     JOBS,
     NOTIFY_LOCK,
     _analysis_file_path,
+    _advanced_analysis_file_path,
+    _analysis_status,
     _dock_file_path,
     _fetch_site_allowed,
     _full_file_path,
@@ -44,6 +47,7 @@ from web_ui import (  # noqa: E402
     full_results,
     register_heartbeat,
     running_task_counts,
+    start_analysis_job,
     run_faers_request,
     run_knockout_request,
     run_network_request,
@@ -142,6 +146,25 @@ class TestNetworkAndFaersWeb(unittest.TestCase):
             self.assertIn("--seed", cmd)
             self.assertEqual(cmd[cmd.index("--seed") + 1], "20260820")
 
+    def test_validation_feature_mode_passes_build_and_gse_switches(self):
+        with mock.patch("web_ui.subprocess.Popen") as popen:
+            try:
+                start_validation_job(
+                    {
+                        "mode": ["features"],
+                        "count": ["4"],
+                        "skip_gse": ["1"],
+                        "skip_build": ["1"],
+                    }
+                )
+            finally:
+                web_ui_module.VALIDATION_JOB.clear()
+            cmd = popen.call_args.args[0]
+            self.assertIn("validate_new_features.py", cmd[1])
+            self.assertEqual(cmd[cmd.index("--max-studies") + 1], "4")
+            self.assertIn("--skip-gse", cmd)
+            self.assertIn("--skip-build", cmd)
+
     def test_network_request_runs_and_lists_files(self):
         with tempfile.TemporaryDirectory() as tmp:
             workdir = Path(tmp) / "work"
@@ -177,6 +200,36 @@ class TestNetworkAndFaersWeb(unittest.TestCase):
             )
             out = Path(result["output_dir"])
             self.assertTrue((out / "figures" / "compound_disease_venn.png").exists())
+
+    def test_network_request_passes_source_directory_and_enrichment(self):
+        with tempfile.TemporaryDirectory() as tmp:
+            workdir = Path(tmp) / "work"
+            workdir.mkdir()
+            with mock.patch(
+                "docking.network_toxicology.run_network_toxicology",
+                return_value={},
+            ) as run:
+                run_network_request(
+                    {
+                        "net_workdir": [str(workdir)],
+                        "net_target_sources_dir": ["data/network/targets"],
+                        "net_disease_genes": ["data/network/disease.csv"],
+                        "net_run_enrichment": ["1"],
+                        "net_enrichment_timeout": ["1500"],
+                    }
+                )
+            cfg = run.call_args.args[0]
+            self.assertEqual(
+                cfg.data["network_toxicology"]["target_sources_dir"],
+                "data/network/targets",
+            )
+            self.assertTrue(
+                cfg.data["network_toxicology"]["run_enrichment"]
+            )
+            self.assertEqual(
+                cfg.data["network_toxicology"]["enrichment_timeout"],
+                1500,
+            )
 
     def test_faers_request_runs_and_lists_files(self):
         with tempfile.TemporaryDirectory() as tmp:
@@ -367,6 +420,10 @@ class TestResultDetails(unittest.TestCase):
             "fig_45_ml_calibration_curve.png",
             "compound_disease_venn.png",
             "liver_cancer_seurat.rds",
+            "fig_21_gsea_kegg_status.json",
+            "positive_control_results.csv",
+            "pca_fel.csv",
+            "mmpbsa.log",
         ):
             self.assertIn(name, names)
         self.assertIn("result-toggle", template)
@@ -406,6 +463,56 @@ class TestRecentWebIntegration(unittest.TestCase):
             finally:
                 DOCK_JOBS.pop(job_id, None)
 
+    def test_dock_job_passes_replicates_controls_and_md_mmpbsa(self):
+        with tempfile.TemporaryDirectory() as tmp:
+            workdir = Path(tmp) / "work"
+            workdir.mkdir()
+            with mock.patch("web_ui._drain_dock_queue"):
+                result = start_dock_job(
+                    {
+                        "workdir": [str(workdir)],
+                        "stage": ["dock"],
+                        "docking_seed": ["42"],
+                        "docking_seeds": ["42 43 44"],
+                        "docking_replicates": ["3"],
+                        "docking_positive_control": [
+                            "data/ligands/control.pdbqt"
+                        ],
+                        "docking_positive_control_id": ["known"],
+                        "docking_positive_control_max_affinity": ["-7.0"],
+                        "md_gen_seed": ["77"],
+                        "md_mmpbsa_command": ["gmx_MMPBSA -O"],
+                        "md_mmpbsa_timeout": ["1800"],
+                    }
+                )
+            job_id = result["job"]
+            try:
+                cfg_path = workdir / "config" / f"docking_web_{job_id}.json"
+                cfg = json.loads(cfg_path.read_text(encoding="utf-8"))
+                self.assertEqual(cfg["docking"]["seed"], 42)
+                self.assertEqual(cfg["docking"]["seeds"], [42, 43, 44])
+                self.assertEqual(cfg["docking"]["replicates"], 3)
+                self.assertEqual(
+                    cfg["docking"]["positive_control_pdbqt"],
+                    "data/ligands/control.pdbqt",
+                )
+                self.assertEqual(cfg["docking"]["positive_control_id"], "known")
+                self.assertEqual(
+                    cfg["docking"]["positive_control_max_affinity"],
+                    -7.0,
+                )
+                self.assertEqual(cfg["md_simulation"]["gen_seed"], 77)
+                self.assertEqual(
+                    cfg["md_simulation"]["mmpbsa_command"],
+                    "gmx_MMPBSA -O",
+                )
+                self.assertEqual(
+                    cfg["md_simulation"]["mmpbsa_timeout_seconds"],
+                    1800,
+                )
+            finally:
+                DOCK_JOBS.pop(job_id, None)
+
     def test_templates_expose_recent_controls(self):
         single = (APP_ROOT / "web" / "templates" / "web_page_template.html").read_text(
             encoding="utf-8"
@@ -432,10 +539,25 @@ class TestRecentWebIntegration(unittest.TestCase):
         self.assertIn('name="ml_model"', full)
         self.assertIn('name="ppi_network_csv"', full)
         self.assertIn('name="depmap_csv"', full)
+        self.assertIn('name="advanced_priority_csv"', full)
+        self.assertIn('name="network_target_sources_dir"', full)
+        self.assertIn('name="network_run_enrichment"', full)
         self.assertIn('name="model"', dock)
         self.assertIn('name="training_csv"', dock)
         self.assertIn('name="moderate_cutoff"', dock)
+        self.assertIn('name="docking_seeds"', dock)
+        self.assertIn('name="docking_replicates"', dock)
+        self.assertIn('name="docking_positive_control"', dock)
         self.assertIn("saveModuleForm('form', 'liver_ui_dock_form'", dock)
+        md = (
+            APP_ROOT
+            / "web"
+            / "templates"
+            / "md_simulation_page_template.html"
+        ).read_text(encoding="utf-8")
+        self.assertIn('name="md_gen_seed"', md)
+        self.assertIn('name="md_mmpbsa_command"', md)
+        self.assertIn('name="md_mmpbsa_timeout"', md)
         self.assertIn('name="ko_ppi"', knockout)
         self.assertIn('name="ko_insilico_engine"', knockout)
         self.assertIn('name="ko_insilico_raw_count_input"', knockout)
@@ -444,9 +566,14 @@ class TestRecentWebIntegration(unittest.TestCase):
         self.assertIn("saveModuleForm('koForm'", knockout)
         self.assertIn('name="net_disease_gene_column"', network)
         self.assertIn('name="net_venn"', network)
+        self.assertIn('name="net_target_sources_dir"', network)
+        self.assertIn('name="net_run_enrichment"', network)
         self.assertIn("saveModuleForm('netForm'", network)
         self.assertIn("saveModuleForm('faersForm'", faers)
         self.assertIn('id="validationStatus"', validation)
+        self.assertIn('name="mode"', validation)
+        self.assertIn('name="skip_gse"', validation)
+        self.assertIn('name="skip_build"', validation)
         molecular = (
             APP_ROOT
             / "web"
@@ -679,6 +806,66 @@ class TestFullStatus(unittest.TestCase):
                 )
                 self.assertIn("--ppi-network-csv", cmd)
                 self.assertIn("--depmap-csv", cmd)
+            finally:
+                FULL_JOBS.pop(job_id, None)
+
+    def test_start_full_job_passes_advanced_and_mr_configs(self):
+        with tempfile.TemporaryDirectory() as tmp:
+            base = Path(tmp)
+            output = base / "out"
+            workdir = base / "work"
+            advanced = base / "advanced.json"
+            mr = base / "mr.json"
+            with mock.patch("web_ui._drain_full_queue"):
+                result = start_full_job(
+                    {
+                        "output": [str(output)],
+                        "workdir": [str(workdir)],
+                        "advanced_config": [str(advanced)],
+                        "mr_config": [str(mr)],
+                    }
+                )
+            job_id = result["job"]
+            try:
+                env = FULL_JOBS[job_id]["env"]
+                self.assertEqual(env["LIVER_ADVANCED_CONFIG"], str(advanced))
+                self.assertEqual(env["LIVER_MR_CONFIG"], str(mr))
+            finally:
+                FULL_JOBS.pop(job_id, None)
+
+    def test_start_full_job_passes_advanced_priority_and_network_options(self):
+        with tempfile.TemporaryDirectory() as tmp:
+            base = Path(tmp)
+            output = base / "out"
+            workdir = base / "work"
+            priority = base / "integrated_priority.csv"
+            with mock.patch("web_ui._drain_full_queue"):
+                result = start_full_job(
+                    {
+                        "output": [str(output)],
+                        "workdir": [str(workdir)],
+                        "advanced_priority_csv": [str(priority)],
+                        "network_target_sources_dir": [
+                            "data/network/targets"
+                        ],
+                        "network_run_enrichment": ["1"],
+                        "network_enrichment_timeout": ["1200"],
+                    }
+                )
+            job_id = result["job"]
+            try:
+                cmd = FULL_JOBS[job_id]["cmd"]
+                self.assertIn("--advanced-priority-csv", cmd)
+                self.assertEqual(
+                    cmd[cmd.index("--advanced-priority-csv") + 1],
+                    str(priority.resolve()),
+                )
+                self.assertIn("--network-target-sources-dir", cmd)
+                self.assertIn("--network-run-enrichment", cmd)
+                self.assertEqual(
+                    cmd[cmd.index("--network-enrichment-timeout") + 1],
+                    "1200",
+                )
             finally:
                 FULL_JOBS.pop(job_id, None)
 
@@ -1137,6 +1324,7 @@ class TestTemplatePolish(unittest.TestCase):
             "validation_page_template.html",
             "guide_page_template.html",
             "environment_page_template.html",
+            "analysis_tools_page_template.html",
         ):
             html = self._read(name)
             self.assertIn(
@@ -1193,6 +1381,7 @@ class TestTemplatePolish(unittest.TestCase):
             ("/network", "网络毒理学分析"),
             ("/faers", "FAERS 不相称性信号检测"),
             ("/validation", "随机真实 GSE 验证报告"),
+            ("/analysis", "高级分析与导出"),
         ):
             self.assertIn(path, web_ui_module.NAV_HTML)
         dock_html = web_ui_module.render_dock_page()
@@ -1207,12 +1396,159 @@ class TestTemplatePolish(unittest.TestCase):
             "随机真实 GSE 验证报告",
             web_ui_module.render_validation_page(),
         )
+        self.assertIn(
+            "高级分析与导出",
+            web_ui_module.render_analysis_page(),
+        )
+
+    def test_analysis_tools_page_and_environment_module(self):
+        page = web_ui_module.render_analysis_page()
+        self.assertIn('id="advancedForm"', page)
+        self.assertIn('id="mrForm"', page)
+        self.assertIn('id="exportForm"', page)
+        self.assertIn("/analysis/start", page)
+        self.assertIn('data-module="analysis"', web_ui_module.render_environment_page())
+
+    def test_start_analysis_job_builds_advanced_command(self):
+        with tempfile.TemporaryDirectory() as tmp:
+            base = Path(tmp)
+            output = base / "advanced"
+            config = base / "advanced.json"
+            expression = base / "expression.csv"
+            metadata = base / "metadata.csv"
+            for path in (config, expression, metadata):
+                payload = "{}\n" if path.suffix == ".json" else "x\n"
+                path.write_text(payload, encoding="utf-8")
+            with mock.patch(
+                "web_ui._drain_analysis_queue",
+            ):
+                result = start_analysis_job(
+                    {
+                        "kind": ["advanced"],
+                        "output": [str(output)],
+                        "config": [str(config)],
+                        "expression": [str(expression)],
+                        "metadata": [str(metadata)],
+                        "cv_folds": ["4"],
+                        "skip_wgcna": ["1"],
+                    }
+                )
+            try:
+                info = ANALYSIS_JOBS[result["job"]]
+                self.assertEqual(info["kind"], "advanced")
+                self.assertIn("run_advanced_analysis.py", info["cmd"][1])
+                self.assertIn("--config", info["cmd"])
+                self.assertIn("--expression", info["cmd"])
+                self.assertIn("--cv-folds", info["cmd"])
+                self.assertIn("--skip-wgcna", info["cmd"])
+            finally:
+                ANALYSIS_JOBS.pop(result["job"], None)
+
+    def test_start_analysis_job_requires_export_destination(self):
+        with self.assertRaises(ValueError):
+            start_analysis_job(
+                {
+                    "kind": ["export"],
+                    "run": ["GSE125449"],
+                    "analysis_root": [""],
+                }
+            )
+
+    def test_start_analysis_job_does_not_create_output_before_validation(self):
+        with tempfile.TemporaryDirectory() as tmp:
+            output = Path(tmp) / "advanced"
+            with self.assertRaises(ValueError):
+                start_analysis_job(
+                    {
+                        "kind": ["advanced"],
+                        "output": [str(output)],
+                    }
+                )
+            self.assertFalse(output.exists())
+
+    def test_start_analysis_job_rolls_back_when_queue_drain_fails(self):
+        with tempfile.TemporaryDirectory() as tmp:
+            output = Path(tmp) / "mr"
+            config_path = Path(tmp) / "mr.json"
+            config_path.write_text("{}", encoding="utf-8")
+            with mock.patch(
+                "web_ui._drain_analysis_queue",
+                side_effect=OSError("spawn failed"),
+            ):
+                with self.assertRaises(OSError):
+                    start_analysis_job(
+                        {
+                            "kind": ["mr"],
+                            "output": [str(output)],
+                            "config": [str(config_path)],
+                        }
+                    )
+            self.assertFalse(
+                any(
+                    info.get("output") == output.resolve()
+                    for info in web_ui_module.ANALYSIS_QUEUE
+                )
+            )
+            self.assertFalse(
+                any(
+                    info.get("output") == output.resolve()
+                    for info in web_ui_module.ANALYSIS_JOBS.values()
+                )
+            )
+
+    def test_advanced_analysis_file_path_blocks_traversal(self):
+        with tempfile.TemporaryDirectory() as tmp:
+            output = Path(tmp)
+            (output / "result.csv").write_text("x\n1\n", encoding="utf-8")
+            info = {"output": output}
+            self.assertIsNotNone(
+                _advanced_analysis_file_path(info, "result.csv")
+            )
+            self.assertIsNone(
+                _advanced_analysis_file_path(info, "../outside.csv")
+            )
+
+    def test_advanced_analysis_file_path_uses_export_result_root(self):
+        with tempfile.TemporaryDirectory() as tmp:
+            workspace = Path(tmp)
+            imported = (
+                workspace / "data" / "imported_results" / "GSE125449"
+            )
+            imported.mkdir(parents=True)
+            target = imported / "_source.json"
+            target.write_text("{}", encoding="utf-8")
+            info = {"kind": "export", "output": workspace}
+            self.assertEqual(
+                _advanced_analysis_file_path(
+                    info,
+                    "GSE125449/_source.json",
+                ),
+                target.resolve(),
+            )
+
+    def test_analysis_results_uses_exported_root(self):
+        with tempfile.TemporaryDirectory() as tmp:
+            workspace = Path(tmp)
+            imported = (
+                workspace / "data" / "imported_results" / "GSE125449"
+            )
+            imported.mkdir(parents=True)
+            (imported / "_source.json").write_text("{}", encoding="utf-8")
+            result = web_ui_module.analysis_results(
+                {"kind": "export", "output": str(workspace)}
+            )
+            self.assertEqual(
+                result["output"],
+                str((workspace / "data" / "imported_results").resolve()),
+            )
+            self.assertIn("GSE125449/_source.json", result["files"])
 
     def test_running_task_counts_empty_stores(self):
         with (
             mock.patch.dict(JOBS, {}),
             mock.patch.dict(DOCK_JOBS, {}),
             mock.patch.dict(FULL_JOBS, {}),
+            mock.patch.dict(ANALYSIS_JOBS, {}),
         ):
             self.assertEqual(
                 running_task_counts(),

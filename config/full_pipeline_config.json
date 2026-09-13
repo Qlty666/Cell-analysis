@@ -13,6 +13,7 @@
   "ko_top_n": 50,
   "depmap_csv": null,
   "ppi_network_csv": null,
+  "advanced_priority_csv": null,
   "md_simulation": {
     "enabled": true,
     "mode": "prepare",

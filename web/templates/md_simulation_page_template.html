@@ -64,6 +64,9 @@
         <label>生产模拟步数
           <input name="md_prod_steps" type="number" min="1" value="250000">
         </label>
+        <label>速度生成随机种子
+          <input name="md_gen_seed" type="number" min="0" value="42">
+        </label>
         <label>温度 (K)
           <input name="md_temperature" type="number" step="1" value="300">
         </label>
@@ -75,6 +78,12 @@
         </label>
         <label>配体拓扑目录（可选）
           <input name="md_topology_dir" placeholder="data/md/topologies">
+        </label>
+        <label>MM/PBSA 命令（可选）
+          <input name="md_mmpbsa_command" placeholder="gmx_MMPBSA -O -i mmpbsa.in">
+        </label>
+        <label>MM/PBSA 超时（秒）
+          <input name="md_mmpbsa_timeout" type="number" min="1" value="7200">
         </label>
         <label class="toggle"><input type="checkbox" name="md_gpu" value="1"> GPU</label>
       </div>

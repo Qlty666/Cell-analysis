@@ -260,6 +260,29 @@ a.file-link { color: #1665c0; text-decoration: none; margin-right: 12px; }
         <input name="top_n" type="number" min="1" value="100">
       </label>
     </div>
+    <details class="form-section">
+      <summary>重复对接与阳性对照</summary>
+      <div class="grid wide">
+        <label>基础随机种子
+          <input name="docking_seed" type="number" min="0" value="42">
+        </label>
+        <label>重复对接种子列表
+          <input name="docking_seeds" placeholder="42 43 44">
+        </label>
+        <label>每个配体重复次数
+          <input name="docking_replicates" type="number" min="1" value="1">
+        </label>
+        <label>阳性对照 PDBQT（相对工作目录）
+          <input name="docking_positive_control" placeholder="data/ligands/positive_control.pdbqt">
+        </label>
+        <label>阳性对照 ID
+          <input name="docking_positive_control_id" value="positive_control">
+        </label>
+        <label>阳性对照最高可接受亲和力
+          <input name="docking_positive_control_max_affinity" type="number" step="0.1" placeholder="-7.0">
+        </label>
+      </div>
+    </details>
     <label class="toggle"><input type="checkbox" name="force" value="1"> 强制从第一阶段重跑</label>
     </details>
     <div class="actions">

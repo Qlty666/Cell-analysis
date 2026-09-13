@@ -1173,6 +1173,7 @@ def extract_key_genes(
     top_n: int = 50,
     keep_all: bool = False,
     blacklist_patterns: list[str] | None = None,
+    advanced_priority_csv: str | Path | None = None,
 ) -> pd.DataFrame:
     """Rank significant DEGs into a compact key-gene table."""
     data_dir = single_cell_root / "results" / "data"
@@ -1244,13 +1245,18 @@ def extract_key_genes(
     frame["avg_log2fc"] = pd.to_numeric(frame["avg_log2fc"], errors="coerce")
     frame["p_val_adj"] = pd.to_numeric(frame["p_val_adj"], errors="coerce")
     frame["abs_log2fc"] = frame["avg_log2fc"].abs()
-    advanced_priority = os.environ.get(
-        "LIVER_ADVANCED_PRIORITY_CSV",
-        "",
+    advanced_priority = str(
+        advanced_priority_csv
+        or os.environ.get("LIVER_ADVANCED_PRIORITY_CSV", "")
     ).strip()
     if advanced_priority:
         priority_path = Path(advanced_priority).expanduser()
-        if priority_path.exists():
+        if not priority_path.exists():
+            log.warning(
+                "advanced priority CSV not found; keeping default DEG ranking: %s",
+                priority_path,
+            )
+        else:
             try:
                 priority = pd.read_csv(priority_path)
                 gene_col = next(
@@ -2507,6 +2513,7 @@ def _stage_key_targets(args, workdir: Path, ctx: dict) -> None:
         _integration_dir(workdir),
         top_n=args.top_genes,
         keep_all=args.keep_all_genes,
+        advanced_priority_csv=getattr(args, "advanced_priority_csv", None),
     )
     ctx["key_genes_path"] = _integration_dir(workdir) / "key_genes.csv"
     ctx["key_genes"] = frame
@@ -3289,6 +3296,8 @@ def _apply_defaults(args, config: dict) -> None:
         args.depmap_csv = config.get("depmap_csv")
     if args.ppi_network_csv is None:
         args.ppi_network_csv = config.get("ppi_network_csv")
+    if getattr(args, "advanced_priority_csv", None) is None:
+        args.advanced_priority_csv = config.get("advanced_priority_csv")
 
     if getattr(args, "skip_md", None) is None:
         args.skip_md = not bool(
@@ -3336,6 +3345,7 @@ def _apply_defaults(args, config: dict) -> None:
     network_section["enabled"] = not bool(args.skip_network)
     for attr, key in [
         ("network_compound_targets_csv", "compound_targets_csv"),
+        ("network_target_sources_dir", "target_sources_dir"),
         ("network_disease_genes_csv", "disease_genes_csv"),
         ("network_disease_gene_column", "disease_gene_column"),
         ("network_ppi_network_csv", "ppi_network_csv"),
@@ -3344,6 +3354,8 @@ def _apply_defaults(args, config: dict) -> None:
         ("network_cytoscape_url", "cytoscape_url"),
         ("network_cytoscape_layout", "cytoscape_layout"),
         ("network_max_ppi_edges", "max_ppi_edges"),
+        ("network_run_enrichment", "run_enrichment"),
+        ("network_enrichment_timeout", "enrichment_timeout"),
     ]:
         value = getattr(args, attr, None)
         if value is None:
@@ -3443,9 +3455,14 @@ def _apply_defaults(args, config: dict) -> None:
         args.ppi_network_csv = str(
             _resolve_path(args.ppi_network_csv, Path.cwd())
         )
+    if args.advanced_priority_csv:
+        args.advanced_priority_csv = str(
+            _resolve_path(args.advanced_priority_csv, Path.cwd())
+        )
     for attr in [
         "docking_ml_training_csv",
         "network_compound_targets_csv",
+        "network_target_sources_dir",
         "network_disease_genes_csv",
         "network_ppi_network_csv",
         "faers_input",
@@ -3456,6 +3473,7 @@ def _apply_defaults(args, config: dict) -> None:
     section_updates = {
         "network_toxicology": {
             "compound_targets_csv": "network_compound_targets_csv",
+            "target_sources_dir": "network_target_sources_dir",
             "disease_genes_csv": "network_disease_genes_csv",
             "ppi_network_csv": "network_ppi_network_csv",
         },
@@ -3472,6 +3490,7 @@ def _apply_defaults(args, config: dict) -> None:
     config_path_keys = {
         "network_toxicology": [
             "compound_targets_csv",
+            "target_sources_dir",
             "disease_genes_csv",
             "ppi_network_csv",
         ],
@@ -3536,6 +3555,14 @@ def build_parser() -> argparse.ArgumentParser:
         "--ppi-network-csv",
         help="STRING-style PPI edge table for knockout PPI hub scoring",
     )
+    parser.add_argument(
+        "--advanced-priority-csv",
+        default=None,
+        help=(
+            "integrated_priority.csv from the advanced analysis; "
+            "used to order key genes"
+        ),
+    )
     parser.add_argument("--skip-md", action="store_true", default=None)
     parser.add_argument(
         "--md-mode",
@@ -3556,6 +3583,7 @@ def build_parser() -> argparse.ArgumentParser:
     parser.add_argument("--docking-ml-training-csv", default=None)
     parser.add_argument("--skip-network", action="store_true", default=None)
     parser.add_argument("--network-compound-targets-csv", default=None)
+    parser.add_argument("--network-target-sources-dir", default=None)
     parser.add_argument("--network-disease-genes-csv", default=None)
     parser.add_argument("--network-disease-gene-column", default=None)
     parser.add_argument("--network-ppi-network-csv", default=None)
@@ -3575,6 +3603,18 @@ def build_parser() -> argparse.ArgumentParser:
         help="also save a .cys session when Cytoscape live export runs",
     )
     parser.add_argument("--network-max-ppi-edges", type=int, default=None)
+    parser.add_argument(
+        "--network-run-enrichment",
+        action="store_true",
+        default=None,
+        help="run GO/KEGG enrichment on the network overlap genes",
+    )
+    parser.add_argument(
+        "--network-enrichment-timeout",
+        type=int,
+        default=None,
+        help="timeout in seconds for network GO/KEGG enrichment",
+    )
     parser.add_argument("--skip-faers", action="store_true", default=None)
     parser.add_argument("--faers-input", default=None)
     parser.add_argument("--faers-drug-column", default=None)

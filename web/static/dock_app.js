@@ -327,6 +327,10 @@ async function loadResults(job) {
       return;
     }
     const summary = data.summary || {};
+    const positiveControl = summary.positive_control || {};
+    const positiveLabel = positiveControl.status === 'ok'
+      ? ('亲和力 ' + esc(positiveControl.affinity) + ' kcal/mol')
+      : esc(positiveControl.status || '未配置');
     const summaryRow = document.getElementById('summaryRow');
     summaryRow.innerHTML = '<p class="muted">成功对接 ' + esc(summary.total_docked || 0) +
       ' 个配体，命中 ' + esc(summary.hits || 0) +
@@ -334,7 +338,9 @@ async function loadResults(job) {
       ' / 中 ' + esc(summary.moderate_hits || 0) +
       ' / 弱 ' + esc(summary.weak_hits || 0) +
       '），最佳亲和力 ' + esc(summary.best_affinity === null || summary.best_affinity === undefined ? '-' : summary.best_affinity) +
-      ' kcal/mol。输出目录：' + esc(data.output_dir) + '</p>';
+      ' kcal/mol，重复次数 ' + esc(summary.replicates_per_ligand || 1) +
+      '，阳性对照 ' + positiveLabel +
+      '。输出目录：' + esc(data.output_dir) + '</p>';
 
     const links = document.getElementById('fileLinks');
     links.innerHTML = (data.files || []).map(name =>
@@ -343,10 +349,12 @@ async function loadResults(job) {
 
     const table = document.getElementById('resultTable');
     if (data.rows && data.rows.length) {
-      table.innerHTML = '<thead><tr><th>排名</th><th>ID</th><th>亲和力</th><th>分级</th><th>模式</th><th>SMILES</th></tr></thead><tbody>' +
+      table.innerHTML = '<thead><tr><th>排名</th><th>ID</th><th>亲和力</th><th>分级</th><th>重复</th><th>重复标准差</th><th>稳定性</th><th>模式</th><th>SMILES</th></tr></thead><tbody>' +
         data.rows.map(r =>
           '<tr><td>' + esc(r.rank || '') + '</td><td>' + esc(r.id) + '</td><td>' +
-          esc(r.affinity) + '</td><td>' + esc(r.affinity_class || '') + '</td><td>' + esc(r.mode || '') + '</td><td style="max-width:280px;word-break:break-all;">' +
+          esc(r.affinity) + '</td><td>' + esc(r.affinity_class || '') + '</td><td>' +
+          esc(r.n_replicates || 1) + '</td><td>' + esc(r.affinity_sd || 0) + '</td><td>' +
+          esc(r.replicate_stability || 1) + '</td><td>' + esc(r.mode || '') + '</td><td style="max-width:280px;word-break:break-all;">' +
           esc(r.smiles || '') + '</td></tr>'
         ).join('') + '</tbody>';
     } else {
@@ -379,13 +387,13 @@ function renderMdResults(job, data) {
   ).join('');
 
   const table = document.getElementById('resultTable');
-  const headers = ['ID', '状态', '时间 (ns)', '蛋白 RMSD 均值 (nm)', '配体 RMSD 均值 (nm)', '配体 RMSF 均值 (nm)', '结合口袋 RMSF 均值 (nm)', 'Rg 均值 (nm)', 'SASA 均值 (nm²)', '氢键均值', '稳定性', '错误'];
-  const keys = ['id', 'status', 'time_ns', 'rmsd_protein_mean_nm', 'rmsd_ligand_mean_nm', 'rmsf_ligand_mean_nm', 'rmsf_contact_residue_mean_nm', 'rg_protein_mean_nm', 'sasa_protein_mean_nm2', 'hbonds_protein_ligand_mean', 'stability_label', 'error'];
+  const headers = ['ID', '状态', '时间 (ns)', '蛋白 RMSD 均值 (nm)', '配体 RMSD 均值 (nm)', '配体 RMSF 均值 (nm)', '结合口袋 RMSF 均值 (nm)', 'Rg 均值 (nm)', 'SASA 均值 (nm²)', '氢键均值', 'PCA1 (nm²)', 'PCA2 (nm²)', 'FEL 最低值 (kJ/mol)', 'MM/PBSA ΔG', 'MM/PBSA 状态', '稳定性', '错误'];
+  const keys = ['id', 'status', 'time_ns', 'rmsd_protein_mean_nm', 'rmsd_ligand_mean_nm', 'rmsf_ligand_mean_nm', 'rmsf_contact_residue_mean_nm', 'rg_protein_mean_nm', 'sasa_protein_mean_nm2', 'hbonds_protein_ligand_mean', 'pca_eigenvalue_top1_nm2', 'pca_eigenvalue_top2_nm2', 'fel_min_kj_mol', 'mmpbsa_delta_total_kj_mol', 'mmpbsa_status', 'stability_label', 'error'];
   if (md.rows && md.rows.length) {
     table.innerHTML = '<thead><tr>' + headers.map(h => '<th>' + h + '</th>').join('') + '</tr></thead><tbody>' +
       md.rows.map(row => '<tr>' + keys.map(key => {
         let value = row[key];
-        const numeric = ['rmsd_protein_mean_nm', 'rmsd_ligand_mean_nm', 'rmsf_ligand_mean_nm', 'rmsf_contact_residue_mean_nm', 'rg_protein_mean_nm', 'sasa_protein_mean_nm2', 'hbonds_protein_ligand_mean'];
+        const numeric = ['rmsd_protein_mean_nm', 'rmsd_ligand_mean_nm', 'rmsf_ligand_mean_nm', 'rmsf_contact_residue_mean_nm', 'rg_protein_mean_nm', 'sasa_protein_mean_nm2', 'hbonds_protein_ligand_mean', 'pca_eigenvalue_top1_nm2', 'pca_eigenvalue_top2_nm2', 'fel_min_kj_mol', 'mmpbsa_delta_total_kj_mol'];
         if (numeric.includes(key) &&
             value !== '' && value !== undefined && value !== null) {
           value = Number(value).toFixed(3);
@@ -543,11 +551,15 @@ async function exportValidation(btn) {
   }
 }
 
-async function loadValidationReport() {
+let currentValidationMode = 'random';
+
+async function loadValidationReport(mode) {
   const box = document.getElementById('validationReport');
+  const form = document.getElementById('validationForm');
+  currentValidationMode = mode || (form && form.elements.mode ? form.elements.mode.value : currentValidationMode);
   box.textContent = '正在加载验证报告...';
   try {
-    const resp = await fetch('/dock/validation-report');
+    const resp = await fetch('/dock/validation-report?mode=' + encodeURIComponent(currentValidationMode));
     const data = await resp.json();
     box.textContent = data.report || '暂无报告';
   } catch (e) {
@@ -565,6 +577,11 @@ async function refreshValidationStatus() {
       box.textContent = '当前没有运行中的验证任务。';
       return;
     }
+    if (status.mode) {
+      currentValidationMode = status.mode;
+      const form = document.getElementById('validationForm');
+      if (form && form.elements.mode) form.elements.mode.value = status.mode;
+    }
     box.innerHTML = '<p class="' + (status.running ? 'ok' : status.ok ? 'ok' : 'error') + '">' +
       (status.running ? '验证运行中，请稍候...' : status.ok ? '最近一次验证已完成。' : '最近一次验证运行失败。') +
       '</p><pre style="height:180px;">' + esc(status.log || '') + '</pre>';
@@ -578,7 +595,8 @@ async function runValidationJob(btn) {
   btn.disabled = true;
   const form = document.getElementById('validationForm');
   const payload = form ? new URLSearchParams(new FormData(form)) : new URLSearchParams();
-  box.textContent = '正在启动随机真实 GSE 验证，耗时较长...';
+  currentValidationMode = String(payload.get('mode') || 'random');
+  box.textContent = '正在启动验证任务，耗时较长...';
   try {
     const resp = await fetch('/dock/validation/run', {
       method: 'POST',
@@ -596,7 +614,7 @@ async function runValidationJob(btn) {
           await refreshValidationStatus();
           box.textContent = (status.ok ? '验证完成。' : '验证运行失败。') +
             '\n' + (status.log || '');
-          if (status.ok) await loadValidationReport();
+          if (status.ok) await loadValidationReport(currentValidationMode);
         } else {
           box.textContent = '验证运行中...\n' + (status.log || '');
           await refreshValidationStatus();
@@ -680,6 +698,12 @@ function netMsg(text, cls) {
 async function runNetwork(btn) {
   const form = document.getElementById('netForm');
   const data = new URLSearchParams(new FormData(form));
+  const compoundTargets = String(data.get('net_compound_targets') || '').trim();
+  const targetSourcesDir = String(data.get('net_target_sources_dir') || '').trim();
+  if (!compoundTargets && !targetSourcesDir) {
+    netMsg('请提供化合物靶点 CSV 或多来源靶点目录。', 'error');
+    return;
+  }
   autoSaveModuleForm('netForm', 'liver_ui_network_form');
   btn.disabled = true;
   netMsg('正在运行网络毒理学分析...');
@@ -699,14 +723,21 @@ async function runNetwork(btn) {
 function renderNetwork(data) {
   const summary = data.summary || {};
   const cyto = summary.cytoscape || {};
+  const enrichment = (summary.outputs || {}).enrichment || {};
   const cytoStatus = cyto.status === 'live' ? '已推送 Cytoscape'
     : cyto.status === 'xgmml_only' ? '已导出 XGMML'
       : cyto.status === 'off' ? '已关闭' : '未推送';
+  const enrichmentStatus = enrichment.status === 'completed'
+    ? '已完成'
+    : enrichment.status === 'skipped' ? '已跳过'
+      : enrichment.status === 'failed' ? '失败'
+        : '未启用';
   document.getElementById('netSummary').innerHTML =
     '<p class="muted">化合物靶点 ' + esc(summary.compound_targets || 0) +
     ' 个，疾病基因 ' + esc(summary.disease_genes || 0) +
     '，交集基因 ' + esc(summary.overlap_genes || 0) +
     '，PPI hub 评分 ' + (summary.ppi_hub_scored ? '已启用' : '未启用') +
+    '，GO/KEGG ' + esc(enrichmentStatus) +
     '，Cytoscape ' + esc(cytoStatus) +
     '。输出目录：' + esc(data.output_dir) + '</p>';
 
@@ -718,9 +749,11 @@ function renderNetwork(data) {
   ).join('');
 
   const headers = ['基因', '来源数', '来源', 'PPI degree', 'PPI betweenness',
+    'PPI closeness', 'PPI eigenvector', 'PPI PageRank', 'PPI MCC',
     'PPI clustering', 'PPI hub'];
   const keys = ['gene', 'n_sources', 'sources', 'ppi_degree',
-    'ppi_betweenness', 'ppi_clustering', 'ppi_hub_score'];
+    'ppi_betweenness', 'ppi_closeness', 'ppi_eigenvector', 'ppi_pagerank',
+    'ppi_mcc', 'ppi_clustering', 'ppi_hub_score'];
   const table = document.getElementById('netTable');
   if (data.rows && data.rows.length) {
     table.innerHTML = '<thead><tr>' + headers.map(h =>
@@ -728,7 +761,7 @@ function renderNetwork(data) {
     ).join('') + '</tr></thead><tbody>' + data.rows.map(row => {
       return '<tr>' + keys.map(key => {
         let value = row[key];
-        if (value === '' || value === undefined || value === null) value = '-';
+        if (value === '' || value === undefined || value === null || value === 'nan' || value === 'NaN') value = '-';
         return '<td>' + esc(value) + '</td>';
       }).join('') + '</tr>';
     }).join('') + '</tbody>';

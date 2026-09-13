@@ -1,0 +1,487 @@
+<!DOCTYPE html>
+<html lang="zh-CN">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1">
+<link rel="stylesheet" href="/static/app.css">
+<script src="/static/nav.js" defer></script>
+<title>高级分析与导出</title>
+<style>
+.analysis-tabs {
+  display: flex;
+  gap: 8px;
+  flex-wrap: wrap;
+  margin: 0 0 16px;
+}
+.analysis-tabs button {
+  width: auto;
+  margin: 0;
+  padding: 8px 14px;
+  background: #e8eef6;
+  color: #24425f;
+  border: 1px solid #cbd8e6;
+}
+.analysis-tabs button.active {
+  background: #1665c0;
+  border-color: #1665c0;
+  color: #fff;
+}
+.analysis-panel[hidden] {
+  display: none;
+}
+.analysis-actions {
+  display: flex;
+  gap: 8px;
+  flex-wrap: wrap;
+  margin-top: 16px;
+}
+.analysis-actions button {
+  width: auto;
+  margin: 0;
+}
+.analysis-actions button:disabled,
+.analysis-tabs button:disabled {
+  opacity: .55;
+  cursor: not-allowed;
+}
+.analysis-status {
+  margin-top: 14px;
+  min-height: 22px;
+}
+.analysis-status.error {
+  color: #b91c1c;
+}
+.analysis-log {
+  height: 300px;
+  margin-top: 12px;
+}
+.analysis-files {
+  display: grid;
+  grid-template-columns: repeat(auto-fit, minmax(min(260px, 100%), 1fr));
+  gap: 8px;
+  margin-top: 12px;
+}
+.analysis-files a {
+  display: block;
+  padding: 9px 10px;
+  border: 1px solid #d8e0e8;
+  border-radius: 6px;
+  background: #f8fafc;
+  color: #145a9d;
+  text-decoration: none;
+  overflow-wrap: anywhere;
+}
+.analysis-files a:hover {
+  border-color: #1665c0;
+  background: #eef5fd;
+}
+.analysis-output {
+  margin: 10px 0 0;
+  padding: 10px 12px;
+  border: 1px solid #d8e0e8;
+  border-radius: 6px;
+  background: #f8fafc;
+  overflow-wrap: anywhere;
+  white-space: pre-wrap;
+}
+</style>
+</head>
+<body>
+<div class="topnav"></div>
+<div class="wrap">
+  <div class="page-head">
+    <div class="page-title">
+      <h1>高级分析与导出</h1>
+      <p class="page-sub">多队列验证、孟德尔随机化、共定位分析和已完成结果的分析工作区导出。</p>
+    </div>
+    <div class="page-actions">
+      <a class="link-button" href="/results">结果清单</a>
+      <a class="link-button" href="/guide">使用教程</a>
+    </div>
+  </div>
+
+  <div class="analysis-tabs" role="tablist">
+    <button type="button" class="active" data-panel="advancedPanel" aria-selected="true">多队列分析</button>
+    <button type="button" data-panel="mrPanel" aria-selected="false">MR / 共定位</button>
+    <button type="button" data-panel="exportPanel" aria-selected="false">分析工作区导出</button>
+  </div>
+
+  <section class="card analysis-panel" id="advancedPanel">
+    <h2>多队列分析与靶点排序</h2>
+    <form id="advancedForm" data-analysis-form data-kind="advanced">
+      <div class="grid wide">
+        <label>配置文件
+          <input name="config" placeholder="config/advanced_analysis.json">
+        </label>
+        <label>输出目录
+          <input name="output" value="results/advanced" required>
+        </label>
+        <label>发现队列表达矩阵
+          <input name="expression" placeholder="data/expression_discovery.csv">
+        </label>
+        <label>发现队列元数据
+          <input name="metadata" placeholder="data/metadata_discovery.csv">
+        </label>
+        <label>队列名称
+          <input name="cohort_name" placeholder="discovery">
+        </label>
+        <label>分组列
+          <input name="condition_column" placeholder="condition">
+        </label>
+        <label>基因列
+          <input name="gene_column" placeholder="gene">
+        </label>
+        <label>病例标签
+          <input name="case_label" placeholder="Disease">
+        </label>
+        <label>对照标签
+          <input name="control_label" placeholder="Control">
+        </label>
+        <label>特征上限
+          <input name="feature_cap" type="number" min="1" placeholder="80">
+        </label>
+        <label>交叉验证折数
+          <input name="cv_folds" type="number" min="2" placeholder="5">
+        </label>
+        <label>交叉验证重复数
+          <input name="cv_repeats" type="number" min="1" placeholder="5">
+        </label>
+        <label>随机种子
+          <input name="seed" type="number" min="0" placeholder="42">
+        </label>
+      </div>
+      <details class="form-section">
+        <summary>执行选项</summary>
+        <div class="grid wide">
+          <label class="toggle"><input type="checkbox" name="skip_r" value="1"> 跳过 R 后端</label>
+          <label class="toggle"><input type="checkbox" name="skip_ml" value="1"> 跳过 ML</label>
+          <label class="toggle"><input type="checkbox" name="skip_wgcna" value="1"> 跳过 WGCNA</label>
+          <label class="toggle"><input type="checkbox" name="skip_immune" value="1"> 跳过免疫浸润</label>
+          <label class="toggle"><input type="checkbox" name="skip_survival" value="1"> 跳过生存分析</label>
+          <label class="toggle"><input type="checkbox" name="verbose" value="1"> 输出详细日志</label>
+        </div>
+      </details>
+      <div class="analysis-actions">
+        <button type="button" class="secondary" data-action="save">保存设置</button>
+        <button type="button" class="secondary" data-action="restore">恢复设置</button>
+        <button type="button" class="secondary" data-action="reset">恢复默认</button>
+        <button id="advancedStart" type="button" data-primary onclick="startAnalysis('advanced')">开始分析</button>
+      </div>
+    </form>
+  </section>
+
+  <section class="card analysis-panel" id="mrPanel" hidden>
+    <h2>孟德尔随机化与共定位</h2>
+    <form id="mrForm" data-analysis-form data-kind="mr">
+      <div class="grid wide">
+        <label>配置文件
+          <input name="config" value="config/mr_coloc.json" required>
+        </label>
+        <label>输出目录
+          <input name="output" value="results/mr_coloc" required>
+        </label>
+      </div>
+      <details class="form-section">
+        <summary>执行选项</summary>
+        <div class="grid wide">
+          <label class="toggle"><input type="checkbox" name="skip_r" value="1"> 跳过 R 后端</label>
+          <label class="toggle"><input type="checkbox" name="verbose" value="1"> 输出详细日志</label>
+        </div>
+      </details>
+      <div class="analysis-actions">
+        <button type="button" class="secondary" data-action="save">保存设置</button>
+        <button type="button" class="secondary" data-action="restore">恢复设置</button>
+        <button type="button" class="secondary" data-action="reset">恢复默认</button>
+        <button id="mrStart" type="button" data-primary onclick="startAnalysis('mr')">开始分析</button>
+      </div>
+    </form>
+  </section>
+
+  <section class="card analysis-panel" id="exportPanel" hidden>
+    <h2>导出到本地分析工作区</h2>
+    <form id="exportForm" data-analysis-form data-kind="export">
+      <div class="grid wide">
+        <label>数据集编号或运行目录
+          <input name="run" placeholder="GSE125449 或 ../liver_cancer">
+        </label>
+        <label>运行结果目录
+          <input name="source" placeholder="../liver_cancer">
+        </label>
+        <label>分析工作区根目录
+          <input name="analysis_root" required>
+        </label>
+        <label>导出目录名
+          <input name="name" placeholder="可选">
+        </label>
+        <label>清单脚本
+          <input name="inventory_script" placeholder="默认使用分析工作区脚本">
+        </label>
+      </div>
+      <details class="form-section">
+        <summary>执行选项</summary>
+        <div class="grid wide">
+          <label class="toggle"><input type="checkbox" name="remember_analysis_root" value="1"> 记住分析工作区</label>
+          <label class="toggle"><input type="checkbox" name="no_inventory" value="1"> 跳过清单刷新</label>
+          <label class="toggle"><input type="checkbox" name="dry_run" value="1"> 仅预演</label>
+        </div>
+      </details>
+      <div class="analysis-actions">
+        <button type="button" class="secondary" data-action="save">保存设置</button>
+        <button type="button" class="secondary" data-action="restore">恢复设置</button>
+        <button type="button" class="secondary" data-action="reset">恢复默认</button>
+        <button id="exportStart" type="button" data-primary onclick="startAnalysis('export')">开始导出</button>
+      </div>
+    </form>
+  </section>
+
+  <section class="card">
+    <h2>任务状态</h2>
+    <div id="analysisMessage" class="analysis-status muted">等待任务。</div>
+    <div id="analysisOutput" class="analysis-output" hidden></div>
+    <pre id="analysisLog" class="analysis-log">等待开始...</pre>
+    <div id="analysisFiles" class="analysis-files"></div>
+  </section>
+</div>
+
+<script>
+const ANALYSIS_JOB_KEY = 'liverbio_analysis_job';
+let analysisJob = null;
+let analysisTimer = null;
+let analysisStarting = false;
+const ANALYSIS_START_BUTTONS = {
+  advanced: 'advancedStart',
+  mr: 'mrStart',
+  export: 'exportStart',
+};
+
+function esc(value) {
+  return String(value == null ? '' : value).replace(/[&<>"']/g, c => ({
+    '&': '&amp;', '<': '&lt;', '>': '&gt;', '"': '&quot;', "'": '&#39;'
+  }[c]));
+}
+
+function formFor(kind) {
+  const ids = {advanced: 'advancedForm', mr: 'mrForm', export: 'exportForm'};
+  return document.getElementById(ids[kind]);
+}
+
+function storageKey(kind) {
+  return 'liverbio_analysis_form_' + kind;
+}
+
+function saveForm(kind) {
+  const form = formFor(kind);
+  if (!form) return;
+  const values = {};
+  new FormData(form).forEach((value, key) => { values[key] = String(value); });
+  form.querySelectorAll('input[type="checkbox"]').forEach(input => {
+    values[input.name] = input.checked ? '1' : '';
+  });
+  try { sessionStorage.setItem(storageKey(kind), JSON.stringify(values)); } catch (e) {}
+}
+
+function restoreForm(kind) {
+  const form = formFor(kind);
+  if (!form) return;
+  let values = null;
+  try { values = JSON.parse(sessionStorage.getItem(storageKey(kind)) || 'null'); } catch (e) {}
+  if (!values) return;
+  form.querySelectorAll('input, select, textarea').forEach(input => {
+    if (!(input.name in values)) return;
+    if (input.type === 'checkbox') input.checked = values[input.name] === '1';
+    else input.value = values[input.name];
+  });
+}
+
+function resetForm(kind) {
+  const form = formFor(kind);
+  if (!form) return;
+  form.reset();
+  try { sessionStorage.removeItem(storageKey(kind)); } catch (e) {}
+}
+
+function panelKind(panelId) {
+  if (panelId === 'mrPanel') return 'mr';
+  if (panelId === 'exportPanel') return 'export';
+  return 'advanced';
+}
+
+function updateAnalysisUrl(kind) {
+  const url = new URL(window.location.href);
+  if (kind === 'advanced') url.searchParams.delete('kind');
+  else url.searchParams.set('kind', kind);
+  window.history.replaceState(null, '', url.toString());
+}
+
+function activatePanel(panelId, updateUrl = true) {
+  document.querySelectorAll('.analysis-panel').forEach(panel => {
+    panel.hidden = panel.id !== panelId;
+  });
+  document.querySelectorAll('.analysis-tabs button').forEach(button => {
+    const active = button.dataset.panel === panelId;
+    button.classList.toggle('active', active);
+    button.setAttribute('aria-selected', active ? 'true' : 'false');
+  });
+  if (updateUrl) updateAnalysisUrl(panelKind(panelId));
+}
+
+function setAnalysisBusy(busy) {
+  analysisStarting = busy;
+  Object.values(ANALYSIS_START_BUTTONS).forEach(id => {
+    const button = document.getElementById(id);
+    if (button) button.disabled = busy;
+  });
+}
+
+function pollAnalysis() {
+  if (!analysisJob) return;
+  Promise.all([
+    fetch('/analysis/status?job=' + encodeURIComponent(analysisJob)).then(r => {
+      if (!r.ok) throw new Error(r.status === 404 ? '任务记录已失效' : '状态读取失败');
+      return r.json();
+    }),
+    fetch('/analysis/log?job=' + encodeURIComponent(analysisJob)).then(r => {
+      if (!r.ok) throw new Error('日志读取失败');
+      return r.text();
+    })
+  ]).then(([status, text]) => {
+    const logBox = document.getElementById('analysisLog');
+    logBox.textContent = text || '等待日志...';
+    logBox.scrollTop = logBox.scrollHeight;
+    const message = document.getElementById('analysisMessage');
+    if (status.queued) {
+      message.className = 'analysis-status muted';
+      message.textContent = '任务已排队，等待前一个分析完成。';
+      return;
+    }
+    if (status.running) {
+      message.className = 'analysis-status ok';
+      message.textContent = '任务运行中。';
+      return;
+    }
+    clearInterval(analysisTimer);
+    analysisTimer = null;
+    message.className = 'analysis-status ' + (status.ok ? 'ok' : 'error');
+    message.textContent = status.ok
+      ? '任务完成。'
+      : ('任务失败：' + (status.error || '请查看日志'));
+    if (status.output) {
+      const output = document.getElementById('analysisOutput');
+      output.hidden = false;
+      output.textContent = '输出目录：' + status.output;
+    }
+    if (status.ok) loadAnalysisFiles(analysisJob);
+    analysisJob = null;
+    setAnalysisBusy(false);
+    try { sessionStorage.removeItem(ANALYSIS_JOB_KEY); } catch (e) {}
+  }).catch(error => {
+    if (String(error.message || error).includes('任务记录已失效')) {
+      if (analysisTimer) clearInterval(analysisTimer);
+      analysisTimer = null;
+      analysisJob = null;
+      setAnalysisBusy(false);
+      try { sessionStorage.removeItem(ANALYSIS_JOB_KEY); } catch (e) {}
+    }
+    const message = document.getElementById('analysisMessage');
+    message.className = 'analysis-status error';
+    message.textContent = String(error.message || error);
+  });
+}
+
+function loadAnalysisFiles(job) {
+  fetch('/analysis/files?job=' + encodeURIComponent(job))
+    .then(r => {
+      if (!r.ok) throw new Error('结果文件读取失败');
+      return r.json();
+    })
+    .then(data => {
+      const box = document.getElementById('analysisFiles');
+      const files = data.files || [];
+      box.innerHTML = '';
+      if (!files.length) {
+        box.innerHTML = '<p class="muted">暂无结果文件。</p>';
+        return;
+      }
+      files.forEach(name => {
+        const link = document.createElement('a');
+        link.href = '/analysis/file?job=' + encodeURIComponent(job) + '&name=' + encodeURIComponent(name);
+        link.textContent = name;
+        link.target = '_blank';
+        box.appendChild(link);
+      });
+    })
+    .catch(error => {
+      document.getElementById('analysisFiles').innerHTML =
+        '<p class="error">' + esc(error.message || error) + '</p>';
+    });
+}
+
+function startAnalysis(kind) {
+  if (analysisStarting) return;
+  if (analysisJob) {
+    document.getElementById('analysisMessage').textContent = '已有分析任务正在运行。';
+    return;
+  }
+  const form = formFor(kind);
+  if (!form || !form.reportValidity()) return;
+  saveForm(kind);
+  const data = new URLSearchParams(new FormData(form));
+  data.set('kind', kind);
+  document.getElementById('analysisFiles').innerHTML = '';
+  document.getElementById('analysisOutput').hidden = true;
+  document.getElementById('analysisLog').textContent = '正在启动...';
+  document.getElementById('analysisMessage').className = 'analysis-status muted';
+  document.getElementById('analysisMessage').textContent = '正在启动任务...';
+  setAnalysisBusy(true);
+  fetch('/analysis/start', {method: 'POST', body: data})
+    .then(async response => {
+      const result = await response.json();
+      if (!response.ok) throw new Error(result.error || '启动失败');
+      analysisJob = result.job;
+      try { sessionStorage.setItem(ANALYSIS_JOB_KEY, analysisJob); } catch (e) {}
+      if (analysisTimer) clearInterval(analysisTimer);
+      analysisTimer = setInterval(pollAnalysis, 1000);
+      document.getElementById('analysisMessage').textContent =
+        '任务已启动：' + analysisJob;
+      pollAnalysis();
+    })
+    .catch(error => {
+      setAnalysisBusy(false);
+      document.getElementById('analysisMessage').className = 'analysis-status error';
+      document.getElementById('analysisMessage').textContent = String(error.message || error);
+    });
+}
+
+document.querySelectorAll('.analysis-tabs button').forEach(button => {
+  button.addEventListener('click', () => activatePanel(button.dataset.panel));
+});
+
+document.querySelectorAll('[data-analysis-form]').forEach(form => {
+  form.querySelectorAll('[data-action]').forEach(button => {
+    button.addEventListener('click', () => {
+      const action = button.dataset.action;
+      const kind = form.dataset.kind;
+      if (action === 'save') saveForm(kind);
+      if (action === 'restore') restoreForm(kind);
+      if (action === 'reset') resetForm(kind);
+    });
+  });
+});
+
+const params = new URLSearchParams(window.location.search);
+const targetKind = params.get('kind');
+if (targetKind === 'mr') activatePanel('mrPanel', false);
+else if (targetKind === 'export') activatePanel('exportPanel', false);
+else activatePanel('advancedPanel', false);
+const restoredJob = params.get('job') || sessionStorage.getItem(ANALYSIS_JOB_KEY);
+if (restoredJob) {
+  analysisJob = restoredJob;
+  setAnalysisBusy(true);
+  document.getElementById('analysisMessage').textContent =
+    '正在恢复任务：' + restoredJob;
+  analysisTimer = setInterval(pollAnalysis, 1000);
+  pollAnalysis();
+}
+</script>
+</body>
+</html>

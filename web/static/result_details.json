@@ -281,6 +281,15 @@
       "legend": "坐标轴：默认 ridgeplot 时横轴为按 log2FC 降序排列的基因排序位置，纵轴为富集分数分布；gseaplot2 时显示富集曲线。\n颜色/图例：ridgeplot 按通路着色；gseaplot2 含 NES/p.adjust 标签。\n回退：无条目显示 No significant GSEA terms。"
     },
     {
+      "file": "data/06_enrichment/fig_21_gsea_kegg_status.json",
+      "name": "fig_21_gsea_kegg_status.json",
+      "kind": "data",
+      "content": "KEGG GSEA 状态、失败原因或完成条目数。",
+      "type": "JSON 状态文件",
+      "use": "判断 KEGG GSEA 是完成、跳过还是因映射/依赖问题不可用，并供验证脚本门控。",
+      "optional": false
+    },
+    {
       "file": "figures/06_enrichment/fig_22_go_network.png",
       "name": "fig_22_go_network.png",
       "kind": "fig",
@@ -954,8 +963,44 @@
       "kind": "data",
       "content": "Vina 原始对接结果",
       "type": "CSV 数据表",
-      "use": "每配体亲和力与模式；该表用于复现对应图表、复核统计结果，并作为下游筛选或报告汇总的输入。",
+      "use": "每配体、重复次数和随机种子对应的亲和力与模式；该表用于复现对应图表、复核统计结果，并作为下游筛选或报告汇总的输入。",
       "optional": false
+    },
+    {
+      "file": "docked/positive_control_results.csv",
+      "name": "positive_control_results.csv",
+      "kind": "data",
+      "content": "阳性对照配体的对接结果与阈值判定",
+      "type": "CSV 数据表",
+      "use": "检查对接流程是否达到预设阳性对照阈值；仅配置阳性对照 PDBQT 时生成。",
+      "optional": true
+    },
+    {
+      "file": "results/06_md/<ligand>/pca_fel.csv",
+      "name": "pca_fel.csv",
+      "kind": "data",
+      "content": "主成分投影与 Gibbs 自由能面数据",
+      "type": "CSV 数据表",
+      "use": "查看主要构象状态和最低自由能区域；需 MD 轨迹与 index 文件可用。",
+      "optional": true
+    },
+    {
+      "file": "results/06_md/<ligand>/mmpbsa.log",
+      "name": "mmpbsa.log",
+      "kind": "data",
+      "content": "外部 MM/PBSA 命令输出日志",
+      "type": "文本日志",
+      "use": "复核结合自由能数值和命令执行状态；需配置 md_simulation.mmpbsa_command。",
+      "optional": true
+    },
+    {
+      "file": "results/06_md/md_simulation_results.csv",
+      "name": "md_simulation_results.csv",
+      "kind": "data",
+      "content": "MD 每配体状态、稳定性、PCA/FEL 与 MM/PBSA 指标",
+      "type": "CSV 数据表",
+      "use": "汇总模拟时长、RMSD、Rg、SASA、氢键、口袋 RMSF 及可选的 PCA/FEL、MM/PBSA 结果。",
+      "optional": true
     },
     {
       "file": "results/01_analysis/figures/fig_46_affinity_distribution.png",
@@ -1273,9 +1318,27 @@
       "file": "network_toxicology/data/ppi_hub_scores.csv",
       "name": "ppi_hub_scores.csv",
       "kind": "data",
-      "content": "STRING PPI degree/betweenness/clustering 评分",
+      "content": "STRING PPI degree、betweenness、closeness、eigenvector、PageRank、MCC、clustering 与 consensus hub 评分",
       "type": "CSV 数据表",
       "use": "PPI hub 靶点评分；仅提供 --ppi-network-csv 输入时生成。该表用于复现对应图表、复核统计结果，并作为下游筛选或报告汇总的输入。",
+      "optional": true
+    },
+    {
+      "file": "network_toxicology/data/insilico_go_enrichment.csv",
+      "name": "insilico_go_enrichment.csv",
+      "kind": "data",
+      "content": "网络交集基因 GO 富集结果",
+      "type": "CSV 数据表",
+      "use": "查看交集基因富集的 GO 条目；需启用网络毒理学 GO/KEGG 富集且交集基因不少于 3 个。",
+      "optional": true
+    },
+    {
+      "file": "network_toxicology/data/insilico_kegg_enrichment.csv",
+      "name": "insilico_kegg_enrichment.csv",
+      "kind": "data",
+      "content": "网络交集基因 KEGG 富集结果",
+      "type": "CSV 数据表",
+      "use": "查看交集基因富集的 KEGG 通路；需启用网络毒理学 GO/KEGG 富集、R 环境可用且交集基因不少于 3 个。",
       "optional": true
     },
     {
@@ -1385,6 +1448,106 @@
       "content": "FAERS 阶段汇总",
       "type": "JSON 汇总文件",
       "use": "信号组合数、信号数和 Top 药物；该文件用于程序读取状态、汇总指标和门控判定，也可人工复核。",
+      "optional": true
+    },
+    {
+      "file": "advanced/integrated_priority.csv",
+      "name": "integrated_priority.csv",
+      "kind": "data",
+      "content": "多队列整合后的基因优先级表",
+      "type": "CSV 数据表",
+      "use": "查看综合评分、证据计数、差异表达和模型得分；作为高级分析的核心优先级结果。",
+      "optional": false
+    },
+    {
+      "file": "advanced/advanced_analysis_summary.json",
+      "name": "advanced_analysis_summary.json",
+      "kind": "data",
+      "content": "多队列、R、ML、免疫和生存分析汇总",
+      "type": "JSON 汇总文件",
+      "use": "查看各高级分析模块状态、参数和输出路径。",
+      "optional": false
+    },
+    {
+      "file": "advanced/ml_model_comparison.csv",
+      "name": "ml_model_comparison.csv",
+      "kind": "data",
+      "content": "基因级 ML 模型交叉验证比较",
+      "type": "CSV 数据表",
+      "use": "比较不同分类模型的交叉验证指标和稳定性。",
+      "optional": true
+    },
+    {
+      "file": "advanced/ml_external_validation.csv",
+      "name": "ml_external_validation.csv",
+      "kind": "data",
+      "content": "验证队列上的模型表现",
+      "type": "CSV 数据表",
+      "use": "检查模型跨队列泛化能力和验证队列表现。",
+      "optional": true
+    },
+    {
+      "file": "advanced/ml_feature_importance.csv",
+      "name": "ml_feature_importance.csv",
+      "kind": "data",
+      "content": "ML 特征重要性表",
+      "type": "CSV 数据表",
+      "use": "查看候选基因特征在模型中的重要性排序。",
+      "optional": true
+    },
+    {
+      "file": "advanced/ml_shap.png",
+      "name": "ml_shap.png",
+      "kind": "fig",
+      "content": "基因级 ML 的 SHAP 解释图",
+      "type": "SHAP 摘要图",
+      "use": "解释候选基因对模型输出的正负贡献。",
+      "optional": true,
+      "legend": "每条基因对应一行 SHAP 分布，颜色表示特征取值方向；需要 SHAP 可用且 ML 模型成功训练。"
+    },
+    {
+      "file": "mr_coloc/harmonised_instruments.csv",
+      "name": "harmonised_instruments.csv",
+      "kind": "data",
+      "content": "暴露与结局协调后的工具变量表",
+      "type": "CSV 数据表",
+      "use": "检查 SNP、效应方向、等位基因、EAF 与 F 统计量。",
+      "optional": false
+    },
+    {
+      "file": "mr_coloc/mr_methods.csv",
+      "name": "mr_methods.csv",
+      "kind": "data",
+      "content": "IVW、加权中位数和 MR-Egger 结果",
+      "type": "CSV 数据表",
+      "use": "比较不同 MR 方法的效应量、方向和显著性。",
+      "optional": false
+    },
+    {
+      "file": "mr_coloc/mr_leave_one_out.csv",
+      "name": "mr_leave_one_out.csv",
+      "kind": "data",
+      "content": "留一法敏感性分析",
+      "type": "CSV 数据表",
+      "use": "判断整体因果效应是否由单个 SNP 驱动。",
+      "optional": false
+    },
+    {
+      "file": "mr_coloc/mr_summary.json",
+      "name": "mr_summary.json",
+      "kind": "data",
+      "content": "MR 汇总与 R 后端状态",
+      "type": "JSON 汇总文件",
+      "use": "查看主要估计、异质性、工具变量和共定位状态。",
+      "optional": false
+    },
+    {
+      "file": "mr_coloc/coloc_posterior.csv",
+      "name": "coloc_posterior.csv",
+      "kind": "data",
+      "content": "共定位后验概率表",
+      "type": "CSV 数据表",
+      "use": "查看 PP.H4 与共享因果变量证据；仅 R coloc 后端成功时生成。",
       "optional": true
     }
   ]
