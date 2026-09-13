@@ -21,6 +21,7 @@ ENTRYPOINTS = {
     "full": ROOT / "scripts" / "run_full_pipeline.py",
     "datasets": ROOT / "scripts" / "search_datasets.py",
     "advanced": ROOT / "scripts" / "run_advanced_analysis.py",
+    "experiment-plan-one": ROOT / "scripts" / "run_experiment_plan_one.py",
     "mr": ROOT / "scripts" / "run_mr_coloc.py",
     "web": ROOT / "web" / "web_ui.py",
     "analysis-export": ROOT / "scripts" / "export_to_analysis.py",
@@ -40,6 +41,7 @@ FEATURE_SUMMARY = (
     "full:       integrated expression-to-docking pipeline\n"
     "datasets:   GEO / BioStudies / Expression Atlas search and download\n"
     "advanced:   multi-cohort WGCNA, gene-level ML, immune/survival analysis\n"
+    "experiment-plan-one: 6PPD-Q / NAFLD plan one end-to-end analysis\n"
     "mr:         local MR/IVW/weighted-median/Egger and colocalisation\n"
     "web:        local web console for the whole suite\n"
     "analysis-export: export finished runs into a Codex analysis workspace\n"
@@ -64,6 +66,7 @@ Examples:
   liverbio docking pipeline --config config/docking_config.json
   liverbio datasets --disease "liver cancer" --max-results 20
   liverbio advanced --config config/advanced_analysis.json --output ../advanced_run
+  liverbio experiment-plan-one --config config/experiment_plan_one.json
   liverbio mr --config config/mr_coloc.json --output ../mr_run
   liverbio web --page full
   liverbio analysis-export --source <SOURCE_DIR>/GSE125449 --analysis-root <ANALYSIS_ROOT>

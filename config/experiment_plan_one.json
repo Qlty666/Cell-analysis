@@ -1,0 +1,81 @@
+{
+  "output_root": "../y1",
+  "compound": {
+    "name": "6PPD-Q",
+    "pubchem_cid": "154926030",
+    "target_databases": [
+      "ChEMBL",
+      "STITCH",
+      "SwissTargetPrediction"
+    ]
+  },
+  "disease": {
+    "name": "NAFLD",
+    "open_targets_terms": [
+      "nonalcoholic fatty liver disease",
+      "metabolic dysfunction-associated steatotic liver disease"
+    ],
+    "open_targets_min_score": 0.01,
+    "gene_cards_file": null,
+    "omim_file": null,
+    "ttd_file": null,
+    "gene_column": null
+  },
+  "datasets": {
+    "GSE89632": {
+      "role": "training",
+      "platform": "GPL14951",
+      "condition_column": "condition"
+    },
+    "GSE49541": {
+      "role": "external_validation_fibrosis",
+      "platform": "GPL570",
+      "condition_column": "condition"
+    },
+    "GSE164441": {
+      "role": "external_validation_hcc_tumor_vs_adjacent",
+      "condition_column": "condition"
+    },
+    "GSE135251": {
+      "role": "supplementary_external_validation_nafld",
+      "condition_column": "condition"
+    },
+    "GSE270583": {
+      "role": "mouse_single_cell_discovery",
+      "species": "mm"
+    },
+    "GSE202379": {
+      "role": "human_single_cell_validation",
+      "species": "hs"
+    }
+  },
+  "ppi": {
+    "required_score": 700,
+    "top_n": 20
+  },
+  "ml": {
+    "cv_folds": 5,
+    "seed": 42
+  },
+  "single_cell": {
+    "mouse": {
+      "max_cells": 5000
+    },
+    "human": {
+      "max_cells_per_sample": 1200,
+      "seed": 42
+    }
+  },
+  "docking": {
+    "targets": 5,
+    "exhaustiveness": 16,
+    "cpu": 4,
+    "timeout_seconds": 3600
+  },
+  "md": {
+    "run": false,
+    "gpu": true,
+    "cpu": 4,
+    "timeout_seconds": 172800
+  }
+}

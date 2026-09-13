@@ -432,6 +432,48 @@ launchers\run_GSE125449.bat
 launchers\run_pipeline_prompt.bat
 ```
 
+### 4.1.1 实验方案一专用分析
+
+`scripts/run_experiment_plan_one.py` 按 `实验方案一 .docx` 实现独立的
+6PPD-Q / NAFLD 分析入口，并把结果按 Figure 1-5 的用途分目录写入指定根目录：
+
+```bash
+python scripts\run_experiment_plan_one.py `
+  --config config\experiment_plan_one.json `
+  --output-root "D:\AAA Liver cancer\y1"
+```
+
+也可以使用统一入口：
+
+```bash
+python scripts\liverbio.py experiment-plan-one --config config\experiment_plan_one.json
+```
+
+默认阶段为 `data,targets,disease,ppi,bulk,ml,mouse,human,docking,md,report`。
+可以只运行或从指定阶段恢复：
+
+```bash
+python scripts\run_experiment_plan_one.py --stage bulk --force
+python scripts\run_experiment_plan_one.py --start-stage ml
+python scripts\run_experiment_plan_one.py --stage report --skip-stage md
+```
+
+实现按以下原则处理原始方案与公开数据之间的差异：
+
+- GSE89632 用作 HC/SS/NASH 三组训练集，使用 `limma` 做差异分析。
+- GSE49541 用于纤维化分期验证；GSE164441 在 GEO 中是 NAFLD 相关 HCC
+  肿瘤与癌旁组织比较，因此不会把其 AUC 误称为健康/NAFLD 验证。
+- 额外加入 GSE135251（10 例对照、206 例 NAFLD）作为补充的独立 NAFLD
+  验证集，以补足 GSE164441 与靶终点不一致的问题。
+- SwissTargetPrediction 直接请求公开页面；STITCH 无记录时明确记录
+  `no_results`。ChEMBL 无精确化合物记录时使用带 Tanimoto 分数的相似性
+  靶点来源，并在结果中明确标注。
+- GeneCards、OMIM、TTD 的批量导出受许可/账号限制；没有本地导出时不会
+  伪造基因列表，配置中可填写本地 CSV/TSV 文件。
+- 小鼠 GSE270583 与人类 GSE202379 使用本地 Scanpy 流程；CellChat 面板
+  使用显式配体-受体表做可审计的通讯评分近似。100 ns GROMACS 生产轨迹
+  默认只准备输入；设置配置中的 `md.run=true` 才执行完整模拟。
+
 ### 4.2 虚拟筛选命令行
 
 先初始化工作目录：
@@ -923,6 +965,7 @@ liverbio analysis-export GSE125449
 | 脚本 | 说明 |
 | --- | --- |
 | `scripts/run_pipeline.py` | 表达分析 CLI 入口 |
+| `scripts/run_experiment_plan_one.py` | 实验方案一（6PPD-Q / NAFLD）专用 CLI 入口 |
 | `scripts/run_docking.py` | 虚拟筛选 CLI 入口 |
 | `scripts/run_full_pipeline.py` | 全自动集成流水线 CLI 入口 |
 | `scripts/run_molecular_docking.py` | 独立分子对接 CLI 入口 |
@@ -946,6 +989,7 @@ liverbio analysis-export GSE125449
 | `launchers/check_*.bat/.py` | 环境检查 |
 | `launchers/install_*.bat/.py` | 环境自动补全 |
 | `launchers/run_web_ui.bat` | 启动网页端 |
+| `launchers/run_experiment_plan_one.bat` / `.sh` | 实验方案一快捷入口 |
 | `launchers/run_docking.bat` | 虚拟筛选快捷入口 |
 | `launchers/run_full_pipeline.bat` | 全自动流水线快捷入口 |
 | `launchers/run_molecular_docking.bat` | 独立分子对接快捷入口 |
@@ -957,6 +1001,7 @@ liverbio analysis-export GSE125449
 | `setup_new_computer.bat` / `check_new_computer.bat` | 新电脑安装与检查 |
 | `package_for_new_computer.bat` | 新电脑源码包生成入口 |
 | `src/analysis/*` | R/Python 分析实现（QC、聚类、DEG、富集、CellChat、ML） |
+| `src/experiment_plan_one/*` | 实验方案一的数据、靶点、PPI、ML、单细胞、对接与报告实现 |
 | `src/analysis/analysis_pipeline.R` | 表达分析驱动脚本（参数、阶段调度与模块加载） |
 | `src/analysis/R/*.R` | 表达分析函数模块（读取、QC、聚类、注释、DEG、富集、出图） |
 | `src/common/*` | Rscript/工具路径、环境探测与通用 HTTP/HTML 工具 |
