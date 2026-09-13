@@ -31,19 +31,19 @@
       <details class="form-section" open>
         <summary>靶点评分输入</summary>
       <div class="grid wide">
-        <label>工作目录
+        <label>工作目录（目录）
           <input name="ko_workdir" placeholder="请输工作目录，默认 dock">
         </label>
-        <label>表达矩阵 CSV（相对工作目录）
+        <label>表达矩阵（CSV，相对工作目录）
           <input name="ko_expression" placeholder="data/knockout/expression.csv" required>
         </label>
-        <label>样本元数据 CSV（可选）
+        <label>样本元数据（CSV，可选）
           <input name="ko_metadata" placeholder="data/knockout/metadata.csv">
         </label>
-        <label>DepMap 依赖 CSV（可选）
+        <label>DepMap 依赖（CSV，可选）
           <input name="ko_depmap" placeholder="data/knockout/depmap_gene_effect.csv">
         </label>
-        <label>PPI 网络边表 CSV/TSV（可选）
+        <label>PPI 网络边表（CSV / TSV，可选）
           <input name="ko_ppi" placeholder="data/network/string_edges.tsv">
         </label>
         <label>肿瘤/病例标签（可选）
@@ -94,13 +94,13 @@
             <option value="mm">mm</option>
           </select>
         </label>
-        <label>UMAP 坐标 CSV（可选）
+        <label>UMAP 坐标（CSV，可选）
           <input name="ko_insilico_embedding" placeholder="data/knockout/umap_coordinates.csv">
         </label>
-        <label>候选调控因子 CSV（可选）
+        <label>候选调控因子（CSV，可选）
           <input name="ko_insilico_regulators" placeholder="data/knockout/regulators.csv">
         </label>
-        <label>图片/报告输出目录（可选）
+        <label>图片/报告输出目录（目录，可选）
           <input name="ko_insilico_photo" placeholder="例如：photo_output">
         </label>
       </div>
@@ -117,7 +117,7 @@
           <label>信号传播轮数
             <input name="ko_insilico_n_propagation" type="number" min="1" max="20" value="3">
           </label>
-          <label>DrugReflector checkpoint 目录（可选）
+          <label>DrugReflector checkpoint 目录（目录，可选）
             <input name="ko_drugreflector_checkpoint_dir" placeholder="含 model_fold_*.pt 的目录">
           </label>
           <label>DrugReflector Top N

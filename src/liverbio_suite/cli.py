@@ -66,7 +66,7 @@ Examples:
   liverbio advanced --config config/advanced_analysis.json --output ../advanced_run
   liverbio mr --config config/mr_coloc.json --output ../mr_run
   liverbio web --page full
-  liverbio analysis-export --source ../y2/GSE125449 --analysis-root <LOCAL_ROOT> analysis
+  liverbio analysis-export --source <SOURCE_DIR>/GSE125449 --analysis-root <ANALYSIS_ROOT>
   liverbio doctor
   liverbio install-skills
   liverbio setup

@@ -159,7 +159,7 @@ launchers\run_web_ui.bat</pre>
     <div class="tutorial-step-grid">
       <div class="tutorial-step">
         <span class="step-label">1. 进入环境补全</span>
-        <p>打开 <code>/environment</code>，页面会列出表达分析、虚拟筛选、分子动力学等全部功能板块。</p>
+        <p>打开 <code>/environment</code>，页面会列出表达分析、高级分析与 MR/共定位、虚拟筛选、分子动力学等全部功能板块。</p>
       </div>
       <div class="tutorial-step">
         <span class="step-label">2. 检查依赖</span>
@@ -241,11 +241,19 @@ launchers\run_web_ui.bat</pre>
         <h3>敲除、网络毒理学与 FAERS</h3>
         <ul>
           <li>“虚拟敲除”页需要表达/计数输入；填写目标基因后可按需启用 scTenifoldKnk 或 CellOracle 风格分析。</li>
-          <li>“网络毒理学”页用化合物-靶点表与疾病基因表计算交集、PPI hub 与 Venn/C-T-P-D 网络；可设置 Cytoscape 模式、CyREST 地址、布局和 PPI 最大边数。</li>
+          <li>“网络毒理学”页支持单文件或多来源靶点目录自动发现，计算交集、7 类 PPI hub 指标与 Venn/C-T-P-D 网络，并可按需运行 GO/KEGG 富集。</li>
           <li>Cytoscape CyREST 运行时会自动推送网络并导出 PNG，否则仍会下载可直接导入的 <code>ctpd_network.xgmml</code>。</li>
           <li>“FAERS”页使用药物-事件计数表输出 ROR、PRR、BCPNN IC 与 EBGM 组合信号。</li>
         </ul>
         <span class="guide-tip">Cytoscape 桌面版安装后，可在安装目录执行 <code>cytoscape.bat -R 1234</code> 启动 REST 服务；网络毒理学页默认使用 <code>http://127.0.0.1:1234</code>。</span>
+      </div>
+      <div class="workflow-item">
+        <h3>真实数据验证</h3>
+        <ul>
+          <li>随机真实 GSE 全流程验证用于检查下载、表达式分析和全自动流水线是否贯通。</li>
+          <li>多队列靶点功能验证复用 TCGA PanCancer 与 GSE165816；证据验证直接检查 RCSB/BindingDB 和对接盒检测。</li>
+          <li>任务日志、状态和报告在页面内读取，四类验证共用一套运行入口。</li>
+        </ul>
       </div>
     </div>
   </section>

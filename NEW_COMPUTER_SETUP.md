@@ -57,6 +57,7 @@ python3 launchers/install_environment.py check full
 ```bash
 python launchers/install_environment.py list
 python launchers/install_environment.py install expression
+python launchers/install_environment.py install analysis
 python launchers/install_environment.py install docking --with-ml
 python launchers/install_environment.py check full
 ```
@@ -86,6 +87,7 @@ python launchers/package_portable.py
 
 - 表达分析/全流程常用 `--output ../liver_cancer`，可改成任意路径；
 - 全自动流水线用 `--workdir <目录>`；
+- 高级分析常用 `<OUTPUT_DIR>/advanced`，MR/共定位常用 `<OUTPUT_DIR>/mr`；
 - 独立对接默认在 `molecular_docking/`，可用 `--workdir` 改变；
 - 网页端验证任务结果默认写入 `data_cache/validation_runs/`，可通过
   `LIVER_VALIDATION_ROOT` 环境变量修改。

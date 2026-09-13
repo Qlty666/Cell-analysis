@@ -818,7 +818,9 @@ GROMACS 输入文件；`auto` 模式需要 GROMACS，并通过 ACPYPE 或
 | `<id>/complex.pdb` | 受体与 Top 对接姿态组成的复合物 | PDB 可打开，配体与受体坐标都存在 | 受体 PDB 或姿态缺失时不生成；`prepare` 模式没有该文件的力场验证 |
 | `<id>/md_rmsd_rmsf.png` | 蛋白骨架 RMSD、配体 RMSD 与配体原子 RMSF 图 | 生产轨迹存在且分析成功，曲线非空 | `auto` 未完成、轨迹为空或 GROMACS 分析失败时不生成 |
 | `<id>/md_stability_dynamics.png` | Rg、SASA、蛋白-配体氢键与蛋白残基 RMSF 图，结合口袋残基高亮 | Rg/SASA/氢键轨迹非空，RMSF 与残基索引可读 | 扩展分析命令失败或文件缺失时不生成；不代表常规 `md_rmsd_rmsf.png` 缺失 |
-| `md_simulation_results.csv` | 每个配体的模拟状态与均值/后段波动指标 | `status=completed` 的行有时间、RMSD 与扩展指标数值 | `prepare` 模式或失败行为空状态，不能当作已完成的模拟结论 |
+| `<id>/pca_fel.csv` | PC1/PC2 构象投影与 Gibbs 自由能面数据 | 主要构象区域可覆盖，最低自由能点存在且坐标可追溯 | NDX/轨迹不足时可为空；不能仅凭单点最低值判断结合强度 |
+| `<id>/mmpbsa.log` | 外部 MM/PBSA 命令日志与结合自由能解析来源 | 命令成功、日志完整，`mmpbsa_status=completed` | 未配置命令时为 `not_configured`；失败日志不能作为自由能证据 |
+| `md_simulation_results.csv` | 每个配体的模拟状态、稳定性、PCA/FEL 与可选 MM/PBSA 指标 | `status=completed` 的行有时间、RMSD、扩展指标和来源状态 | `prepare` 模式或失败行为空状态，不能当作已完成的模拟结论 |
 | `md_simulation_summary.json` | 模式与完成/失败统计 | 数值与结果 CSV 一致 | 全部失败时命令会返回非零退出码并记录原因 |
 
 `auto` 模式按“最小化 → NVT → NPT → 生产模拟”运行，并在生产轨迹上自动追加 Rg、SASA、
@@ -827,6 +829,20 @@ GROMACS 输入文件；`auto` 模式需要 GROMACS，并通过 ACPYPE 或
 `md_simulation.prod_steps` 控制；默认 250000 步为快速验证值，正式研究应
 根据体系和采样需要调大，并核对力场、溶剂盒子、离子浓度与轨迹收敛后再下结论。
 `stability_label` 是启发式标记，不等同于实验验证；任何计算预测仍需湿实验确认。
+
+### 5.7 高级分析与 MR/共定位
+
+单队列以外的多队列整合、WGCNA、基因级 ML、免疫/生存分析和 MR/共定位由 `scripts/run_advanced_analysis.py` 与 `scripts/run_mr_coloc.py` 生成，也可在网页 `/analysis` 独立运行。全自动流水线配置 `LIVER_ADVANCED_CONFIG` / `LIVER_MR_CONFIG` 时，输出位于单细胞结果根目录的 `results/advanced/` 与 `results/mr_coloc/`。
+
+| 文件 | 内容与用途 | 合格判据 | 不可用或警示 |
+| --- | --- | --- | --- |
+| `integrated_priority.csv` | 多队列证据、差异表达和模型得分的综合排序 | 至少包含基因和 `priority_score`，排序方向与配置一致 | Python 回退和 R 后端缺失时仍需查看各队列覆盖与失败状态 |
+| `advanced_analysis_summary.json` | 各高级分析模块状态和输出路径 | 模块状态、参数和输出路径可追溯 | 状态为 skipped/failed 的模块不能写成已完成 |
+| `ml_model_comparison.csv` / `ml_external_validation.csv` | 基因级模型的交叉验证和外部验证指标 | 折数、重复数、验证队列和指标列完整 | 小样本或类别不平衡时不能仅凭单一 AUC 下结论 |
+| `ml_feature_importance.csv` / `ml_shap.png` | 特征重要性和可选 SHAP 解释 | 特征名可映射，SHAP 依赖可用 | 缺少 SHAP 包时只说明未生成解释图 |
+| `harmonised_instruments.csv` | MR 暴露/结局协调后的工具变量 | SNP、效应等位基因、EAF 与 F 统计量可读 | 回文 SNP 链方向不确定时必须剔除并记录 |
+| `mr_methods.csv` / `mr_leave_one_out.csv` | IVW、加权中位数、MR-Egger、异质性和留一法结果 | 多种方法方向、显著性及留一法结果同时可追溯 | 多方法不一致或工具变量过少时不能写成稳定因果效应 |
+| `coloc_posterior.csv` | R coloc 后验概率与 PP.H4 | 仅 R 后端成功时生成，PP.H4 可复核 | 文件存在不自动等于共定位成立，需结合先验和区域解释 |
 
 ## 6. 全自动集成流水线与细胞反馈结果图
 
@@ -904,6 +920,8 @@ GROMACS 输入文件；`auto` 模式需要 GROMACS，并通过 ACPYPE 或
   figures/compound_disease_venn.png
   data/compound_disease_overlap.csv
   data/ppi_hub_scores.csv
+  data/insilico_go_enrichment.csv
+  data/insilico_kegg_enrichment.csv
   data/ctpd_nodes.csv
   data/ctpd_edges.csv
   data/ctpd_network.html
@@ -918,8 +936,9 @@ GROMACS 输入文件；`auto` 模式需要 GROMACS，并通过 ACPYPE 或
 | 文件 | 内容与用途 | 合格判据 | 不可用或警示 |
 | --- | --- | --- | --- |
 | `compound_disease_venn.png` | 化合物靶点与疾病基因的 Venn 图，用于查看交集规模和来源 | 图片可打开，交集基因数与 `compound_disease_overlap.csv` 一致，来源标签清晰 | 只有 1 个基因集或输入文件缺失时不生成；交集为 0 时只能说明无重叠，不能作为阳性证据 |
-| `compound_disease_overlap.csv` | 核心交集靶点及来源数据库计数 | 至少 1 个交集基因，`n_sources` 可读 | 交集为 0 或输入表不完整时需复核数据库下载 |
-| `ppi_hub_scores.csv` | STRING PPI 的 degree、betweenness、clustering 与 hub 评分 | 提供 PPI 边表时生成，基因名可匹配 | 未提供 `--ppi-network-csv` 时不生成；匹配率过低时 hub 评分代表性不足 |
+| `compound_disease_overlap.csv` | 核心交集靶点及来源数据库计数；来源可由单文件或多来源目录自动汇总 | 至少 1 个交集基因，`n_sources` 可读 | 交集为 0 或输入表不完整时需复核数据库下载 |
+| `ppi_hub_scores.csv` | STRING PPI 的 degree、betweenness、closeness、eigenvector、PageRank、MCC、clustering 与 consensus hub 评分 | 提供 PPI 边表时生成，基因名可匹配 | 未提供 `--ppi-network-csv` 时不生成；匹配率过低时 hub 评分代表性不足 |
+| `insilico_go_enrichment.csv` / `insilico_kegg_enrichment.csv` | 网络交集基因的 GO/KEGG 富集表 | 启用富集、交集基因不少于 3 个且 R 环境可用 | 未启用时为 disabled；R 缺失或 KEGG 在线注解失败时记录跳过/失败原因 |
 | `ctpd_network.html` | C-T-P-D 网络可视化页 | HTML 可打开，节点和边数与 CSV 一致 | 输入不完整时不生成 |
 | `ctpd_network.xgmml` | Cytoscape XGMML 网络文件，节点类型、PPI hub 指标与边类型均已写入 | 可被 Cytoscape 直接导入；节点/边数与 CSV 一致 | 缺少交集基因时只含化合物/疾病节点 |
 | `ctpd_network_cytoscape.png` | Cytoscape 自动布局并套用样式的 C-T-P-D 网络图 | 图片可打开，网络内容与 CSV 一致 | 仅在 Cytoscape CyREST 运行且已安装 `py4cytoscape` 时生成；否则仍可导入 `ctpd_network.xgmml` |

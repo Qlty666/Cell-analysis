@@ -38,8 +38,8 @@ liverbio expression GSE125449 --output ../liver_cancer --species auto
 liverbio full --accession GSE125449 --output ../liver_cancer --workdir ../liver_cancer_full
 liverbio docking pipeline --config config/docking_config.json
 liverbio datasets --disease "liver cancer" --max-results 20
-liverbio advanced --config config/advanced_analysis.json --output <OUTPUT_DIR>\advanced
-liverbio mr --config config/mr_coloc.json --output <OUTPUT_DIR>\mr
+liverbio advanced --config config/advanced_analysis.json --output <OUTPUT_DIR>/advanced
+liverbio mr --config config/mr_coloc.json --output <OUTPUT_DIR>/mr
 liverbio web --page full
 liverbio analysis-export GSE235863
 liverbio doctor
@@ -75,6 +75,8 @@ launchers\export_to_analysis.bat GSE235863
 
 `liverbio mr` 读取本地 eQTL 和 GWAS summary statistics，执行距离剪枝或 PLINK LD clumping，并处理回文 SNP 的链方向问题；随后执行 IVW、weighted median、MR-Egger、异质性、Egger intercept 和 leave-one-out，R 包存在时追加 MendelianRandomization 和 coloc 结果。输入列映射见 `config/mr_coloc.example.json`。
 
+网页版与命令行共用同一组入口：`/analysis` 可独立运行高级多队列分析、MR/共定位和结果导出；`/validation` 可选择随机 GSE 全流程、TCGA/GSE165816 多队列、真实 PDB 证据或随机证据/对接盒验证；全自动流水线可通过 `--advanced-priority-csv` 使用上一轮 `integrated_priority.csv` 调整关键基因排序。
+
 ## 常用工作流
 
 ### 打开网页软件
@@ -85,7 +87,8 @@ liverbio web
 
 默认打开 `http://127.0.0.1:8000/full`。可使用 `--page dock`、
 `--page md-simulation`、`--page knockout`、`--page network`、
-`--page faers`、`--page validation`、`--page molecular-docking`、
+`--page faers`、`--page validation`、`--page analysis`、
+`--page molecular-docking`、
 `--page datasets`、`--page results`、`--page tasks`、
 `--page guide`、`--page environment` 等打开对应页面。
 
@@ -116,6 +119,7 @@ liverbio doctor docking
 ```text
 launchers\install_expression_environment.bat        # 表达分析
 launchers\install_datasets_environment.bat           # 数据集搜索
+launchers\install_analysis_environment.bat           # 高级分析 / MR / 共定位
 launchers\install_docking_environment.bat            # 虚拟筛选 / 对接
 launchers\install_molecular_docking_environment.bat  # 独立分子对接
 launchers\install_md_environment.bat                 # 分子动力学
@@ -163,10 +167,16 @@ src\             可复用 Python 模块
   common\        环境与通用工具
   data\          数据下载、转换与校验
   pipeline\      表达分析、全流程编排
+    qc.py           QC 门控
+    differential.py 差异丰度
+    key_targets.py  关键基因排序
   docking\       虚拟筛选、靶点评分
   report\        结果报告
   liverbio_suite\ 统一命令入口
 web\             本地网页软件
+  web_analysis.py   高级分析与 MR/导出任务
+  web_validation.py 真实数据验证任务
+  web_files.py      结果文件发现
 skills\          Codex skill 源文件
 launchers\       Windows 快捷启动与安装脚本
 config\          默认配置

@@ -31,7 +31,7 @@
       <details class="form-section" open>
         <summary>模拟参数</summary>
       <div class="grid wide">
-        <label>工作目录
+        <label>工作目录（目录）
           <input name="workdir" placeholder="默认 dock">
         </label>
         <label>执行模式
@@ -40,10 +40,10 @@
             <option value="auto">auto（运行 GROMACS）</option>
           </select>
         </label>
-        <label>受体 PDB（相对工作目录）
+        <label>受体 PDB（PDB，相对工作目录）
           <input name="md_receptor_pdb" placeholder="data/receptors/receptor.pdb">
         </label>
-        <label>GROMACS 数据目录（可选）
+        <label>GROMACS 数据目录（目录，可选）
           <input name="md_gmx_data" placeholder="例如：gromacs_data">
         </label>
         <label>Top N 配体
@@ -76,10 +76,10 @@
         <label>CPU 线程
           <input name="md_cpu" type="number" min="1" value="4">
         </label>
-        <label>配体拓扑目录（可选）
+        <label>配体拓扑目录（目录，可选）
           <input name="md_topology_dir" placeholder="data/md/topologies">
         </label>
-        <label>MM/PBSA 命令（可选）
+        <label>MM/PBSA 命令（可执行命令，可选）
           <input name="md_mmpbsa_command" placeholder="gmx_MMPBSA -O -i mmpbsa.in">
         </label>
         <label>MM/PBSA 超时（秒）
@@ -120,7 +120,7 @@
 
   <div class="card">
     <h2 style="margin-top:0;">环境状态与自动补全</h2>
-    <label for="dockInstallPath">安装地址</label>
+    <label for="dockInstallPath">安装地址（目录）</label>
     <input id="dockInstallPath" name="install_path" placeholder="可选">
     <div class="actions" style="margin-top:10px;">
       <button type="button" onclick="checkEnv(this)">检查环境</button>

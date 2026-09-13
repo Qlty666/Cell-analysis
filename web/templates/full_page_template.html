@@ -199,7 +199,7 @@ a.file-link { color: #1665c0; text-decoration: none; margin-right: 12px; }
         <label>结束日期 <input type="date" name="end_date"></label>
         <label>平台过滤 <input name="platform" placeholder="GPL24676 或平台名称"></label>
         <label>数据集类型过滤 <input name="dataset_type" placeholder="high throughput sequencing"></label>
-        <label>ML/DL 模型路径 <input name="model" placeholder="data_cache\dataset_search\relevance_model.joblib"></label>
+        <label>ML/DL 模型路径（.joblib） <input name="model" placeholder="data_cache\dataset_search\relevance_model.joblib"></label>
       </div>
     </details>
     <div class="actions">
@@ -232,14 +232,14 @@ a.file-link { color: #1665c0; text-decoration: none; margin-right: 12px; }
           <input name="accession" value="" placeholder="请输入数据集编号">
           <span class="field-hint">支持 GSE125449、E-MTAB-1234 或 S-BSST123；GEO / ArrayExpress / Expression Atlas 均可自动下载并运行。</span>
         </label>
-        <label>表达分析结果目录
+        <label>表达分析结果目录（目录）
           <input name="output" placeholder="请输入结果保存地址" required>
         </label>
-        <label>工作目录
+        <label>工作目录（目录）
           <input name="workdir" placeholder="请输入工作目录" required>
           <span class="field-hint">填到包含 outputs 的上一层目录。</span>
         </label>
-        <label>配体库（可选）
+        <label>配体库（SDF / SMI / CSV，可选）
           <input name="ligand_library" placeholder="data/ligands/library.smi">
         </label>
       </div>
@@ -263,13 +263,13 @@ a.file-link { color: #1665c0; text-decoration: none; margin-right: 12px; }
             <option value="lasso_svm">lasso_svm - LASSO+SVM-RFE</option>
           </select>
         </label>
-        <label>DepMap 依赖 CSV（可选）
+        <label>DepMap 依赖 CSV（CSV，可选）
           <input name="depmap_csv" placeholder="data/knockout/depmap_gene_effect.csv">
         </label>
-        <label>PPI 网络边表 CSV/TSV（可选）
+        <label>PPI 网络边表（CSV / TSV，可选）
           <input name="ppi_network_csv" placeholder="data/network/string_edges.tsv">
         </label>
-        <label>高级分析优先级表（可选）
+        <label>高级分析优先级表（CSV，可选）
           <input name="advanced_priority_csv" placeholder="results/advanced/integrated_priority.csv">
         </label>
         <label>关键基因数
@@ -299,25 +299,25 @@ a.file-link { color: #1665c0; text-decoration: none; margin-right: 12px; }
             <option value="torch">torch - PyTorch MLP</option>
           </select>
         </label>
-        <label>对接 ML 训练 CSV（可选）
+        <label>对接 ML 训练 CSV（CSV，可选）
           <input name="docking_ml_training_csv" placeholder="data/ml/training.csv">
         </label>
         <label>对接 ML 标签列
           <input name="docking_ml_label_column" value="active">
         </label>
-        <label>网络毒理学：化合物靶点 CSV（可选）
+        <label>网络毒理学：化合物靶点表（CSV / TSV / JSON / JSONL，可选）
           <input name="network_compound_targets_csv" placeholder="data/network/compound_targets.csv">
         </label>
-        <label>网络毒理学：多来源靶点目录（可选）
+        <label>网络毒理学：多来源靶点目录（目录，可选）
           <input name="network_target_sources_dir" placeholder="data/network/targets">
         </label>
-        <label>网络毒理学：疾病基因 CSV（可选，默认关键基因）
+        <label>网络毒理学：疾病基因表（CSV / TSV / TXT，可选，默认关键基因）
           <input name="network_disease_genes_csv" placeholder="默认 outputs/integration/key_genes.csv">
         </label>
         <label>网络毒理学：疾病基因列
           <input name="network_disease_gene_column" placeholder="gene">
         </label>
-        <label>网络毒理学：PPI 边表 CSV/TSV（可选）
+        <label>网络毒理学：PPI 边表（CSV / TSV，可选）
           <input name="network_ppi_network_csv" placeholder="data/network/string_edges.tsv">
         </label>
         <label>网络毒理学：Cytoscape 模式
@@ -341,7 +341,7 @@ a.file-link { color: #1665c0; text-decoration: none; margin-right: 12px; }
         </label>
         <label class="toggle"><input type="checkbox" name="network_cytoscape_session" value="1"> 网络毒理学保存 .cys 会话</label>
         <label class="toggle"><input type="checkbox" name="network_run_enrichment" value="1"> 对交集基因运行 GO/KEGG 富集</label>
-        <label>FAERS 事件表 CSV（可选）
+        <label>FAERS 事件表（CSV，可选）
           <input name="faers_input" placeholder="data/faers/events.csv">
         </label>
         <label>FAERS 药物列
@@ -362,10 +362,10 @@ a.file-link { color: #1665c0; text-decoration: none; margin-right: 12px; }
         <label>正常标签（可选）
           <input name="normal_label" placeholder="Normal / HCC">
         </label>
-        <label>多队列分析配置（可选）
+        <label>多队列分析配置（JSON，可选）
           <input name="advanced_config" placeholder="config/advanced_analysis.json">
         </label>
-        <label>MR / 共定位配置（可选）
+        <label>MR / 共定位配置（JSON，可选）
           <input name="mr_config" placeholder="config/mr_coloc.json">
         </label>
       </div>
@@ -434,7 +434,7 @@ a.file-link { color: #1665c0; text-decoration: none; margin-right: 12px; }
 <div class="card" id="full-existing">
   <h2>查看已有结果</h2>
   <div class="grid wide">
-    <label>工作目录
+      <label>工作目录（目录）
       <input id="existingWorkdir" placeholder="填到 outputs 的上一层目录">
     </label>
   </div>

@@ -74,7 +74,6 @@ from web_state import (  # noqa: E402
     FULL_QUEUE_LOCK,
     ANALYSIS_JOBS,
     ANALYSIS_QUEUE,
-    ANALYSIS_QUEUE_LOCK,
     DATASET_DOWNLOAD_JOBS,
     DATASET_DOWNLOAD_LOCK,
     VALIDATION_JOB,
@@ -131,25 +130,8 @@ RESULT_DETAILS_PATH = STATIC_DIR / "result_details.json"
 TASKS_TEMPLATE_PATH = TEMPLATE_DIR / "tasks_template.html"
 DATASET_TEMPLATE_PATH = TEMPLATE_DIR / "datasets_template.html"
 ANALYSIS_TEMPLATE_PATH = TEMPLATE_DIR / "analysis_tools_page_template.html"
-ANALYSIS_LOG_DIR = APP_ROOT / "logs" / "analysis"
 DATASET_SEARCH_DIR = APP_ROOT / "data_cache" / "dataset_search"
 DATASET_DATABASES = ("geo", "biostudies", "atlas")
-VALIDATION_ROOT = Path(
-    os.environ.get(
-        "LIVER_VALIDATION_ROOT",
-        str(APP_ROOT / "data_cache" / "validation_runs"),
-    )
-).resolve()
-VALIDATION_REPORT_DIR = VALIDATION_ROOT / "validation"
-VALIDATION_REPORT_PATH = VALIDATION_REPORT_DIR / "validation_summary.json"
-VALIDATION_LOG = WEB_DIR / "validation_run.log"
-VALIDATION_FEATURES_ROOT = (
-    APP_ROOT / "dock" / "validation_real" / "pan_cancer_20"
-)
-VALIDATION_EVIDENCE_ROOT = APP_ROOT / "dock" / "validation_real"
-VALIDATION_RANDOM_EVIDENCE_ROOT = (
-    APP_ROOT / "dock" / "validation_real_random"
-)
 MAX_POST_BODY_BYTES = 1_000_000
 MAX_SERVED_FILE_BYTES = 64 * 1024 * 1024
 LOCAL_ORIGIN_HOSTS = {"127.0.0.1", "localhost", "[::1]", "::1"}
@@ -200,6 +182,8 @@ CONTENT_TYPES = {
 
 def _content_type(suffix: str) -> str:
     return CONTENT_TYPES.get((suffix or "").lower(), "application/octet-stream")
+
+
 from web_data import (  # noqa: E402
     NAV_HTML,
     NAV_CSS,
@@ -213,9 +197,40 @@ from web_data import (  # noqa: E402
     MOLECULAR_DOCK_STAGE_LABELS,
     FULL_STAGE_LABELS,
     RESULT_IMAGE_SUFFIXES,
-    RESULT_DATA_SUFFIXES,
-    RESULT_FILE_SUFFIXES,
 )
+from web_analysis import (  # noqa: E402
+    _advanced_analysis_file_path,
+    _analysis_status,
+    _drain_analysis_queue,
+    analysis_results,
+    start_analysis_job,
+)
+from web_files import (  # noqa: E402
+    analysis_files as _analysis_files,
+    is_result_file as _is_result_file,
+    list_result_files as _list_result_files,
+    list_result_images as _list_result_images,
+)
+from web_utils import (  # noqa: E402
+    cli_path,
+    first_value as _first,
+    float3 as _float3,
+    float_field as _float_field,
+    integer_field as _int_field,
+    integer_list_field as _int_list_field,
+    raw_count_flag as _raw_count_flag,
+)
+from web_validation import (  # noqa: E402
+    _validation_report_path,
+    start_validation_job,
+    validation_job_status,
+    validation_report_text,
+)
+
+
+def _cli_path(value: str) -> str:
+    return cli_path(value, APP_ROOT)
+
 
 def environment_module_cards() -> str:
     """Return the per-module environment cards for the web board."""
@@ -1239,301 +1254,6 @@ def render_analysis_page() -> str:
     )
 
 
-ANALYSIS_KIND_LABELS = {
-    "advanced": "多队列分析与靶点排序",
-    "mr": "孟德尔随机化与共定位",
-    "export": "分析工作区导出",
-}
-
-
-def _cli_path(value: str) -> str:
-    """Return an absolute CLI path while preserving an empty argument."""
-    value = str(value or "").strip()
-    if not value:
-        return ""
-    path = Path(value).expanduser()
-    if not path.is_absolute():
-        path = APP_ROOT / path
-    return str(path.resolve())
-
-
-def _analysis_output_path(data: dict, kind: str) -> Path:
-    if kind == "export":
-        value = _first(data, "analysis_root", "").strip()
-    else:
-        value = _first(data, "output", "").strip()
-    if not value:
-        field = "分析工作区根目录" if kind == "export" else "输出目录"
-        raise ValueError(f"{field}不能为空")
-    output = Path(value).expanduser()
-    if not output.is_absolute():
-        output = APP_ROOT / output
-    return output.resolve()
-
-
-def _analysis_flags(data: dict, names: tuple[str, ...]) -> list[str]:
-    flags = []
-    for name in names:
-        if _first(data, name, "").strip().lower() in (
-            "1",
-            "true",
-            "on",
-            "yes",
-        ):
-            flags.append("--" + name.replace("_", "-"))
-    return flags
-
-
-def _require_existing_path(value: str, label: str) -> str:
-    resolved = _cli_path(value)
-    if not Path(resolved).is_file():
-        raise ValueError(f"{label}不存在：{value}")
-    return resolved
-
-
-def start_analysis_job(data: dict) -> dict:
-    """Start an Advanced, MR/coloc or analysis-export job."""
-    kind = _first(data, "kind", "").strip().lower()
-    if kind not in ANALYSIS_KIND_LABELS:
-        raise ValueError("分析类型必须是 advanced、mr 或 export")
-    output = _analysis_output_path(data, kind)
-    dry_run = _first(data, "dry_run", "").strip().lower() in (
-        "1",
-        "true",
-        "on",
-        "yes",
-    )
-
-    if kind == "advanced":
-        cmd = [
-            sys.executable,
-            str(SCRIPTS_DIR / "run_advanced_analysis.py"),
-            "--output",
-            str(output),
-        ]
-        config = _cli_path(_first(data, "config", ""))
-        expression = _first(data, "expression", "").strip()
-        if not config and not expression:
-            raise ValueError("请填写高级分析配置文件或发现队列表达矩阵")
-        if config:
-            config = _require_existing_path(config, "高级分析配置文件")
-            cmd += ["--config", config]
-        for key in (
-            "expression",
-            "metadata",
-            "cohort_name",
-            "condition_column",
-            "gene_column",
-            "case_label",
-            "control_label",
-        ):
-            value = _first(data, key, "").strip()
-            if value:
-                if key in {"expression", "metadata"}:
-                    value = _require_existing_path(value, "发现队列表")
-                cmd += ["--" + key.replace("_", "-"), value]
-        for key in ("feature_cap", "cv_folds", "cv_repeats", "seed"):
-            value = _int_field(data, key)
-            if value is not None:
-                cmd += ["--" + key.replace("_", "-"), str(value)]
-        cmd += _analysis_flags(
-            data,
-            ("skip_r", "skip_ml", "skip_wgcna", "skip_immune", "skip_survival", "verbose"),
-        )
-    elif kind == "mr":
-        config = _cli_path(_first(data, "config", ""))
-        if not config:
-            raise ValueError("MR/共定位配置文件不能为空")
-        config = _require_existing_path(config, "MR/共定位配置文件")
-        cmd = [
-            sys.executable,
-            str(SCRIPTS_DIR / "run_mr_coloc.py"),
-            "--config",
-            config,
-            "--output",
-            str(output),
-        ]
-        cmd += _analysis_flags(data, ("skip_r", "verbose"))
-    else:
-        cmd = [sys.executable, str(SCRIPTS_DIR / "export_to_analysis.py")]
-        source = _first(data, "source", "").strip()
-        run = _first(data, "run", "").strip()
-        if source:
-            source_path = Path(_cli_path(source))
-            if not source_path.exists():
-                raise ValueError(f"运行结果目录不存在：{source}")
-            cmd += ["--source", str(source_path)]
-        elif run:
-            cmd.append(run)
-        else:
-            raise ValueError("请填写数据集编号、运行目录或来源目录")
-        cmd += ["--analysis-root", str(output)]
-        name = _first(data, "name", "").strip()
-        if name:
-            cmd += ["--name", name]
-        inventory_script = _first(data, "inventory_script", "").strip()
-        if inventory_script:
-            cmd += [
-                "--inventory-script",
-                _require_existing_path(inventory_script, "清单脚本"),
-            ]
-        cmd += _analysis_flags(
-            data,
-            ("remember_analysis_root", "no_inventory", "dry_run"),
-        )
-
-    if kind != "export" or not dry_run:
-        output.mkdir(parents=True, exist_ok=True)
-    ANALYSIS_LOG_DIR.mkdir(parents=True, exist_ok=True)
-    job_id = uuid.uuid4().hex[:8]
-    log_path = ANALYSIS_LOG_DIR / f"{kind}_{job_id}.log"
-    env = os.environ.copy()
-    env["PYTHONIOENCODING"] = "utf-8"
-    info = {
-        "job_id": job_id,
-        "kind": kind,
-        "title": ANALYSIS_KIND_LABELS[kind],
-        "log": log_path,
-        "proc": None,
-        "started": time.time(),
-        "output": output,
-        "cmd": cmd,
-        "env": env,
-        "queued": True,
-        "recorded": False,
-        "notified": False,
-    }
-    ANALYSIS_JOBS[job_id] = info
-    with ANALYSIS_QUEUE_LOCK:
-        ANALYSIS_QUEUE.append(info)
-    try:
-        _drain_analysis_queue()
-    except Exception:
-        with ANALYSIS_QUEUE_LOCK:
-            ANALYSIS_QUEUE[:] = [
-                item for item in ANALYSIS_QUEUE if item is not info
-            ]
-        ANALYSIS_JOBS.pop(job_id, None)
-        raise
-    return {
-        "job": job_id,
-        "log_url": f"/analysis/log?job={job_id}",
-        "status_url": f"/analysis/status?job={job_id}",
-    }
-
-
-def _drain_analysis_queue() -> None:
-    _drain_store(ANALYSIS_QUEUE, ANALYSIS_QUEUE_LOCK)
-
-
-def _analysis_status(info: dict) -> dict:
-    if info.get("proc") is None:
-        return {
-            "running": False,
-            "ok": False,
-            "queued": True,
-            "paused": False,
-            "stage": "排队中",
-            "error": "",
-            "kind": info.get("kind", ""),
-            "output": str(info.get("output", "")),
-        }
-    running = info["proc"].poll() is None
-    if running:
-        return {
-            "running": True,
-            "ok": False,
-            "queued": False,
-            "paused": False,
-            "stage": ANALYSIS_KIND_LABELS.get(info.get("kind", ""), "分析中"),
-            "error": "",
-            "kind": info.get("kind", ""),
-            "output": str(info.get("output", "")),
-        }
-    ok = info["proc"].returncode == 0
-    with JOB_RECORD_LOCK:
-        if not info.get("recorded"):
-            record_analysis_job(info, ok)
-            info["recorded"] = True
-    _drain_analysis_queue()
-    log_text = _log_tail(info["log"], 30000)
-    error = "" if ok else (
-        _extract_error(log_text) or "进程已退出，请查看日志"
-    )
-    _notify_finished(
-        info,
-        "analysis",
-        "高级分析",
-        info.get("title", "高级分析"),
-        "completed" if ok else "interrupted",
-        info.get("title", ""),
-        error,
-        exit_code=info["proc"].returncode,
-    )
-    return {
-        "running": False,
-        "ok": ok,
-        "queued": False,
-        "paused": False,
-        "stage": info.get("title", ""),
-        "error": error,
-        "kind": info.get("kind", ""),
-        "output": str(info.get("output", "")),
-    }
-
-
-def _analysis_result_root(info: dict) -> Path:
-    """Return the directory whose files are exposed by the analysis page."""
-    root = Path(info["output"]).resolve()
-    if info.get("kind") == "export":
-        imported = root / "data" / "imported_results"
-        if imported.is_dir():
-            return imported.resolve()
-    return root
-
-
-def analysis_results(info: dict) -> dict:
-    root = _analysis_result_root(info)
-    files = _analysis_files(root)
-    if len(files) > 500:
-        files = files[:500]
-    return {
-        "job": info.get("job_id", ""),
-        "kind": info.get("kind", ""),
-        "output": str(root),
-        "files": files,
-        "count": len(files),
-    }
-
-
-def _advanced_analysis_file_path(info: dict, name: str) -> Path | None:
-    root = _analysis_result_root(info)
-    relative = Path(name)
-    if relative.is_absolute() or ".." in relative.parts:
-        return None
-    target = (root / relative).resolve()
-    allowed_suffixes = RESULT_FILE_SUFFIXES | {
-        ".json",
-        ".md",
-        ".html",
-        ".txt",
-    }
-    if (
-        not target.is_relative_to(root)
-        or not target.is_file()
-        or target.suffix.lower() not in allowed_suffixes
-    ):
-        return None
-    return target
-
-
-def _first(data: dict, key: str, default: str = "") -> str:
-    values = data.get(key)
-    if not values:
-        return default
-    return str(values[0])
-
-
 def run_environment_check(module: str, with_ml: bool = False) -> dict:
     cmd = [
         sys.executable,
@@ -1571,46 +1291,6 @@ def run_environment_check(module: str, with_ml: bool = False) -> dict:
             "ok": False,
             "output": f"环境检查失败：{exc}",
         }
-
-
-def _float3(data: dict, prefix: str):
-    vals = [
-        _first(data, f"{prefix}_x"),
-        _first(data, f"{prefix}_y"),
-        _first(data, f"{prefix}_z"),
-    ]
-    if any(str(v).strip() == "" for v in vals):
-        return None
-    return [float(v) for v in vals]
-
-
-def _int_field(data: dict, key: str):
-    value = _first(data, key, "")
-    if str(value).strip() == "":
-        return None
-    return int(float(value))
-
-
-def _float_field(data: dict, key: str):
-    value = _first(data, key, "")
-    if str(value).strip() == "":
-        return None
-    return float(value)
-
-
-def _int_list_field(data: dict, key: str) -> list[int] | None:
-    value = _first(data, key, "")
-    if str(value).strip() == "":
-        return None
-    tokens = [part for part in re.split(r"[\s,;]+", str(value)) if part]
-    return [int(float(part)) for part in tokens]
-
-
-def _raw_count_flag(value: str) -> bool | None:
-    text = str(value or "").strip().lower()
-    if text in ("", "auto"):
-        return None
-    return text in ("1", "true", "yes", "on")
 
 
 def dataset_search_request(data: dict) -> dict:
@@ -2856,32 +2536,6 @@ def running_task_counts() -> dict:
 
 
 
-def _is_result_file(path: Path) -> bool:
-    return path.is_file() and path.suffix.lower() in RESULT_FILE_SUFFIXES
-
-
-def _list_result_files(root: Path) -> list[str]:
-    if not root.exists() or not root.is_dir():
-        return []
-    return sorted(
-        p.relative_to(root).as_posix()
-        for p in root.rglob("*")
-        if _is_result_file(p)
-    )
-
-
-def _list_result_images(root: Path) -> list[str]:
-    if not root.exists() or not root.is_dir():
-        return []
-    return sorted(
-        p.relative_to(root).as_posix()
-        for p in root.rglob("*")
-        if p.is_file() and p.suffix.lower() in RESULT_IMAGE_SUFFIXES
-    )
-
-
-
-
 def _full_result_files(workdir: Path) -> list[str]:
     files: list[str] = []
     roots: list[tuple[Path, str]] = [
@@ -3130,202 +2784,6 @@ def _full_file_path(workdir: Path, name: str) -> Path | None:
     if not any(target.is_relative_to(root) for root in allowed_roots):
         return None
     return target
-
-
-VALIDATION_KIND_LABELS = {
-    "random": "随机真实 GSE 全流程验证",
-    "features": "多队列靶点功能验证",
-    "evidence": "真实 PDB 证据验证",
-    "random-evidence": "随机真实证据与对接盒验证",
-}
-
-
-def _validation_mode(value: object = "random") -> str:
-    mode = str(value or "random").strip().lower()
-    return mode if mode in VALIDATION_KIND_LABELS else "random"
-
-
-def _validation_report_path(mode: str) -> Path:
-    mode = _validation_mode(mode)
-    if mode == "features":
-        return VALIDATION_FEATURES_ROOT / "validation_report.md"
-    if mode == "evidence":
-        return VALIDATION_EVIDENCE_ROOT / "summary.json"
-    if mode == "random-evidence":
-        return VALIDATION_RANDOM_EVIDENCE_ROOT / "summary.json"
-    return VALIDATION_REPORT_PATH
-
-
-def validation_report_text(mode: str = "random") -> str:
-    mode = _validation_mode(mode)
-    report_path = _validation_report_path(mode)
-    if mode in {"evidence", "random-evidence"} and report_path.exists():
-        try:
-            data = json.loads(
-                report_path.read_text(encoding="utf-8", errors="replace")
-            )
-        except Exception:
-            data = {}
-        lines = [
-            f"# {VALIDATION_KIND_LABELS[mode]}",
-            "",
-            f"- 状态：{data.get('status', '')}",
-            f"- 通过：{data.get('passed', '')}",
-            f"- 最少成功靶点：{data.get('min_ok_targets', '')}",
-            f"- 最少配体记录：{data.get('min_ligands', '')}",
-            f"- 完成时间：{data.get('finished_at', '')}",
-            "",
-            "## 原始汇总",
-            "",
-            "```json",
-            json.dumps(data, ensure_ascii=False, indent=2)[-30000:],
-            "```",
-        ]
-        return "\n".join(lines)
-    if mode == "features" and report_path.exists():
-        return report_path.read_text(encoding="utf-8", errors="replace")
-    if mode == "random" and VALIDATION_REPORT_PATH.exists():
-        try:
-            data = json.loads(
-                VALIDATION_REPORT_PATH.read_text(encoding="utf-8", errors="replace")
-            )
-        except Exception:
-            data = {}
-        lines = [
-            "# 随机真实 GSE 全流程验证汇总",
-            "",
-            f"- 请求数量：{data.get('requested', 0)}",
-            f"- 通过数量：{data.get('passed', 0)}",
-            f"- 随机种子：{data.get('seed', '')}",
-            f"- 完成时间：{data.get('finished_at', '')}",
-            "",
-        ]
-        for record in data.get("results", []):
-            lines.append(
-                f"### {record.get('accession', '')}：{record.get('status', '')}"
-            )
-            lines.append(f"- 耗时：{record.get('elapsed_seconds', '')} 秒")
-            lines.append(f"- 工作目录：{record.get('workdir', '')}")
-            lines.append("")
-        return "\n".join(lines)
-    return (
-        "报告尚未生成。\n"
-        f"请运行“{VALIDATION_KIND_LABELS[mode]}”，或在命令行运行对应验证脚本。"
-    )
-
-
-def start_validation_job(data: dict | None = None) -> dict:
-    proc = VALIDATION_JOB.get("proc")
-    if proc is not None and proc.poll() is None:
-        return {"running": True, "message": "验证任务已在运行"}
-    old_handle = VALIDATION_JOB.get("handle")
-    if old_handle is not None and not old_handle.closed:
-        old_handle.close()
-    payload = data or {}
-    mode = _validation_mode(_first(payload, "mode", "random"))
-    count = _int_field(payload, "count") or 10
-    count = max(1, min(20 if mode == "features" else 30, count))
-    raw_seed = _first(payload, "seed", "20260813") or "20260813"
-    try:
-        seed = int(raw_seed)
-    except (TypeError, ValueError):
-        seed = 20260813
-    VALIDATION_LOG.parent.mkdir(parents=True, exist_ok=True)
-    handle = VALIDATION_LOG.open("w", encoding="utf-8", errors="replace")
-    if mode == "random":
-        cmd = [
-            sys.executable,
-            str(SCRIPTS_DIR / "validate_random_real_full_pipeline.py"),
-            "--result-root",
-            str(VALIDATION_ROOT),
-            "--count",
-            str(count),
-            "--seed",
-            str(seed),
-        ]
-    elif mode == "features":
-        cmd = [
-            sys.executable,
-            str(SCRIPTS_DIR / "validate_new_features.py"),
-            "--max-studies",
-            str(count),
-        ]
-        if _first(payload, "skip_gse", "") in ("1", "true", "on", "yes"):
-            cmd.append("--skip-gse")
-        if _first(payload, "skip_build", "") in ("1", "true", "on", "yes"):
-            cmd.append("--skip-build")
-    elif mode == "evidence":
-        cmd = [
-            sys.executable,
-            str(SCRIPTS_DIR / "validate_real_evidence.py"),
-        ]
-    else:
-        cmd = [
-            sys.executable,
-            str(SCRIPTS_DIR / "validate_real_random.py"),
-        ]
-    try:
-        proc = subprocess.Popen(
-            cmd,
-            cwd=APP_ROOT,
-            stdout=handle,
-            stderr=subprocess.STDOUT,
-            text=True,
-            encoding="utf-8",
-            errors="replace",
-        )
-    except Exception:
-        handle.close()
-        raise
-    VALIDATION_JOB.update(
-        {
-            "proc": proc,
-            "log": VALIDATION_LOG,
-            "handle": handle,
-            "started": time.time(),
-            "mode": mode,
-            "label": VALIDATION_KIND_LABELS[mode],
-        }
-    )
-    return {
-        "running": True,
-        "job": "validation",
-        "mode": mode,
-        "label": VALIDATION_KIND_LABELS[mode],
-    }
-
-
-def validation_job_status() -> dict:
-    proc = VALIDATION_JOB.get("proc")
-    if proc is None:
-        return {
-            "running": False,
-            "ok": False,
-            "started": False,
-            "log": "",
-            "mode": "",
-            "label": "",
-        }
-    running = proc.poll() is None
-    handle = VALIDATION_JOB.get("handle")
-    if not running and handle is not None and not handle.closed:
-        handle.close()
-    log_text = ""
-    if VALIDATION_LOG.exists():
-        log_text = VALIDATION_LOG.read_text(
-            encoding="utf-8", errors="replace"
-        )[-6000:]
-    return {
-        "running": running,
-        "ok": not running and proc.returncode == 0,
-        "started": True,
-        "log": log_text,
-        "mode": VALIDATION_JOB.get("mode", "random"),
-        "label": VALIDATION_JOB.get(
-            "label",
-            VALIDATION_KIND_LABELS["random"],
-        ),
-    }
 
 
 
@@ -3724,22 +3182,6 @@ def run_faers_request(data: dict) -> dict:
         "output_dir": str(out_dir),
         "workdir": str(workdir),
     }
-
-
-def _analysis_files(root: Path, images_only: bool = False) -> list[str]:
-    if not root.exists() or not root.is_dir():
-        return []
-    suffixes = (
-        RESULT_IMAGE_SUFFIXES
-        if images_only
-        else RESULT_IMAGE_SUFFIXES
-        | {".csv", ".html", ".json", ".md", ".xlsx"}
-    )
-    return sorted(
-        p.relative_to(root).as_posix()
-        for p in root.rglob("*")
-        if p.is_file() and p.suffix.lower() in suffixes
-    )
 
 
 def _analysis_file_path(workdir: str, name: str, kind: str):
