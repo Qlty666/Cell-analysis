@@ -40,6 +40,7 @@ from .common import (
     slug,
     write_json,
 )
+from .classify import classify_experiment_plan_results
 from .docking_md import prepare_or_run_md, run_docking_for_targets
 from .enrichment import run_go_kegg
 from .ml import run_ml_validation
@@ -72,6 +73,7 @@ STAGES = (
     "human",
     "docking",
     "md",
+    "classify",
     "report",
 )
 
@@ -264,6 +266,7 @@ class ExperimentPlanOne:
             "human": self.stage_human,
             "docking": self.stage_docking,
             "md": self.stage_md,
+            "classify": self.stage_classify,
             "report": self.stage_report,
         }
         for stage in stages:
@@ -926,6 +929,10 @@ class ExperimentPlanOne:
             "n_files": int(len(inventory)),
         }
 
+    def stage_classify(self) -> dict[str, Any]:
+        result = classify_experiment_plan_results(self.context.output_root)
+        return _serializable(result)
+
     def _core_candidate_genes(self) -> list[str]:
         path = (
             self.context.output_root
@@ -1580,6 +1587,7 @@ def _render_results_summary(
         "- `08_docking`",
         "- `09_md_mmpbsa`",
         "- `10_reports`",
+        "- `按方案分类`（按 Figure 1-5 和 Panel 重组）",
         "",
         "Full file inventory and stage status: `10_reports/experiment_plan_one_report.md`.",
     ]

@@ -10,6 +10,7 @@ from pathlib import Path
 import pandas as pd
 
 from experiment_plan_one.common import bh_fdr, split_gene_symbol
+from experiment_plan_one.classify import classify_experiment_plan_results
 from experiment_plan_one.pipeline import default_config, merge_config
 from experiment_plan_one.targets import _parse_swiss_target_table, make_venn_figure
 
@@ -59,6 +60,23 @@ class TestExperimentPlanOne(unittest.TestCase):
         config = merge_config(default_config(), {"ml": {"seed": 7}})
         self.assertEqual(config["ml"]["seed"], 7)
         self.assertEqual(config["ml"]["cv_folds"], 5)
+
+    def test_classify_results_creates_plan_tree(self):
+        with tempfile.TemporaryDirectory() as tmp:
+            root = Path(tmp)
+            source = root / "01_compound_characterization"
+            source.mkdir(parents=True)
+            (source / "fig1a_workflow.png").write_bytes(b"png")
+            result = classify_experiment_plan_results(root)
+            classified = Path(result["classified_root"])
+            self.assertTrue(
+                (
+                    classified
+                    / "Figure1_化合物表征_靶点预测与通路富集"
+                    / "Fig1a_研究全局流程图.png"
+                ).exists()
+            )
+            self.assertTrue((classified / "分类清单.csv").exists())
 
 
 if __name__ == "__main__":

@@ -449,7 +449,7 @@ python scripts\run_experiment_plan_one.py `
 python scripts\liverbio.py experiment-plan-one --config config\experiment_plan_one.json
 ```
 
-默认阶段为 `data,targets,disease,ppi,bulk,ml,mouse,human,docking,md,report`。
+默认阶段为 `data,targets,disease,ppi,bulk,ml,mouse,human,docking,md,classify,report`。
 可以只运行或从指定阶段恢复：
 
 ```bash
@@ -473,6 +473,8 @@ python scripts\run_experiment_plan_one.py --stage report --skip-stage md
 - 小鼠 GSE270583 与人类 GSE202379 使用本地 Scanpy 流程；CellChat 面板
   使用显式配体-受体表做可审计的通讯评分近似。100 ns GROMACS 生产轨迹
   默认只准备输入；设置配置中的 `md.run=true` 才执行完整模拟。
+- `classify` 阶段会在结果根目录创建 `按方案分类/`，按 Figure 1-5 和
+  Panel a-h/j 建立可读目录；文件使用硬链接组织，原始分析目录仍保留。
 
 ### 4.2 虚拟筛选命令行
 
