@@ -110,16 +110,16 @@
     <h2>多队列分析与靶点排序</h2>
     <form id="advancedForm" data-analysis-form data-kind="advanced">
       <div class="grid wide">
-        <label>配置文件
+        <label>配置文件（JSON）
           <input name="config" placeholder="config/advanced_analysis.json">
         </label>
-        <label>输出目录
+        <label>输出目录（目录）
           <input name="output" value="results/advanced" required>
         </label>
-        <label>发现队列表达矩阵
+        <label>发现队列表达矩阵（CSV / TSV / TXT）
           <input name="expression" placeholder="data/expression_discovery.csv">
         </label>
-        <label>发现队列元数据
+        <label>发现队列元数据（CSV / TSV / TXT）
           <input name="metadata" placeholder="data/metadata_discovery.csv">
         </label>
         <label>队列名称
@@ -174,10 +174,10 @@
     <h2>孟德尔随机化与共定位</h2>
     <form id="mrForm" data-analysis-form data-kind="mr">
       <div class="grid wide">
-        <label>配置文件
+        <label>配置文件（JSON）
           <input name="config" value="config/mr_coloc.json" required>
         </label>
-        <label>输出目录
+        <label>输出目录（目录）
           <input name="output" value="results/mr_coloc" required>
         </label>
       </div>
@@ -201,19 +201,19 @@
     <h2>导出到本地分析工作区</h2>
     <form id="exportForm" data-analysis-form data-kind="export">
       <div class="grid wide">
-        <label>数据集编号或运行目录
+        <label>数据集编号或运行目录（GSE / 目录）
           <input name="run" placeholder="GSE125449 或 ../liver_cancer">
         </label>
-        <label>运行结果目录
+        <label>运行结果目录（目录）
           <input name="source" placeholder="../liver_cancer">
         </label>
-        <label>分析工作区根目录
+        <label>分析工作区根目录（目录）
           <input name="analysis_root" required>
         </label>
         <label>导出目录名
           <input name="name" placeholder="可选">
         </label>
-        <label>清单脚本
+        <label>清单脚本（PowerShell .ps1）
           <input name="inventory_script" placeholder="默认使用分析工作区脚本">
         </label>
       </div>

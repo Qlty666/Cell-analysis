@@ -157,13 +157,13 @@ a.file-link { color: #1665c0; text-decoration: none; margin-right: 12px; }
     <details class="form-section" open>
       <summary>基础设置</summary>
       <div class="grid wide">
-        <label>工作目录
+        <label>工作目录（目录）
           <input name="workdir" placeholder="默认 Script/molecular_docking" required>
         </label>
-        <label>受体文件（相对工作目录）
+        <label>受体文件（PDB / PDBQT，相对工作目录）
           <input name="receptor" placeholder="data/receptors/receptor.pdb">
         </label>
-        <label>配体库文件（相对工作目录）
+        <label>配体库文件（SDF / SMI / CSV，相对工作目录）
           <input name="ligand" placeholder="data/ligands/library.sdf">
         </label>
         <label>执行步骤
@@ -222,7 +222,7 @@ a.file-link { color: #1665c0; text-decoration: none; margin-right: 12px; }
         <label>Top N
           <input name="top_n" type="number" min="1" value="100">
         </label>
-        <label>Vina 路径（可选）
+        <label>Vina 路径（EXE / PY，可选）
           <input name="executable" placeholder="vina 或 dock/tools/vina.exe">
         </label>
       </div>
@@ -257,7 +257,7 @@ a.file-link { color: #1665c0; text-decoration: none; margin-right: 12px; }
 
 <div class="card">
   <h2 style="margin-top:0;">环境状态</h2>
-  <label for="installPath">安装地址</label>
+  <label for="installPath">安装地址（目录）</label>
   <input id="installPath" name="install_path" placeholder="可选">
   <div class="actions" style="margin-top:10px;">
     <button type="button" onclick="checkEnv()">检查环境</button>

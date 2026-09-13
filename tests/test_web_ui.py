@@ -595,6 +595,65 @@ class TestRecentWebIntegration(unittest.TestCase):
         self.assertIn("fig_45_ml_calibration_curve.png", results)
         self.assertIn("fig_24_ml_selected_features.csv", results)
 
+    def test_file_path_labels_include_supported_types(self):
+        cases = {
+            "analysis_tools_page_template.html": (
+                "配置文件（JSON）",
+                "发现队列表达矩阵（CSV / TSV / TXT）",
+                "清单脚本（PowerShell .ps1）",
+            ),
+            "dock_page_template.html": (
+                "受体文件（PDB / PDBQT",
+                "配体库文件（SDF / SMI / CSV",
+                "阳性对照 PDBQT（PDBQT",
+            ),
+            "full_page_template.html": (
+                "高级分析优先级表（CSV",
+                "多队列分析配置（JSON",
+                "网络毒理学：多来源靶点目录（目录",
+            ),
+            "knockout_page_template.html": (
+                "表达矩阵（CSV",
+                "UMAP 坐标（CSV",
+                "DrugReflector checkpoint 目录（目录",
+            ),
+            "network_page_template.html": (
+                "化合物靶点表（CSV / TSV / JSON / JSONL",
+                "疾病基因表（CSV / TSV / TXT",
+                "PPI 边表（CSV / TSV / TXT",
+            ),
+            "md_simulation_page_template.html": (
+                "受体 PDB（PDB",
+                "配体拓扑目录（目录",
+            ),
+            "molecular_docking_template.html": (
+                "配体库文件（SDF / SMI / CSV",
+                "Vina 路径（EXE / PY",
+            ),
+            "datasets_template.html": (
+                "ML/DL 模型路径（.joblib）",
+                "下载根目录（目录）",
+            ),
+            "faers_page_template.html": (
+                "工作目录（目录）",
+                "事件表（CSV",
+            ),
+            "web_page_template.html": (
+                "结果保存路径（目录）",
+                "安装地址（目录）",
+            ),
+            "environment_page_template.html": (
+                "安装地址（目录，可选）",
+            ),
+        }
+        for filename, labels in cases.items():
+            template = (
+                APP_ROOT / "web" / "templates" / filename
+            ).read_text(encoding="utf-8")
+            for label in labels:
+                with self.subTest(template=filename, label=label):
+                    self.assertIn(label, template)
+
 
 class TestHeartbeatAutoShutdown(unittest.TestCase):
     def setUp(self) -> None:

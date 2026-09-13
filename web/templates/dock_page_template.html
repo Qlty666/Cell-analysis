@@ -171,13 +171,13 @@ a.file-link { color: #1665c0; text-decoration: none; margin-right: 12px; }
     <details class="form-section" open>
       <summary>输入文件</summary>
     <div class="grid wide">
-      <label>工作目录
+      <label>工作目录（目录）
         <input name="workdir" placeholder="请输入保存路径" required>
       </label>
-      <label>受体文件（相对工作目录）
+      <label>受体文件（PDB / PDBQT，相对工作目录）
         <input name="receptor" placeholder="请输入受体文件路径">
       </label>
-      <label>配体库文件（相对工作目录）
+      <label>配体库文件（SDF / SMI / CSV，相对工作目录）
         <input name="ligand" placeholder="请输入配体文件路径">
       </label>
     </div>
@@ -211,7 +211,7 @@ a.file-link { color: #1665c0; text-decoration: none; margin-right: 12px; }
           <option value="torch">torch - PyTorch MLP</option>
         </select>
       </label>
-      <label>训练 CSV（相对工作目录）
+      <label>训练 CSV（CSV，相对工作目录）
         <input name="training_csv" placeholder="data/ml/training.csv">
       </label>
       <label>标签列
@@ -272,7 +272,7 @@ a.file-link { color: #1665c0; text-decoration: none; margin-right: 12px; }
         <label>每个配体重复次数
           <input name="docking_replicates" type="number" min="1" value="1">
         </label>
-        <label>阳性对照 PDBQT（相对工作目录）
+        <label>阳性对照 PDBQT（PDBQT，相对工作目录）
           <input name="docking_positive_control" placeholder="data/ligands/positive_control.pdbqt">
         </label>
         <label>阳性对照 ID
@@ -319,7 +319,7 @@ a.file-link { color: #1665c0; text-decoration: none; margin-right: 12px; }
 
 <div class="card" id="dock-env">
   <h2>环境状态与自动补全</h2>
-  <label for="dockInstallPath">安装地址</label>
+  <label for="dockInstallPath">安装地址（目录）</label>
   <input id="dockInstallPath" name="install_path" placeholder="请输入环境安装地址">
   <div class="actions" style="margin-top:0;">
     <button class="env-action" type="button" onclick="checkEnv(this)">检查虚拟筛选环境</button>
