@@ -142,7 +142,7 @@
 
 ### 2.5 网页版统一界面
 
-`web/web_ui.py`（配合 `web/web_handler.py` 请求处理、`web/web_data.py` 静态数据表、`web/web_state.py` 运行时状态和 `web/web_results.py` 结果读取）提供本地网页端。除全自动流水线保留集成入口外，其余分析工具按功能拆成独立页面，顶部导航顺序为全自动流水线、环境补全、表达分析、数据集搜索、虚拟筛选、分子动力学、分子对接、虚拟敲除、网络毒理学、FAERS、真实数据验证、高级分析、结果清单、使用教程，“任务进度”固定在右上角：
+`web/web_ui.py` 负责网页服务生命周期与任务入口，`web/web_handler.py` 负责 HTTP 路由，`web/web_analysis.py` / `web/web_validation.py` 分别承载高级分析任务与真实数据验证任务，`web/web_files.py` / `web/web_utils.py` 提供结果文件发现和参数解析；静态数据、运行时状态与结果读取继续由 `web/web_data.py`、`web/web_state.py`、`web/web_results.py` 承担。除全自动流水线保留集成入口外，其余分析工具按功能拆成独立页面，顶部导航顺序为全自动流水线、环境补全、表达分析、数据集搜索、虚拟筛选、分子动力学、分子对接、虚拟敲除、网络毒理学、FAERS、真实数据验证、高级分析、结果清单、使用教程，“任务进度”固定在右上角：
 
 - 全自动流水线：`/full`
 - 环境补全：`/environment`
@@ -155,11 +155,12 @@
 - 网络毒理学：`/network`
 - FAERS：`/faers`
 - 真实数据验证：`/validation`
+- 高级分析：`/analysis`
 - 结果清单：`/results`
 - 使用教程：`/guide`
 - 任务进度：`/tasks`
 
-“使用教程”页（`/guide`）提供网页版从启动、首次补全环境、标准运行流程、任务管理到结果查看的完整步骤与页面速查表。“环境补全”页（`/environment`）按表达分析、数据集搜索、虚拟筛选、独立分子对接、分子动力学、全自动流水线、网页版与 Codex Skills 分板块提供环境检查和一键补全，可填写自定义安装地址或勾选同时安装 ML/DL 依赖，并实时显示统一补全任务日志。
+“使用教程”页（`/guide`）提供网页版从启动、首次补全环境、标准运行流程、任务管理到结果查看的完整步骤与页面速查表。“环境补全”页（`/environment`）按表达分析、数据集搜索、高级分析与 MR/共定位、虚拟筛选、独立分子对接、分子动力学、全自动流水线、网页版与 Codex Skills 分板块提供环境检查和一键补全，可填写自定义安装地址或勾选同时安装 ML/DL 依赖，并实时显示统一补全任务日志。
 
 网页使用优化：顶部导航按当前页面自动高亮，“任务进度”入口显示进行中任务数量徽标并定时刷新；表达分析与全自动流水线在启动任务时自动保存表单参数，之后可通过“恢复设置”直接复用上次运行参数。
 
@@ -328,6 +329,7 @@ liverbio package
 | --- | --- | --- |
 | 表达分析 | `launchers\install_expression_environment.bat` | `launchers\check_expression_environment.bat` |
 | 数据集搜索 | `launchers\install_datasets_environment.bat` | 无专用检查 |
+| 高级分析与 MR/共定位 | `launchers\install_analysis_environment.bat` | `launchers\check_analysis_environment.bat` |
 | 虚拟筛选 / 对接 | `launchers\install_docking_environment.bat` | `launchers\check_docking_environment.bat` |
 | 独立分子对接 | `launchers\install_molecular_docking_environment.bat` | `launchers\check_molecular_docking_environment.bat` |
 | 分子动力学 | `launchers\install_md_environment.bat` | `launchers\check_md_environment.bat` |
@@ -666,12 +668,14 @@ launchers\run_web_ui.bat
 ```text
 launchers\run_web_ui.bat --page dock
 launchers\run_web_ui.bat --page molecular-docking
+launchers\run_web_ui.bat --page validation
+launchers\run_web_ui.bat --page analysis
 launchers\run_web_ui.bat --page full
 launchers\run_web_ui.bat --page results
 launchers\run_web_ui.bat --page tasks
 ```
 
-全自动流水线页的“表达分析结果目录”和“工作目录”均为必填项，须手动填写；工作目录需填到包含 `outputs` 的上一层目录，目录中没有结果时页面会显示错误提示。表达分析页需要手动填写数据集编号和结果保存地址。“结果清单”页展示 `scripts/run_full_pipeline.py` 成功且完整运行后应输出的图片、数据、报告、断点和溯源文件清单；“任务进度”页支持查看任务进度并跳转到对应任务页面。
+全自动流水线页的“表达分析结果目录”和“工作目录”均为必填项，须手动填写；工作目录需填到包含 `outputs` 的上一层目录，目录中没有结果时页面会显示错误提示。表达分析页需要手动填写数据集编号和结果保存地址。“高级分析”页可运行多队列分析、MR/共定位和本地分析工作区导出；“真实数据验证”页可选择随机全流程、多队列靶点、真实 PDB 证据或随机证据/对接盒验证。“结果清单”页展示 `scripts/run_full_pipeline.py` 成功且完整运行后应输出的图片、数据、报告、断点和溯源文件清单；“任务进度”页支持查看任务进度并跳转到对应任务页面。
 
 关闭所有网页标签后，本地网页服务会在数秒内自动退出并释放端口；正常退出时启动窗口也会自动关闭。再次启动时，如果检测到旧网页服务仍占用端口，会自动关闭旧实例后再启动；若端口被其他非网页程序占用，窗口会保留错误信息等待确认后关闭。
 
@@ -909,6 +913,8 @@ liverbio analysis-export GSE125449
 - `cell_feedback/`：细胞反馈阶段输出，包括 `data/cell_scores.csv`、`data/feedback_targets.csv`、`data/celltype_summary.csv`、`data/celltype_enrichment.csv`、`data/condition_summary.csv`、`data/feedback_deg.csv`、`data/feedback_enrichment_go.csv`、`data/feedback_enrichment_kegg.csv`，以及 `fig_54` 至 `fig_62` 的结果图；其中 `fig_61/fig_62` 为反馈靶基因 GO/KEGG 富集 Top5 的通路-基因网络图。
 - `integration_report.html`：全流程集成报告。
 - `integration_summary.json` / `run_manifest.json`：本次运行的汇总和溯源信息。
+- `results/advanced/`：配置 `LIVER_ADVANCED_CONFIG` 时的多队列、WGCNA、基因级 ML、免疫/生存和 `integrated_priority.csv` 输出。
+- `results/mr_coloc/`：配置 `LIVER_MR_CONFIG` 时的协调工具变量、MR 方法、敏感性分析、汇总和可选 coloc 输出。
 
 每个靶点的对接在独立目录 `<workdir>/work/<gene>/` 下运行，支持单独断点续跑；MD 与导出产物也写入同一靶点目录（`outputs/run_001/results/06_md/`、`outputs/run_001/results/03_ml/`、`outputs/md/`、`outputs/run_001/external/`）。配体优先使用 ChEMBL/BindingDB 已知活性分子，无数据库配体时自动提取共晶配体作为对照，最后回退到用户提供的配体库。
 
@@ -964,6 +970,10 @@ liverbio analysis-export GSE125449
 | `src/liverbio_suite/*` | `liverbio` 统一入口实现 |
 | `src/pipeline/orchestrator.py` | 表达流水线编排 |
 | `src/pipeline/integration.py` | 全自动集成流水线编排 |
+| `src/pipeline/errors.py` | 全流程共享异常类型 |
+| `src/pipeline/qc.py` | QC 指标收集、门控判定与 `qc_metrics.json` 写入 |
+| `src/pipeline/differential.py` | 样本级细胞类型差异丰度检验 |
+| `src/pipeline/key_targets.py` | DEG 排序、黑名单过滤与关键基因输出 |
 | `src/pipeline/stage_paths.py` | 全自动流水线阶段目录、标记与输出清单 |
 | `src/pipeline/integrated_report.py` | 集成 HTML 报告生成 |
 | `src/pipeline/cell_feedback.py` / `cell_feedback.R` | 虚拟敲除/对接结果返回单细胞对象的闭环分析 |
@@ -972,6 +982,10 @@ liverbio analysis-export GSE125449
 | `src/report/guides.py` | 结果图/数据指南表 |
 | `web/web_ui.py` | 本地网页服务与任务调度 |
 | `web/web_handler.py` | 网页端 HTTP 路由与请求处理 |
+| `web/web_analysis.py` | 高级分析、MR/共定位与分析工作区导出任务 |
+| `web/web_validation.py` | 四类真实数据验证任务与报告读取 |
+| `web/web_files.py` | 网页结果文件发现与安全读取辅助 |
+| `web/web_utils.py` | 网页端参数、布尔值和路径解析辅助 |
 | `web/web_data.py` | 网页端静态数据表（导航、图目录、软件清单） |
 | `web/web_state.py` | 网页端任务、队列与历史运行时状态 |
 | `web/web_results.py` | 网页端任务状态、历史与结果清单读取 |
@@ -983,6 +997,7 @@ liverbio analysis-export GSE125449
 | `tests/conftest.py` | pytest 共享 `sys.path` 引导 |
 | `tests/test_*.py` | 单元/集成测试 |
 | `tests/test_r_pipeline_syntax.py` | R 脚本解析与模块加载冒烟测试 |
+| `tests/test_module_structure.py` | 重构后的模块接口兼容性测试 |
 | `tests/test_web_security.py` | 网页端同源/跨站与路径安全测试 |
 | `tests/test_web_server_smoke.py` | 网页端真实 HTTP 服务冒烟测试 |
 | `tests/test_web_script_mode.py` | 网页端脚本模式状态一致性测试 |
@@ -1078,6 +1093,8 @@ MIT License. See `LICENSE` for details.
 - 将 v1.6.0 新增的高级分析、MR/共定位、分析工作区导出、多队列验证、网络多来源靶点、重复对接、阳性对照、PCA/FEL、MM/PBSA 和 KEGG GSEA 状态同步到网页端。
 - 新增网页版“高级分析”页，支持任务日志、状态轮询、历史记录和结果文件下载；全自动流水线页可配置 Advanced/MR 并衔接高级分析优先级表。
 - 真实数据验证页新增随机全流程、多队列靶点、真实 PDB 证据和随机证据/对接盒四类验证入口。
+- 拆分网页任务层：高级分析与 MR/导出任务、真实数据验证、结果文件发现和通用参数解析分别进入 `web_analysis.py`、`web_validation.py`、`web_files.py` 和 `web_utils.py`。
+- 拆分集成流水线公共能力：共享异常、QC 门控、样本级差异丰度与关键基因排序分别进入 `errors.py`、`qc.py`、`differential.py` 和 `key_targets.py`；`integration.py` 与 `web_ui.py` 保留兼容导出和原有运行行为。
 
 ### v1.6.0
 

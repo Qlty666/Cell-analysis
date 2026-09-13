@@ -1420,7 +1420,7 @@ class TestTemplatePolish(unittest.TestCase):
                 payload = "{}\n" if path.suffix == ".json" else "x\n"
                 path.write_text(payload, encoding="utf-8")
             with mock.patch(
-                "web_ui._drain_analysis_queue",
+                "web_analysis._drain_analysis_queue",
             ):
                 result = start_analysis_job(
                     {
@@ -1472,7 +1472,7 @@ class TestTemplatePolish(unittest.TestCase):
             config_path = Path(tmp) / "mr.json"
             config_path.write_text("{}", encoding="utf-8")
             with mock.patch(
-                "web_ui._drain_analysis_queue",
+                "web_analysis._drain_analysis_queue",
                 side_effect=OSError("spawn failed"),
             ):
                 with self.assertRaises(OSError):

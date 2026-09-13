@@ -175,6 +175,10 @@ Script/
 | --- | --- |
 | `orchestrator.py` | 表达流水线进程编排 |
 | `integration.py` | 全自动集成流水线编排 |
+| `errors.py` | 集成流水线共享异常类型 |
+| `qc.py` | QC 指标收集、门控判定与输出写入 |
+| `differential.py` | 样本级差异丰度和统计辅助函数 |
+| `key_targets.py` | DEG 排序、黑名单过滤与关键基因表 |
 | `stage_paths.py` | 全自动流水线阶段目录、完成标记与输出清单 |
 | `integrated_report.py` | 集成 HTML 报告生成 |
 | `cell_feedback.py` / `cell_feedback.R` | 结果写回单细胞对象的反馈分析 |
@@ -192,8 +196,12 @@ Script/
 
 | 路径 | 作用 |
 | --- | --- |
-| `web/web_ui.py` | 本地网页服务、路由注册与任务调度 |
+| `web/web_ui.py` | 本地网页服务生命周期、页面聚合与任务入口 |
 | `web/web_handler.py` | HTTP 请求处理器（页面、运行接口、文件下载与安全校验） |
+| `web/web_analysis.py` | 高级分析、MR/共定位与分析工作区导出任务 |
+| `web/web_validation.py` | 随机全流程、多队列、真实证据与对接盒验证任务 |
+| `web/web_files.py` | 结果文件发现与可下载文件判定 |
+| `web/web_utils.py` | Web 请求参数、布尔值、数字和路径解析辅助 |
 | `web/web_data.py` | 静态数据表（导航、环境模块、图目录、软件清单与阶段标签） |
 | `web/web_state.py` | 进程内运行时状态（任务注册表、队列、锁与历史读写） |
 | `web/web_results.py` | 任务状态、历史记录与结果清单读取辅助 |
@@ -213,6 +221,7 @@ Script/
 | `tests/conftest.py` | pytest 共享 `sys.path` 引导（仓库根、`src`、`web`、`launchers`、`scripts`） |
 | `tests/test_*.py` | 与 `src`/`scripts`/`web` 对应的单元与集成测试 |
 | `tests/test_r_pipeline_syntax.py` | R 脚本解析、驱动加载与 `R/` 模块独立加载冒烟测试 |
+| `tests/test_module_structure.py` | 校验重构后领域模块与旧导入接口保持一致 |
 | `tests/test_web_security.py` | 网页端同源/跨站校验、请求体限制与路径安全测试 |
 | `tests/test_web_server_smoke.py` | 在回环端口启动真实 `ThreadingHTTPServer` 的路由与安全冒烟测试 |
 | `tests/test_web_script_mode.py` | `python web/web_ui.py` 脚本模式下状态不被重复导入的回归测试 |
@@ -223,7 +232,9 @@ Script/
 - `scripts/` 只放命令行入口与验证驱动，具体分析逻辑放到 `src/`。
 - `launchers/` 中的 `.bat` 负责双击启动，`launchers/*.py` 负责同名的环境检查/安装实现。
 - `src/` 按领域分包：表达分析、数据下载、虚拟筛选/CADD、独立分子对接、全流程编排、报告生成。
-- `web/` 通过调用 `scripts/` 与 `src/` 复用分析能力，不复制核心算法。
+- `src/pipeline/` 的领域功能（QC、差异丰度、关键基因、阶段编排）分文件维护，`integration.py` 只保留编排和跨阶段状态。
+- `web/` 通过调用 `scripts/` 与 `src/` 复用分析能力，不复制核心算法；任务状态、验证、文件发现和参数解析按职责拆分。
+- 原有 `pipeline.integration` 与 `web_ui` 导入路径保留兼容导出，重构不需要同步修改调用方。
 - `skills/` 只描述调用方式，不复制分析代码。
 - `tests/` 与实现模块同名对应，运行 `python -m pytest` 可整仓验证。
 

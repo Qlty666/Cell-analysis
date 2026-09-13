@@ -402,3 +402,47 @@
 内容: 化合物-靶点-通路-疾病网络可视化。
 类型: 交互式网络图（HTML）。
 用途: 查看化合物到疾病的多层关联路径。
+
+71_network_go_enrichment.csv
+内容: 网络毒理学交集基因的 GO 富集表。
+类型: 富集数据表。
+用途: 查看交集靶点对应的 GO 生物学过程、细胞组分和分子功能。
+
+72_network_kegg_enrichment.csv
+内容: 网络毒理学交集基因的 KEGG 富集表。
+类型: 富集数据表。
+用途: 查看交集靶点对应的 KEGG 通路。
+
+## 五、高级分析与 MR/共定位结果
+
+对应目录：独立高级分析任务输出目录，或全自动流水线的 `<output>/results/advanced/` 与 `<output>/results/mr_coloc/`。
+
+73_integrated_priority.csv
+内容: 多队列证据、差异表达和模型得分的综合候选排序。
+类型: CSV 数据表。
+用途: 作为关键基因排序和后续靶点筛选的综合输入。
+
+74_advanced_analysis_summary.json
+内容: 多队列、WGCNA、ML、免疫、生存和 R 后端状态。
+类型: JSON 汇总文件。
+用途: 核对模块是否真的完成以及各自输出路径。
+
+75_ml_model_comparison.csv
+内容: 基因级模型的重复交叉验证指标。
+类型: CSV 数据表。
+用途: 比较不同模型表现和稳定性。
+
+76_ml_external_validation.csv
+内容: 模型在独立验证队列上的指标。
+类型: CSV 数据表。
+用途: 判断跨队列泛化能力。
+
+77_mr_methods.csv
+内容: IVW、加权中位数和 MR-Egger 等方法结果。
+类型: CSV 数据表。
+用途: 比较方法方向、效应量和异质性。
+
+78_coloc_posterior.csv
+内容: R coloc 后验概率与 PP.H4。
+类型: CSV 数据表。
+用途: 仅在后端成功时辅助判断共享因果变量证据。

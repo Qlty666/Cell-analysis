@@ -9,6 +9,7 @@
 | 功能板块 | 运行入口 | 基础软件 | Python 依赖 | R 环境 | 检查 / 安装 |
 | --- | --- | --- | --- | --- | --- |
 | 表达分析 | `scripts/run_pipeline.py`、`liverbio expression` | Python 3.10+、R 4.5+ | `requirements.txt` | 需要（Seurat 等） | `check_pipeline_environment.bat` / `install_pipeline_dependencies.bat` |
+| 高级分析与 MR/共定位 | `scripts/run_advanced_analysis.py`、`scripts/run_mr_coloc.py`、`liverbio advanced` / `mr` | Python 3.10+；R 可选 | `requirements.txt` | 可选（WGCNA、limma、survival、GSVA 等） | `check_analysis_environment.bat` / `install_analysis_environment.bat` |
 | 数据集搜索 | `scripts/search_datasets.py`、`liverbio datasets` | Python 3.10+ | 标准库为主；ML 重排需 `requirements.txt` | 不需要 | 无独立检查脚本 |
 | 虚拟筛选 | `scripts/run_docking.py`、`liverbio docking` | Python 3.10+、AutoDock Vina | `requirements.txt` + `requirements_dock.txt` + AutoDockTools | 仅部分子命令需要 | `check_dock_environment.bat` / `install_dock_dependencies.bat` |
 | 独立分子对接 | `scripts/run_molecular_docking.py` | Python 3.10+、AutoDock Vina | `requirements.txt` + `requirements_dock.txt` + AutoDockTools | 不需要 | 同上（docking 检查脚本） |
@@ -61,6 +62,13 @@ python scripts\run_advanced_analysis.py --config config\advanced_analysis.json -
 liverbio advanced --config config\advanced_analysis.json --output <OUTPUT_DIR>\advanced
 ```
 
+高级分析与 MR/共定位环境可单独补全：
+
+```bat
+launchers\install_analysis_environment.bat
+launchers\check_analysis_environment.bat
+```
+
 本地 MR/共定位入口：
 
 ```bat
@@ -74,6 +82,7 @@ MR 的 R 后端可选依赖 `MendelianRandomization` 和 `coloc`；未安装时 
 
 ```bat
 launchers\check_pipeline_environment.bat
+launchers\check_analysis_environment.bat
 ```
 
 ## 2. 数据集搜索
@@ -225,6 +234,8 @@ python scripts\run_molecular_docking.py check-env
 
 网页服务本身使用 Python 标准库 HTTP 服务。页面能否实际启动分析，取决于该页面对应功能板块的环境；各页面底部提供“环境状态与自动补全”区域，可分别检查/补全单细胞环境和虚拟筛选环境。
 
+高级分析页复用“高级分析与 MR/共定位”环境；真实数据验证页按所选模式复用表达分析、虚拟筛选或 Codex Skills 环境。全自动流水线页同时提供 Advanced/MR 配置、高级分析优先级表和网络毒理学多来源靶点目录。
+
 ## 8. 新电脑最小安装流程
 
 在项目根目录执行：
@@ -237,6 +248,7 @@ Rscript --version
 
 python -m pip install -r requirements.txt
 launchers\install_pipeline_dependencies.bat
+launchers\install_analysis_environment.bat
 
 python -m pip install -r requirements_dock.txt
 launchers\install_dock_dependencies.bat
