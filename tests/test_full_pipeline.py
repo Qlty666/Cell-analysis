@@ -713,6 +713,15 @@ class TestScientificGates(unittest.TestCase):
                 {"md_completed": 1},
                 docking_config,
                 out_dir,
+                {
+                    "gates": {
+                        "positive_control": True,
+                        "replicate_consensus": True,
+                        "md_completed": True,
+                        "md_rmsd_stability": True,
+                        "mmpbsa_available": True,
+                    }
+                },
             )
             self.assertEqual(readiness["level"], "publication_grade")
 
@@ -1282,6 +1291,9 @@ class TestFullPipeline(unittest.TestCase):
             )
             self.assertTrue((out / "integration_report.html").exists())
             self.assertTrue((out / "integration_summary.json").exists())
+            self.assertTrue(
+                (out / "reproducibility_manifest.json").exists()
+            )
             self.assertTrue((out / ".stages" / "11_report.done").exists())
             self.assertTrue((out / "cadd_downstream_summary.json").exists())
             self.assertTrue((out / "network_summary.json").exists())

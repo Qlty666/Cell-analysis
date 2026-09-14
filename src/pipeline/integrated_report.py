@@ -15,6 +15,7 @@ from docking.provenance import write_run_manifest  # noqa: E402
 from docking.utils import write_json  # noqa: E402
 
 from .stage_paths import _integration_dir, _read_json  # noqa: E402
+from .reproducibility import write_reproducibility_manifest  # noqa: E402
 
 log = logging.getLogger("full_pipeline")
 
@@ -36,6 +37,7 @@ def _publication_readiness(
     cadd_summary: dict,
     docking_config: Path,
     out_dir: Path,
+    structural_quality: dict | None = None,
 ) -> dict:
     """Summarize which publication-strength gates have actually been met."""
     try:
@@ -47,6 +49,22 @@ def _publication_readiness(
     except Exception:
         positive_control = False
         replicates = 1
+    structural_gates = (structural_quality or {}).get("gates") or {}
+    positive_control = bool(
+        structural_gates.get("positive_control", positive_control)
+    )
+    replicate_consensus = bool(
+        structural_gates.get(
+            "replicate_consensus",
+            replicates >= 3,
+        )
+    )
+    md_completed = bool(
+        structural_gates.get(
+            "md_completed",
+            int(cadd_summary.get("md_completed", 0) or 0) > 0,
+        )
+    )
     workdir = out_dir.parents[1]
     benchmark = (
         target_priority_summary.get("benchmark")
@@ -122,13 +140,19 @@ def _publication_readiness(
             >= 0.50
         ),
         "docking_positive_control": positive_control,
-        "docking_replicates": replicates >= 3,
-        "md_completed": int(cadd_summary.get("md_completed", 0) or 0) > 0,
+        "docking_replicates": replicate_consensus,
+        "md_completed": md_completed,
+        "md_rmsd_stability": bool(
+            structural_gates.get("md_rmsd_stability", False)
+        ),
         "benchmark": benchmark_passed,
         "external_validation": any(
             path.exists() for path in external_validation_paths
         ),
         "mechanistic_perturbation": mechanistic_path.exists(),
+        "mmpbsa_available": bool(
+            structural_gates.get("mmpbsa_available", False)
+        ),
     }
     required = (
         "multi_source_evidence",
@@ -137,11 +161,16 @@ def _publication_readiness(
         "docking_positive_control",
         "docking_replicates",
         "md_completed",
+        "md_rmsd_stability",
         "benchmark",
         "external_validation",
     )
     passed = sum(bool(checks[name]) for name in required)
-    if passed == len(required) and checks["mechanistic_perturbation"]:
+    if (
+        passed == len(required)
+        and checks["mechanistic_perturbation"]
+        and checks["mmpbsa_available"]
+    ):
         level = "publication_grade"
     elif passed == len(required):
         level = "paper_supporting"
@@ -232,6 +261,9 @@ def generate_integrated_report(
         if (out_dir / "cadd_targets.csv").exists()
         else pd.DataFrame()
     )
+    structural_quality = _read_json(
+        out_dir / "structural_quality_summary.json"
+    )
     network_summary = _read_json(out_dir / "network_summary.json")
     network_overlap = pd.DataFrame()
     network_overlap_csv = (
@@ -305,6 +337,7 @@ def generate_integrated_report(
         cadd_summary,
         docking_config,
         out_dir,
+        structural_quality,
     )
     readiness_frame = pd.DataFrame(
         [
@@ -769,6 +802,30 @@ a {{ color: #1d4ed8; }}
         "finished_at": datetime.now().isoformat(timespec="seconds"),
     }
     write_json(out_dir / "integration_summary.json", summary)
+    config_path = Path(
+        ctx.get("full_config")
+        or (Path(__file__).resolve().parents[2] / "config" / "full_pipeline_config.json")
+    )
+    reproducibility_path = write_reproducibility_manifest(
+        workdir,
+        single_cell_root,
+        config_path,
+        docking_config,
+        {
+            "targets": len(target_priority),
+            "candidate_origins": target_priority_summary.get(
+                "candidate_origins",
+                {},
+            ),
+            "benchmark": benchmark,
+            "readiness": readiness,
+        },
+    )
+    summary["reproducibility_manifest"] = os.path.relpath(
+        reproducibility_path,
+        out_dir,
+    ).replace("\\", "/")
+    write_json(out_dir / "integration_summary.json", summary)
     cfg = load_config(docking_config, {"workdir": str(workdir)})
     write_run_manifest(
         out_dir,
@@ -789,6 +846,7 @@ a {{ color: #1d4ed8; }}
                 out_dir / "evidence_hub" / "evidence_hub_summary.json"
             ),
             "integration_summary_json": out_dir / "integration_summary.json",
+            "reproducibility_manifest_json": reproducibility_path,
         },
         summary,
     )

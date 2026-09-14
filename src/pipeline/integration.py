@@ -94,6 +94,7 @@ from .target_priority import (  # noqa: E402
     build_target_priority,
     write_target_priority_summary,
 )
+from .structural_quality import build_structural_quality  # noqa: E402
 from .stage_paths import (  # noqa: E402
     _integration_dir,
     _marker,
@@ -149,6 +150,8 @@ STAGE_OUTPUTS = {
     "07": (
         "outputs/integration/cadd_downstream_summary.json",
         "outputs/integration/cadd_targets.csv",
+        "outputs/integration/structural_quality_summary.json",
+        "outputs/integration/structural_quality_targets.csv",
     ),
     "08": ("outputs/integration/network_summary.json",),
     "09": ("outputs/integration/faers_summary.json",),
@@ -156,6 +159,7 @@ STAGE_OUTPUTS = {
     "11": (
         "outputs/integration/integration_report.html",
         "outputs/integration/integration_summary.json",
+        "outputs/integration/reproducibility_manifest.json",
         "outputs/integration/run_manifest.json",
     ),
 }
@@ -3084,6 +3088,27 @@ def _stage_cadd_downstream(args, workdir: Path, ctx: dict) -> None:
                 _integration_dir(workdir) / "cadd_targets.csv"
             ),
         }
+    structural_quality = build_structural_quality(
+        workdir,
+        _integration_dir(workdir),
+        protein_rmsd_std_cutoff_nm=float(
+            getattr(
+                args,
+                "md_rmsd_stable_std_nm",
+                0.15,
+            )
+            or 0.15
+        ),
+        ligand_rmsd_std_cutoff_nm=float(
+            getattr(
+                args,
+                "md_rmsd_stable_std_nm",
+                0.15,
+            )
+            or 0.15
+        ),
+    )
+    summary["structural_quality"] = structural_quality
     write_json(
         _integration_dir(workdir) / "cadd_downstream_summary.json",
         summary,
@@ -3335,6 +3360,7 @@ def run_full_pipeline(args) -> int:
     ctx = {
         "single_cell_root": Path(args.output).resolve(),
         "workdir": workdir,
+        "full_config": Path(args.config).resolve(),
         "docking_config": cfg_path,
     }
     if not args.force:
