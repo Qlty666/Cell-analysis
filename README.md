@@ -440,7 +440,7 @@ launchers\run_pipeline_prompt.bat
 ```bash
 python scripts\run_experiment_plan_one.py `
   --config config\experiment_plan_one.json `
-  --output-root "D:\AAA Liver cancer\y1"
+  --output-root "..\experiment_plan_one_results"
 ```
 
 也可以使用统一入口：
