@@ -749,6 +749,79 @@ class ClinVarConnector(BaseConnector):
         return records
 
 
+class ClinicalTrialsGovConnector(BaseConnector):
+    name = "ClinicalTrialsGov"
+    source_version = "ClinicalTrials.gov API v2"
+    source_group = "clinicaltrials"
+    tier = EvidenceTier.CURATED
+
+    BASE = "https://clinicaltrials.gov/api/v2/studies"
+
+    def collect(self, context: EvidenceContext) -> list[EvidenceRecord]:
+        if not context.allow_network:
+            raise ConnectorError("network disabled")
+        disease = str(
+            context.disease.get("name")
+            or context.disease.get("id")
+            or ""
+        ).strip()
+        if not disease:
+            return []
+        options = dict(context.source_options.get(self.name) or {})
+        limit = int(options.get("max_targets", 50) or 50)
+        records: list[EvidenceRecord] = []
+        for symbol in context.target_symbols[:limit]:
+            gene = _normalise_symbol(symbol)
+            if not gene:
+                continue
+            payload = _json_get(
+                self.BASE,
+                params={
+                    "query.term": f"{gene} {disease}",
+                    "pageSize": 1,
+                    "countTotal": "true",
+                },
+                timeout=context.timeout_seconds,
+            )
+            count = int(payload.get("totalCount") or 0)
+            if count <= 0:
+                continue
+            records.append(
+                EvidenceRecord(
+                    source=self.name,
+                    source_record_id=f"{gene}:{disease}:clinical_trials",
+                    evidence_type="clinical_precedent",
+                    subject_type="disease",
+                    subject_id=disease,
+                    relation="studied_in",
+                    object_type="target",
+                    object_id=gene,
+                    target_symbol=gene,
+                    tier=self.tier,
+                    source_version=self.source_version,
+                    source_group=self.source_group,
+                    score=float(
+                        np.clip(
+                            math.log1p(count) / math.log1p(50.0),
+                            0.0,
+                            1.0,
+                        )
+                    ),
+                    sample_size=count,
+                    species="Homo sapiens",
+                    url=(
+                        "https://clinicaltrials.gov/search?term="
+                        + urllib.parse.quote(f"{gene} {disease}")
+                    ),
+                    license="ClinicalTrials.gov public data terms",
+                    payload={"clinical_trial_count": count},
+                )
+            )
+            if len(records) >= context.max_records_per_source:
+                break
+        return records
+
+
 class GTExConnector(BaseConnector):
     name = "GTEx"
     source_version = "GTEx API v2"
@@ -1271,6 +1344,8 @@ def connector_from_config(
         return GWASCatalogConnector()
     if key == "clinvar":
         return ClinVarConnector()
+    if key in {"clinicaltrials", "clinicaltrialsgov"}:
+        return ClinicalTrialsGovConnector()
     if key == "gtex":
         return GTExConnector()
     if key in {"hpa", "humanproteinatlas"}:

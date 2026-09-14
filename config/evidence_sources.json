@@ -20,6 +20,10 @@
       "enabled": true,
       "max_targets": 100
     },
+    "ClinicalTrialsGov": {
+      "enabled": true,
+      "max_targets": 50
+    },
     "GTEx": {
       "enabled": true
     },
@@ -93,9 +97,11 @@
       "liver_context": 0.1,
       "dependency": 0.1,
       "pathway": 0.05,
-      "structure": 0.03
+      "structure": 0.03,
+      "clinical_precedent": 0.08
     },
     "evidence_weight": 0.8,
-    "coverage_weight": 0.2
+    "coverage_weight": 0.2,
+    "safety_penalty_weight": 0.15
   }
 }

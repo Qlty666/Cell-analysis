@@ -46,6 +46,7 @@ The current open connectors are:
 | PubChem BioAssay | bioassay activity | experimental |
 | GWAS Catalog | human genetic association | genetic |
 | ClinVar | clinical variant association | genetic |
+| ClinicalTrials.gov | clinical trial precedent | curated |
 | GTEx | liver expression context | context |
 | Human Protein Atlas | liver expression context | context |
 | DepMap local snapshot | cancer-cell dependency | context |
@@ -69,6 +70,7 @@ Scores are calculated from available categories only. Missing categories remain
 priority_score =
     evidence_weight * weighted_mean(available category scores)
     + coverage_weight * coverage_ratio
+    - safety_penalty_weight * safety_risk
 ```
 
 Within a category, records are first collapsed to one maximum score per
@@ -177,6 +179,12 @@ file also changes the evidence-store fingerprint, so stale records are not
 silently reused. If a configured source fails in the current run while strict
 mode is off, its previous records are removed before scoring so that a stale
 success cannot masquerade as current evidence.
+
+Benchmark output includes Recall@N, Precision@N, AUROC, AUPRC, enrichment
+factor, bootstrap AUROC confidence intervals and a permutation p-value. Safety
+evidence such as Tox21/ToxCast is classified separately from positive target
+evidence and reduces the final priority through an explicit penalty instead of
+being counted as a beneficial category.
 
 ## Scientific limits
 

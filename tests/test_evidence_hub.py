@@ -14,6 +14,7 @@ from unittest import mock
 import pandas as pd
 
 from evidence.connectors import (
+    ClinicalTrialsGovConnector,
     ClinVarConnector,
     DepMapLocalConnector,
     ConnectorError,
@@ -152,6 +153,11 @@ class TestEvidenceScoring(unittest.TestCase):
         )
         self.assertEqual(result["recall_at_n"], 0.5)
         self.assertIsNotNone(result["auroc"])
+        self.assertIsNotNone(result["auprc"])
+        self.assertIsNotNone(result["auroc_ci_low"])
+        self.assertIsNotNone(result["auroc_ci_high"])
+        self.assertIsNotNone(result["permutation_p_value"])
+        self.assertIsNotNone(result["enrichment_factor"])
 
 
 class TestConnectors(unittest.TestCase):
@@ -221,6 +227,49 @@ class TestConnectors(unittest.TestCase):
         self.assertEqual(records[0].target_symbol, "TP53")
         self.assertEqual(records[0].tier, EvidenceTier.GENETIC)
         self.assertGreater(records[0].score or 0, 0)
+
+    def test_clinical_trials_parser(self):
+        payload = {"totalCount": 12}
+        with mock.patch(
+            "evidence.connectors._json_get",
+            return_value=payload,
+        ):
+            records = ClinicalTrialsGovConnector().collect(
+                EvidenceContext(
+                    disease={"name": "liver cancer"},
+                    target_symbols=["GPC3"],
+                    max_records_per_source=10,
+                )
+            )
+        self.assertEqual(len(records), 1)
+        self.assertEqual(records[0].evidence_type, "clinical_precedent")
+        self.assertEqual(records[0].target_symbol, "GPC3")
+
+    def test_safety_risk_reduces_priority_score(self):
+        rows = [
+            _record(
+                source="OpenTargets",
+                record_id="D1",
+                target="EGFR",
+                relation="associated_with",
+                evidence_type="curated_association",
+                tier=EvidenceTier.CURATED,
+                score=0.9,
+                subject_type="disease",
+            ).to_row(),
+            _record(
+                source="LocalTox",
+                record_id="T1",
+                target="EGFR",
+                relation="toxic_to",
+                evidence_type="toxicity_assay",
+                tier=EvidenceTier.EXPERIMENTAL,
+                score=1.0,
+                subject_type="compound",
+            ).to_row(),
+        ]
+        priority, _, _ = score_targets(pd.DataFrame(rows))
+        self.assertGreater(priority.iloc[0]["safety_penalty"], 0)
 
     def test_local_table_connector(self):
         with tempfile.TemporaryDirectory() as tmp:

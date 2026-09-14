@@ -22,6 +22,7 @@ DEFAULT_CATEGORY_WEIGHTS: dict[str, float] = {
     "dependency": 0.10,
     "pathway": 0.05,
     "structure": 0.03,
+    "clinical_precedent": 0.08,
 }
 
 CATEGORY_LABELS = {
@@ -34,6 +35,8 @@ CATEGORY_LABELS = {
     "dependency": "Functional dependency evidence",
     "pathway": "Pathway membership or pathway evidence",
     "structure": "Experimental or predicted structure evidence",
+    "clinical_precedent": "Clinical trial or translational precedent",
+    "safety_risk": "Known toxicity or safety liability",
 }
 
 
@@ -42,6 +45,7 @@ class ScoringConfig:
     weights: Mapping[str, float]
     evidence_weight: float = 0.8
     coverage_weight: float = 0.2
+    safety_penalty_weight: float = 0.15
 
     @classmethod
     def from_dict(cls, value: Mapping | None) -> "ScoringConfig":
@@ -72,6 +76,10 @@ class ScoringConfig:
             weights=weights,
             evidence_weight=evidence_weight / total_mix,
             coverage_weight=coverage_weight / total_mix,
+            safety_penalty_weight=max(
+                0.0,
+                float(raw.get("safety_penalty_weight", 0.15)),
+            ),
         )
 
 
@@ -91,6 +99,18 @@ def _evidence_category(row: Mapping) -> str:
         return "curated_target"
     if relation in {"targets", "binds", "perturbs"} and tier == EvidenceTier.PREDICTED:
         return "predicted_target"
+    if (
+        "safety" in evidence_type
+        or "toxicity" in evidence_type
+        or "adverse" in evidence_type
+        or relation in {"toxic_to", "causes"}
+    ):
+        return "safety_risk"
+    if (
+        "clinical" in evidence_type
+        or relation in {"studied_in", "clinical_precedent"}
+    ):
+        return "clinical_precedent"
     if tier == EvidenceTier.GENETIC or "genetic" in evidence_type:
         return "genetic_association"
     if subject_type == "disease" and relation in {
@@ -210,9 +230,15 @@ def _score_from_category_frame(
             else 0.0
         )
         coverage_ratio = available_weight / total_weight if total_weight else 0.0
-        priority_score = (
+        safety_risk = float(scores.get("safety_risk", 0.0) or 0.0)
+        safety_penalty = (
+            config.safety_penalty_weight * safety_risk
+        )
+        priority_score = max(
+            0.0,
             config.evidence_weight * evidence_score
             + config.coverage_weight * coverage_ratio
+            - safety_penalty,
         )
         row = {
             "target_symbol": target,
@@ -237,6 +263,8 @@ def _score_from_category_frame(
                 for category in config.weights
                 if category not in scores
             ),
+            "safety_risk": safety_risk,
+            "safety_penalty": safety_penalty,
         }
         for category in config.weights:
             row[category] = scores.get(category, np.nan)
@@ -393,6 +421,12 @@ def benchmark_ranking(
         "median_positive_rank": (
             float(np.median(positive_ranks)) if positive_ranks else None
         ),
+        "precision_at_n": (
+            len(recovered_top_n) / min(top_n, len(ranked))
+            if ranked
+            else None
+        ),
+        "enrichment_factor": None,
     }
     labeled = [(target, 1) for target in positives if target in rank_map]
     labeled.extend(
@@ -400,6 +434,11 @@ def benchmark_ranking(
     )
     if len({label for _, label in labeled}) < 2:
         result["auroc"] = None
+        result["auprc"] = None
+        result["auroc_ci_low"] = None
+        result["auroc_ci_high"] = None
+        result["permutation_p_value"] = None
+        result["n_labeled"] = len(labeled)
         return result
     labels = np.asarray([label for _, label in labeled], dtype=int)
     scores = np.asarray(
@@ -409,19 +448,76 @@ def benchmark_ranking(
         ],
         dtype=float,
     )
+    auroc = _binary_auroc(labels, scores)
+    result["auroc"] = auroc
+    result["n_labeled"] = len(labeled)
+    prevalence = float(np.mean(labels))
+    if prevalence > 0 and result["precision_at_n"] is not None:
+        result["enrichment_factor"] = float(
+            result["precision_at_n"] / prevalence
+        )
+
+    order = np.argsort(-scores)
+    sorted_labels = labels[order]
+    cumulative_positives = np.cumsum(sorted_labels)
+    ranks = np.arange(1, len(sorted_labels) + 1)
+    precision = cumulative_positives / ranks
+    recall = cumulative_positives / max(1, int(cumulative_positives[-1]))
+    average_precision = 0.0
+    previous_recall = 0.0
+    for value, recall_value in zip(precision, recall):
+        average_precision += (recall_value - previous_recall) * value
+        previous_recall = recall_value
+    result["auprc"] = float(average_precision)
+
+    rng = np.random.default_rng(42)
+    boot = []
+    permutation_scores = []
+    for _ in range(1000):
+        indices = rng.integers(0, len(labels), size=len(labels))
+        sampled_labels = labels[indices]
+        sampled_scores = scores[indices]
+        if len(set(sampled_labels)) < 2:
+            continue
+        boot.append(_binary_auroc(sampled_labels, sampled_scores))
+        permuted = rng.permutation(labels)
+        permutation_scores.append(_binary_auroc(permuted, scores))
+    if boot:
+        result["auroc_ci_low"] = float(np.percentile(boot, 2.5))
+        result["auroc_ci_high"] = float(np.percentile(boot, 97.5))
+    else:
+        result["auroc_ci_low"] = None
+        result["auroc_ci_high"] = None
+    if permutation_scores:
+        result["permutation_p_value"] = float(
+            (
+                1
+                + sum(
+                    value >= auroc
+                    for value in permutation_scores
+                )
+            )
+            / (len(permutation_scores) + 1)
+        )
+    else:
+        result["permutation_p_value"] = None
+    return result
+
+
+def _binary_auroc(labels: np.ndarray, scores: np.ndarray) -> float:
     order = np.argsort(scores)
     ranks = np.empty_like(order, dtype=float)
     ranks[order] = np.arange(1, len(scores) + 1)
-    positive_ranks_in_labeled = ranks[labels == 1]
+    positive_ranks = ranks[labels == 1]
     negative_count = int(np.sum(labels == 0))
-    auroc = float(
+    if len(positive_ranks) == 0 or negative_count == 0:
+        return float("nan")
+    return float(
         (
-            positive_ranks_in_labeled.sum()
-            - len(positive_ranks_in_labeled)
-            * (len(positive_ranks_in_labeled) + 1)
+            positive_ranks.sum()
+            - len(positive_ranks)
+            * (len(positive_ranks) + 1)
             / 2.0
         )
-        / (len(positive_ranks_in_labeled) * negative_count)
+        / (len(positive_ranks) * negative_count)
     )
-    result["auroc"] = auroc
-    return result

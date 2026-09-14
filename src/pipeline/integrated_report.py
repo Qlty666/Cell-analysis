@@ -327,6 +327,11 @@ def generate_integrated_report(
             "recall_at_n",
             "precision_at_n",
             "auroc",
+            "auroc_ci_low",
+            "auroc_ci_high",
+            "auprc",
+            "enrichment_factor",
+            "permutation_p_value",
             "n_positive",
             "n_negative",
         )

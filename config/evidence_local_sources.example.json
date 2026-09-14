@@ -149,7 +149,9 @@
       "liver_context": 0.1,
       "dependency": 0.1,
       "pathway": 0.05,
-      "structure": 0.03
-    }
+      "structure": 0.03,
+      "clinical_precedent": 0.08
+    },
+    "safety_penalty_weight": 0.15
   }
 }
