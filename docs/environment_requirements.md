@@ -11,6 +11,7 @@
 | 表达分析 | `scripts/run_pipeline.py`、`liverbio expression` | Python 3.10+、R 4.5+ | `requirements.txt` | 需要（Seurat 等） | `check_pipeline_environment.bat` / `install_pipeline_dependencies.bat` |
 | 高级分析与 MR/共定位 | `scripts/run_advanced_analysis.py`、`scripts/run_mr_coloc.py`、`liverbio advanced` / `mr` | Python 3.10+；R 可选 | `requirements.txt` | 可选（WGCNA、limma、survival、GSVA 等） | `check_analysis_environment.bat` / `install_analysis_environment.bat` |
 | 数据集搜索 | `scripts/search_datasets.py`、`liverbio datasets` | Python 3.10+ | 标准库为主；ML 重排需 `requirements.txt` | 不需要 | 无独立检查脚本 |
+| 多数据库证据中心 | `scripts/run_evidence_hub.py`、`liverbio evidence` | Python 3.10+；联网使用开放 API | `requirements.txt`；SQLite 使用 Python 标准库 | 不需要 | 无需额外检查；本地授权表由用户提供 |
 | 虚拟筛选 | `scripts/run_docking.py`、`liverbio docking` | Python 3.10+、AutoDock Vina | `requirements.txt` + `requirements_dock.txt` + AutoDockTools | 仅部分子命令需要 | `check_dock_environment.bat` / `install_dock_dependencies.bat` |
 | 独立分子对接 | `scripts/run_molecular_docking.py` | Python 3.10+、AutoDock Vina | `requirements.txt` + `requirements_dock.txt` + AutoDockTools | 不需要 | 同上（docking 检查脚本） |
 | 分子动力学 | `scripts/run_docking.py md-simulation` | Python、Vina、GROMACS | 上述对接依赖；可选 `torch` | 不需要 | docking 检查 + MD 运行时检查 |

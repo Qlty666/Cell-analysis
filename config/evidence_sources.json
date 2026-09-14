@@ -1,0 +1,97 @@
+{
+  "strict": false,
+  "sources": {
+    "OpenTargets": {
+      "enabled": true
+    },
+    "ChEMBL": {
+      "enabled": true
+    },
+    "BindingDB": {
+      "enabled": true
+    },
+    "PubChemBioAssay": {
+      "enabled": true
+    },
+    "GWASCatalog": {
+      "enabled": true
+    },
+    "GTEx": {
+      "enabled": true
+    },
+    "HPA": {
+      "enabled": true
+    },
+    "DepMap": {
+      "enabled": false,
+      "path": ""
+    },
+    "CTD": {
+      "enabled": false,
+      "connector": "local",
+      "path": "",
+      "source_version": "local snapshot",
+      "evidence_type": "disease_gene_association",
+      "relation": "associated_with",
+      "tier": "CURATED",
+      "subject_type": "disease",
+      "target_column": "gene",
+      "score_column": "score"
+    },
+    "Tox21": {
+      "enabled": false,
+      "connector": "local",
+      "path": "",
+      "source_version": "local snapshot",
+      "evidence_type": "toxicity_assay",
+      "relation": "targets",
+      "tier": "EXPERIMENTAL",
+      "subject_type": "compound",
+      "target_column": "gene",
+      "score_column": "score"
+    },
+    "LINCS": {
+      "enabled": false,
+      "connector": "local",
+      "path": "",
+      "source_version": "local snapshot",
+      "evidence_type": "transcriptomic_signature",
+      "relation": "perturbs",
+      "tier": "EXPERIMENTAL",
+      "subject_type": "compound",
+      "target_column": "gene",
+      "score_column": "score"
+    },
+    "DisGeNET": {
+      "enabled": false,
+      "connector": "local",
+      "path": "",
+      "source_version": "local snapshot",
+      "evidence_type": "disease_gene_association",
+      "relation": "associated_with",
+      "tier": "CURATED",
+      "subject_type": "disease",
+      "target_column": "gene",
+      "score_column": "score"
+    }
+  },
+  "limits": {
+    "max_records_per_source": 1000,
+    "timeout_seconds": 120
+  },
+  "scoring": {
+    "weights": {
+      "direct_experimental": 0.24,
+      "curated_target": 0.14,
+      "predicted_target": 0.06,
+      "genetic_association": 0.16,
+      "disease_association": 0.12,
+      "liver_context": 0.1,
+      "dependency": 0.1,
+      "pathway": 0.05,
+      "structure": 0.03
+    },
+    "evidence_weight": 0.8,
+    "coverage_weight": 0.2
+  }
+}

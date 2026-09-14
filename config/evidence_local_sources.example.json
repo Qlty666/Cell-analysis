@@ -1,0 +1,83 @@
+{
+  "strict": false,
+  "sources": {
+    "OpenTargets": {
+      "enabled": true
+    },
+    "ChEMBL": {
+      "enabled": true
+    },
+    "BindingDB": {
+      "enabled": true
+    },
+    "CTD": {
+      "enabled": true,
+      "connector": "local",
+      "path": "data/evidence/ctd_gene_disease.tsv",
+      "source_version": "CTD release supplied by user",
+      "evidence_type": "disease_gene_association",
+      "relation": "associated_with",
+      "tier": "CURATED",
+      "subject_type": "disease",
+      "target_column": "GeneSymbol",
+      "score_column": "InferenceScore",
+      "p_value_column": "pValue",
+      "direction_column": "DirectEvidence"
+    },
+    "Tox21": {
+      "enabled": true,
+      "connector": "local",
+      "path": "data/evidence/tox21_gene_assays.tsv",
+      "source_version": "Tox21 snapshot supplied by user",
+      "evidence_type": "toxicity_assay",
+      "relation": "targets",
+      "tier": "EXPERIMENTAL",
+      "subject_type": "compound",
+      "subject_value": "6PPD-Q",
+      "target_column": "gene_symbol",
+      "score_column": "activity_score"
+    },
+    "LINCS": {
+      "enabled": true,
+      "connector": "local",
+      "path": "data/evidence/lincs_gene_signatures.tsv",
+      "source_version": "LINCS snapshot supplied by user",
+      "evidence_type": "transcriptomic_signature",
+      "relation": "perturbs",
+      "tier": "EXPERIMENTAL",
+      "subject_type": "compound",
+      "subject_value": "6PPD-Q",
+      "target_column": "gene_symbol",
+      "score_column": "normalized_effect"
+    },
+    "DisGeNET": {
+      "enabled": true,
+      "connector": "local",
+      "path": "data/evidence/disgenet_gene_disease.tsv",
+      "source_version": "DisGeNET export supplied by user",
+      "evidence_type": "disease_gene_association",
+      "relation": "associated_with",
+      "tier": "CURATED",
+      "subject_type": "disease",
+      "target_column": "gene_symbol",
+      "score_column": "score"
+    }
+  },
+  "limits": {
+    "max_records_per_source": 5000,
+    "timeout_seconds": 120
+  },
+  "scoring": {
+    "weights": {
+      "direct_experimental": 0.24,
+      "curated_target": 0.14,
+      "predicted_target": 0.06,
+      "genetic_association": 0.16,
+      "disease_association": 0.12,
+      "liver_context": 0.1,
+      "dependency": 0.1,
+      "pathway": 0.05,
+      "structure": 0.03
+    }
+  }
+}

@@ -240,6 +240,12 @@ class TestDockResumeFresh(unittest.TestCase):
 
 
 class TestDockingReplicates(unittest.TestCase):
+    def test_missing_seed_list_generates_distinct_replicates(self):
+        from docking.docking import _replicate_seeds
+
+        self.assertEqual(_replicate_seeds([42], 42, 3), [42, 43, 44])
+        self.assertEqual(_replicate_seeds([7, 11], 42, 4), [7, 11, 42, 43])
+
     def test_replicates_and_positive_control(self):
         with tempfile.TemporaryDirectory() as tmp:
             tmp_path = Path(tmp)

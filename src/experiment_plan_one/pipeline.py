@@ -3,6 +3,7 @@
 from __future__ import annotations
 
 import html
+import hashlib
 import json
 import logging
 import os
@@ -19,6 +20,14 @@ import matplotlib.pyplot as plt
 import numpy as np
 import pandas as pd
 from scipy import sparse
+
+from evidence import (
+    EvidenceContext,
+    EvidenceHub,
+    EvidenceRecord,
+    EvidenceTier,
+    SQLiteEvidenceStore,
+)
 
 from . import __version__
 from .bulk import (
@@ -67,6 +76,7 @@ STAGES = (
     "data",
     "targets",
     "disease",
+    "evidence",
     "ppi",
     "bulk",
     "ml",
@@ -136,6 +146,114 @@ class PipelineContext:
     def dir(self, name: str) -> Path:
         return ensure_dir(self.output_root / name)
 
+    def fingerprint_file(self, path: Path) -> str:
+        path = Path(path)
+        if not path.exists() or not path.is_file():
+            return "missing"
+        stat = path.stat()
+        if stat.st_size <= 64 * 1024 * 1024:
+            return f"sha256:{sha256_file(path)}"
+        return f"meta:{stat.st_size}:{stat.st_mtime_ns}"
+
+    def stage_signature(self, stage: str, previous_stages: list[str]) -> str:
+        payload: dict[str, Any] = {
+            "stage": stage,
+            "pipeline_version": __version__,
+            "config": self.config,
+            "previous": {},
+            "inputs": {},
+        }
+        for previous in previous_stages:
+            state_path = self.state_dir / f"{previous}.json"
+            payload["previous"][previous] = self.fingerprint_file(state_path)
+        for path in STAGE_INPUT_PATHS.get(stage, []):
+            resolved = path
+            if not resolved.is_absolute():
+                resolved = self.output_root / resolved
+            if resolved.is_dir():
+                files = sorted(
+                    item
+                    for item in resolved.rglob("*")
+                    if item.is_file()
+                )
+                payload["inputs"][str(resolved)] = {
+                    str(file.relative_to(resolved)): self.fingerprint_file(file)
+                    for file in files
+                }
+            else:
+                payload["inputs"][str(resolved)] = self.fingerprint_file(resolved)
+        if stage == "evidence":
+            evidence_config = str(
+                (self.config.get("evidence") or {}).get("config_file")
+                or "config/evidence_sources.json"
+            )
+            evidence_path = Path(evidence_config).expanduser()
+            if not evidence_path.is_absolute():
+                evidence_path = self.root / evidence_path
+            payload["inputs"]["evidence_config"] = self.fingerprint_file(
+                evidence_path.resolve()
+            )
+        encoded = json.dumps(
+            payload,
+            ensure_ascii=False,
+            sort_keys=True,
+            default=str,
+        ).encode("utf-8")
+        return hashlib.sha256(encoded).hexdigest()
+
+
+STAGE_INPUT_PATHS: dict[str, list[Path]] = {
+    "data": [],
+    "targets": [Path("00_data/cache")],
+    "disease": [],
+    "evidence": [
+        Path("01_compound_characterization/compound_properties.csv"),
+        Path("01_compound_characterization/compound_targets.csv"),
+        Path("02_disease_targets/disease_targets.csv"),
+    ],
+    "ppi": [
+        Path("03_intersection_ppi/compound_disease_overlap.csv"),
+        Path("02b_evidence/target_priority.csv"),
+    ],
+    "bulk": [Path("00_data/raw"), Path("00_data/processed")],
+    "ml": [Path("00_data/processed"), Path("04_bulk_training")],
+    "mouse": [Path("00_data/raw/extracted/GSE270583")],
+    "human": [Path("00_data/raw/extracted/GSE202379")],
+    "docking": [
+        Path("05_machine_learning/ml_core_genes.json"),
+        Path("02b_evidence/target_priority.csv"),
+    ],
+    "md": [Path("08_docking")],
+    "classify": [Path("10_reports")],
+    "figure_audit": [Path("按方案分类")],
+    "report": [Path("10_reports")],
+}
+
+STAGE_REQUIRED_OUTPUTS: dict[str, list[Path]] = {
+    "data": [Path("00_data/raw/dataset_inventory.json")],
+    "targets": [
+        Path("01_compound_characterization/compound_properties.csv"),
+        Path("01_compound_characterization/compound_targets.csv"),
+    ],
+    "disease": [Path("02_disease_targets/disease_targets.csv")],
+    "evidence": [
+        Path("02b_evidence/evidence_summary.json"),
+        Path("02b_evidence/target_priority.csv"),
+    ],
+    "ppi": [Path("03_intersection_ppi/ppi_summary.json")],
+    "bulk": [Path("04_bulk_training/bulk_summary.json")],
+    "ml": [Path("05_machine_learning/ml_summary.json")],
+    "mouse": [Path("06_single_cell_mouse/mouse_single_cell_summary.json")],
+    "human": [Path("07_single_cell_human/human_single_cell_summary.json")],
+    "docking": [Path("08_docking/docking_summary.json")],
+    "md": [Path("09_md_mmpbsa/md_stage_summary.json")],
+    "classify": [Path("按方案分类/分类汇总.json")],
+    "figure_audit": [
+        Path("10_reports/figure_quality_audit/figure_quality_audit.json")
+    ],
+    "report": [Path("10_reports/experiment_plan_one_report.html")],
+}
+
 
 def default_config() -> dict[str, Any]:
     return {
@@ -186,6 +304,15 @@ def default_config() -> dict[str, Any]:
         },
         "ppi": {"required_score": 700, "top_n": 20, "add_nodes": 50},
         "ml": {"cv_folds": 5, "seed": 42},
+        "evidence": {
+            "enabled": True,
+            "config_file": "config/evidence_sources.json",
+            "target_scope": "intersection",
+            "max_target_symbols": 500,
+            "top_n": 50,
+            "benchmark_positive": [],
+            "benchmark_negative": [],
+        },
         "single_cell": {
             "mouse": {"max_cells": 5000},
             "human": {"max_cells_per_sample": 1200, "seed": 42},
@@ -261,6 +388,7 @@ class ExperimentPlanOne:
             "data": self.stage_data,
             "targets": self.stage_targets,
             "disease": self.stage_disease,
+            "evidence": self.stage_evidence,
             "ppi": self.stage_ppi,
             "bulk": self.stage_bulk,
             "ml": self.stage_ml,
@@ -277,26 +405,72 @@ class ExperimentPlanOne:
                 raise ValueError(f"unknown stage: {stage}; expected one of {STAGES}")
         for stage in stages:
             state_path = self.context.state_dir / f"{stage}.json"
+            previous_stages = list(STAGES[: STAGES.index(stage)])
+            signature = self.context.stage_signature(stage, previous_stages)
+            missing_outputs = self._missing_stage_outputs(stage)
             if state_path.exists() and not self.context.force:
                 state = read_json(state_path, {})
-                LOG.info("stage %s already complete; reusing %s", stage, state_path)
-                self.results[stage] = state
-                continue
+                same_signature = state.get("signature") == signature
+                output_ready = not missing_outputs
+                if (
+                    state.get("status") == "completed"
+                    and same_signature
+                    and output_ready
+                ):
+                    LOG.info(
+                        "stage %s already complete with matching signature; reusing %s",
+                        stage,
+                        state_path,
+                    )
+                    self.results[stage] = state
+                    continue
+                LOG.warning(
+                    "stage %s will rerun: signature_match=%s missing_outputs=%s",
+                    stage,
+                    same_signature,
+                    missing_outputs or "none",
+                )
             started = time.time()
             LOG.info("starting stage %s", stage)
             result = stage_functions[stage]()
             result = _serializable(result)
+            missing_outputs = self._missing_stage_outputs(stage)
+            result_status = (
+                str(result.get("status") or "completed")
+                if isinstance(result, dict)
+                else "completed"
+            )
+            if result_status == "failed" or missing_outputs:
+                result_status = "failed"
             state = {
                 "stage": stage,
-                "status": "completed",
+                "status": result_status,
+                "signature": signature,
                 "elapsed_seconds": round(time.time() - started, 3),
                 "result": result,
             }
             write_json(state_path, state)
             self.results[stage] = state
+            if result_status != "completed":
+                reason = (
+                    f"missing outputs: {missing_outputs}"
+                    if missing_outputs
+                    else str(result.get("reason") or "stage returned failed")
+                    if isinstance(result, dict)
+                    else "stage returned failed"
+                )
+                raise RuntimeError(f"stage {stage} failed: {reason}")
             LOG.info("completed stage %s in %.1f s", stage, state["elapsed_seconds"])
         self._write_manifest()
         return self.results
+
+    def _missing_stage_outputs(self, stage: str) -> list[str]:
+        missing: list[str] = []
+        for relative in STAGE_REQUIRED_OUTPUTS.get(stage, []):
+            path = self.context.output_root / relative
+            if not path.exists() or not path.is_file() or path.stat().st_size == 0:
+                missing.append(relative.as_posix())
+        return missing
 
     def stage_data(self) -> dict[str, Any]:
         outputs: dict[str, str] = {}
@@ -458,6 +632,299 @@ class ExperimentPlanOne:
             "sources": statuses,
             "n_targets": int(len(combined)),
         }
+
+    def stage_evidence(self) -> dict[str, Any]:
+        """Collect independent evidence sources and produce target priorities."""
+        out_dir = self.context.dir("02b_evidence")
+        config_section = dict(self.context.config.get("evidence") or {})
+        if not config_section.get("enabled", True):
+            summary = {"status": "skipped", "reason": "evidence stage disabled"}
+            pd.DataFrame(
+                columns=[
+                    "rank",
+                    "target_symbol",
+                    "priority_score",
+                    "coverage_ratio",
+                ]
+            ).to_csv(out_dir / "target_priority.csv", index=False)
+            self._write_priority_markdown(
+                pd.DataFrame(),
+                out_dir / "target_priority.md",
+            )
+            write_json(out_dir / "evidence_summary.json", summary)
+            return summary
+
+        config_file = str(
+            config_section.get("config_file")
+            or "config/evidence_sources.json"
+        )
+        source_config_path = Path(config_file).expanduser()
+        if not source_config_path.is_absolute():
+            source_config_path = (self.context.root / source_config_path).resolve()
+        evidence_config = (
+            json.loads(source_config_path.read_text(encoding="utf-8"))
+            if source_config_path.exists()
+            else {}
+        )
+        overrides = {
+            key: value
+            for key, value in config_section.items()
+            if key
+            not in {
+                "enabled",
+                "config_file",
+                "target_scope",
+                "top_n",
+                "benchmark_positive",
+                "benchmark_negative",
+            }
+        }
+        evidence_config = merge_config(evidence_config, overrides)
+
+        compound_dir = (
+            self.context.output_root / "01_compound_characterization"
+        )
+        disease_dir = self.context.output_root / "02_disease_targets"
+        compound_frame = pd.read_csv(compound_dir / "compound_targets.csv")
+        disease_frame = pd.read_csv(disease_dir / "disease_targets.csv")
+        compound_genes = {
+            str(value).upper()
+            for value in compound_frame.get("gene", pd.Series(dtype=str)).dropna()
+        }
+        disease_genes = {
+            str(value).upper()
+            for value in disease_frame.get("gene", pd.Series(dtype=str)).dropna()
+        }
+        scope = str(config_section.get("target_scope") or "intersection").lower()
+        if scope == "all":
+            target_symbols = sorted(compound_genes | disease_genes)
+        elif scope == "compound":
+            target_symbols = sorted(compound_genes)
+        elif scope == "disease":
+            target_symbols = sorted(disease_genes)
+        else:
+            target_symbols = sorted(compound_genes & disease_genes)
+            if not target_symbols:
+                target_symbols = sorted(compound_genes | disease_genes)
+        max_targets = max(1, int(config_section.get("max_target_symbols", 500)))
+        target_symbols = target_symbols[:max_targets]
+
+        ensembl_map: dict[str, str] = {}
+        if "ensembl_id" in disease_frame.columns:
+            for row in disease_frame[["gene", "ensembl_id"]].dropna().to_dict(
+                "records"
+            ):
+                gene = str(row.get("gene") or "").upper().strip()
+                ensembl = str(row.get("ensembl_id") or "").strip()
+                if gene and ensembl:
+                    ensembl_map[gene] = ensembl
+        compound_row = pd.read_csv(
+            compound_dir / "compound_properties.csv"
+        ).iloc[0].to_dict()
+        disease_row = {"name": self.context.config["disease"]["name"]}
+        context = EvidenceContext(
+            compound=compound_row,
+            disease=disease_row,
+            target_symbols=target_symbols,
+            ensembl_ids=ensembl_map,
+            cache_dir=out_dir,
+            max_records_per_source=int(
+                (evidence_config.get("limits") or {}).get(
+                    "max_records_per_source",
+                    1000,
+                )
+            ),
+            timeout_seconds=int(
+                (evidence_config.get("limits") or {}).get(
+                    "timeout_seconds",
+                    120,
+                )
+            ),
+            allow_network=bool(config_section.get("allow_network", True)),
+            source_options={
+                str(name): dict(options or {})
+                for name, options in (evidence_config.get("sources") or {}).items()
+            },
+        )
+        database = self.context.output_root / "00_data" / "evidence" / "target_evidence.sqlite"
+        with SQLiteEvidenceStore(database) as store:
+            inherited_started = time.time()
+            inherited = self._inherited_target_evidence(
+                compound_row,
+                str(disease_row["name"]),
+            )
+            store.upsert_evidence(inherited)
+            if inherited:
+                store.record_source_run(
+                    source="ExperimentPlanInherited",
+                    source_version="current stage outputs",
+                    status="completed",
+                    started_at=time.strftime(
+                        "%Y-%m-%dT%H:%M:%S%z",
+                        time.localtime(inherited_started),
+                    ),
+                    completed_at=time.strftime(
+                        "%Y-%m-%dT%H:%M:%S%z",
+                        time.localtime(time.time()),
+                    ),
+                    record_count=len(inherited),
+                    query_hash="local-stage-outputs",
+                    metadata={"mode": "local import"},
+                )
+            hub = EvidenceHub.from_config(
+                database,
+                evidence_config,
+                store=store,
+            )
+            status = hub.collect(context)
+            scored = hub.score(
+                benchmark_positives=config_section.get("benchmark_positive") or [],
+                benchmark_negatives=config_section.get("benchmark_negative") or [],
+                benchmark_top_n=int(config_section.get("top_n", 50)),
+            )
+            paths = hub.export(
+                out_dir,
+                context=context,
+                source_status=status,
+                scored=scored,
+            )
+        priority = scored["priority"]
+        summary = {
+            "status": "completed",
+            "database": str(database),
+            "target_scope": scope,
+            "requested_targets": len(target_symbols),
+            "evidence_records": int(len(scored["evidence"])),
+            "prioritized_targets": int(len(priority)),
+            "collector_status": status.to_dict(orient="records"),
+            "benchmark": scored.get("benchmark"),
+            **paths,
+        }
+        write_json(out_dir / "evidence_summary.json", summary)
+        self._write_priority_markdown(priority, out_dir / "target_priority.md")
+        return summary
+
+    def _inherited_target_evidence(
+        self,
+        compound: dict[str, Any],
+        disease_name: str,
+    ) -> list[EvidenceRecord]:
+        records: list[EvidenceRecord] = []
+        compound_id = str(
+            compound.get("pubchem_cid")
+            or compound.get("inchi_key")
+            or "compound"
+        )
+        compound_sources = {
+            "SwissTargetPrediction": (EvidenceTier.PREDICTED, "predicted_target"),
+            "STITCH": (EvidenceTier.PREDICTED, "predicted_target"),
+            "ChEMBL_similarity": (EvidenceTier.PREDICTED, "ligand_similarity"),
+        }
+        source_dir = (
+            self.context.output_root
+            / "01_compound_characterization"
+            / "sources"
+        )
+        for source_name, (tier, evidence_type) in compound_sources.items():
+            path = source_dir / f"{source_name}.csv"
+            if not path.exists():
+                continue
+            frame = pd.read_csv(path)
+            if "gene" not in frame.columns:
+                continue
+            score_column = "probability" if "probability" in frame.columns else None
+            for index, row in frame.iterrows():
+                symbol = str(row.get("gene") or "").upper().strip()
+                if not symbol:
+                    continue
+                records.append(
+                    EvidenceRecord(
+                        source=source_name,
+                        source_record_id=f"pipeline:{index}:{symbol}",
+                        evidence_type=evidence_type,
+                        subject_type="compound",
+                        subject_id=compound_id,
+                        relation="targets",
+                        object_type="target",
+                        object_id=symbol,
+                        target_symbol=symbol,
+                        tier=tier,
+                        source_version="experiment-plan-one inherited output",
+                        source_group=source_name.lower(),
+                        score=(
+                            float(row.get(score_column))
+                            if score_column
+                            and pd.notna(row.get(score_column))
+                            else None
+                        ),
+                        species="Homo sapiens",
+                        payload={"inherited_from": str(path)},
+                    )
+                )
+        disease_dir = self.context.output_root / "02_disease_targets"
+        for path in sorted(disease_dir.glob("source_*.csv")):
+            source_name = path.stem.removeprefix("source_")
+            if source_name.lower().startswith("opentargets"):
+                continue
+            frame = pd.read_csv(path)
+            if "gene" not in frame.columns:
+                continue
+            for index, row in frame.iterrows():
+                symbol = str(row.get("gene") or "").upper().strip()
+                if not symbol:
+                    continue
+                records.append(
+                    EvidenceRecord(
+                        source=source_name,
+                        source_record_id=f"pipeline:{index}:{symbol}",
+                        evidence_type="disease_gene_association",
+                        subject_type="disease",
+                        subject_id=disease_name,
+                        relation="associated_with",
+                        object_type="target",
+                        object_id=symbol,
+                        target_symbol=symbol,
+                        tier=EvidenceTier.CURATED,
+                        source_version="local or licensed snapshot",
+                        source_group=source_name.lower(),
+                        score=(
+                            float(row.get("score"))
+                            if "score" in frame.columns
+                            and pd.notna(row.get("score"))
+                            else 1.0
+                        ),
+                        species="Homo sapiens",
+                        payload={"inherited_from": str(path)},
+                    )
+                )
+        return records
+
+    @staticmethod
+    def _write_priority_markdown(priority: pd.DataFrame, output: Path) -> None:
+        lines = [
+            "# Target evidence priorities",
+            "",
+            "Scores use only available evidence categories. Missing database "
+            "records are not treated as negative evidence.",
+            "",
+            "| Rank | Target | Priority | Coverage | Sources | Missing categories |",
+            "|---:|---|---:|---:|---:|---|",
+        ]
+        for row in priority.head(50).to_dict("records"):
+            lines.append(
+                "| {rank} | {target} | {score:.3f} | {coverage:.2f} | "
+                "{sources} | {missing} |".format(
+                    rank=int(row.get("rank") or 0),
+                    target=row.get("target_symbol") or "",
+                    score=float(row.get("priority_score") or 0.0),
+                    coverage=float(row.get("coverage_ratio") or 0.0),
+                    sources=int(row.get("source_group_count") or 0),
+                    missing=row.get("missing_categories") or "",
+                )
+            )
+        if len(priority) == 0:
+            lines.append("| - | No target with usable evidence | 0 | 0 | 0 | - |")
+        output.write_text("\n".join(lines) + "\n", encoding="utf-8")
 
     def stage_ppi(self) -> dict[str, Any]:
         out_dir = self.context.dir("03_intersection_ppi")
@@ -998,12 +1465,33 @@ class ExperimentPlanOne:
                 / "in_silico"
                 / "in_silico_knockout_report.html"
             )
+            input_signature = hashlib.sha256(
+                json.dumps(
+                    {
+                        "gene": str(gene).upper(),
+                        "h5ad": self.context.fingerprint_file(
+                            mouse_dir / "mouse_liver_processed.h5ad"
+                        ),
+                        "engine": "celloracle",
+                        "max_cells": 5000,
+                        "max_genes": 1800,
+                        "seed": 123,
+                    },
+                    sort_keys=True,
+                ).encode("utf-8")
+            ).hexdigest()
             if previous_config_path.exists() and previous_report.exists():
                 previous = read_json(previous_config_path, {})
                 previous_gene = (
                     (previous.get("insilico_knockout") or {}).get("ko_gene")
                 )
-                if str(previous_gene).upper() == str(gene).upper():
+                previous_signature = (
+                    previous.get("insilico_knockout") or {}
+                ).get("_input_signature")
+                if (
+                    str(previous_gene).upper() == str(gene).upper()
+                    and previous_signature == input_signature
+                ):
                     _export_knockout_outputs(knockout_dir, mouse_dir)
                     return {
                         "status": "completed",
@@ -1080,6 +1568,7 @@ class ExperimentPlanOne:
                     "enrichment_genes": 150,
                     "enrichment_timeout": 900,
                     "figures": True,
+                    "_input_signature": input_signature,
                 },
             }
             config_path = knockout_dir / "insilico_config.json"

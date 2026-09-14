@@ -3,6 +3,7 @@
 from __future__ import annotations
 
 import logging
+import os
 import time
 import urllib.request
 from pathlib import Path
@@ -11,11 +12,14 @@ logger = logging.getLogger(__name__)
 
 # Replace with a real maintainer address (or set the caller's user_agent) when
 # deploying so remote services can contact the operator about traffic.
-CONTACT_PLACEHOLDER = "your-email@example.com"
+CONTACT_EMAIL = (
+    os.environ.get("LIVER_CONTACT_EMAIL", "").strip()
+    or "not-configured@example.invalid"
+)
 
 DEFAULT_USER_AGENT = (
     "liver-cancer-pipeline/1.0 "
-    f"(+https://github.com/Qlty666/Cell-analysis; mailto:{CONTACT_PLACEHOLDER})"
+    f"(+https://github.com/Qlty666/Cell-analysis; mailto:{CONTACT_EMAIL})"
 )
 
 

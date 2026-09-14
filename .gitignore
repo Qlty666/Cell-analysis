@@ -38,6 +38,9 @@ Thumbs.db
 *.jks
 *.keystore
 *.kdbx
+*.sqlite
+*.sqlite-wal
+*.sqlite-shm
 
 # Local analysis workspace handoff
 /config/analysis_workspace.json

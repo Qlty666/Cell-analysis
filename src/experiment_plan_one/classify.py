@@ -34,6 +34,7 @@ PLAN_GROUPS: dict[str, tuple[str, ...]] = {
         "03_intersection_ppi/enrichment",
     ),
     "Figure2_PPI网络与枢纽基因初步筛选": (
+        "02b_evidence",
         "03_intersection_ppi",
         "04_bulk_training/fig2f_candidate_gene_heatmap.png",
         "04_bulk_training/fig2f_candidate_gene_heatmap.csv",

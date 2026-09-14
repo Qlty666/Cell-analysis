@@ -28,6 +28,7 @@ Script/
 │   ├── common/                      # 通用环境探测、HTTP 与 HTML 工具
 │   ├── data/                        # 数据集下载、转换与合成数据
 │   ├── docking/                     # 虚拟筛选、虚拟敲除、MD 等 CADD 实现
+│   ├── evidence/                    # 多数据库证据模型、SQLite 证据库、连接器与评分
 │   ├── molecular_docking/           # 独立分子对接板块
 │   ├── liverbio_suite/              # liverbio 统一入口实现
 │   ├── pipeline/                    # 流水线编排、阶段路径、集成报告与细胞反馈
@@ -61,6 +62,7 @@ Script/
 | `scripts/run_docking.py` | 虚拟筛选 CLI |
 | `scripts/run_full_pipeline.py` | 全自动集成流水线 CLI |
 | `scripts/run_molecular_docking.py` | 独立分子对接 CLI |
+| `scripts/run_evidence_hub.py` | 多数据库靶点证据采集、评分与导出 |
 | `scripts/export_to_analysis.py` | 导出运行结果到本地 Codex 分析工作区 |
 | `scripts/search_datasets.py` | 多数据库数据集搜索与下载 |
 | `scripts/dataset_search_ml.py` | 搜索结果 ML/DL 相关性排序 |
@@ -151,7 +153,17 @@ Script/
 | `ml.py` / `handoff.py` / `environment.py` / `utils.py` | 重打分、工具交接、环境与通用工具 |
 | `http.py` / `html_utils.py` | 证据收集 HTTP 下载（超时与重试）与报告 HTML 转义工具 |
 
-### 3.5 `src/molecular_docking`
+### 3.5 `src/evidence`
+
+| 文件 | 作用 |
+| --- | --- |
+| `models.py` / `context.py` | 统一证据记录、证据等级和连接器上下文 |
+| `store.py` | SQLite 证据库、来源运行记录、覆盖统计和 CSV 导出 |
+| `connectors.py` | Open Targets、ChEMBL、BindingDB、PubChem、GWAS、GTEx、HPA、DepMap 和本地表连接器 |
+| `scoring.py` | 缺失值语义、来源独立性、覆盖感知评分、来源消融和参考集基准 |
+| `hub.py` | 连接器编排、失败记录、评分与可复现导出 |
+
+### 3.6 `src/molecular_docking`
 
 独立于虚拟筛选的分子对接板块：
 
@@ -162,14 +174,14 @@ Script/
 | `pipeline.py` | 独立流水线 |
 | `report.py` | HTML 报告 |
 
-### 3.6 `src/liverbio_suite`
+### 3.7 `src/liverbio_suite`
 
 | 文件 | 作用 |
 | --- | --- |
 | `cli.py` | `liverbio` 子命令路由 |
 | `analysis_export.py` | 分析工作区结果导出与来源登记 |
 
-### 3.7 `src/pipeline`
+### 3.8 `src/pipeline`
 
 | 文件 | 作用 |
 | --- | --- |
@@ -184,7 +196,7 @@ Script/
 | `cell_feedback.py` / `cell_feedback.R` | 结果写回单细胞对象的反馈分析 |
 | `export_pseudobulk.R` | 伪 bulk 导出 |
 
-### 3.8 `src/report`
+### 3.9 `src/report`
 
 | 文件 | 作用 |
 | --- | --- |
@@ -215,6 +227,8 @@ Script/
 | 路径 | 作用 |
 | --- | --- |
 | `config/*.json` | 表达分析、虚拟筛选、独立分子对接与项目默认配置 |
+| `config/evidence_sources.json` | 多数据库连接器、记录上限和证据评分配置 |
+| `config/evidence_local_sources.example.json` | CTD、Tox21、LINCS、DisGeNET 等本地授权快照接入示例 |
 | `skills/liver-*/SKILL.md` | Codex skill 定义 |
 | `skills/liver-*/agents/openai.yaml` | skill agent 配置 |
 | `pytest.ini` | pytest 配置（`testpaths = tests`） |
@@ -223,6 +237,7 @@ Script/
 | `tests/test_r_pipeline_syntax.py` | R 脚本解析、驱动加载与 `R/` 模块独立加载冒烟测试 |
 | `tests/test_module_structure.py` | 校验重构后领域模块与旧导入接口保持一致 |
 | `tests/test_web_security.py` | 网页端同源/跨站校验、请求体限制与路径安全测试 |
+| `tests/test_evidence_hub.py` | 证据模型、SQLite 存储、连接器、评分、消融和 CLI 测试 |
 | `tests/test_web_server_smoke.py` | 在回环端口启动真实 `ThreadingHTTPServer` 的路由与安全冒烟测试 |
 | `tests/test_web_script_mode.py` | `python web/web_ui.py` 脚本模式下状态不被重复导入的回归测试 |
 | `.github/workflows/tests.yml` | GitHub Actions：push/PR 在 Windows 与 Linux + Python 3.11 上安装依赖并运行 pytest |

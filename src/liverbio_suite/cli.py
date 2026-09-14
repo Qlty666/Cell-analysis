@@ -22,6 +22,7 @@ ENTRYPOINTS = {
     "datasets": ROOT / "scripts" / "search_datasets.py",
     "advanced": ROOT / "scripts" / "run_advanced_analysis.py",
     "experiment-plan-one": ROOT / "scripts" / "run_experiment_plan_one.py",
+    "evidence": ROOT / "scripts" / "run_evidence_hub.py",
     "mr": ROOT / "scripts" / "run_mr_coloc.py",
     "web": ROOT / "web" / "web_ui.py",
     "analysis-export": ROOT / "scripts" / "export_to_analysis.py",
@@ -42,6 +43,7 @@ FEATURE_SUMMARY = (
     "datasets:   GEO / BioStudies / Expression Atlas search and download\n"
     "advanced:   multi-cohort WGCNA, gene-level ML, immune/survival analysis\n"
     "experiment-plan-one: 6PPD-Q / NAFLD plan one end-to-end analysis\n"
+    "evidence:   multi-database target evidence collection and prioritisation\n"
     "mr:         local MR/IVW/weighted-median/Egger and colocalisation\n"
     "web:        local web console for the whole suite\n"
     "analysis-export: export finished runs into a Codex analysis workspace\n"
@@ -67,6 +69,7 @@ Examples:
   liverbio datasets --disease "liver cancer" --max-results 20
   liverbio advanced --config config/advanced_analysis.json --output ../advanced_run
   liverbio experiment-plan-one --config config/experiment_plan_one.json
+  liverbio evidence --disease NAFLD --targets GPAT3,PPP2R2A --output ../evidence_run
   liverbio mr --config config/mr_coloc.json --output ../mr_run
   liverbio web --page full
   liverbio analysis-export --source <SOURCE_DIR>/GSE125449 --analysis-root <ANALYSIS_ROOT>

@@ -1006,62 +1006,97 @@ if (stage_allowed("04")) run_stage("04_cluster", {
     )
     log_msg("number of clusters (author sub_cluster): ", length(unique(seurat$seurat_clusters)))
   } else if (dataset_mode == "sample_level") {
-    log_msg("sample-level mode: assigning sample-level clusters and embeddings")
+    log_msg("sample-level mode: assigning sample-level clusters and computing real PCA")
     seurat$seurat_clusters <- as.character(seurat$sample)
     npcs <- min(30, max(1, ncol(seurat) - 1))
-    set.seed(42)
-    emb_pca <- matrix(
-      rnorm(ncol(seurat) * npcs),
-      nrow = ncol(seurat),
-      ncol = npcs
+    pca_status <- "completed"
+    seurat <- tryCatch(
+      {
+        seurat <- FindVariableFeatures(
+          seurat,
+          selection.method = "vst",
+          nfeatures = min(2000, max(10, nrow(seurat) - 1)),
+          verbose = FALSE
+        )
+        seurat <- ScaleData(
+          seurat,
+          features = VariableFeatures(seurat),
+          verbose = FALSE
+        )
+        RunPCA(
+          seurat,
+          features = VariableFeatures(seurat),
+          npcs = npcs,
+          verbose = FALSE
+        )
+      },
+      error = function(e) {
+        pca_status <<- paste0("failed: ", conditionMessage(e))
+        log_msg("sample-level PCA failed: ", conditionMessage(e))
+        seurat
+      }
     )
-    rownames(emb_pca) <- colnames(seurat)
-    colnames(emb_pca) <- paste0("PC_", seq_len(npcs))
-    seurat[["pca"]] <- CreateDimReducObject(
-      embeddings = emb_pca,
-      key = "PC_",
-      assay = "RNA"
+    writeLines(
+      pca_status,
+      stage_data_file("sample_level_pca_status.txt")
     )
-    emb_umap <- matrix(
-      rnorm(ncol(seurat) * 2),
-      nrow = ncol(seurat),
-      ncol = 2
-    )
-    rownames(emb_umap) <- colnames(seurat)
-    colnames(emb_umap) <- c("UMAP_1", "UMAP_2")
-    seurat[["umap"]] <- CreateDimReducObject(
-      embeddings = emb_umap,
-      key = "umap_",
-      assay = "RNA"
-    )
+    if ("pca" %in% Reductions(seurat)) {
+      p_pca <- DimPlot(seurat, reduction = "pca", group.by = "condition") +
+        ggtitle("PCA by condition (sample-level)")
+      save_fig(file.path(fig_dir, "fig_14_pca.png"), p_pca, width = 8, height = 7)
 
-    p_pca <- DimPlot(seurat, reduction = "pca", group.by = "condition") +
-      ggtitle("PCA by condition (sample-level)")
-    save_fig(file.path(fig_dir, "fig_14_pca.png"), p_pca, width = 8, height = 7)
+      p_elbow <- ElbowPlot(seurat, ndims = npcs, reduction = "pca") +
+        ggtitle("PCA standard deviation (sample-level)")
+      save_fig(file.path(fig_dir, "fig_15_elbow.png"), p_elbow, width = 8, height = 5)
 
-    p_elbow <- ggplot(
-      data.frame(PC = seq_len(npcs), stdev = rep(1, npcs)),
-      aes(x = PC, y = stdev)
-    ) +
-      geom_line() +
-      labs(title = "PCA standard deviation (sample-level)") +
-      theme_minimal()
-    save_fig(file.path(fig_dir, "fig_15_elbow.png"), p_elbow, width = 8, height = 5)
+      pca_tbl <- as.data.frame(Embeddings(seurat, reduction = "pca"))
+      pca_tbl$cell <- rownames(pca_tbl)
+      pca_tbl$seurat_clusters <- as.character(seurat$seurat_clusters)
+      pca_tbl$condition <- seurat$condition
+      pca_tbl$sample <- seurat$sample
+      write.csv(
+        pca_tbl,
+        stage_data_file("fig_14_sample_level_pca.csv"),
+        row.names = FALSE
+      )
+    }
 
-    umap_tbl <- data.frame(
-      UMAP_1 = emb_umap[, 1],
-      UMAP_2 = emb_umap[, 2],
-      cell = rownames(emb_umap),
-      seurat_clusters = as.character(seurat$seurat_clusters),
-      condition = seurat$condition,
-      sample = seurat$sample,
-      stringsAsFactors = FALSE
+    umap_status <- "skipped: fewer than 5 samples"
+    if (ncol(seurat) >= 5 && "pca" %in% Reductions(seurat)) {
+      umap_status <- "completed"
+      seurat <- tryCatch(
+        RunUMAP(
+          seurat,
+          reduction = "pca",
+          dims = seq_len(max(1, min(10, npcs))),
+          n.neighbors = min(15, ncol(seurat) - 1),
+          min.dist = 0.3,
+          seed.use = 42,
+          verbose = FALSE
+        ),
+        error = function(e) {
+          umap_status <<- paste0("failed: ", conditionMessage(e))
+          log_msg("sample-level UMAP failed: ", conditionMessage(e))
+          seurat
+        }
+      )
+    }
+    writeLines(
+      umap_status,
+      stage_data_file("sample_level_umap_status.txt")
     )
-    write.csv(
-      umap_tbl,
-      stage_data_file("fig_03_04_05_umap_coordinates.csv"),
-      row.names = FALSE
-    )
+    if ("umap" %in% Reductions(seurat)) {
+      umap_tbl <- as.data.frame(Embeddings(seurat, reduction = "umap"))
+      umap_tbl$cell <- rownames(umap_tbl)
+      umap_tbl$seurat_clusters <- as.character(seurat$seurat_clusters)
+      umap_tbl$condition <- seurat$condition
+      umap_tbl$sample <- seurat$sample
+      write.csv(
+        umap_tbl,
+        stage_data_file("fig_03_04_05_umap_coordinates.csv"),
+        row.names = FALSE
+      )
+    }
 
     cluster_counts <- as.data.frame(table(
       seurat_clusters = seurat$seurat_clusters,
@@ -1134,21 +1169,7 @@ if (stage_allowed("04")) run_stage("04_cluster", {
     seurat <- tryCatch(
       RunPCA(seurat, npcs = npcs, verbose = FALSE),
       error = function(e) {
-        log_msg("PCA failed; using dummy reduction: ", conditionMessage(e))
-        set.seed(42)
-        emb <- matrix(
-          rnorm(ncol(seurat) * max(1, npcs)),
-          nrow = ncol(seurat),
-          ncol = max(1, npcs)
-        )
-        rownames(emb) <- colnames(seurat)
-        colnames(emb) <- paste0("PC_", seq_len(max(1, npcs)))
-        seurat[["pca"]] <- CreateDimReducObject(
-          embeddings = emb,
-          key = "PC_",
-          assay = "RNA"
-        )
-        seurat
+        stop(paste0("PCA failed; refusing to create a placeholder reduction: ", conditionMessage(e)))
       }
     )
     reduction <- "pca"
@@ -1199,21 +1220,7 @@ if (stage_allowed("04")) run_stage("04_cluster", {
         verbose = FALSE
       ),
       error = function(e) {
-        log_msg("UMAP failed; using dummy embedding: ", conditionMessage(e))
-        set.seed(42)
-        emb <- matrix(
-          rnorm(ncol(seurat) * 2),
-          nrow = ncol(seurat),
-          ncol = 2
-        )
-        rownames(emb) <- colnames(seurat)
-        colnames(emb) <- c("UMAP_1", "UMAP_2")
-        seurat[["umap"]] <- CreateDimReducObject(
-          embeddings = emb,
-          key = "umap_",
-          assay = "RNA"
-        )
-        seurat
+        stop(paste0("UMAP failed; refusing to create a placeholder reduction: ", conditionMessage(e)))
       }
     )
 
@@ -1258,6 +1265,8 @@ if (stage_allowed("05")) run_stage("05_annotation", {
   if (!exists("seurat")) {
     seurat <- readRDS(ckpt_path("seurat_clustered.rds"))
   }
+  # Marker-based cell annotation is only valid when columns represent cells.
+  if (dataset_mode != "sample_level") {
   marker_list <- list(
     T_NK = c("CD3D", "CD3E", "CD8A", "NKG7", "GNLY", "CD4"),
     B = c("CD79A", "MS4A1", "CD19", "IGHG1"),
@@ -1699,6 +1708,8 @@ if (stage_allowed("05")) run_stage("05_annotation", {
     log_msg("saved figure: fig_07_annotation_confusion_heatmap.png")
   } else {
     log_msg("skip figure: fig_07_annotation_confusion_heatmap.png")
+  }
+
   }
 
   if (dataset_mode == "sample_level") {

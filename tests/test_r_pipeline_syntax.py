@@ -164,6 +164,13 @@ def _driver_deps_available() -> bool:
 
 @unittest.skipUnless(RSCRIPT, "Rscript not installed")
 class TestRPipelineSyntax(unittest.TestCase):
+    def test_no_placeholder_embeddings_are_generated(self):
+        text = R_PIPELINE.read_text(encoding="utf-8")
+        self.assertNotIn("using dummy reduction", text)
+        self.assertNotIn("using dummy embedding", text)
+        self.assertIn("sample_level_pca_status.txt", text)
+        self.assertIn("sample_level_umap_status.txt", text)
+
     def test_every_r_script_parses(self):
         scripts = _r_scripts()
         self.assertTrue(scripts, "no R scripts found under src/analysis or src/pipeline")

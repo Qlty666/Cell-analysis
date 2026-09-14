@@ -12,7 +12,7 @@ import numpy as np
 import pandas as pd
 from scipy import stats
 from sklearn.base import clone
-from sklearn.calibration import calibration_curve
+from sklearn.calibration import CalibratedClassifierCV, calibration_curve
 from sklearn.ensemble import (
     ExtraTreesClassifier,
     GradientBoostingClassifier,
@@ -171,6 +171,124 @@ def _pipeline(
     return Pipeline(steps)
 
 
+def _fit_calibrated(
+    estimator: Pipeline,
+    X: pd.DataFrame,
+    y: pd.Series,
+    *,
+    seed: int,
+) -> Any:
+    """Fit a probability calibrator using training data only."""
+    min_class = int(y.value_counts().min())
+    folds = min(3, min_class)
+    if folds < 2:
+        return clone(estimator).fit(X, y)
+    calibrated = CalibratedClassifierCV(
+        estimator=clone(estimator),
+        method="sigmoid",
+        cv=folds,
+    )
+    calibrated.fit(X, y)
+    return calibrated
+
+
+def _nested_cv_evaluation(
+    candidate_models: dict[tuple[str, str], Pipeline],
+    X_by_feature: dict[str, pd.DataFrame],
+    y: pd.Series,
+    *,
+    seed: int,
+    outer_folds: int,
+    inner_folds: int,
+) -> tuple[pd.DataFrame, dict[str, Any], np.ndarray]:
+    """Select feature set and algorithm inside each outer training split."""
+    outer = StratifiedKFold(
+        n_splits=outer_folds,
+        shuffle=True,
+        random_state=seed,
+    )
+    probabilities = np.full(len(y), np.nan, dtype=float)
+    selected_rows: list[dict[str, Any]] = []
+    for fold_number, (train_index, test_index) in enumerate(
+        outer.split(next(iter(X_by_feature.values())), y),
+        start=1,
+    ):
+        candidate_scores: dict[tuple[str, str], float] = {}
+        for key, estimator in candidate_models.items():
+            X = X_by_feature[key[0]].iloc[train_index]
+            y_train = y.iloc[train_index]
+            min_class = int(y_train.value_counts().min())
+            folds = max(2, min(inner_folds, min_class))
+            inner = StratifiedKFold(
+                n_splits=folds,
+                shuffle=True,
+                random_state=seed + fold_number,
+            )
+            scores: list[float] = []
+            for inner_train, inner_test in inner.split(X, y_train):
+                try:
+                    fitted = clone(estimator).fit(
+                        X.iloc[inner_train],
+                        y_train.iloc[inner_train],
+                    )
+                    probability = fitted.predict_proba(
+                        X.iloc[inner_test]
+                    )[:, 1]
+                    scores.append(
+                        float(
+                            roc_auc_score(
+                                y_train.iloc[inner_test],
+                                probability,
+                            )
+                        )
+                    )
+                except Exception:  # noqa: BLE001
+                    continue
+            if scores:
+                candidate_scores[key] = float(np.mean(scores))
+        if not candidate_scores:
+            raise RuntimeError(
+                f"no nested-CV candidate completed in outer fold {fold_number}"
+            )
+        best_key = max(
+            candidate_scores,
+            key=lambda key: (candidate_scores[key], key[1], key[0]),
+        )
+        X_train = X_by_feature[best_key[0]].iloc[train_index]
+        X_test = X_by_feature[best_key[0]].iloc[test_index]
+        y_train = y.iloc[train_index]
+        model = _fit_calibrated(
+            candidate_models[best_key],
+            X_train,
+            y_train,
+            seed=seed,
+        )
+        probabilities[test_index] = model.predict_proba(X_test)[:, 1]
+        selected_rows.append(
+            {
+                "outer_fold": fold_number,
+                "feature_set": best_key[0],
+                "model": best_key[1],
+                "inner_auc": candidate_scores[best_key],
+                "n_train": int(len(train_index)),
+                "n_test": int(len(test_index)),
+            }
+        )
+    if np.isnan(probabilities).any():
+        raise RuntimeError("nested cross-validation left samples without predictions")
+    selected = pd.DataFrame(selected_rows)
+    metrics = {
+        "auc": float(roc_auc_score(y, probabilities)),
+        "average_precision": float(
+            average_precision_score(y, probabilities)
+        ),
+        "brier": float(brier_score_loss(y, probabilities)),
+        "selected_models": selected["model"].value_counts().to_dict(),
+        "selected_feature_sets": selected["feature_set"].value_counts().to_dict(),
+    }
+    return selected, metrics, probabilities
+
+
 def run_ml_validation(
     training_expression_path: Path,
     training_metadata_path: Path,
@@ -226,17 +344,24 @@ def run_ml_validation(
     rows: list[dict[str, Any]] = []
     fitted_models: dict[tuple[str, str], tuple[Pipeline, pd.Series]] = {}
     cv_predictions: dict[tuple[str, str], dict[str, np.ndarray]] = {}
+    candidate_models: dict[tuple[str, str], Pipeline] = {}
+    X_by_feature = {
+        name: all_matrix[features]
+        for name, (features, _, _) in feature_sets.items()
+    }
+    model_zoo = _model_zoo(seed)
     splitter = StratifiedKFold(n_splits=cv_folds, shuffle=True, random_state=seed)
 
     for feature_name, (features, dynamic_k, feature_description) in feature_sets.items():
         X = all_matrix[features]
-        for model_name, estimator in _model_zoo(seed).items():
+        for model_name, estimator in model_zoo.items():
             selector = (
                 SelectKBest(score_func=f_classif, k=min(dynamic_k, len(features)))
                 if dynamic_k
                 else None
             )
             model = _pipeline(estimator, selector=selector)
+            candidate_models[(feature_name, model_name)] = model
             fold_auc: list[float] = []
             fold_ap: list[float] = []
             fold_brier: list[float] = []
@@ -265,11 +390,16 @@ def run_ml_validation(
                 )
                 rows.append(
                     {
-                        "feature_set": feature_name,
-                        "feature_description": feature_description,
-                        "model": model_name,
-                        "n_features": len(features),
-                        "status": "failed",
+                            "feature_set": feature_name,
+                            "feature_description": feature_description,
+                            "model": model_name,
+                            "n_features": (
+                                min(int(dynamic_k), len(features))
+                                if dynamic_k
+                                else len(features)
+                            ),
+                            "n_input_features": len(features),
+                            "status": "failed",
                         "error": str(exc),
                     }
                 )
@@ -279,7 +409,12 @@ def run_ml_validation(
                     "feature_set": feature_name,
                     "feature_description": feature_description,
                     "model": model_name,
-                    "n_features": len(features),
+                    "n_features": (
+                        min(int(dynamic_k), len(features))
+                        if dynamic_k
+                        else len(features)
+                    ),
+                    "n_input_features": len(features),
                     "status": "ok",
                     "cv_auc_mean": float(np.mean(fold_auc)),
                     "cv_auc_sd": float(np.std(fold_auc, ddof=1)),
@@ -301,10 +436,45 @@ def run_ml_validation(
     )
     if valid_performance.empty:
         raise RuntimeError("all ML models failed")
-    best = valid_performance.iloc[0]
-    best_key = (str(best["feature_set"]), str(best["model"]))
-    best_model, _ = fitted_models[best_key]
+    nested_selection, nested_metrics, nested_probability = _nested_cv_evaluation(
+        candidate_models,
+        X_by_feature,
+        y,
+        seed=seed,
+        outer_folds=cv_folds,
+        inner_folds=max(2, min(3, cv_folds)),
+    )
+    nested_selection.to_csv(
+        output_dir / "nested_model_selection.csv",
+        index=False,
+    )
+    selected_model = max(
+        nested_metrics["selected_models"],
+        key=lambda value: (
+            nested_metrics["selected_models"][value],
+            value,
+        ),
+    )
+    selected_feature_set = max(
+        nested_metrics["selected_feature_sets"],
+        key=lambda value: (
+            nested_metrics["selected_feature_sets"][value],
+            value,
+        ),
+    )
+    best_key = (selected_feature_set, selected_model)
+    best_model_raw, _ = fitted_models[best_key]
+    best_model = _fit_calibrated(
+        best_model_raw,
+        X_by_feature[best_key[0]],
+        y,
+        seed=seed,
+    )
     cv = cv_predictions[best_key]
+    best = valid_performance[
+        (valid_performance["feature_set"] == best_key[0])
+        & (valid_performance["model"] == best_key[1])
+    ].iloc[0]
 
     _plot_auc_heatmap(performance, output_dir / "fig3a_multimodel_auc_heatmap.png")
     _plot_roc(
@@ -314,10 +484,11 @@ def run_ml_validation(
         title=f"{best_key[0]} / {best_key[1]}",
     )
     calibration = _plot_calibration(
-        cv["y"],
-        cv["probability"],
+        y.to_numpy(),
+        nested_probability,
         output_dir / "fig3e_calibration_curve.png",
     )
+    calibration = {**calibration, **nested_metrics}
     cv_frame = pd.DataFrame(
         {
             "sample_id": sample_ids,
@@ -345,7 +516,7 @@ def run_ml_validation(
     validation.to_csv(output_dir / "external_validation_metrics.csv", index=False)
 
     shap = _shap_analysis(
-        best_model,
+        best_model_raw,
         all_matrix,
         y,
         output_dir,
@@ -359,6 +530,8 @@ def run_ml_validation(
             "best_model": best_key[1],
             "cv_auc": float(best["cv_auc_mean"]),
             "cv_auc_sd": float(best["cv_auc_sd"]),
+            "nested_cv": nested_metrics,
+            "calibration_method": "sigmoid_calibrated_outer_fold",
             "cv_auc_target": 0.85,
             "cv_auc_target_met": bool(float(best["cv_auc_mean"]) >= 0.85),
             "calibration": calibration,
@@ -394,7 +567,7 @@ def validate_external_model(
     ranked_training = training.T.astype(float).rank(axis=0, method="average", pct=True)
     ranked_validation = validation.T.astype(float).rank(axis=0, method="average", pct=True)
     metadata = pd.read_csv(validation_metadata_path, index_col=0)
-    model_columns = list(getattr(fitted_model, "feature_names_in_", []))
+    model_columns = _estimator_feature_names(fitted_model)
     if not model_columns:
         imputer = fitted_model.named_steps.get("imputer")
         model_columns = list(getattr(imputer, "feature_names_in_", []))
@@ -458,6 +631,25 @@ def validate_external_model(
         "target_auc": 0.8,
         "target_met": bool(auc >= 0.8),
     }
+
+
+def _estimator_feature_names(estimator: Any) -> list[str]:
+    """Return fitted feature names from plain or calibrated estimators."""
+    names = list(getattr(estimator, "feature_names_in_", []))
+    if names:
+        return names
+    if hasattr(estimator, "named_steps"):
+        for step in estimator.named_steps.values():
+            names = _estimator_feature_names(step)
+            if names:
+                return names
+    calibrated = getattr(estimator, "calibrated_classifiers_", None)
+    if calibrated:
+        for wrapper in calibrated:
+            names = _estimator_feature_names(getattr(wrapper, "estimator", None))
+            if names:
+                return names
+    return []
 
 
 def _plot_auc_heatmap(performance: pd.DataFrame, output: Path) -> None:

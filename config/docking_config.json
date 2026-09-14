@@ -66,7 +66,7 @@
     "topology_dir": null,
     "em_steps": 5000,
     "equil_steps": 5000,
-    "prod_steps": 250000,
+    "prod_steps": 50000000,
     "dt_ps": 0.002,
     "temperature": 300,
     "pressure": 1.0,

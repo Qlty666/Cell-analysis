@@ -24,8 +24,8 @@ def parse_args(argv: list[str] | None = None) -> argparse.Namespace:
     parser = argparse.ArgumentParser(
         description=(
             "Run the local 6PPD-Q / NAFLD pipeline defined in 实验方案一: "
-            "compound targets, disease targets, PPI, ML, single-cell, docking "
-            "and GROMACS preparation."
+            "compound targets, disease targets, multi-source evidence, PPI, ML, "
+            "single-cell, docking and GROMACS preparation."
         )
     )
     parser.add_argument(

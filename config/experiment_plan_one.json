@@ -57,6 +57,16 @@
     "cv_folds": 5,
     "seed": 42
   },
+  "evidence": {
+    "enabled": true,
+    "config_file": "config/evidence_sources.json",
+    "target_scope": "intersection",
+    "max_target_symbols": 500,
+    "top_n": 50,
+    "benchmark_positive": [],
+    "benchmark_negative": [],
+    "allow_network": true
+  },
   "single_cell": {
     "mouse": {
       "max_cells": 5000

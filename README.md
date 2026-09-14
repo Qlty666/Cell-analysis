@@ -1,14 +1,15 @@
 # Liver Cancer Bioinformatics Workflow
 
-> 当前版本：1.6.0
+> 当前版本：1.7.0
 
-面向肝癌研究的本地生信自动化工作流，整合三条可实际运行的流水线：
+面向肝癌研究的本地生信自动化工作流，整合多条可实际运行的流水线：
 
 - 表达谱分析（单细胞 / bulk RNA-seq / microarray 等）：GEO 数据下载、QC、差异表达、富集分析和 ML 可解释性分析；单细胞数据额外执行双细胞检测、聚类注释。
 - 虚拟筛选（CADD）：靶点证据收集、受体/配体准备、AutoDock Vina 并行对接、命中排序、精细重对接、ML/DL 重打分和 MD/外部工具交接。
 - 独立分子对接：单独运行受体/配体准备、AutoDock Vina 对接、结果分析、精细重对接和 HTML 报告，不依赖虚拟筛选的旁路分析。
 - 全自动集成流水线：从表达分析直接筛选关键基因/蛋白，再自动完成证据富集、虚拟敲除、虚拟筛选、MD/ML/工具交接、网络毒理学/FAERS 和细胞反馈，最终输出集成报告和湿实验验证方案。
 - 高级多队列分析：样本级与基因级数据识别、limma/ComBat、WGCNA、多模型机器学习、外部验证、免疫浸润/生存分析和本地 MR/共定位。
+- 多数据库证据中心：统一保存 Open Targets、ChEMBL、BindingDB、PubChem BioAssay、GWAS Catalog、GTEx、HPA 和 DepMap/本地快照等证据，输出覆盖率、来源消融稳定性和靶点优先级。
 
 ## 1. 项目解决什么问题
 
@@ -190,6 +191,7 @@ liverbio expression GSE125449 --output ../liver_cancer --species auto
 liverbio docking pipeline --config config/docking_config.json
 liverbio full --accession GSE125449 --output ../liver_cancer --workdir ../liver_cancer_full
 liverbio datasets --disease "liver cancer" --max-results 20
+liverbio evidence --disease NAFLD --targets GPAT3,PPP2R2A --output <OUTPUT_DIR>\evidence
 liverbio web --page full
 liverbio doctor
 liverbio setup
@@ -284,6 +286,18 @@ GEO 下载器在没有补充 count matrix 时会回退解析 `series_matrix` 表
 网络毒理学现在支持 CSV、TSV、JSON、JSONL 和目录自动发现，并增加 closeness、eigenvector、PageRank、MCC 和 consensus PPI hub 评分；设置 `network_toxicology.run_enrichment=true` 可对交集基因运行 GO/KEGG。
 
 虚拟筛选默认保持单次运行；在配置中设置 `docking.seeds` 和 `docking.replicates` 可执行多随机种子重复，分析阶段会输出中位亲和力、标准差、重复稳定性和 consensus rank。`docking.positive_control_pdbqt` 与 `docking.positive_control_max_affinity` 可执行已知配体对照。MD 可选执行蛋白 PCA/FEL，并通过 `md_simulation.mmpbsa_command` 接入本地 gmx_MMPBSA 或 Amber MM/PBSA 命令。
+
+### 2.11 多数据库证据中心
+
+新增独立证据层 `src/evidence/`，把不同数据库的靶点证据保存为统一、可追溯的长表，并将“没有检索到证据”和“负证据”严格区分。默认开放连接器覆盖 Open Targets、ChEMBL、BindingDB、PubChem BioAssay、GWAS Catalog、GTEx 和 Human Protein Atlas；DepMap、CTD、Tox21/ToxCast、LINCS、DisGeNET 以及 GeneCards、OMIM、TTD、DrugBank 等本地授权导出可通过本地表连接器接入。
+
+```text
+liverbio evidence --config config/evidence_sources.json \
+  --disease NAFLD --targets GPAT3,PPP2R2A --output <OUTPUT_DIR>\evidence
+```
+
+证据按 direct experimental、curated、predicted、genetic、disease association、liver context、dependency、pathway 和 structure 分层。评分只使用实际存在的类别，缺失类别保留为 `NaN` 并写入 `missing_categories`，同时通过 `source_ablation.csv` 评估移除任一来源后的排序稳定性。详细记录结构、来源矩阵和本地数据接入示例见 `docs/evidence_hub.md` 与 `config/evidence_local_sources.example.json`。
+大规模联网查询前可设置 `LIVER_CONTACT_EMAIL`，便于远程数据库在 API 流量异常时联系运行者。
 
 ## 3. 安装方法
 
@@ -449,7 +463,7 @@ python scripts\run_experiment_plan_one.py `
 python scripts\liverbio.py experiment-plan-one --config config\experiment_plan_one.json
 ```
 
-默认阶段为 `data,targets,disease,ppi,bulk,ml,mouse,human,docking,md,classify,report`。
+默认阶段为 `data,targets,disease,evidence,ppi,bulk,ml,mouse,human,docking,md,classify,figure_audit,report`。
 可以只运行或从指定阶段恢复：
 
 ```bash
@@ -968,6 +982,7 @@ liverbio analysis-export GSE125449
 | --- | --- |
 | `scripts/run_pipeline.py` | 表达分析 CLI 入口 |
 | `scripts/run_experiment_plan_one.py` | 实验方案一（6PPD-Q / NAFLD）专用 CLI 入口 |
+| `scripts/run_evidence_hub.py` | 多数据库靶点证据采集、覆盖评价、来源消融与优先级排序入口 |
 | `scripts/run_docking.py` | 虚拟筛选 CLI 入口 |
 | `scripts/run_full_pipeline.py` | 全自动集成流水线 CLI 入口 |
 | `scripts/run_molecular_docking.py` | 独立分子对接 CLI 入口 |
@@ -1004,6 +1019,7 @@ liverbio analysis-export GSE125449
 | `package_for_new_computer.bat` | 新电脑源码包生成入口 |
 | `src/analysis/*` | R/Python 分析实现（QC、聚类、DEG、富集、CellChat、ML） |
 | `src/experiment_plan_one/*` | 实验方案一的数据、靶点、PPI、ML、单细胞、对接与报告实现 |
+| `src/evidence/*` | 统一证据模型、SQLite 证据库、数据库连接器、覆盖感知评分和来源消融分析 |
 | `src/analysis/analysis_pipeline.R` | 表达分析驱动脚本（参数、阶段调度与模块加载） |
 | `src/analysis/R/*.R` | 表达分析函数模块（读取、QC、聚类、注释、DEG、富集、出图） |
 | `src/common/*` | Rscript/工具路径、环境探测与通用 HTTP/HTML 工具 |
@@ -1037,9 +1053,10 @@ liverbio analysis-export GSE125449
 | `web/web_state.py` | 网页端任务、队列与历史运行时状态 |
 | `web/web_results.py` | 网页端任务状态、历史与结果清单读取 |
 | `web/templates/*` | 全流程、表达分析、数据集、虚拟筛选、分子对接、结果清单等页面模板 |
-| `config/*.json` | 表达分析、对接、独立分子对接和全流程配置 |
+| `config/*.json` | 表达分析、对接、独立分子对接、全流程和多数据库证据源配置 |
 | `skills/liver-*/SKILL.md` | Codex skill 定义 |
 | `docs/project_structure.md` | 代码文件结构化说明 |
+| `docs/evidence_hub.md` | 多数据库证据中心的数据模型、来源、评分和 CLI 说明 |
 | `pytest.ini` | pytest 配置（`testpaths = tests`） |
 | `tests/conftest.py` | pytest 共享 `sys.path` 引导 |
 | `tests/test_*.py` | 单元/集成测试 |
@@ -1078,6 +1095,7 @@ Script/
 │   ├── run_docking.py
 │   ├── run_full_pipeline.py
 │   ├── run_molecular_docking.py
+│   ├── run_evidence_hub.py
 │   ├── liverbio.py
 │   ├── install_codex_skills.py
 │   ├── run_web_full_new_datasets.py
@@ -1088,6 +1106,8 @@ Script/
 │   ├── project_config.json
 │   ├── docking_config.json
 │   ├── molecular_docking_config.json
+│   ├── evidence_sources.json
+│   ├── evidence_local_sources.example.json
 │   └── full_pipeline_config.json
 ├── src/
 │   ├── analysis/        # 表达分析 R/Python（analysis_pipeline.R 驱动 + R/ 模块）
@@ -1095,6 +1115,7 @@ Script/
 │   ├── common/          # 环境探测、HTTP 与 HTML 工具
 │   ├── data/            # 数据下载与转换
 │   ├── docking/         # 虚拟筛选/CADD/MD/虚拟敲除
+│   ├── evidence/        # 多数据库证据、SQLite 证据库、覆盖评分与消融分析
 │   ├── molecular_docking/ # 独立分子对接
 │   ├── liverbio_suite/  # liverbio 统一入口
 │   ├── pipeline/        # 流水线编排、阶段路径、集成报告与细胞反馈
@@ -1135,8 +1156,16 @@ MIT License. See `LICENSE` for details.
 
 ## 9. 更新日志
 
-### 未发布
+### v1.7.0
 
+- 新增 `src/evidence/` 多数据库证据中心：统一证据模型、SQLite 证据库、来源运行记录、实体和关系证据长表、覆盖感知评分与 leave-one-source-out 消融分析。
+- 新增 Open Targets、ChEMBL、BindingDB、PubChem BioAssay、GWAS Catalog、GTEx、Human Protein Atlas 和 DepMap/本地快照连接器；CTD、Tox21/ToxCast、LINCS、DisGeNET 及授权数据库支持本地表接入。
+- 实验方案一新增 `evidence` 阶段，位于 `disease` 与 `ppi` 之间，输出 `02b_evidence/target_priority.csv`、证据矩阵、来源消融和完整 SQLite 证据库。
+- 机器学习改为外层折内完成特征集和模型选择，并使用训练折内 sigmoid 校准后的概率进行外部验证；新增嵌套模型选择记录。
+- 修复样本级表达数据使用随机 PCA/UMAP 占位图的问题：改为真实 PCA，样本数不足时明确跳过 UMAP，单细胞 PCA/UMAP 失败时不再伪造降维结果。
+- 对接重复种子不足时自动生成互不相同的确定性随机种子，避免把同一 seed 的重复运行误报为独立重复。
+- 默认 GROMACS 生产步数调整为 100 ns，并增加证据阶段签名、阶段输出校验和虚拟敲除输入签名，配置或输入变化时不再静默复用旧结果。
+- 全量测试通过：426 个测试用例 + 80 个 subtests。
 - 将 v1.6.0 新增的高级分析、MR/共定位、分析工作区导出、多队列验证、网络多来源靶点、重复对接、阳性对照、PCA/FEL、MM/PBSA 和 KEGG GSEA 状态同步到网页端。
 - 新增网页版“高级分析”页，支持任务日志、状态轮询、历史记录和结果文件下载；全自动流水线页可配置 Advanced/MR 并衔接高级分析优先级表。
 - 真实数据验证页新增随机全流程、多队列靶点、真实 PDB 证据和随机证据/对接盒四类验证入口。

@@ -67,21 +67,21 @@ def run_docking(cfg: ResolvedConfig, log):
         row for row in rows
         if row.get("pdbqt") and Path(row["pdbqt"]).exists()
     ]
-    seeds = cfg.get("docking", "seeds") or []
-    if not isinstance(seeds, (list, tuple)):
-        seeds = [seeds]
-    seeds = [int(seed) for seed in seeds if str(seed).strip()]
+    base_seed = int(cfg.get("docking", "seed", 42))
+    raw_seeds = cfg.get("docking", "seeds") or []
+    if not isinstance(raw_seeds, (list, tuple)):
+        raw_seeds = [raw_seeds]
+    seeds = [int(seed) for seed in raw_seeds if str(seed).strip()]
     if not seeds:
-        seeds = [int(cfg.get("docking", "seed", 42))]
+        seeds = [base_seed]
     replicates = max(1, int(cfg.get("docking", "replicates", 1)))
-    if replicates > len(seeds):
-        seeds = [seeds[index % len(seeds)] for index in range(replicates)]
+    seeds = _replicate_seeds(seeds, base_seed, replicates)
     tasks = []
     for row in prepared:
         for replicate in range(1, replicates + 1):
             task = dict(row)
             task["replicate"] = replicate
-            task["seed"] = int(seeds[(replicate - 1) % len(seeds)])
+            task["seed"] = int(seeds[replicate - 1])
             tasks.append(task)
     if not tasks:
         raise DockingError("no prepared PDBQT ligands found in the manifest")
@@ -157,6 +157,21 @@ def run_docking(cfg: ResolvedConfig, log):
         summary["best_affinity"],
     )
     return summary
+
+
+def _replicate_seeds(
+    configured: list[int],
+    base_seed: int,
+    replicates: int,
+) -> list[int]:
+    """Return distinct deterministic seeds for independent Vina repetitions."""
+    seeds = list(dict.fromkeys(int(seed) for seed in configured))
+    candidate = int(base_seed)
+    while len(seeds) < replicates:
+        if candidate not in seeds:
+            seeds.append(candidate)
+        candidate += 1
+    return seeds[:replicates]
 
 
 def _run_positive_control(
