@@ -944,7 +944,11 @@ def make_venn_figure(
             ("B",): len(values[1] - values[0]),
             ("AB",): len(values[0] & values[1]),
         }
-        positions = {"A": (-1.15, 0), "B": (1.15, 0), "AB": (0, 0)}
+        positions = {
+            ("A",): (-1.15, 0),
+            ("B",): (1.15, 0),
+            ("AB",): (0, 0),
+        }
     else:
         centers = [
             (0.0, 0.95),

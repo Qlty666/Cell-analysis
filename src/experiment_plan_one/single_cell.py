@@ -12,6 +12,7 @@ from pathlib import Path
 from typing import Any
 
 import anndata as ad
+import matplotlib.patheffects as path_effects
 import matplotlib.pyplot as plt
 import numpy as np
 import pandas as pd
@@ -435,7 +436,11 @@ def _plot_umap(
         markerscale=2.5,
         bbox_to_anchor=(1.01, 1),
         loc="upper left",
-        frameon=False,
+        frameon=True,
+        framealpha=0.9,
+        edgecolor="#c7d0d8",
+        borderpad=0.35,
+        labelspacing=0.3,
     )
     save_figure(fig, output)
 
@@ -735,7 +740,7 @@ def _plot_cell_communication(
                 "connectionstyle": "arc3,rad=0.08",
             },
         )
-    nx.draw_networkx_labels(
+    label_texts = nx.draw_networkx_labels(
         graph,
         position,
         labels={
@@ -747,6 +752,10 @@ def _plot_cell_communication(
         font_color="#1f2933",
         ax=ax,
     )
+    for text in label_texts.values():
+        text.set_path_effects(
+            [path_effects.withStroke(linewidth=1.8, foreground="white")]
+        )
     handles = [
         plt.Line2D([0], [0], color="#c05b4d", lw=3, label="HFD > NCD"),
         plt.Line2D([0], [0], color="#4f7fa8", lw=3, label="HFD < NCD"),

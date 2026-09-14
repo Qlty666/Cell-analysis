@@ -10,6 +10,7 @@ from pathlib import Path
 from typing import Any
 
 import matplotlib.pyplot as plt
+import matplotlib.patheffects as path_effects
 import networkx as nx
 import numpy as np
 import pandas as pd
@@ -364,7 +365,7 @@ def _draw_network(
                 color="none",
                 markerfacecolor="#aebac3",
                 markersize=7,
-                label="STRING context nodes",
+                label="STRING context nodes (unlabeled)",
             ),
         ]
     else:
@@ -377,13 +378,8 @@ def _draw_network(
             linewidths=0.6,
             edgecolors="white",
         )
-    ranked_context_labels = sorted(
-        (node for node in node_order if node not in focus_genes),
-        key=lambda node: degree.get(node, 0),
-        reverse=True,
-    )[:8]
     if focus_genes:
-        nx.draw_networkx_labels(
+        focus_texts = nx.draw_networkx_labels(
             graph,
             position,
             ax=ax,
@@ -393,16 +389,10 @@ def _draw_network(
             font_weight="bold",
             font_color="#102b3d",
         )
-    if ranked_context_labels:
-        nx.draw_networkx_labels(
-            graph,
-            position,
-            ax=ax,
-            labels={node: node for node in ranked_context_labels},
-            font_size=5.2,
-            font_family="Arial",
-            font_color="#53616d",
-        )
+        for text in focus_texts.values():
+            text.set_path_effects(
+                [path_effects.withStroke(linewidth=1.8, foreground="white")]
+            )
     if legend_handles:
         ax.legend(
             handles=legend_handles,

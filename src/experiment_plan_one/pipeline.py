@@ -1581,6 +1581,7 @@ def _render_results_summary(
     )
     if audit_path.exists():
         audit = read_json(audit_path, {})
+        overlap_counts = audit.get("label_overlap_counts") or {}
         lines += [
             "",
             "## Figure Audit",
@@ -1592,6 +1593,16 @@ def _render_results_summary(
             (
                 "- Resolution/vector issues: "
                 f"{audit.get('resolution_or_vector_issue_count', 0)}"
+            ),
+            (
+                "- Label overlap: "
+                f"severe={overlap_counts.get('严重', 0)}, "
+                f"minor={overlap_counts.get('轻微', 0)}, "
+                f"none={overlap_counts.get('无', 0)}"
+            ),
+            (
+                "- Duplicate SVG text anchors: "
+                f"{audit.get('duplicate_text_anchor_panel_count', 0)}"
             ),
             (
                 "- Detailed review: "

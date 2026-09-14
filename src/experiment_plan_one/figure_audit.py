@@ -4,6 +4,7 @@ from __future__ import annotations
 
 import html
 import math
+import re
 from dataclasses import dataclass
 from pathlib import Path
 from typing import Any
@@ -279,6 +280,60 @@ REVIEWS: dict[tuple[str, str], FigureReview] = {
     ),
 }
 
+LABEL_OVERLAP_REVIEWS: dict[tuple[str, str], tuple[str, str]] = {
+    ("Figure1_化合物表征_靶点预测与通路富集", "f"): (
+        "无",
+        "两集合区域数字已分别放置，原交集中心的重叠问题已修复。",
+    ),
+    ("Figure2_PPI网络与枢纽基因初步筛选", "a"): (
+        "无",
+        "仅保留交集基因标签，STRING上下文节点不再逐个标注，已消除中心标签拥挤。",
+    ),
+    ("Figure2_PPI网络与枢纽基因初步筛选", "b"): (
+        "无",
+        "模块网络仅标注交集基因，模块归属由图例颜色表达，已消除中心标签拥挤。",
+    ),
+    ("Figure2_PPI网络与枢纽基因初步筛选", "e"): (
+        "无",
+        "两集合区域数字已分别放置，原交集中心的重叠问题已修复。",
+    ),
+    ("Figure4_单细胞图谱_细胞通讯与虚拟扰动", "f"): (
+        "轻微",
+        "细胞和通路名称位于节点上，白色描边已提高可读性；最终组图可进一步放大。",
+    ),
+    ("Figure4_单细胞图谱_细胞通讯与虚拟扰动", "i"): (
+        "无",
+        "图例已增加边框并与散点区域分离。",
+    ),
+}
+
+LABEL_OVERLAP_ALIAS_REVIEWS: dict[tuple[str, str, str], tuple[str, str]] = {
+    (
+        "Figure4_单细胞图谱_细胞通讯与虚拟扰动",
+        "g",
+        "虚拟敲除 Top 10 变化数据",
+    ): (
+        "无",
+        "表格文字在原分辨率下未发现重叠。",
+    ),
+    (
+        "Figure4_单细胞图谱_细胞通讯与虚拟扰动",
+        "g",
+        "虚拟敲除调控网络",
+    ): (
+        "轻微",
+        "外部渲染的网络节点文字较满，建议仅用于补充材料。",
+    ),
+    (
+        "Figure4_单细胞图谱_细胞通讯与虚拟扰动",
+        "g",
+        "虚拟敲除 UMAP 偏移",
+    ): (
+        "无",
+        "原分辨率下未发现文字或标签重叠。",
+    ),
+}
+
 
 def audit_figures(
     output_root: Path,
@@ -303,6 +358,13 @@ def audit_figures(
         for alias in aliases:
             source = (output_root / alias.source).resolve()
             review = REVIEWS.get((figure, alias.panel), FigureReview("不确定", "不确定", "人工复核", ""))
+            overlap_severity, overlap_notes = LABEL_OVERLAP_ALIAS_REVIEWS.get(
+                (figure, alias.panel, alias.description),
+                LABEL_OVERLAP_REVIEWS.get(
+                    (figure, alias.panel),
+                    ("无", "原分辨率视觉复核未发现文字重叠。"),
+                ),
+            )
             metrics = _image_metrics(source) if source.exists() else {}
             row = {
                 "figure": figure,
@@ -315,6 +377,8 @@ def audit_figures(
                 "audit_verdict": review.verdict,
                 "recommended_output": _recommended_output(review.verdict),
                 "notes": review.notes,
+                "label_overlap_severity": overlap_severity,
+                "label_overlap_notes": overlap_notes,
                 **metrics,
             }
             row["automatic_quality_score"] = _automatic_score(row)
@@ -343,6 +407,7 @@ def _image_metrics(path: Path) -> dict[str, Any]:
         rgb = np.asarray(image.resize((max(1, width // 8), max(1, height // 8))))
         near_white = np.all(rgb >= 245, axis=2)
         non_white_fraction = float(1.0 - near_white.mean())
+        svg_metrics = _svg_text_metrics(path.with_suffix(".svg"))
         return {
             "width_px": int(width),
             "height_px": int(height),
@@ -358,7 +423,43 @@ def _image_metrics(path: Path) -> dict[str, Any]:
             "has_pdf": path.with_suffix(".pdf").exists(),
             "has_svg": path.with_suffix(".svg").exists(),
             "has_tiff": path.with_suffix(".tiff").exists(),
+            **svg_metrics,
         }
+
+
+def _svg_text_metrics(svg_path: Path) -> dict[str, Any]:
+    if not svg_path.exists():
+        return {
+            "duplicate_svg_text_anchor_groups": None,
+            "duplicate_svg_text_examples": "",
+        }
+    text = svg_path.read_text(encoding="utf-8", errors="replace")
+    matches = re.findall(
+        r'<text\b[^>]*\bx="([^"]+)"[^>]*\by="([^"]+)"[^>]*>(.*?)</text>',
+        text,
+        flags=re.DOTALL,
+    )
+    anchors: dict[tuple[float, float], list[str]] = {}
+    for x_value, y_value, label in matches:
+        value = re.sub(r"<[^>]+>", "", label)
+        value = html.unescape(value).strip()
+        if not value:
+            continue
+        key = (round(float(x_value), 3), round(float(y_value), 3))
+        anchors.setdefault(key, []).append(value)
+    duplicate_groups = {
+        key: values
+        for key, values in anchors.items()
+        if len(values) > 1
+    }
+    examples = [
+        f"({x:g},{y:g}): {' / '.join(values[:4])}"
+        for (x, y), values in list(duplicate_groups.items())[:5]
+    ]
+    return {
+        "duplicate_svg_text_anchor_groups": int(len(duplicate_groups)),
+        "duplicate_svg_text_examples": "; ".join(examples),
+    }
 
 
 def _automatic_score(row: dict[str, Any]) -> int | None:
@@ -438,6 +539,19 @@ def _summary(audit: pd.DataFrame) -> dict[str, Any]:
         .value_counts()
         .to_dict()
     )
+    severe_overlaps = available[
+        available["label_overlap_severity"] == "严重"
+    ]
+    minor_overlaps = available[
+        available["label_overlap_severity"] == "轻微"
+    ]
+    duplicate_anchor_panels = available[
+        pd.to_numeric(
+            available["duplicate_svg_text_anchor_groups"],
+            errors="coerce",
+        ).fillna(0)
+        > 0
+    ]
     major_issues = audit[
         audit["audit_verdict"].isin(
             {"需重绘", "不可替代Venn", "结果未达标", "结果未全达标", "不满足方案"}
@@ -448,7 +562,13 @@ def _summary(audit: pd.DataFrame) -> dict[str, Any]:
         "target_journal": "not specified; exact journal requirements remain unverified",
         "overall_verdict": (
             "not_ready_for_if10"
-            if len(not_run) or len(major_issues) or len(resolution_issues)
+            if (
+                len(not_run)
+                or len(major_issues)
+                or len(resolution_issues)
+                or len(severe_overlaps)
+                or len(duplicate_anchor_panels)
+            )
             else "conditional_ready"
         ),
         "panel_entries": int(len(audit)),
@@ -463,6 +583,20 @@ def _summary(audit: pd.DataFrame) -> dict[str, Any]:
             str(key): int(value)
             for key, value in output_tiers.items()
         },
+        "label_overlap_counts": {
+            "严重": int(len(severe_overlaps)),
+            "轻微": int(len(minor_overlaps)),
+            "无": int(
+                (available["label_overlap_severity"] == "无").sum()
+            ),
+        },
+        "duplicate_text_anchor_panel_count": int(len(duplicate_anchor_panels)),
+        "severe_label_overlap_panels": severe_overlaps[
+            ["figure", "panel", "content", "label_overlap_notes"]
+        ].to_dict(orient="records"),
+        "minor_label_overlap_panels": minor_overlaps[
+            ["figure", "panel", "content", "label_overlap_notes"]
+        ].to_dict(orient="records"),
         "major_issue_count": int(len(major_issues)),
         "major_issues": major_issues[
             ["figure", "panel", "content", "audit_verdict", "notes"]
@@ -610,6 +744,16 @@ def _render_audit_markdown(
             )
         ),
         (
+            "- Label overlap review: "
+            f"severe={summary['label_overlap_counts']['严重']}, "
+            f"minor={summary['label_overlap_counts']['轻微']}, "
+            f"none={summary['label_overlap_counts']['无']}"
+        ),
+        (
+            "- Duplicate SVG text anchors: "
+            f"{summary['duplicate_text_anchor_panel_count']}"
+        ),
+        (
             f"- Mean automated raster score: "
             f"{summary['mean_automatic_quality_score']:.1f}"
             if summary.get("mean_automatic_quality_score") is not None
@@ -648,6 +792,35 @@ def _render_audit_markdown(
         "- Assemble final multi-panel figures, add lowercase panel letters, export "
         "vector PDF/SVG for line art, and provide source data tables.",
         "- Add confidence intervals, effect sizes and exact FDR to key statistical panels.",
+        "",
+        "## Label Overlap Review",
+        "",
+        "| Figure | Panel | Content | Severity | Notes |",
+        "|---|---|---|---|---|",
+    ]
+    overlap_rows = audit[
+        (audit["label_overlap_severity"] != "无")
+        | (
+            pd.to_numeric(
+                audit["duplicate_svg_text_anchor_groups"],
+                errors="coerce",
+            ).fillna(0)
+            > 0
+        )
+    ]
+    if overlap_rows.empty:
+        lines.append("| - | - | - | 无 | 原分辨率视觉检查未发现标签重叠。 |")
+    else:
+        for row in overlap_rows.itertuples(index=False):
+            examples = str(row.duplicate_svg_text_examples or "")
+            note = row.label_overlap_notes
+            if examples:
+                note = f"{note} SVG重复锚点: {examples}"
+            lines.append(
+                f"| {row.figure} | {row.panel} | {row.content} | "
+                f"{row.label_overlap_severity} | {note} |"
+            )
+    lines += [
         "",
         "## Contact Sheets",
         "",

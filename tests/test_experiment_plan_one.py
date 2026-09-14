@@ -3,6 +3,7 @@
 
 from __future__ import annotations
 
+import re
 import tempfile
 import unittest
 from pathlib import Path
@@ -49,12 +50,27 @@ class TestExperimentPlanOne(unittest.TestCase):
         with tempfile.TemporaryDirectory() as tmp:
             output = Path(tmp) / "venn.png"
             make_venn_figure(
-                {"A": {"EGFR", "STAT3"}, "B": {"STAT3", "TNF"}},
+                {
+                    "A": {"A1", "A2", "A3", "SHARED"},
+                    "B": {"SHARED", "B1", "B2", "B3", "B4"},
+                },
                 output,
                 title="test",
             )
             self.assertTrue(output.exists())
             self.assertGreater(output.stat().st_size, 100)
+            svg_path = output.with_suffix(".svg")
+            self.assertTrue(svg_path.exists())
+            svg = svg_path.read_text(encoding="utf-8")
+            number_positions = {
+                value: x
+                for x, value in re.findall(
+                    r'<text[^>]* x="([^"]+)"[^>]*>(\d+)</text>',
+                    svg,
+                )
+            }
+            self.assertEqual(set(number_positions), {"1", "3", "4"})
+            self.assertEqual(len(set(number_positions.values())), 3)
 
     def test_config_merge(self):
         config = merge_config(default_config(), {"ml": {"seed": 7}})
