@@ -105,6 +105,9 @@ def write_reproducibility_manifest(
         / "candidate_universe_evidence_expanded.csv",
         "key_genes": out_dir / "key_genes.csv",
         "gene_evidence": out_dir / "gene_evidence.csv",
+        "omics_qc_summary": out_dir / "omics_qc_summary.json",
+        "omics_qc_sample_metrics": out_dir
+        / "omics_qc_sample_metrics.csv",
         "target_priority": out_dir / "target_priority.csv",
         "integrated_target_priority": out_dir
         / "integrated_target_priority.csv",

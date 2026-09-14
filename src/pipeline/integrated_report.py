@@ -41,6 +41,7 @@ def _publication_readiness(
     out_dir: Path,
     structural_quality: dict | None = None,
     external_validation_summary: dict | None = None,
+    omics_qc_summary: dict | None = None,
 ) -> dict:
     """Summarize which publication-strength gates have actually been met."""
     try:
@@ -129,6 +130,10 @@ def _publication_readiness(
         errors="coerce",
     ).iloc[0]
     checks = {
+        "omics_qc": bool(
+            str((omics_qc_summary or {}).get("status", "")) == "completed"
+            and (omics_qc_summary or {}).get("gate_passed", False)
+        ),
         "multi_source_evidence": (
             str(evidence_hub_summary.get("status", "")) == "completed"
             and int(
@@ -173,6 +178,7 @@ def _publication_readiness(
         ),
     }
     required = (
+        "omics_qc",
         "multi_source_evidence",
         "candidate_universe_not_top50_only",
         "evidence_target_coverage",
@@ -362,6 +368,7 @@ def generate_integrated_report(
         else pd.DataFrame()
     )
     qc_metrics = _read_json(out_dir / "qc_metrics.json")
+    omics_qc_summary = _read_json(out_dir / "omics_qc_summary.json")
     differential_abundance = (
         pd.read_csv(out_dir / "differential_abundance.csv")
         if (out_dir / "differential_abundance.csv").exists()
@@ -383,6 +390,7 @@ def generate_integrated_report(
         out_dir,
         structural_quality,
         external_validation,
+        omics_qc_summary,
     )
     readiness_frame = pd.DataFrame(
         [
@@ -723,6 +731,15 @@ a {{ color: #1d4ed8; }}
   {_render_table(differential_abundance, differential_abundance_cols)}
 </div>
 <div class="card">
+  <h2>Pseudobulk omics QC ({_esc(omics_qc_summary.get("status", "skipped"))})</h2>
+  <p class="muted">
+    genes: {_esc(omics_qc_summary.get("n_genes", "NA"))};
+    samples: {_esc(omics_qc_summary.get("n_samples", "NA"))};
+    missing fraction: {_esc(omics_qc_summary.get("missing_fraction", "NA"))};
+    groups: {_esc(omics_qc_summary.get("group_counts", {}))}
+  </p>
+</div>
+<div class="card">
   <h2>External validation</h2>
   <p class="muted">{_esc(external_validation.get("reason", ""))}</p>
   {_render_table(external_validation_frame, external_validation_cols)}
@@ -838,6 +855,7 @@ a {{ color: #1d4ed8; }}
     summary = {
         "single_cell": sc_summary,
         "qc_gate": qc_gate,
+        "omics_qc": omics_qc_summary,
         "differential_abundance": differential_abundance_summary,
         "key_genes": len(key_genes),
         "candidate_universe": len(candidate_universe),
@@ -925,6 +943,10 @@ a {{ color: #1d4ed8; }}
             ),
             "benchmark": benchmark,
             "readiness": readiness,
+            "omics_qc_gate_passed": omics_qc_summary.get(
+                "gate_passed",
+                False,
+            ),
         },
     )
     summary["reproducibility_manifest"] = os.path.relpath(
@@ -957,6 +979,7 @@ a {{ color: #1d4ed8; }}
                 out_dir / "external_validation_summary.json"
             ),
             "gene_evidence_csv": out_dir / "gene_evidence.csv",
+            "omics_qc_summary_json": out_dir / "omics_qc_summary.json",
             "evidence_hub_summary_json": (
                 out_dir / "evidence_hub" / "evidence_hub_summary.json"
             ),

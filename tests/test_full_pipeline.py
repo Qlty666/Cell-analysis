@@ -727,6 +727,10 @@ class TestScientificGates(unittest.TestCase):
                     "status": "completed",
                     "auroc": 0.82,
                 },
+                {
+                    "status": "completed",
+                    "gate_passed": True,
+                },
             )
             self.assertEqual(readiness["level"], "publication_grade")
 

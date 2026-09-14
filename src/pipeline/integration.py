@@ -95,6 +95,7 @@ from .target_priority import (  # noqa: E402
     write_target_priority_summary,
 )
 from .structural_quality import build_structural_quality  # noqa: E402
+from .omics_qc import run_omics_qc  # noqa: E402
 from .stage_paths import (  # noqa: E402
     _integration_dir,
     _marker,
@@ -136,6 +137,8 @@ STAGE_OUTPUTS = {
         "data/knockout/expression.csv",
         "data/knockout/metadata.csv",
         "data/knockout/inputs_summary.json",
+        "outputs/integration/omics_qc_summary.json",
+        "outputs/integration/omics_qc_sample_metrics.csv",
     ),
     "05": (
         "outputs/integration/knockout_summary.json",
@@ -2654,6 +2657,10 @@ def _stage_knockout_inputs(args, workdir: Path, ctx: dict) -> None:
         ctx["single_cell_root"],
         workdir,
         skip_pseudobulk=args.skip_pseudobulk,
+    )
+    ctx["omics_qc"] = run_omics_qc(
+        workdir,
+        _integration_dir(workdir),
     )
 
 

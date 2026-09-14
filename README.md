@@ -1003,6 +1003,7 @@ liverbio analysis-export GSE125449
 - `knockout_summary.json`：启发式扰动评分与验证方案汇总。
 - `integration_summary.json` 中的 `publication_readiness`：论文支持等级和未通过的质量门控。
 - `reproducibility_manifest.json`：记录 Git 提交与 dirty 状态、Python/平台、关键依赖版本、配置/输入文件 SHA256、关键输出哈希和运行参数，便于跨机器复现和审计。
+- `omics_qc_summary.json` / `omics_qc_sample_metrics.csv`：伪 bulk 表达矩阵的基因/样本数、重复基因、缺失率、零值率、负值、样本元数据匹配、分组样本数和每个样本的表达分布。
 - `docking_targets.csv`：每个靶点的对接状态、命中数和最佳亲和力。
 - `cadd_downstream_summary.json` / `cadd_targets.csv`：MD 准备/运行、ML 重打分和 MD/外部工具导出的逐靶点状态。
 - `structural_quality_summary.json` / `structural_quality_targets.csv`：结构验证门控，分别记录对接阳性对照、重复种子一致性、MD 完成状态、蛋白/配体 RMSD 尾部稳定性和 MM-PBSA 可用性。
