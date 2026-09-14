@@ -168,6 +168,9 @@ def _publication_readiness(
         "mmpbsa_available": bool(
             structural_gates.get("mmpbsa_available", False)
         ),
+        "posebusters_valid": bool(
+            structural_gates.get("posebusters_valid", False)
+        ),
     }
     required = (
         "multi_source_evidence",
@@ -185,6 +188,7 @@ def _publication_readiness(
         passed == len(required)
         and checks["mechanistic_perturbation"]
         and checks["mmpbsa_available"]
+        and checks["posebusters_valid"]
     ):
         level = "publication_grade"
     elif passed == len(required):

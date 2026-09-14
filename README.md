@@ -1006,6 +1006,7 @@ liverbio analysis-export GSE125449
 - `docking_targets.csv`：每个靶点的对接状态、命中数和最佳亲和力。
 - `cadd_downstream_summary.json` / `cadd_targets.csv`：MD 准备/运行、ML 重打分和 MD/外部工具导出的逐靶点状态。
 - `structural_quality_summary.json` / `structural_quality_targets.csv`：结构验证门控，分别记录对接阳性对照、重复种子一致性、MD 完成状态、蛋白/配体 RMSD 尾部稳定性和 MM-PBSA 可用性。
+- `pose_qc_summary.json` / `pose_qc_results.csv`：当存在 SDF poses 且安装 PoseBusters 时执行物理合理性检查；缺少 SDF 或 PoseBusters 时会明确标记 unavailable/skipped，不会伪造通过状态。
 - `network_summary.json`：网络毒理学汇总；`outputs/run_001/network_toxicology/` 下含交集表、Venn 图、C-T-P-D 节点/边、XGMML 网络文件，Cytoscape 在线导出时另含 `figures/ctpd_network_cytoscape.png`。
 - `faers_summary.json`：FAERS 信号汇总；`outputs/run_001/faers/data/faers_signals.csv` 为信号表。
 - `cell_feedback/`：细胞反馈阶段输出，包括 `data/cell_scores.csv`、`data/feedback_targets.csv`、`data/celltype_summary.csv`、`data/celltype_enrichment.csv`、`data/condition_summary.csv`、`data/feedback_deg.csv`、`data/feedback_enrichment_go.csv`、`data/feedback_enrichment_kegg.csv`，以及 `fig_54` 至 `fig_62` 的结果图；其中 `fig_61/fig_62` 为反馈靶基因 GO/KEGG 富集 Top5 的通路-基因网络图。

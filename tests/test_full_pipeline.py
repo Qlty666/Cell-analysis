@@ -720,6 +720,7 @@ class TestScientificGates(unittest.TestCase):
                         "md_completed": True,
                         "md_rmsd_stability": True,
                         "mmpbsa_available": True,
+                        "posebusters_valid": True,
                     }
                 },
                 {

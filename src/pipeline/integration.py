@@ -152,6 +152,8 @@ STAGE_OUTPUTS = {
         "outputs/integration/cadd_targets.csv",
         "outputs/integration/structural_quality_summary.json",
         "outputs/integration/structural_quality_targets.csv",
+        "outputs/integration/pose_qc_summary.json",
+        "outputs/integration/pose_qc_results.csv",
     ),
     "08": ("outputs/integration/network_summary.json",),
     "09": ("outputs/integration/faers_summary.json",),

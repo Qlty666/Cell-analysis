@@ -9,6 +9,7 @@ from typing import Any
 import pandas as pd
 
 from docking.utils import safe_name, write_json
+from .pose_qc import run_pose_qc
 
 
 def _read_json(path: Path) -> dict:
@@ -162,6 +163,10 @@ def build_structural_quality(
             "ligand_rmsd_tail_std_nm": ligand_rmsd_std_cutoff_nm,
         },
     }
+    pose_qc = run_pose_qc(workdir, out_dir)
+    gates["posebusters_valid"] = bool(pose_qc.get("gate_passed", False))
+    summary["pose_qc"] = pose_qc
+    summary["all_publication_structural_gates"] = all(gates.values())
     out_dir.mkdir(parents=True, exist_ok=True)
     frame.to_csv(out_dir / "structural_quality_targets.csv", index=False)
     write_json(out_dir / "structural_quality_summary.json", summary)
