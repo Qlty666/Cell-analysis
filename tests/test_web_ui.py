@@ -1395,11 +1395,26 @@ class TestTemplatePolish(unittest.TestCase):
         ).read_text(encoding="utf-8")
         self.assertIn("/tasks/count", js)
         self.assertIn("nav-count", js)
+        self.assertIn("bindNavigation", js)
+        self.assertIn("nav-group-trigger", js)
+        self.assertIn("nav-toggle", js)
+        self.assertIn("aria-expanded", js)
         css = (
             APP_ROOT / "web" / "static" / "app.css"
         ).read_text(encoding="utf-8")
         self.assertIn(".topnav a .nav-count", css)
         self.assertIn(".topnav a .nav-count[hidden]", css)
+        self.assertIn(".nav-menu", css)
+        self.assertIn(".nav-group-menu", css)
+        self.assertIn(".nav-toggle", css)
+        self.assertIn(".nav-group.open > .nav-group-menu", css)
+        self.assertIn('data-nav', web_ui_module.NAV_HTML)
+        self.assertIn('id="primary-navigation"', web_ui_module.NAV_HTML)
+        self.assertIn('id="nav-tools-menu"', web_ui_module.NAV_HTML)
+        self.assertIn('id="nav-resources-menu"', web_ui_module.NAV_HTML)
+        rendered = web_ui_module.render_dock_page()
+        self.assertIn('data-nav', rendered)
+        self.assertIn('id="primary-navigation"', rendered)
 
     def test_guide_and_environment_pages_render(self):
         self.assertIn("/guide", web_ui_module.NAV_HTML)

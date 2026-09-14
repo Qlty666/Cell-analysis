@@ -8,46 +8,53 @@ from __future__ import annotations
 
 
 NAV_HTML = (
-    '<div class="topnav">'
+    '<div class="topnav" data-nav>'
+    '<a class="nav-brand" href="/" aria-label="返回首页">'
+    '<span class="nav-brand-mark" aria-hidden="true">LB</span>'
+    '<span class="nav-brand-text">LiverBio</span>'
+    '</a>'
+    '<nav class="nav-menu" id="primary-navigation" aria-label="主导航">'
     '<a href="/full">全自动流水线</a>'
-    '<a href="/environment">环境补全</a>'
     '<a href="/">表达分析</a>'
-    '<a href="/datasets">数据集搜索</a>'
+    '<a href="/datasets">数据集</a>'
+    '<a href="/results">结果清单</a>'
+    '<div class="nav-group">'
+    '<button type="button" class="nav-group-trigger" aria-expanded="false" '
+    'aria-haspopup="true" aria-controls="nav-tools-menu">'
+    '分析工具</button>'
+    '<div class="nav-group-menu" id="nav-tools-menu">'
     '<a href="/dock">虚拟筛选</a>'
-    '<a href="/md-simulation">分子动力学</a>'
     '<a href="/molecular-docking">分子对接</a>'
+    '<a href="/md-simulation">分子动力学</a>'
     '<a href="/knockout">虚拟敲除</a>'
     '<a href="/network">网络毒理学</a>'
     '<a href="/faers">FAERS</a>'
     '<a href="/validation">真实数据验证</a>'
     '<a href="/analysis">高级分析</a>'
-    '<a href="/results">结果清单</a>'
+    '</div>'
+    '</div>'
+    '<div class="nav-group">'
+    '<button type="button" class="nav-group-trigger" aria-expanded="false" '
+    'aria-haspopup="true" aria-controls="nav-resources-menu">'
+    '资源</button>'
+    '<div class="nav-group-menu" id="nav-resources-menu">'
     '<a href="/guide">使用教程</a>'
-    '<a href="/tasks" class="nav-right">任务进度</a>'
+    '<a href="/environment">环境补全</a>'
+    '</div>'
+    '</div>'
+    '</nav>'
+    '<a href="/tasks" class="nav-task nav-right">任务进度</a>'
+    '<button type="button" class="nav-toggle" aria-expanded="false" '
+    'aria-controls="primary-navigation" aria-label="展开导航">'
+    '<span class="nav-toggle-lines" aria-hidden="true">'
+    '<span></span><span></span><span></span></span>'
+    '<span class="nav-toggle-text">导航</span>'
+    '</button>'
     '</div>'
 )
-NAV_CSS = (
-    ".topnav{position:sticky;top:0;z-index:100;"
-    "background:#0f172a;padding:12px 28px;box-shadow:0 2px 8px rgba(15,23,42,.35);"
-    "display:flex;gap:18px;align-items:center;flex-wrap:wrap;}"
-    ".topnav a{color:#ffffff;text-decoration:none;font-size:15px;"
-    "font-weight:600;padding:6px 10px;border-radius:6px;"
-    "background:rgba(255,255,255,.08);}"
-    ".topnav a:hover,.topnav a.active{background:#1665c0;color:#fff;}"
-    ".topnav a .nav-count{display:inline-flex;align-items:center;"
-    "justify-content:center;min-width:20px;height:20px;margin-left:6px;"
-    "padding:0 6px;border-radius:999px;background:#f59e0b;color:#fff;"
-    "font-size:12px;font-weight:700;line-height:1;}"
-    ".topnav a .nav-count[hidden]{display:none;}"
-    ".topnav .nav-right{margin-left:auto;}"
-    "@media (max-width:900px){"
-    ".topnav{flex-wrap:nowrap;gap:6px;padding:7px 12px;overflow-x:auto;"
-    "scrollbar-width:none;-webkit-overflow-scrolling:touch;}"
-    ".topnav::-webkit-scrollbar{display:none;}"
-    ".topnav a{flex:0 0 auto;padding:5px 10px;font-size:13px;}"
-    ".topnav .nav-right{margin-left:0;}"
-    "}"
-)
+# Navigation styling lives in static/app.css so every page shares one source
+# of truth and the responsive menu cannot drift between templates.
+NAV_CSS = ""
 
 ENV_MODULES = {
     "expression": {
