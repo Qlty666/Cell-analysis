@@ -78,7 +78,7 @@ launchers\export_to_analysis.bat GSE235863
 
 ### 多数据库证据中心
 
-`liverbio evidence` 把 Open Targets、ChEMBL、BindingDB、PubChem BioAssay、GWAS Catalog、GTEx 和 HPA 等来源写入统一 SQLite 证据库，并输出目标优先级、证据矩阵和来源消融结果。DepMap、CTD、Tox21/ToxCast、LINCS、DisGeNET 及授权数据库通过 `config/evidence_local_sources.example.json` 的本地表映射接入。详细说明见 `docs/evidence_hub.md`。
+`liverbio evidence` 把 Open Targets、ChEMBL、BindingDB、PubChem BioAssay、GWAS Catalog、ClinVar、GTEx 和 HPA 等来源写入统一 SQLite 证据库，并输出目标优先级、证据矩阵和来源消融结果。全自动流水线还会把疾病/遗传证据发现的非 DEG 靶点并入扩展候选宇宙，并将旧版 ChEMBL、PDB、AlphaFold、Reactome 和 KEGG 证据标准化后参与排序。DepMap、CTD、Tox21/ToxCast、LINCS、DisGeNET、cBioPortal、OncoKB、CIViC、ClinicalTrials.gov 及授权数据库通过 `config/evidence_local_sources.example.json` 的本地表映射接入。详细说明见 `docs/evidence_hub.md`。
 
 网页版与命令行共用同一组入口：`/analysis` 可独立运行高级多队列分析、MR/共定位和结果导出；`/validation` 可选择随机 GSE 全流程、TCGA/GSE165816 多队列、真实 PDB 证据或随机证据/对接盒验证；全自动流水线可通过 `--advanced-priority-csv` 使用上一轮 `integrated_priority.csv` 调整关键基因排序。
 

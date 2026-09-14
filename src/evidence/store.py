@@ -221,6 +221,19 @@ class SQLiteEvidenceStore:
             self._connection,
         )
 
+    def delete_source_records(self, sources: Iterable[str]) -> int:
+        """Remove records from sources that failed in the current run."""
+        values = sorted({str(value) for value in sources if value})
+        if not values:
+            return 0
+        placeholders = ", ".join("?" for _ in values)
+        cursor = self._connection.execute(
+            f"DELETE FROM evidence_records WHERE source IN ({placeholders})",
+            values,
+        )
+        self._connection.commit()
+        return int(cursor.rowcount or 0)
+
     def summary(self) -> dict:
         counts = pd.read_sql_query(
             """

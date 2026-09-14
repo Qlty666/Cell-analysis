@@ -1,6 +1,6 @@
 ---
 name: liver-full-pipeline
-description: Run the integrated Liver Cancer Bioinformatics workflow from expression analysis through key targets, evidence, knockout, docking, MD/ML/handoff, network toxicology, FAERS, cell feedback, and report generation. Use only inside that project or when LIVER_PIPELINE_ROOT points to it.
+description: Run the integrated Liver Cancer Bioinformatics workflow from expression analysis through a multi-source candidate universe, evidence-aware target prioritisation, heuristic perturbation scoring, docking, MD/ML/handoff, network toxicology, FAERS, cell feedback, benchmark evaluation, and report generation. Use only inside that project or when LIVER_PIPELINE_ROOT points to it.
 ---
 
 # Liver Full Pipeline
@@ -29,12 +29,15 @@ The `--output` directory is the single-cell output root used by stage 01 and dow
 - Run `python scripts/liverbio.py full --list-stages` or `--dry-run` before a long first run when the user wants to confirm scope.
 - Do not pass `--force` by default; the stage markers preserve completed work and rerun only stale stages.
 - Respect the stage order 01-11 and use `--start-stage` only when the user needs to resume from a known stage.
+- Use evidence-aware target ranking (`target_priority.csv` / `integrated_target_priority.csv`) rather than the legacy `key_genes.csv` when selecting docking candidates.
+- Docking defaults to `GO` and `CONDITIONAL_GO` targets. Use `--allow-review-docking` only when the user explicitly wants exploratory docking of `REVIEW` targets.
+- Provide `--benchmark-positive`, `--benchmark-negative`, and `--benchmark-top-n` when evaluating ranking quality.
 - Report missing R, Python, Vina, or evidence-skill dependencies instead of continuing with fabricated output.
 - Keep user-provided labels (`--case-label`, `--normal-label`) verbatim; do not infer tumor/normal when the metadata is ambiguous.
 
 ## Useful options
 
-The full pipeline accepts `--skip-scrna`, `--skip-download`, `--skip-evidence-fetch`, `--skip-knockout`, `--skip-docking`, `--skip-md`, `--skip-network`, `--skip-faers`, and `--skip-cell-feedback` to run partial workflows. MD/ML/handoff and network/FAERS stages require no external data by default and write honest skipped summaries when inputs are absent. Additional options and config defaults are documented by `python scripts/run_full_pipeline.py --help` and `README.md`.
+The full pipeline accepts `--skip-scrna`, `--skip-download`, `--skip-evidence-fetch`, `--skip-evidence-hub`, `--skip-knockout`, `--skip-docking`, `--skip-md`, `--skip-network`, `--skip-faers`, and `--skip-cell-feedback` to run partial workflows. Evidence expansion, strict-source handling, benchmark targets, and docking selection thresholds are controlled by `config/full_pipeline_config.json`. MD/ML/handoff and network/FAERS stages require no external data by default and write honest skipped summaries when inputs are absent. Additional options and config defaults are documented by `python scripts/run_full_pipeline.py --help` and `README.md`.
 
 ## References
 

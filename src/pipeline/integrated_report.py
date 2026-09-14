@@ -47,10 +47,67 @@ def _publication_readiness(
     except Exception:
         positive_control = False
         replicates = 1
+    workdir = out_dir.parents[1]
+    benchmark = (
+        target_priority_summary.get("benchmark")
+        or evidence_hub_summary.get("benchmark")
+        or {}
+    )
+    benchmark_auroc = pd.to_numeric(
+        pd.Series([benchmark.get("auroc")]),
+        errors="coerce",
+    ).iloc[0]
+    benchmark_recall = pd.to_numeric(
+        pd.Series([benchmark.get("recall_at_n")]),
+        errors="coerce",
+    ).iloc[0]
+    benchmark_passed = bool(
+        (pd.notna(benchmark_auroc) and float(benchmark_auroc) >= 0.70)
+        or (
+            pd.notna(benchmark_recall)
+            and float(benchmark_recall) >= 0.50
+        )
+    )
+    external_validation_paths = (
+        out_dir / "external_validation" / "validation_summary.json",
+        out_dir
+        / "external_validation"
+        / "ml_external_validation.csv",
+        workdir
+        / "outputs"
+        / "run_001"
+        / "results"
+        / "05_validation"
+        / "data"
+        / "ml_external_validation.csv",
+        workdir
+        / "outputs"
+        / "run_001"
+        / "results"
+        / "05_validation"
+        / "data"
+        / "validation_external.csv",
+    )
+    mechanistic_path = (
+        workdir
+        / "outputs"
+        / "run_001"
+        / "results"
+        / "04_knockout"
+        / "in_silico"
+        / "insilico_summary.json"
+    )
     checks = {
         "multi_source_evidence": (
             str(evidence_hub_summary.get("status", "")) == "completed"
-            and int(evidence_hub_summary.get("source_count", 0) or 0) >= 3
+            and int(
+                evidence_hub_summary.get(
+                    "successful_source_count",
+                    evidence_hub_summary.get("source_count", 0),
+                )
+                or 0
+            )
+            >= 3
         ),
         "candidate_universe_not_top50_only": int(
             target_priority_summary.get("targets", 0) or 0
@@ -67,12 +124,11 @@ def _publication_readiness(
         "docking_positive_control": positive_control,
         "docking_replicates": replicates >= 3,
         "md_completed": int(cadd_summary.get("md_completed", 0) or 0) > 0,
-        "external_validation": (
-            out_dir
-            / "external_validation"
-            / "validation_summary.json"
-        ).exists(),
-        "mechanistic_perturbation": False,
+        "benchmark": benchmark_passed,
+        "external_validation": any(
+            path.exists() for path in external_validation_paths
+        ),
+        "mechanistic_perturbation": mechanistic_path.exists(),
     }
     required = (
         "multi_source_evidence",
@@ -81,21 +137,25 @@ def _publication_readiness(
         "docking_positive_control",
         "docking_replicates",
         "md_completed",
+        "benchmark",
         "external_validation",
     )
     passed = sum(bool(checks[name]) for name in required)
     if passed == len(required) and checks["mechanistic_perturbation"]:
         level = "publication_grade"
-    elif passed >= 4:
+    elif passed == len(required):
         level = "paper_supporting"
     else:
         level = "exploratory"
+    missing = [name for name in required if not checks[name]]
+    if not checks["mechanistic_perturbation"]:
+        missing.append("mechanistic_perturbation")
     return {
         "level": level,
         "passed": passed,
         "required": len(required),
         "checks": checks,
-        "missing": [name for name in required if not checks[name]],
+        "missing": missing,
     }
 
 
@@ -112,10 +172,17 @@ def generate_integrated_report(
     dataset_mode = str(sc_summary.get("dataset_mode", "single_cell"))
     sample_label = "samples" if dataset_mode != "single_cell" else "cells"
     key_genes = pd.read_csv(out_dir / "key_genes.csv") if (out_dir / "key_genes.csv").exists() else pd.DataFrame()
+    expanded_candidate_path = (
+        out_dir / "candidate_universe_evidence_expanded.csv"
+    )
     candidate_universe = (
-        pd.read_csv(out_dir / "candidate_universe.csv")
-        if (out_dir / "candidate_universe.csv").exists()
-        else pd.DataFrame()
+        pd.read_csv(expanded_candidate_path)
+        if expanded_candidate_path.exists()
+        else (
+            pd.read_csv(out_dir / "candidate_universe.csv")
+            if (out_dir / "candidate_universe.csv").exists()
+            else pd.DataFrame()
+        )
     )
     target_priority = (
         pd.read_csv(out_dir / "integrated_target_priority.csv")
@@ -248,6 +315,23 @@ def generate_integrated_report(
             for name, value in (readiness.get("checks") or {}).items()
         ]
     )
+    benchmark = (
+        target_priority_summary.get("benchmark")
+        or evidence_hub_summary.get("benchmark")
+        or {}
+    )
+    benchmark_frame = pd.DataFrame([benchmark]) if benchmark else pd.DataFrame()
+    benchmark_cols = [
+        column
+        for column in (
+            "recall_at_n",
+            "precision_at_n",
+            "auroc",
+            "n_positive",
+            "n_negative",
+        )
+        if column in benchmark_frame.columns
+    ]
 
     sc_html = _render_table(
         pd.DataFrame(
@@ -310,6 +394,7 @@ def generate_integrated_report(
         for c in [
             "priority_rank",
             "gene",
+            "candidate_origin",
             "decision",
             "integrated_score",
             "evidence_score",
@@ -526,6 +611,7 @@ a {{ color: #1d4ed8; }}
     {_esc(target_priority_summary.get("median_coverage_ratio", "NA"))}
   </p>
   {_render_table(target_priority, priority_cols)}
+  {_render_table(benchmark_frame, benchmark_cols)}
 </div>
 <div class="card">
   <h2>Key genes (top 20)</h2>
@@ -583,6 +669,7 @@ a {{ color: #1d4ed8; }}
   <ul>
     <li><a href="{rel(out_dir / 'key_genes.csv')}">key_genes.csv</a></li>
     <li><a href="{rel(out_dir / 'candidate_universe.csv') if (out_dir / 'candidate_universe.csv').exists() else '#'}">candidate_universe.csv</a></li>
+    <li><a href="{rel(out_dir / 'candidate_universe_evidence_expanded.csv') if (out_dir / 'candidate_universe_evidence_expanded.csv').exists() else '#'}">candidate_universe_evidence_expanded.csv</a></li>
     <li><a href="{rel(out_dir / 'target_priority.csv') if (out_dir / 'target_priority.csv').exists() else '#'}">target_priority.csv</a></li>
     <li><a href="{rel(out_dir / 'integrated_target_priority.csv') if (out_dir / 'integrated_target_priority.csv').exists() else '#'}">integrated_target_priority.csv</a></li>
     <li><a href="{rel(out_dir / 'evidence_hub' / 'evidence_coverage.csv') if (out_dir / 'evidence_hub' / 'evidence_coverage.csv').exists() else '#'}">evidence_coverage.csv</a></li>
@@ -617,6 +704,10 @@ a {{ color: #1d4ed8; }}
         "differential_abundance": differential_abundance_summary,
         "key_genes": len(key_genes),
         "candidate_universe": len(candidate_universe),
+        "candidate_origins": target_priority_summary.get(
+            "candidate_origins",
+            {},
+        ),
         "target_priority": {
             **target_priority_summary,
             "top_targets": target_priority.head(20).to_dict(orient="records"),
@@ -681,6 +772,9 @@ a {{ color: #1d4ed8; }}
         {
             "key_genes_csv": out_dir / "key_genes.csv",
             "candidate_universe_csv": out_dir / "candidate_universe.csv",
+            "candidate_universe_evidence_expanded_csv": (
+                out_dir / "candidate_universe_evidence_expanded.csv"
+            ),
             "target_priority_csv": out_dir / "target_priority.csv",
             "integrated_target_priority_csv": (
                 out_dir / "integrated_target_priority.csv"

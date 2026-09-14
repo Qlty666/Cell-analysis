@@ -14,6 +14,7 @@ from unittest import mock
 import pandas as pd
 
 from evidence.connectors import (
+    ClinVarConnector,
     DepMapLocalConnector,
     ConnectorError,
     LocalTableConnector,
@@ -94,6 +95,9 @@ class TestEvidenceModelAndStore(unittest.TestCase):
                 summary = store.summary()
                 self.assertEqual(summary["n_records"], 2)
                 self.assertEqual(summary["n_targets"], 1)
+                removed = store.delete_source_records(["ChEMBL"])
+                self.assertEqual(removed, 1)
+                self.assertEqual(store.summary()["n_records"], 1)
                 paths = store.export_csv(root / "export")
                 self.assertTrue(Path(paths["records"]).exists())
 
@@ -199,6 +203,24 @@ class TestConnectors(unittest.TestCase):
         self.assertEqual(len(records), 1)
         self.assertEqual(records[0].target_symbol, "EGFR")
         self.assertEqual(records[0].tier, EvidenceTier.CURATED)
+
+    def test_clinvar_parser(self):
+        payload = {"esearchresult": {"count": "25"}}
+        with mock.patch(
+            "evidence.connectors._json_get",
+            return_value=payload,
+        ):
+            records = ClinVarConnector().collect(
+                EvidenceContext(
+                    disease={"name": "liver cancer"},
+                    target_symbols=["TP53"],
+                    max_records_per_source=10,
+                )
+            )
+        self.assertEqual(len(records), 1)
+        self.assertEqual(records[0].target_symbol, "TP53")
+        self.assertEqual(records[0].tier, EvidenceTier.GENETIC)
+        self.assertGreater(records[0].score or 0, 0)
 
     def test_local_table_connector(self):
         with tempfile.TemporaryDirectory() as tmp:

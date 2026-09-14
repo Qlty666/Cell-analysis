@@ -292,6 +292,19 @@ a.file-link { color: #1665c0; text-decoration: none; margin-right: 12px; }
         <label>证据中心配置
           <input name="evidence_hub_config" value="config/evidence_sources.json">
         </label>
+        <label>候选靶点扩展上限
+          <input name="candidate_expansion_max_targets" type="number" min="0" value="1000">
+          <span class="field-hint">从疾病和遗传证据中额外并入的非 DEG 靶点数量。</span>
+        </label>
+        <label>Benchmark 阳性靶点
+          <input name="benchmark_positive_targets" placeholder="GPC3,TP53,CTNNB1">
+        </label>
+        <label>Benchmark 阴性靶点
+          <input name="benchmark_negative_targets" placeholder="ALB,APOA1">
+        </label>
+        <label>Benchmark Top N
+          <input name="benchmark_top_n" type="number" min="1" value="20">
+        </label>
         <label>对接靶点数
           <input name="docking_targets" type="number" min="0" value="3">
         </label>
@@ -428,6 +441,7 @@ a.file-link { color: #1665c0; text-decoration: none; margin-right: 12px; }
         <label class="toggle"><input type="checkbox" name="skip_pseudobulk" value="1"> 跳过伪 bulk 导出</label>
         <label class="toggle"><input type="checkbox" name="skip_knockout" value="1"> 跳过启发式靶点优先级评分</label>
         <label class="toggle"><input type="checkbox" name="skip_docking" value="1"> 跳过虚拟筛选</label>
+        <label class="toggle"><input type="checkbox" name="allow_review_docking" value="1"> 允许 REVIEW 靶点进入对接</label>
         <label class="toggle"><input type="checkbox" name="skip_md" value="1"> 跳过 MD/工具交接</label>
         <label class="toggle"><input type="checkbox" name="skip_handoff" value="1"> 跳过 MD/外部工具导出</label>
         <label class="toggle"><input type="checkbox" name="skip_docking_ml" value="1"> 跳过对接 ML 重打分</label>
@@ -867,6 +881,7 @@ function renderStats(data) {
   const fb = summary.cell_feedback || {};
   const priority = summary.target_priority || {};
   const readiness = summary.publication_readiness || {};
+  const benchmark = priority.benchmark || {};
   const qc = (data.qc_metrics || {}).qc_gate || summary.qc_gate || {};
   const cards = [
     {
@@ -880,6 +895,10 @@ function renderStats(data) {
     {
       label: '证据覆盖靶点',
       value: priority.evidence_covered !== undefined ? priority.evidence_covered : 0,
+    },
+    {
+      label: 'Benchmark AUROC',
+      value: benchmark.auroc !== undefined && benchmark.auroc !== null ? Number(benchmark.auroc).toFixed(3) : 'NA',
     },
     {
       label: '论文就绪等级',
@@ -958,6 +977,7 @@ function renderResults(data) {
     '；论文就绪：' + esc(readiness.level || 'exploratory') +
     '；GO：' + esc((priority.decisions || {}).GO || 0) +
     '；证据覆盖中位数：' + esc(priority.median_coverage_ratio !== null && priority.median_coverage_ratio !== undefined ? Number(priority.median_coverage_ratio).toFixed(3) : 'NA') +
+    '；Benchmark AUROC：' + esc(benchmark.auroc !== undefined && benchmark.auroc !== null ? Number(benchmark.auroc).toFixed(3) : 'NA') +
     '；关键基因：' + esc(summary.key_genes !== undefined ? summary.key_genes : data.key_genes.length) +
     '；敲除评分基因数：' + esc(ko.genes_scored !== undefined ? ko.genes_scored : 0) +
     '；对接成功：' + esc(dock.ok !== undefined ? dock.ok : 0) +
@@ -996,7 +1016,7 @@ function renderResults(data) {
   renderTable('diffAbundanceTable', data.differential_abundance, [
     'celltype', 'n_cells', 'chi2', 'p_value', 'p_adjust', 'significant', 'direction'
   ]);
-  renderTable('priorityTable', data.target_priority, ['priority_rank', 'gene', 'decision', 'integrated_score', 'evidence_score', 'coverage_ratio', 'knockout_score', 'evidence_status']);
+  renderTable('priorityTable', data.target_priority, ['priority_rank', 'gene', 'candidate_origin', 'decision', 'integrated_score', 'evidence_score', 'coverage_ratio', 'knockout_score', 'evidence_status']);
   renderTable('evidenceCoverageTable', data.evidence_coverage, ['source', 'tier', 'evidence_type', 'relation', 'n_records', 'n_targets']);
   renderTable('sourceAblationTable', data.source_ablation, ['target_symbol', 'ablation_rank_sd', 'max_rank_delta', 'rank_stability', 'ablation_runs']);
   renderTable('keyTable', data.key_genes, ['rank', 'gene', 'direction', 'avg_log2fc', 'p_val_adj']);

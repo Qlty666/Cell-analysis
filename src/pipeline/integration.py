@@ -62,6 +62,8 @@ from data.geo_downloader import canonical_accession  # noqa: E402
 from evidence import (  # noqa: E402
     EvidenceContext,
     EvidenceHub,
+    EvidenceRecord,
+    EvidenceTier,
     SQLiteEvidenceStore,
 )
 
@@ -125,6 +127,7 @@ STAGE_OUTPUTS = {
     ),
     "03": (
         "outputs/integration/gene_evidence.csv",
+        "outputs/integration/candidate_universe_evidence_expanded.csv",
         "outputs/integration/target_priority.csv",
         "outputs/integration/target_priority_summary.json",
     ),
@@ -204,6 +207,10 @@ DEFAULT_EVIDENCE = {
     "allow_network": True,
     "strict": False,
     "legacy_pool_size": 50,
+    "candidate_expansion_max_targets": 1000,
+    "benchmark_positive_targets": "",
+    "benchmark_negative_targets": "",
+    "benchmark_top_n": 20,
 }
 
 DEFAULT_TARGET_PRIORITY = {
@@ -216,6 +223,10 @@ DEFAULT_TARGET_PRIORITY = {
     "go_min_score": 0.75,
     "go_min_coverage": 0.50,
     "conditional_min_score": 0.50,
+}
+
+DEFAULT_DOCKING_SELECTION = {
+    "allow_review": False,
 }
 
 DEFAULT_NETWORK_TOXICOLOGY = {
@@ -431,6 +442,19 @@ def _stage_signature(code: str, args, workdir: Path, ctx: dict) -> str:
                 "legacy_pool_size": int(
                     getattr(args, "evidence_legacy_pool_size", 50) or 50
                 ),
+                "candidate_expansion_max_targets": int(
+                    getattr(args, "candidate_expansion_max_targets", 1000)
+                    or 0
+                ),
+                "benchmark_positive_targets": str(
+                    getattr(args, "benchmark_positive_targets", "")
+                ),
+                "benchmark_negative_targets": str(
+                    getattr(args, "benchmark_negative_targets", "")
+                ),
+                "benchmark_top_n": int(
+                    getattr(args, "benchmark_top_n", 20) or 20
+                ),
                 "target_priority_weights": _json_sorted(
                     getattr(args, "target_priority_weights", {})
                 ),
@@ -491,6 +515,9 @@ def _stage_signature(code: str, args, workdir: Path, ctx: dict) -> str:
                 "max_targets": int(getattr(args, "docking_targets", 3) or 3),
                 "ligand_library": getattr(args, "ligand_library", None),
                 "skip_docking": bool(getattr(args, "skip_docking", False)),
+                "allow_review": bool(
+                    getattr(args, "allow_review_docking", False)
+                ),
             }
         )
     elif code == "07":
@@ -1721,6 +1748,7 @@ def run_docking_stage(
     ligand_library: str | None,
     force: bool = False,
     priority_csv: Path | None = None,
+    allow_review: bool = False,
 ) -> dict:
     out_dir = _integration_dir(workdir)
     out_dir.mkdir(parents=True, exist_ok=True)
@@ -1736,6 +1764,45 @@ def run_docking_stage(
             selection = pd.DataFrame()
     if selection.empty:
         selection = pd.read_csv(key_genes_csv)
+    if "decision" in selection.columns and not allow_review:
+        eligible = selection[
+            selection["decision"].astype(str).str.upper().isin(
+                {"GO", "CONDITIONAL_GO"}
+            )
+        ]
+        selection = eligible
+    if selection.empty:
+        empty = pd.DataFrame(
+            columns=[
+                "gene",
+                "status",
+                "pdb_id",
+                "uniprot",
+                "box_mode",
+                "ligand_count",
+                "hits",
+                "best_affinity",
+                "output_dir",
+                "error",
+                "ligand_library",
+                "ligand_library_sha256",
+            ]
+        )
+        empty.to_csv(out_dir / "docking_targets.csv", index=False)
+        summary = {
+            "status": "skipped",
+            "reason": (
+                "no GO/CONDITIONAL_GO targets selected; "
+                "enable allow_review to dock REVIEW targets"
+            ),
+            "ok": 0,
+            "failed": 0,
+            "skipped": 0,
+            "selection_source": selection_source,
+            "selection_csv": str(priority_csv or key_genes_csv),
+        }
+        write_json(out_dir / "docking_summary.json", summary)
+        return summary
     genes = (
         selection["gene"]
         .astype(str)
@@ -1920,9 +1987,20 @@ def _stage_key_targets(args, workdir: Path, ctx: dict) -> None:
 
 def _candidate_universe_frame(workdir: Path, ctx: dict) -> pd.DataFrame:
     candidate_path = (
-        ctx.get("candidate_universe_path")
-        or _integration_dir(workdir) / "candidate_universe.csv"
+        ctx.get("candidate_universe_expanded_path")
+        or _integration_dir(workdir)
+        / "candidate_universe_evidence_expanded.csv"
     )
+    if not Path(candidate_path).exists():
+        candidate_path = (
+            ctx.get("candidate_universe_path")
+            or _integration_dir(workdir) / "candidate_universe.csv"
+        )
+    if not Path(candidate_path).exists():
+        candidate_path = (
+            ctx.get("key_genes_path")
+            or _integration_dir(workdir) / "key_genes.csv"
+        )
     key_path = (
         ctx.get("key_genes_path")
         or _integration_dir(workdir) / "key_genes.csv"
@@ -1939,14 +2017,248 @@ def _candidate_universe_frame(workdir: Path, ctx: dict) -> pd.DataFrame:
     return frame[frame["gene"] != ""].drop_duplicates("gene", keep="first")
 
 
+def _legacy_evidence_records(
+    frame: pd.DataFrame,
+    source_version: str = "full-pipeline legacy evidence",
+) -> list[EvidenceRecord]:
+    """Convert legacy per-gene evidence counts into canonical evidence records."""
+    records: list[EvidenceRecord] = []
+    if frame is None or frame.empty or "gene" not in frame.columns:
+        return records
+
+    def number(row: pd.Series, column: str) -> float:
+        value = pd.to_numeric(row.get(column), errors="coerce")
+        return 0.0 if pd.isna(value) else float(value)
+
+    for _, row in frame.iterrows():
+        gene = str(row.get("gene") or "").strip().upper()
+        if not gene:
+            continue
+        chembl = max(
+            number(row, "chembl_bioactivities"),
+            number(row, "known_ligands"),
+        )
+        if chembl > 0:
+            records.append(
+                EvidenceRecord(
+                    source="LegacyTargetEvidence",
+                    source_record_id=f"{gene}:chembl_bioactivity",
+                    evidence_type="direct_bioactivity_aggregate",
+                    subject_type="compound",
+                    subject_id="ChEMBL aggregate",
+                    relation="targets",
+                    object_type="target",
+                    object_id=gene,
+                    target_symbol=gene,
+                    tier=EvidenceTier.EXPERIMENTAL,
+                    source_version=source_version,
+                    source_group="chembl",
+                    score=float(
+                        np.clip(np.log1p(chembl) / np.log1p(50.0), 0.0, 1.0)
+                    ),
+                    payload={"bioactivity_count": chembl},
+                )
+            )
+        pdb_count = number(row, "pdb_structures")
+        if pdb_count > 0:
+            records.append(
+                EvidenceRecord(
+                    source="LegacyTargetEvidence",
+                    source_record_id=f"{gene}:pdb_structure",
+                    evidence_type="experimental_structure",
+                    subject_type="target",
+                    subject_id=gene,
+                    relation="has_structure",
+                    object_type="structure",
+                    object_id=f"PDB:{pdb_count}",
+                    target_symbol=gene,
+                    tier=EvidenceTier.EXPERIMENTAL,
+                    source_version=source_version,
+                    source_group="pdb",
+                    score=float(min(1.0, 0.65 + 0.1 * pdb_count)),
+                    payload={"pdb_structures": pdb_count},
+                )
+            )
+        alphafold_count = number(row, "alphafold_structures")
+        if alphafold_count > 0:
+            records.append(
+                EvidenceRecord(
+                    source="LegacyTargetEvidence",
+                    source_record_id=f"{gene}:alphafold_structure",
+                    evidence_type="predicted_structure",
+                    subject_type="target",
+                    subject_id=gene,
+                    relation="has_structure",
+                    object_type="structure",
+                    object_id="AlphaFold",
+                    target_symbol=gene,
+                    tier=EvidenceTier.PREDICTED,
+                    source_version=source_version,
+                    source_group="alphafold",
+                    score=0.5,
+                    payload={"alphafold_structures": alphafold_count},
+                )
+            )
+        for source, column, source_group in (
+            ("Reactome", "reactome_pathways", "reactome"),
+            ("KEGG", "kegg_pathways", "kegg"),
+        ):
+            count = number(row, column)
+            if count <= 0:
+                continue
+            records.append(
+                EvidenceRecord(
+                    source=source,
+                    source_record_id=f"{gene}:{column}",
+                    evidence_type="pathway_membership",
+                    subject_type="target",
+                    subject_id=gene,
+                    relation="participates_in",
+                    object_type="pathway",
+                    object_id=source,
+                    target_symbol=gene,
+                    tier=EvidenceTier.CURATED,
+                    source_version=source_version,
+                    source_group=source_group,
+                    score=float(min(1.0, 0.4 + 0.1 * count)),
+                    payload={column: count},
+                )
+            )
+    return records
+
+
+def _evidence_target_origin(evidence: pd.DataFrame) -> dict[str, str]:
+    """Assign a conservative origin label to targets found by evidence only."""
+    origins: dict[str, str] = {}
+    if evidence is None or evidence.empty or "target_symbol" not in evidence.columns:
+        return origins
+    priority = {
+        "GENETIC": 4,
+        "DISEASE": 3,
+        "DEPENDENCY": 2,
+        "EVIDENCE": 1,
+    }
+    for _, row in evidence.iterrows():
+        gene = str(row.get("target_symbol") or "").strip().upper()
+        if not gene:
+            continue
+        evidence_type = str(row.get("evidence_type") or "").lower()
+        relation = str(row.get("relation") or "").lower()
+        if "genetic" in evidence_type:
+            origin = "GENETIC"
+        elif relation in {"associated_with", "implicated_in"}:
+            origin = "DISEASE"
+        elif relation in {"dependent_on", "essential_in"}:
+            origin = "DEPENDENCY"
+        else:
+            origin = "EVIDENCE"
+        if priority[origin] > priority.get(origins.get(gene, "EVIDENCE"), 0):
+            origins[gene] = origin
+    return origins
+
+
+def _expand_candidate_frame(
+    candidate_frame: pd.DataFrame,
+    evidence: pd.DataFrame,
+    max_extra: int = 1000,
+) -> tuple[pd.DataFrame, dict]:
+    """Union DEG candidates with targets discovered by disease/genetic evidence."""
+    base = candidate_frame.copy()
+    base["gene"] = base["gene"].astype(str).str.strip().str.upper()
+    base["candidate_origin"] = "DEG"
+    if evidence is None or evidence.empty:
+        return base, {"expanded_targets": 0, "origins": {"DEG": len(base)}}
+
+    origins = _evidence_target_origin(evidence)
+    known = set(base["gene"])
+    score_by_gene: dict[str, float] = {}
+    if "target_symbol" in evidence.columns:
+        score_frame = evidence[["target_symbol", "score"]].copy()
+        score_frame["target_symbol"] = (
+            score_frame["target_symbol"].astype(str).str.strip().str.upper()
+        )
+        score_frame["score"] = pd.to_numeric(
+            score_frame["score"],
+            errors="coerce",
+        )
+        score_by_gene = (
+            score_frame.groupby("target_symbol")["score"]
+            .max()
+            .fillna(0.0)
+            .to_dict()
+        )
+    discovered = [
+        (gene, origin, float(score_by_gene.get(gene, 0.0) or 0.0))
+        for gene, origin in origins.items()
+        if gene
+        and gene not in known
+        and re.fullmatch(r"[A-Z][A-Z0-9-]{1,14}", gene)
+    ]
+    discovered.sort(key=lambda item: (-item[2], item[0]))
+    if max_extra > 0:
+        discovered = discovered[:max_extra]
+    if not discovered:
+        return base, {"expanded_targets": 0, "origins": {"DEG": len(base)}}
+
+    rows: list[dict] = []
+    for gene, origin, _ in discovered:
+        row = {column: np.nan for column in base.columns}
+        row["gene"] = gene
+        row["candidate_origin"] = origin
+        rows.append(row)
+    expanded = pd.concat([base, pd.DataFrame(rows)], ignore_index=True)
+    expanded["gene"] = expanded["gene"].astype(str).str.strip().str.upper()
+    expanded = expanded.drop_duplicates("gene", keep="first")
+    origin_counts = {
+        str(key): int(value)
+        for key, value in expanded["candidate_origin"].value_counts().items()
+    }
+    return expanded, {
+        "expanded_targets": len(discovered),
+        "origins": origin_counts,
+    }
+
+
+def _local_source_fingerprints(
+    config: dict,
+    config_path: Path,
+    out_dir: Path,
+) -> dict[str, str]:
+    fingerprints: dict[str, str] = {}
+    for name, options in (config.get("sources") or {}).items():
+        options = dict(options or {})
+        if str(options.get("connector") or "") != "local":
+            continue
+        raw_path = str(options.get("path") or "").strip()
+        if not raw_path:
+            continue
+        candidates = (
+            Path(raw_path),
+            config_path.parent / raw_path,
+            out_dir / raw_path,
+        )
+        path = next(
+            (candidate for candidate in candidates if candidate.exists()),
+            candidates[0],
+        )
+        fingerprints[str(name)] = _sha256_file(path)
+    return fingerprints
+
+
 def _run_evidence_hub(
     workdir: Path,
     candidate_frame: pd.DataFrame,
     args,
-) -> tuple[pd.DataFrame, dict]:
+    legacy_evidence: pd.DataFrame | None = None,
+) -> tuple[pd.DataFrame, dict, pd.DataFrame]:
     """Collect, score and export the multi-source evidence hub."""
     out_dir = _integration_dir(workdir) / "evidence_hub"
     out_dir.mkdir(parents=True, exist_ok=True)
+    strict = bool(getattr(args, "evidence_hub_strict", False))
+    base_candidates, _ = _expand_candidate_frame(
+        candidate_frame,
+        pd.DataFrame(),
+    )
     enabled = bool(getattr(args, "evidence_hub_enabled", False))
     config_value = str(
         getattr(args, "evidence_hub_config", "") or ""
@@ -1958,7 +2270,7 @@ def _run_evidence_hub(
             "output_dir": str(out_dir),
         }
         write_json(out_dir / "evidence_hub_summary.json", summary)
-        return pd.DataFrame(), summary
+        return pd.DataFrame(), summary, base_candidates
     if not config_value:
         summary = {
             "status": "skipped",
@@ -1966,7 +2278,9 @@ def _run_evidence_hub(
             "output_dir": str(out_dir),
         }
         write_json(out_dir / "evidence_hub_summary.json", summary)
-        return pd.DataFrame(), summary
+        if strict:
+            raise IntegrationError(summary["reason"])
+        return pd.DataFrame(), summary, base_candidates
 
     config_path = _resolve_path(config_value, APP_ROOT)
     if not config_path.exists():
@@ -1977,7 +2291,26 @@ def _run_evidence_hub(
         }
         write_json(out_dir / "evidence_hub_summary.json", summary)
         log.warning(summary["reason"])
-        return pd.DataFrame(), summary
+        if strict:
+            raise IntegrationError(summary["reason"])
+        return pd.DataFrame(), summary, base_candidates
+
+    try:
+        config = json.loads(config_path.read_text(encoding="utf-8"))
+        if not isinstance(config, dict):
+            raise ValueError("evidence hub config must be a JSON object")
+    except Exception as exc:  # noqa: BLE001
+        summary = {
+            "status": "failed",
+            "reason": f"invalid evidence hub config: {exc}",
+            "output_dir": str(out_dir),
+            "config": str(config_path),
+        }
+        write_json(out_dir / "evidence_hub_summary.json", summary)
+        log.warning(summary["reason"])
+        if strict:
+            raise IntegrationError(summary["reason"]) from exc
+        return pd.DataFrame(), summary, base_candidates
 
     max_targets = int(getattr(args, "evidence_max_targets", 300) or 0)
     genes = candidate_frame["gene"].astype(str).tolist()
@@ -1990,13 +2323,18 @@ def _run_evidence_hub(
             "output_dir": str(out_dir),
         }
         write_json(out_dir / "evidence_hub_summary.json", summary)
-        return pd.DataFrame(), summary
+        return pd.DataFrame(), summary, base_candidates
 
     query_fingerprint = hashlib.sha256(
         json.dumps(
             {
                 "config": str(config_path),
                 "config_sha256": _sha256_file(config_path),
+                "local_source_hashes": _local_source_fingerprints(
+                    config,
+                    config_path,
+                    out_dir,
+                ),
                 "disease": str(
                     getattr(args, "evidence_disease", "") or "liver cancer"
                 ).strip(),
@@ -2047,11 +2385,7 @@ def _run_evidence_hub(
     disease_id = str(
         getattr(args, "evidence_disease_id", "") or ""
     ).strip()
-    strict = bool(getattr(args, "evidence_hub_strict", False))
     try:
-        config = json.loads(config_path.read_text(encoding="utf-8"))
-        if not isinstance(config, dict):
-            raise ValueError("evidence hub config must be a JSON object")
         limits = config.get("limits") or {}
         context = EvidenceContext(
             disease={"name": disease_name, "id": disease_id},
@@ -2089,7 +2423,68 @@ def _run_evidence_hub(
                 store=store,
             )
             status = hub.collect(context)
-            scored = hub.score(target_symbols=genes)
+            failed_sources = []
+            if {"status", "source"}.issubset(status.columns):
+                failed_sources = (
+                    status.loc[
+                        status["status"].astype(str) == "failed",
+                        "source",
+                    ]
+                    .astype(str)
+                    .tolist()
+                )
+            if failed_sources:
+                removed = store.delete_source_records(failed_sources)
+                if removed:
+                    log.warning(
+                        "removed %s stale evidence records from failed sources: %s",
+                        removed,
+                        ", ".join(failed_sources),
+                    )
+            legacy_records = _legacy_evidence_records(
+                legacy_evidence
+                if legacy_evidence is not None
+                else pd.DataFrame()
+            )
+            if legacy_records:
+                store.upsert_evidence(legacy_records)
+            all_evidence = store.records()
+            expanded, expansion_summary = _expand_candidate_frame(
+                candidate_frame,
+                all_evidence,
+                max_extra=int(
+                    getattr(
+                        args,
+                        "candidate_expansion_max_targets",
+                        1000,
+                    )
+                    or 0
+                ),
+            )
+            expanded_genes = expanded["gene"].astype(str).tolist()
+            context.target_symbols = expanded_genes
+            benchmark_positives = [
+                value.strip().upper()
+                for value in str(
+                    getattr(args, "benchmark_positive_targets", "") or ""
+                ).replace("\n", ",").split(",")
+                if value.strip()
+            ]
+            benchmark_negatives = [
+                value.strip().upper()
+                for value in str(
+                    getattr(args, "benchmark_negative_targets", "") or ""
+                ).replace("\n", ",").split(",")
+                if value.strip()
+            ]
+            scored = hub.score(
+                target_symbols=expanded_genes,
+                benchmark_positives=benchmark_positives or None,
+                benchmark_negatives=benchmark_negatives or None,
+                benchmark_top_n=int(
+                    getattr(args, "benchmark_top_n", 20) or 20
+                ),
+            )
             paths = hub.export(
                 out_dir,
                 context=context,
@@ -2104,6 +2499,8 @@ def _run_evidence_hub(
             "status": "completed",
             "reason": "",
             "targets_queried": len(genes),
+            "candidate_targets_expanded": len(expanded),
+            "candidate_expansion": expansion_summary,
             "sources": {
                 str(row["source"]): {
                     "status": str(row.get("status", "")),
@@ -2113,6 +2510,13 @@ def _run_evidence_hub(
                 for row in status.to_dict(orient="records")
             },
             "source_count": int(store_summary.get("n_sources", 0) or 0),
+            "successful_source_count": int(
+                sum(
+                    str(row.get("status", "")) == "completed"
+                    and int(row.get("record_count", 0) or 0) > 0
+                    for row in status.to_dict(orient="records")
+                )
+            ),
             "targets_with_evidence": int(store_summary.get("n_targets", 0) or 0),
             "evidence_records": int(store_summary.get("n_records", 0) or 0),
             "outputs": paths,
@@ -2121,9 +2525,10 @@ def _run_evidence_hub(
             "disease": disease_name,
             "allow_network": allow_network,
             "query_fingerprint": query_fingerprint,
+            "benchmark": scored.get("benchmark"),
         }
         write_json(out_dir / "evidence_hub_summary.json", summary)
-        return priority, summary
+        return priority, summary, expanded
     except Exception as exc:  # noqa: BLE001
         summary = {
             "status": "failed",
@@ -2135,22 +2540,54 @@ def _run_evidence_hub(
         }
         write_json(out_dir / "evidence_hub_summary.json", summary)
         log.warning("multi-source evidence hub failed: %s", exc)
-        return pd.DataFrame(), summary
+        if strict:
+            raise IntegrationError(
+                f"multi-source evidence hub failed: {exc}"
+            ) from exc
+        return pd.DataFrame(), summary, base_candidates
 
 
 def _stage_evidence(args, workdir: Path, ctx: dict) -> None:
     candidate_frame = _candidate_universe_frame(workdir, ctx)
-    key_frame = pd.read_csv(ctx["key_genes_path"])
+    key_path = (
+        ctx.get("key_genes_path")
+        or _integration_dir(workdir) / "key_genes.csv"
+    )
+    key_frame = pd.read_csv(key_path)
     key_genes = key_frame["gene"].astype(str).str.strip().str.upper().tolist()
 
-    evidence_priority, hub_summary = _run_evidence_hub(
+    legacy_pool_size = int(
+        getattr(args, "evidence_legacy_pool_size", 50) or 50
+    )
+    legacy_pool_size = max(
+        legacy_pool_size,
+        int(getattr(args, "docking_targets", 0) or 0) * 2,
+    )
+    discovery_genes = candidate_frame["gene"].astype(str).tolist()
+    legacy_genes = list(
+        dict.fromkeys(key_genes + discovery_genes[:legacy_pool_size])
+    )
+    legacy = ensure_gene_evidence(
+        legacy_genes,
+        workdir,
+        fetch=not getattr(args, "skip_evidence_fetch", False),
+        max_workers=int(getattr(args, "evidence_workers", 6) or 6),
+        timeout=int(getattr(args, "evidence_timeout", 90) or 90),
+    )
+
+    evidence_priority, hub_summary, expanded = _run_evidence_hub(
         workdir,
         candidate_frame,
         args,
+        legacy_evidence=legacy,
     )
+    expanded_path = (
+        _integration_dir(workdir) / "candidate_universe_evidence_expanded.csv"
+    )
+    expanded.to_csv(expanded_path, index=False)
     target_priority_path = _integration_dir(workdir) / "target_priority.csv"
     target_priority = build_target_priority(
-        _integration_dir(workdir) / "candidate_universe.csv",
+        expanded_path,
         _integration_dir(workdir) / "evidence_hub" / "target_priority.csv"
         if not evidence_priority.empty
         else None,
@@ -2167,27 +2604,12 @@ def _stage_evidence(args, workdir: Path, ctx: dict) -> None:
             getattr(args, "target_conditional_min_score", 0.50)
         ),
     )
-
-    legacy_pool_size = int(
-        getattr(args, "evidence_legacy_pool_size", 50) or 50
-    )
-    legacy_pool_size = max(
-        legacy_pool_size,
-        int(getattr(args, "docking_targets", 0) or 0) * 2,
-    )
-    ranked_genes = target_priority["gene"].astype(str).tolist()
-    legacy_genes = list(dict.fromkeys(key_genes + ranked_genes[:legacy_pool_size]))
-    legacy = ensure_gene_evidence(
-        legacy_genes,
-        workdir,
-        fetch=not getattr(args, "skip_evidence_fetch", False),
-        max_workers=int(getattr(args, "evidence_workers", 6) or 6),
-        timeout=int(getattr(args, "evidence_timeout", 90) or 90),
-    )
     ctx["candidate_universe"] = candidate_frame
     ctx["candidate_universe_path"] = (
         _integration_dir(workdir) / "candidate_universe.csv"
     )
+    ctx["candidate_universe_expanded_path"] = expanded_path
+    ctx["candidate_universe_expanded"] = expanded
     ctx["evidence_hub_summary"] = hub_summary
     ctx["evidence_hub_priority"] = evidence_priority
     ctx["target_priority"] = target_priority
@@ -2204,6 +2626,7 @@ def _stage_evidence(args, workdir: Path, ctx: dict) -> None:
         evidence_targets_queried=int(
             hub_summary.get("targets_queried", 0) or 0
         ),
+        benchmark=hub_summary.get("benchmark") or {},
     )
 
 
@@ -2219,6 +2642,15 @@ def _stage_knockout(args, workdir: Path, ctx: dict) -> None:
     if args.skip_knockout:
         summary = {"status": "skipped", "reason": "knockout disabled by arguments"}
         write_json(_integration_dir(workdir) / "knockout_summary.json", summary)
+        for stale in (
+            _integration_dir(workdir) / "integrated_target_priority.csv",
+            _integration_dir(workdir)
+            / "integrated_target_priority_summary.json",
+        ):
+            try:
+                stale.unlink(missing_ok=True)
+            except OSError as exc:
+                log.warning("could not remove stale %s: %s", stale, exc)
         ctx["knockout"] = summary
         return
     ctx["knockout"] = run_knockout_stage(
@@ -2320,6 +2752,15 @@ def _stage_knockout(args, workdir: Path, ctx: dict) -> None:
                 ).get("targets_queried", 0)
                 or 0
             ),
+            benchmark=(
+                ctx.get("evidence_hub_summary")
+                or _read_json(
+                    _integration_dir(workdir)
+                    / "evidence_hub"
+                    / "evidence_hub_summary.json"
+                )
+            ).get("benchmark")
+            or {},
         )
 
 
@@ -2349,11 +2790,22 @@ def _stage_docking(args, workdir: Path, ctx: dict) -> None:
                 "gene_evidence.csv missing; run stage 03 before docking"
             )
         ctx["evidence_path"] = evidence_path
+    integrated_path = (
+        _integration_dir(workdir) / "integrated_target_priority.csv"
+    )
+    knockout_summary = _read_json(
+        _integration_dir(workdir) / "knockout_summary.json"
+    )
+    integrated_ready = (
+        not getattr(args, "skip_knockout", False)
+        and bool(knockout_summary.get("knockout"))
+        and integrated_path.exists()
+        and integrated_path.stat().st_size > 0
+    )
+    priority_candidates = [integrated_path] if integrated_ready else []
+    priority_candidates.append(_integration_dir(workdir) / "target_priority.csv")
     priority_path = None
-    for candidate in (
-        _integration_dir(workdir) / "integrated_target_priority.csv",
-        _integration_dir(workdir) / "target_priority.csv",
-    ):
+    for candidate in priority_candidates:
         if candidate.exists() and candidate.stat().st_size > 0:
             priority_path = candidate
             break
@@ -2366,6 +2818,9 @@ def _stage_docking(args, workdir: Path, ctx: dict) -> None:
         ligand_library=args.ligand_library,
         force=args.force,
         priority_csv=priority_path,
+        allow_review=bool(
+            getattr(args, "allow_review_docking", False)
+        ),
     )
 
 
@@ -2987,6 +3442,7 @@ def load_full_config(path: Path) -> dict:
         },
         "evidence": DEFAULT_EVIDENCE,
         "target_priority": DEFAULT_TARGET_PRIORITY,
+        "docking_selection": DEFAULT_DOCKING_SELECTION,
         "qc_gate": DEFAULT_QC_GATE,
         "differential_abundance": DEFAULT_DIFFERENTIAL_ABUNDANCE,
         "gene_blacklist": DEFAULT_GENE_BLACKLIST,
@@ -3019,6 +3475,9 @@ def load_full_config(path: Path) -> dict:
     target_priority.update(raw.get("target_priority") or {})
     target_priority["weights"] = target_priority_weights
     config["target_priority"] = target_priority
+    docking_selection = dict(defaults["docking_selection"])
+    docking_selection.update((raw.get("docking_selection") or {}))
+    config["docking_selection"] = docking_selection
     config["qc_gate"] = dict(defaults["qc_gate"])
     config["qc_gate"].update((raw.get("qc_gate") or {}))
     config["differential_abundance"] = dict(
@@ -3204,6 +3663,10 @@ def _apply_defaults(args, config: dict) -> None:
         "evidence_hub_allow_network": "allow_network",
         "evidence_hub_strict": "strict",
         "evidence_legacy_pool_size": "legacy_pool_size",
+        "candidate_expansion_max_targets": "candidate_expansion_max_targets",
+        "benchmark_positive_targets": "benchmark_positive_targets",
+        "benchmark_negative_targets": "benchmark_negative_targets",
+        "benchmark_top_n": "benchmark_top_n",
     }
     for attr, key in evidence_defaults.items():
         if getattr(args, attr, None) is None:
@@ -3224,6 +3687,13 @@ def _apply_defaults(args, config: dict) -> None:
     args.target_conditional_min_score = float(
         target_priority.get("conditional_min_score", 0.50)
     )
+    if getattr(args, "allow_review_docking", None) is None:
+        args.allow_review_docking = bool(
+            (config.get("docking_selection") or {}).get(
+                "allow_review",
+                False,
+            )
+        )
     if args.evidence_workers is None:
         args.evidence_workers = int(config.get("evidence", {}).get("max_workers", 6))
     if args.evidence_timeout is None:
@@ -3371,6 +3841,12 @@ def build_parser() -> argparse.ArgumentParser:
         help="single-cell ML model used by the integrated pipeline",
     )
     parser.add_argument("--docking-targets", type=int, help="max genes to dock")
+    parser.add_argument(
+        "--allow-review-docking",
+        action="store_true",
+        default=None,
+        help="allow REVIEW targets to enter docking; default is GO/CONDITIONAL_GO only",
+    )
     parser.add_argument("--ligand-library", help="ligand library file (.smi/.sdf/.csv)")
     parser.add_argument("--case-label", help="case group label for knockout")
     parser.add_argument("--normal-label", help="normal group label for knockout")
@@ -3473,6 +3949,25 @@ def build_parser() -> argparse.ArgumentParser:
         help="use only cached or local evidence sources",
     )
     parser.add_argument("--evidence-legacy-pool-size", type=int, default=None)
+    parser.add_argument(
+        "--candidate-expansion-max-targets",
+        type=int,
+        default=None,
+        help="maximum non-DEG disease/genetic targets added to the candidate universe",
+    )
+    parser.add_argument(
+        "--benchmark-positive",
+        dest="benchmark_positive_targets",
+        default=None,
+        help="comma-separated positive control target symbols",
+    )
+    parser.add_argument(
+        "--benchmark-negative",
+        dest="benchmark_negative_targets",
+        default=None,
+        help="comma-separated negative control target symbols",
+    )
+    parser.add_argument("--benchmark-top-n", type=int, default=None)
     parser.add_argument("--skip-scrna", action="store_true")
     parser.add_argument("--skip-download", action="store_true")
     parser.add_argument("--skip-deps", action="store_true")

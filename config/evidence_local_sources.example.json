@@ -61,6 +61,78 @@
       "subject_type": "disease",
       "target_column": "gene_symbol",
       "score_column": "score"
+    },
+    "ClinVar": {
+      "enabled": false,
+      "connector": "local",
+      "path": "data/evidence/clinvar_gene_condition.tsv",
+      "source_version": "ClinVar snapshot supplied by user",
+      "evidence_type": "clinical_variant_association",
+      "relation": "associated_with",
+      "tier": "GENETIC",
+      "subject_type": "disease",
+      "target_column": "gene_symbol",
+      "score_column": "clinical_score"
+    },
+    "gnomAD": {
+      "enabled": false,
+      "connector": "local",
+      "path": "data/evidence/gnomad_gene_constraint.tsv",
+      "source_version": "gnomAD snapshot supplied by user",
+      "evidence_type": "population_constraint",
+      "relation": "associated_with",
+      "tier": "GENETIC",
+      "subject_type": "target",
+      "target_column": "gene_symbol",
+      "score_column": "constraint_score"
+    },
+    "cBioPortal": {
+      "enabled": false,
+      "connector": "local",
+      "path": "data/evidence/cbioportal_liver_mutations.tsv",
+      "source_version": "cBioPortal snapshot supplied by user",
+      "evidence_type": "somatic_alteration",
+      "relation": "associated_with",
+      "tier": "EXPERIMENTAL",
+      "subject_type": "disease",
+      "target_column": "gene_symbol",
+      "score_column": "alteration_score"
+    },
+    "OncoKB": {
+      "enabled": false,
+      "connector": "local",
+      "path": "data/evidence/oncokb_actionability.tsv",
+      "source_version": "OncoKB snapshot supplied by user",
+      "evidence_type": "clinical_actionability",
+      "relation": "targets",
+      "tier": "CURATED",
+      "subject_type": "disease",
+      "target_column": "gene_symbol",
+      "score_column": "actionability_score"
+    },
+    "CIViC": {
+      "enabled": false,
+      "connector": "local",
+      "path": "data/evidence/civic_evidence.tsv",
+      "source_version": "CIViC snapshot supplied by user",
+      "evidence_type": "clinical_evidence",
+      "relation": "targets",
+      "tier": "CURATED",
+      "subject_type": "disease",
+      "target_column": "gene_symbol",
+      "score_column": "evidence_score"
+    },
+    "ClinicalTrials": {
+      "enabled": false,
+      "connector": "local",
+      "path": "data/evidence/clinicaltrials_targets.tsv",
+      "source_version": "ClinicalTrials.gov snapshot supplied by user",
+      "evidence_type": "clinical_precedent",
+      "relation": "targets",
+      "tier": "CURATED",
+      "subject_type": "disease",
+      "target_column": "gene_symbol",
+      "score_column": "trial_score"
     }
   },
   "limits": {

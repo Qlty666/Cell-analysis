@@ -146,6 +146,14 @@ def build_target_priority(
     candidates["gene"] = candidates["gene"].astype(str).str.strip().str.upper()
     candidates = candidates[candidates["gene"] != ""]
     candidates = candidates.drop_duplicates("gene", keep="first")
+    if "candidate_origin" not in candidates.columns:
+        candidates["candidate_origin"] = "DEG"
+    candidates["candidate_origin"] = (
+        candidates["candidate_origin"]
+        .fillna("DEG")
+        .astype(str)
+        .replace({"": "DEG"})
+    )
 
     if "deg_rank" in candidates.columns:
         rank = _numeric(candidates["deg_rank"])
@@ -301,6 +309,7 @@ def write_target_priority_summary(
     evidence_hub_used: bool,
     evidence_source_count: int = 0,
     evidence_targets_queried: int = 0,
+    benchmark: dict | None = None,
 ) -> dict:
     """Write concise ranking and evidence-coverage diagnostics."""
     coverage = _numeric(frame.get("coverage_ratio", pd.Series(dtype=float)))
@@ -333,6 +342,7 @@ def write_target_priority_summary(
                 for column in (
                     "priority_rank",
                     "gene",
+                    "candidate_origin",
                     "integrated_score",
                     "decision",
                     "evidence_status",
@@ -341,6 +351,16 @@ def write_target_priority_summary(
                 if column in frame.columns
             ]
         ].to_dict(orient="records"),
+        "candidate_origins": {
+            str(key): int(value)
+            for key, value in frame.get(
+                "candidate_origin",
+                pd.Series(dtype=str),
+            )
+            .value_counts()
+            .items()
+        },
+        "benchmark": benchmark or {},
     }
     output_json.parent.mkdir(parents=True, exist_ok=True)
     output_json.write_text(

@@ -9,7 +9,7 @@
 - 独立分子对接：单独运行受体/配体准备、AutoDock Vina 对接、结果分析、精细重对接和 HTML 报告，不依赖虚拟筛选的旁路分析。
 - 全自动集成流水线：从表达分析直接筛选关键基因/蛋白，再自动完成证据富集、虚拟敲除、虚拟筛选、MD/ML/工具交接、网络毒理学/FAERS 和细胞反馈，最终输出集成报告和湿实验验证方案。
 - 高级多队列分析：样本级与基因级数据识别、limma/ComBat、WGCNA、多模型机器学习、外部验证、免疫浸润/生存分析和本地 MR/共定位。
-- 多数据库证据中心：统一保存 Open Targets、ChEMBL、BindingDB、PubChem BioAssay、GWAS Catalog、GTEx、HPA 和 DepMap/本地快照等证据，输出覆盖率、来源消融稳定性和靶点优先级。
+- 多数据库证据中心：统一保存 Open Targets、ChEMBL、BindingDB、PubChem BioAssay、GWAS Catalog、ClinVar、GTEx、HPA 和 DepMap/本地快照等证据，输出覆盖率、来源消融稳定性和靶点优先级。
 
 ## 1. 项目解决什么问题
 
@@ -101,11 +101,13 @@
 
 每一阶段写标记文件，重跑时自动断点续跑；`--start-stage` 可从任意阶段开始。标记文件不再只是时间戳：每个阶段会记录配置和输入指纹（`signature`），当 `top_genes`、物种、标签、证据/对接配置、关键基因表或证据表发生变化时，会自动使当前阶段及下游阶段失效，避免“参数改了但结果仍是旧值”的静默错误。每个阶段完成后还会按 `STAGE_OUTPUTS` 校验必需输出，缺失或空文件不会写入完成标记。
 
-阶段 02 现在同时写出 `candidate_universe.csv` 和 `key_genes.csv`。前者不再被 `top_genes` 截断，默认 `candidate_universe_size=0` 保留全部符合筛选条件的 DEG，也可设置正整数限制候选池；后者保留旧的 Top N 接口。阶段 03 会把 `src/evidence` 的证据中心接入全流程，默认检索 `config/evidence_sources.json` 中启用的来源，并输出 `target_priority.csv`、`target_priority_summary.json`、`evidence_coverage.csv` 和 `source_ablation.csv`。阶段 05 再把启发式扰动评分合并为 `integrated_target_priority.csv`，阶段 06 默认优先消费这张综合排序表，而不是旧的 `key_genes.csv`。
+阶段 02 现在同时写出 `candidate_universe.csv` 和 `key_genes.csv`。前者不再被 `top_genes` 截断，默认 `candidate_universe_size=0` 保留全部符合筛选条件的 DEG，也可设置正整数限制候选池；后者保留旧的 Top N 接口。阶段 03 会把 `src/evidence` 的证据中心接入全流程，默认检索 `config/evidence_sources.json` 中启用的来源，并输出 `target_priority.csv`、`target_priority_summary.json`、`evidence_coverage.csv` 和 `source_ablation.csv`。阶段 03 还会把 Open Targets、GWAS 和其他证据来源中发现的非 DEG 靶点并入 `candidate_universe_evidence_expanded.csv`，由 `candidate_expansion_max_targets` 控制扩展规模。阶段 05 再把启发式扰动评分合并为 `integrated_target_priority.csv`，阶段 06 默认优先消费这张综合排序表，而不是旧的 `key_genes.csv`。
 
-证据中心支持 Open Targets、ChEMBL、BindingDB、PubChem BioAssay、GWAS Catalog、GTEx、HPA、DepMap，以及 CTD、Tox21/ToxCast、LINCS、DisGeNET 和授权数据库的本地快照。`evidence.max_targets` 控制联网检索规模，`evidence.hub_config` 指定来源配置，`evidence.allow_network=false` 或网页“仅用本地来源”用于离线运行；缺失证据会保留为 `not_found`/`not_queried`，不会被静默当作负证据。Open Targets 等聚合来源通过 `source_group` 做来源级去重，避免把同一底层证据重复计分。
+证据中心支持 Open Targets、ChEMBL、BindingDB、PubChem BioAssay、GWAS Catalog、ClinVar、GTEx、HPA、DepMap，以及 CTD、Tox21/ToxCast、LINCS、DisGeNET 和授权数据库的本地快照。`evidence.max_targets` 控制联网检索规模，`evidence.hub_config` 指定来源配置，`evidence.allow_network=false` 或网页“仅用本地来源”用于离线运行；缺失证据会保留为 `not_found`/`not_queried`，不会被静默当作负证据。Open Targets 等聚合来源通过 `source_group` 做来源级去重，避免把同一底层证据重复计分。旧版 gene evidence 中的 ChEMBL 活性、PDB/AlphaFold 结构、Reactome 和 KEGG 证据也会转换成 canonical evidence records 参与排序。`evidence.strict=true` 或网页“证据来源失败即中断”会在来源或配置失败时真正终止阶段；非严格模式下，当前运行失败的来源会清除旧记录后再评分，避免使用过期成功结果。
 
-集成报告新增 `publication_readiness` 质量面板，明确区分 `exploratory`、`paper_supporting` 和 `publication_grade`，并列出多来源证据、候选池规模、候选靶点证据覆盖比例、对接阳性对照、重复种子、真实完成 MD、外部验证和机制性扰动等未通过门控。默认 MD 仍是 `prepare`，默认对接仍为单次运行，因此未主动完成这些验证时，流水线不会把结果标记为论文级闭环。
+新增 `benchmark_positive_targets` / `benchmark_negative_targets` / `benchmark_top_n`，可在网页或 CLI 中用 `--benchmark-positive` / `--benchmark-negative` / `--benchmark-top-n` 指定阳性/阴性对照，输出 Recall@N、AUROC 等排序评估。对接默认只选择 `GO` 或 `CONDITIONAL_GO` 靶点；需要保留 REVIEW 靶点时必须显式启用 `docking_selection.allow_review=true` 或 `--allow-review-docking`。
+
+集成报告新增 `publication_readiness` 质量面板，明确区分 `exploratory`、`paper_supporting` 和 `publication_grade`，并列出多来源证据、候选池规模、候选靶点证据覆盖比例、基准排序、对接阳性对照、重复种子、真实完成 MD、外部验证和机制性扰动等未通过门控。`paper_supporting` 现在同时要求 benchmark 和外部验证文件；`publication_grade` 还要求检测到机制性扰动结果。默认 MD 仍是 `prepare`，默认对接仍为单次运行，因此未主动完成这些验证时，流水线不会把结果标记为论文级闭环。
 
 新增 `--dry-run`，不执行任何阶段，只打印每个阶段会 `RUN` 还是 `DONE` 及原因；新增 `--skip-qc-gate` 和 `--skip-differential-abundance` 可分别关闭 QC 门控和细胞组成差异检验。
 
@@ -295,7 +297,7 @@ GEO 下载器在没有补充 count matrix 时会回退解析 `series_matrix` 表
 
 ### 2.11 多数据库证据中心
 
-新增独立证据层 `src/evidence/`，把不同数据库的靶点证据保存为统一、可追溯的长表，并将“没有检索到证据”和“负证据”严格区分。默认开放连接器覆盖 Open Targets、ChEMBL、BindingDB、PubChem BioAssay、GWAS Catalog、GTEx 和 Human Protein Atlas；DepMap、CTD、Tox21/ToxCast、LINCS、DisGeNET 以及 GeneCards、OMIM、TTD、DrugBank 等本地授权导出可通过本地表连接器接入。
+新增独立证据层 `src/evidence/`，把不同数据库的靶点证据保存为统一、可追溯的长表，并将“没有检索到证据”和“负证据”严格区分。默认开放连接器覆盖 Open Targets、ChEMBL、BindingDB、PubChem BioAssay、GWAS Catalog、ClinVar、GTEx 和 Human Protein Atlas；DepMap、CTD、Tox21/ToxCast、LINCS、DisGeNET、cBioPortal、OncoKB、CIViC、ClinicalTrials.gov 以及 GeneCards、OMIM、TTD、DrugBank 等本地授权导出可通过本地表连接器接入。
 
 ```text
 liverbio evidence --config config/evidence_sources.json \
@@ -706,6 +708,10 @@ python scripts\run_full_pipeline.py \
 - `--evidence-hub-offline`：证据中心只用本地或缓存来源，不访问公共 API。
 - `--evidence-hub-strict`：任一配置来源失败时让证据阶段失败；默认记录失败并继续。
 - `--evidence-legacy-pool-size`：为旧版结构/配体证据保留的候选数，默认 50，并会自动覆盖对接靶点数。
+- `--candidate-expansion-max-targets`：从疾病/遗传证据中并入候选宇宙的非 DEG 靶点上限，默认 1000；设置为 0 时不设上限。
+- `--benchmark-positive` / `--benchmark-negative`：逗号分隔的阳性/阴性对照靶点，用于 Recall@N、AUROC 等排序评估。
+- `--benchmark-top-n`：benchmark 评估的 Top N，默认 20。
+- `--allow-review-docking`：显式允许 `REVIEW` 靶点进入对接；默认只允许 `GO` 和 `CONDITIONAL_GO`。
 - `--docking-targets`：参与对接的靶点数量，默认 3。
 - `--md-mode prepare|auto`：GROMACS MD 模式；`prepare` 只生成输入，`auto` 在本机运行完整模拟。
 - `--md-top-n`：每个靶点进入 MD 的 Top 命中数，默认 1。
@@ -981,6 +987,7 @@ liverbio analysis-export GSE125449
 输出（`<workdir>/outputs/integration/`）：
 
 - `candidate_universe.csv`：经过 DEG 方向、显著性和黑名单筛选后的完整候选靶点宇宙。
+- `candidate_universe_evidence_expanded.csv`：将 Open Targets、GWAS 等疾病/遗传证据发现的非 DEG 靶点并入后的扩展候选宇宙。
 - `key_genes.csv`：兼容旧流程的关键基因 Top N 表。
 - `target_priority.csv`：表达证据与多来源数据库证据的覆盖感知排序。
 - `integrated_target_priority.csv`：进一步合并启发式扰动评分后的综合靶点排序。

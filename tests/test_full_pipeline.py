@@ -25,6 +25,7 @@ from pipeline.integration import (  # noqa: E402
     _clear_downstream_markers,
     _dataset_mode_from_root,
     _download_pdb,
+    _expand_candidate_frame,
     _extract_cocrystal_ligands,
     _invalidate_markers_for_changed_root,
     _prune_stale_stage_markers,
@@ -32,12 +33,15 @@ from pipeline.integration import (  # noqa: E402
     _stage_cadd_downstream,
     _stage_cell_feedback,
     _stage_faers,
+    _stage_evidence,
+    _stage_knockout,
     _stage_network,
     _stage_outdated,
     _stage_output_paths,
     _stage_outputs_ready,
     _stage_signature,
     _run_evidence_hub,
+    _legacy_evidence_records,
     _valid_docking_box,
     _write_stage_marker,
     _write_run_context,
@@ -54,6 +58,7 @@ from pipeline.cell_feedback import (  # noqa: E402
     build_feedback_manifest,
     run_cell_feedback,
 )
+from pipeline.integrated_report import _publication_readiness  # noqa: E402
 from pipeline import orchestrator  # noqa: E402
 import pipeline.integration as integration_module  # noqa: E402
 
@@ -362,16 +367,239 @@ class TestDockingTargetSelection(unittest.TestCase):
                 "integrated_target_priority",
             )
 
+    def test_docking_requires_go_or_conditional_go_by_default(self):
+        with tempfile.TemporaryDirectory() as tmp:
+            root = Path(tmp)
+            key_genes = root / "key_genes.csv"
+            evidence = root / "gene_evidence.csv"
+            priority = root / "integrated_target_priority.csv"
+            pd.DataFrame({"gene": ["GENE1", "GENE2", "GENE3"]}).to_csv(
+                key_genes,
+                index=False,
+            )
+            pd.DataFrame({"gene": ["GENE1", "GENE2", "GENE3"]}).to_csv(
+                evidence,
+                index=False,
+            )
+            pd.DataFrame(
+                {
+                    "gene": ["GENE1", "GENE2", "GENE3"],
+                    "decision": ["GO", "CONDITIONAL_GO", "REVIEW"],
+                }
+            ).to_csv(priority, index=False)
+            captured: list[str] = []
+
+            def fake_docking(
+                gene,
+                workdir,
+                docking_config,
+                evidence_frame,
+                ligand_library,
+                force=False,
+            ):
+                captured.append(gene)
+                return {
+                    "gene": gene,
+                    "status": "ok",
+                    "pdb_id": "1ABC",
+                    "uniprot": "",
+                    "box_mode": "test",
+                    "ligand_count": 1,
+                    "hits": 1,
+                    "best_affinity": "-8.0",
+                    "output_dir": "",
+                    "error": "",
+                    "ligand_library": "",
+                    "ligand_library_sha256": "",
+                }
+
+            with mock.patch(
+                "pipeline.integration.run_target_docking",
+                side_effect=fake_docking,
+            ):
+                run_docking_stage(
+                    root / "work",
+                    root / "docking.json",
+                    key_genes,
+                    evidence,
+                    max_targets=3,
+                    ligand_library=None,
+                    priority_csv=priority,
+                )
+            self.assertEqual(captured, ["GENE1", "GENE2"])
+
 
 class TestEvidenceHubIntegration(unittest.TestCase):
+    def test_stage_evidence_expands_universe_and_writes_benchmark(self):
+        with tempfile.TemporaryDirectory() as tmp:
+            root = Path(tmp)
+            workdir = root / "work"
+            integration = workdir / "outputs" / "integration"
+            integration.mkdir(parents=True)
+            pd.DataFrame(
+                {
+                    "gene": ["GENE1", "GENE2"],
+                    "deg_rank": [1, 2],
+                    "avg_log2fc": [2.0, -1.5],
+                    "p_val_adj": [0.01, 0.02],
+                }
+            ).to_csv(integration / "candidate_universe.csv", index=False)
+            pd.DataFrame({"gene": ["GENE1", "GENE2"]}).to_csv(
+                integration / "key_genes.csv",
+                index=False,
+            )
+            local_table = root / "local.tsv"
+            pd.DataFrame(
+                {
+                    "gene": ["GENE1", "GENE3"],
+                    "score": [0.95, 0.85],
+                }
+            ).to_csv(local_table, sep="\t", index=False)
+            hub_config = root / "evidence_sources.json"
+            hub_config.write_text(
+                json.dumps(
+                    {
+                        "strict": True,
+                        "sources": {
+                            "Local": {
+                                "enabled": True,
+                                "name": "LocalEvidence",
+                                "path": str(local_table),
+                                "source_version": "test",
+                                "evidence_type": "disease_gene_association",
+                                "relation": "associated_with",
+                                "tier": "CURATED",
+                                "subject_type": "disease",
+                                "subject_value": "liver cancer",
+                                "target_column": "gene",
+                                "score_column": "score",
+                            }
+                        },
+                        "scoring": {},
+                    }
+                ),
+                encoding="utf-8",
+            )
+            args = argparse.Namespace(
+                evidence_hub_enabled=True,
+                evidence_hub_config=str(hub_config),
+                evidence_hub_strict=False,
+                evidence_max_targets=0,
+                evidence_max_records=100,
+                evidence_hub_timeout=30,
+                evidence_hub_allow_network=False,
+                skip_evidence_fetch=True,
+                evidence_disease="liver cancer",
+                evidence_disease_id="",
+                candidate_expansion_max_targets=100,
+                benchmark_positive_targets="GENE1",
+                benchmark_negative_targets="GENE2",
+                benchmark_top_n=10,
+                evidence_legacy_pool_size=10,
+                docking_targets=1,
+                evidence_workers=1,
+                evidence_timeout=10,
+                target_priority_weights=None,
+                target_go_min_score=0.75,
+                target_go_min_coverage=0.5,
+                target_conditional_min_score=0.5,
+            )
+            _stage_evidence(args, workdir, {})
+            expanded = pd.read_csv(
+                integration / "candidate_universe_evidence_expanded.csv"
+            )
+            self.assertIn("GENE3", set(expanded["gene"]))
+            benchmark = json.loads(
+                (integration / "target_priority_summary.json").read_text(
+                    encoding="utf-8"
+                )
+            )["benchmark"]
+            self.assertIn("auroc", benchmark)
+
+    def test_candidate_expansion_adds_evidence_only_targets(self):
+        base = pd.DataFrame(
+            {
+                "gene": ["GENE1"],
+                "deg_rank": [1],
+                "avg_log2fc": [2.0],
+                "p_val_adj": [0.01],
+            }
+        )
+        evidence = pd.DataFrame(
+            {
+                "target_symbol": ["GENE2", "GENE3"],
+                "evidence_type": [
+                    "genetic_association",
+                    "disease_gene_association",
+                ],
+                "relation": ["associated_with", "associated_with"],
+                "score": [0.9, 0.7],
+            }
+        )
+        expanded, summary = _expand_candidate_frame(
+            base,
+            evidence,
+            max_extra=10,
+        )
+        self.assertEqual(
+            set(expanded["gene"]),
+            {"GENE1", "GENE2", "GENE3"},
+        )
+        self.assertEqual(summary["expanded_targets"], 2)
+        self.assertIn("GENETIC", set(expanded["candidate_origin"]))
+
+    def test_legacy_evidence_is_converted_to_hub_records(self):
+        records = _legacy_evidence_records(
+            pd.DataFrame(
+                {
+                    "gene": ["GENE1"],
+                    "chembl_bioactivities": [12],
+                    "known_ligands": [8],
+                    "pdb_structures": [2],
+                    "alphafold_structures": [1],
+                    "reactome_pathways": [3],
+                    "kegg_pathways": [1],
+                }
+            )
+        )
+        self.assertGreaterEqual(len(records), 5)
+        self.assertTrue(
+            any(record.evidence_type == "direct_bioactivity_aggregate" for record in records)
+        )
+        self.assertTrue(
+            any(record.evidence_type == "experimental_structure" for record in records)
+        )
+
+    def test_strict_evidence_hub_raises_on_invalid_config(self):
+        with tempfile.TemporaryDirectory() as tmp:
+            root = Path(tmp)
+            config = root / "bad.json"
+            config.write_text("{invalid", encoding="utf-8")
+            args = argparse.Namespace(
+                evidence_hub_enabled=True,
+                evidence_hub_config=str(config),
+                evidence_hub_strict=True,
+                evidence_max_targets=10,
+                evidence_hub_allow_network=False,
+                skip_evidence_fetch=True,
+                evidence_disease="liver cancer",
+                evidence_disease_id="",
+            )
+            with self.assertRaises(IntegrationError):
+                _run_evidence_hub(
+                    root / "work",
+                    pd.DataFrame({"gene": ["GENE1"]}),
+                    args,
+                )
+
     def test_local_evidence_hub_writes_priority_table(self):
         with tempfile.TemporaryDirectory() as tmp:
             root = Path(tmp)
             local_table = root / "local.tsv"
             pd.DataFrame(
                 {
-                    "gene": ["GENE1"],
-                    "score": [0.91],
+                    "gene": ["GENE1", "GENE3"],
+                    "score": [0.91, 0.88],
                 }
             ).to_csv(local_table, sep="\t", index=False)
             hub_config = root / "evidence_sources.json"
@@ -411,13 +639,15 @@ class TestEvidenceHubIntegration(unittest.TestCase):
                 evidence_disease_id="",
                 evidence_hub_strict=True,
             )
-            priority, summary = _run_evidence_hub(
+            priority, summary, expanded = _run_evidence_hub(
                 root / "work",
                 pd.DataFrame({"gene": ["GENE1", "GENE2"]}),
                 args,
             )
             self.assertEqual(summary["status"], "completed")
+            self.assertEqual(len(expanded), 3)
             self.assertIn("GENE1", priority["target_symbol"].tolist())
+            self.assertIn("GENE3", priority["target_symbol"].tolist())
             self.assertTrue(
                 (
                     root
@@ -428,6 +658,80 @@ class TestEvidenceHubIntegration(unittest.TestCase):
                     / "target_priority.csv"
                 ).exists()
             )
+
+
+class TestScientificGates(unittest.TestCase):
+    def test_publication_readiness_requires_benchmark_and_external_validation(
+        self,
+    ):
+        with tempfile.TemporaryDirectory() as tmp:
+            root = Path(tmp)
+            out_dir = root / "outputs" / "integration"
+            out_dir.mkdir(parents=True)
+            validation_dir = out_dir / "external_validation"
+            validation_dir.mkdir()
+            (validation_dir / "validation_summary.json").write_text(
+                "{}",
+                encoding="utf-8",
+            )
+            mechanistic_dir = (
+                root
+                / "outputs"
+                / "run_001"
+                / "results"
+                / "04_knockout"
+                / "in_silico"
+            )
+            mechanistic_dir.mkdir(parents=True)
+            (mechanistic_dir / "insilico_summary.json").write_text(
+                "{}",
+                encoding="utf-8",
+            )
+            docking_config = root / "docking.json"
+            docking_config.write_text(
+                json.dumps(
+                    {
+                        "docking": {
+                            "positive_control_pdbqt": "control.pdbqt",
+                            "replicates": 3,
+                        }
+                    }
+                ),
+                encoding="utf-8",
+            )
+            readiness = _publication_readiness(
+                {
+                    "targets": 100,
+                    "evidence_targets_queried": 100,
+                    "benchmark": {"auroc": 0.82},
+                },
+                {
+                    "status": "completed",
+                    "source_count": 4,
+                    "successful_source_count": 4,
+                },
+                {"md_completed": 1},
+                docking_config,
+                out_dir,
+            )
+            self.assertEqual(readiness["level"], "publication_grade")
+
+    def test_skipping_knockout_removes_stale_integrated_priority(self):
+        with tempfile.TemporaryDirectory() as tmp:
+            workdir = Path(tmp) / "work"
+            integration = workdir / "outputs" / "integration"
+            integration.mkdir(parents=True)
+            stale = integration / "integrated_target_priority.csv"
+            stale.write_text("gene,integrated_score\nGENE1,0.9\n", encoding="utf-8")
+            summary = integration / "integrated_target_priority_summary.json"
+            summary.write_text("{}", encoding="utf-8")
+            _stage_knockout(
+                argparse.Namespace(skip_knockout=True),
+                workdir,
+                {},
+            )
+            self.assertFalse(stale.exists())
+            self.assertFalse(summary.exists())
 
 
 @unittest.skipUnless(RDKIT_AVAILABLE, "rdkit not installed")
@@ -1355,7 +1659,7 @@ class TestStageOutputVerification(unittest.TestCase):
             args = _pipeline_args(cfg, dock, output, workdir)
             ctx = {"single_cell_root": output}
             paths = _stage_output_paths("03", workdir, ctx, args)
-            self.assertEqual(len(paths), 3)
+            self.assertEqual(len(paths), 4)
             self.assertFalse(_stage_outputs_ready("03", workdir, ctx, args))
             for path in paths:
                 path.parent.mkdir(parents=True, exist_ok=True)

@@ -16,6 +16,10 @@
     "GWASCatalog": {
       "enabled": true
     },
+    "ClinVar": {
+      "enabled": true,
+      "max_targets": 100
+    },
     "GTEx": {
       "enabled": true
     },

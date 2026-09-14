@@ -974,8 +974,13 @@ class TestFullStatus(unittest.TestCase):
                         "evidence_disease": ["hepatocellular carcinoma"],
                         "evidence_max_targets": ["250"],
                         "evidence_legacy_pool_size": ["80"],
+                        "candidate_expansion_max_targets": ["400"],
+                        "benchmark_positive_targets": ["GPC3,TP53"],
+                        "benchmark_negative_targets": ["ALB"],
+                        "benchmark_top_n": ["30"],
                         "evidence_hub_offline": ["1"],
                         "evidence_hub_strict": ["1"],
+                        "allow_review_docking": ["1"],
                     }
                 )
             job_id = result["job"]
@@ -1001,8 +1006,27 @@ class TestFullStatus(unittest.TestCase):
                     cmd[cmd.index("--evidence-legacy-pool-size") + 1],
                     "80",
                 )
+                self.assertEqual(
+                    cmd[
+                        cmd.index("--candidate-expansion-max-targets") + 1
+                    ],
+                    "400",
+                )
+                self.assertEqual(
+                    cmd[cmd.index("--benchmark-positive") + 1],
+                    "GPC3,TP53",
+                )
+                self.assertEqual(
+                    cmd[cmd.index("--benchmark-negative") + 1],
+                    "ALB",
+                )
+                self.assertEqual(
+                    cmd[cmd.index("--benchmark-top-n") + 1],
+                    "30",
+                )
                 self.assertIn("--evidence-hub-offline", cmd)
                 self.assertIn("--evidence-hub-strict", cmd)
+                self.assertIn("--allow-review-docking", cmd)
             finally:
                 FULL_JOBS.pop(job_id, None)
 

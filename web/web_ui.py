@@ -2010,6 +2010,7 @@ def start_full_job(data: dict) -> dict:
         "skip_pseudobulk",
         "skip_knockout",
         "skip_docking",
+        "allow_review_docking",
         "skip_md",
         "skip_handoff",
         "skip_docking_ml",
@@ -2057,10 +2058,19 @@ def start_full_job(data: dict) -> dict:
         "evidence_max_records",
         "evidence_hub_timeout",
         "evidence_legacy_pool_size",
+        "candidate_expansion_max_targets",
+        "benchmark_top_n",
     ):
         value = _int_field(data, attr)
         if value is not None:
             cmd += ["--" + attr.replace("_", "-"), str(value)]
+    for attr in (
+        "benchmark_positive_targets",
+        "benchmark_negative_targets",
+    ):
+        value = _first(data, attr, "").strip()
+        if value:
+            cmd += ["--" + attr.replace("_targets", "").replace("_", "-"), value]
     for attr in [
         "network_compound_targets_csv",
         "network_disease_genes_csv",

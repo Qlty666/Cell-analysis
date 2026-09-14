@@ -78,7 +78,11 @@
     "hub_timeout": 120,
     "allow_network": true,
     "strict": false,
-    "legacy_pool_size": 50
+    "legacy_pool_size": 50,
+    "candidate_expansion_max_targets": 1000,
+    "benchmark_positive_targets": "",
+    "benchmark_negative_targets": "",
+    "benchmark_top_n": 20
   },
   "target_priority": {
     "weights": {
@@ -90,6 +94,9 @@
     "go_min_score": 0.75,
     "go_min_coverage": 0.5,
     "conditional_min_score": 0.5
+  },
+  "docking_selection": {
+    "allow_review": false
   },
   "qc_gate": {
     "enabled": true,

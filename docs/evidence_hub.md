@@ -45,6 +45,7 @@ The current open connectors are:
 | BindingDB | direct binding measurement | experimental |
 | PubChem BioAssay | bioassay activity | experimental |
 | GWAS Catalog | human genetic association | genetic |
+| ClinVar | clinical variant association | genetic |
 | GTEx | liver expression context | context |
 | Human Protein Atlas | liver expression context | context |
 | DepMap local snapshot | cancer-cell dependency | context |
@@ -53,6 +54,11 @@ CTD, Tox21, ToxCast/CompTox, LINCS, DisGeNET and licensed resources such as
 GeneCards, OMIM, TTD and DrugBank can be imported through the generic local
 table connector. Licensed data are never downloaded or redistributed by the
 repository.
+
+`config/evidence_local_sources.example.json` also contains disabled templates
+for ClinVar, gnomAD, cBioPortal, OncoKB, CIViC and ClinicalTrials.gov exports.
+When a user has the corresponding authorized or public snapshot, the template
+can be copied into a local evidence config and enabled without changing code.
 
 ## Scoring
 
@@ -152,6 +158,25 @@ evidence remains `not_found` or `not_queried` in the target priority table and
 is never converted to a negative result. The integrated report also writes a
 `publication_readiness` block that distinguishes exploratory results from
 paper-supporting or publication-grade evidence gates.
+
+The full pipeline now keeps a DEG-derived `candidate_universe.csv` and writes
+an evidence-expanded `candidate_universe_evidence_expanded.csv`. Disease and
+genetic targets discovered by Open Targets or GWAS Catalog are unioned into the
+expanded universe, controlled by `evidence.candidate_expansion_max_targets`.
+Legacy target-level ChEMBL, PDB, AlphaFold, Reactome and KEGG evidence is
+converted into the canonical evidence store before scoring. This makes the
+chemical, structural and pathway axes available even when no particular
+compound was supplied by the user.
+
+Positive and negative benchmark targets can be supplied through
+`evidence.benchmark_positive_targets`, `evidence.benchmark_negative_targets`
+and `evidence.benchmark_top_n`, or through the corresponding CLI options.
+`evidence.strict=true` now propagates failures to the full-pipeline stage
+instead of being silently downgraded to a warning. A changed local evidence
+file also changes the evidence-store fingerprint, so stale records are not
+silently reused. If a configured source fails in the current run while strict
+mode is off, its previous records are removed before scoring so that a stale
+success cannot masquerade as current evidence.
 
 ## Scientific limits
 

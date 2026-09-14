@@ -676,6 +676,79 @@ class GWASCatalogConnector(BaseConnector):
         return records
 
 
+class ClinVarConnector(BaseConnector):
+    name = "ClinVar"
+    source_version = "NCBI E-utilities/ClinVar"
+    source_group = "clinvar"
+    tier = EvidenceTier.GENETIC
+
+    BASE = "https://eutils.ncbi.nlm.nih.gov/entrez/eutils/esearch.fcgi"
+
+    def collect(self, context: EvidenceContext) -> list[EvidenceRecord]:
+        if not context.allow_network:
+            raise ConnectorError("network disabled")
+        options = dict(context.source_options.get(self.name) or {})
+        limit = int(options.get("max_targets", 100) or 100)
+        records: list[EvidenceRecord] = []
+        for symbol in context.target_symbols[:limit]:
+            gene = _normalise_symbol(symbol)
+            if not gene:
+                continue
+            payload = _json_get(
+                self.BASE,
+                params={
+                    "db": "clinvar",
+                    "term": f"{gene}[gene] AND human[orgn]",
+                    "retmode": "json",
+                    "retmax": 1,
+                },
+                timeout=context.timeout_seconds,
+            )
+            count = int(
+                ((payload.get("esearchresult") or {}).get("count") or 0)
+            )
+            if count <= 0:
+                continue
+            records.append(
+                EvidenceRecord(
+                    source=self.name,
+                    source_record_id=f"{gene}:clinvar_count",
+                    evidence_type="clinical_variant_association",
+                    subject_type="disease",
+                    subject_id=str(
+                        context.disease.get("id")
+                        or context.disease.get("name")
+                        or "disease"
+                    ),
+                    relation="associated_with",
+                    object_type="target",
+                    object_id=gene,
+                    target_symbol=gene,
+                    tier=self.tier,
+                    source_version=self.source_version,
+                    source_group=self.source_group,
+                    score=float(
+                        np.clip(
+                            math.log1p(count) / math.log1p(100.0),
+                            0.0,
+                            1.0,
+                        )
+                    ),
+                    sample_size=count,
+                    species="Homo sapiens",
+                    url=(
+                        "https://www.ncbi.nlm.nih.gov/clinvar/?term="
+                        + urllib.parse.quote(f"{gene}[gene]")
+                    ),
+                    license="NCBI public data terms",
+                    payload={"clinvar_record_count": count},
+                )
+            )
+            if len(records) >= context.max_records_per_source:
+                break
+        return records
+
+
 class GTExConnector(BaseConnector):
     name = "GTEx"
     source_version = "GTEx API v2"
@@ -1196,6 +1269,8 @@ def connector_from_config(
         return PubChemBioAssayConnector()
     if key in {"gwas", "gwascatalog"}:
         return GWASCatalogConnector()
+    if key == "clinvar":
+        return ClinVarConnector()
     if key == "gtex":
         return GTExConnector()
     if key in {"hpa", "humanproteinatlas"}:
