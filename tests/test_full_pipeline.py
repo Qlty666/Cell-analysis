@@ -37,6 +37,7 @@ from pipeline.integration import (  # noqa: E402
     _stage_output_paths,
     _stage_outputs_ready,
     _stage_signature,
+    _run_evidence_hub,
     _valid_docking_box,
     _write_stage_marker,
     _write_run_context,
@@ -46,6 +47,7 @@ from pipeline.integration import (  # noqa: E402
     extract_key_genes,
     main,
     run_differential_abundance,
+    run_docking_stage,
     write_qc_metrics,
 )
 from pipeline.cell_feedback import (  # noqa: E402
@@ -189,7 +191,20 @@ class TestExtractKeyGenes(unittest.TestCase):
             self.assertEqual(frame.iloc[0]["gene"], "GENE1")
             self.assertAlmostEqual(float(frame.iloc[0]["avg_log2fc"]), 3.0)
             self.assertTrue((out / "key_genes.csv").exists())
+            self.assertTrue((out / "candidate_universe.csv").exists())
             self.assertTrue((out / "key_genes_summary.json").exists())
+
+    def test_candidate_universe_is_not_limited_by_key_gene_top_n(self):
+        with tempfile.TemporaryDirectory() as tmp:
+            root = Path(tmp) / "single_cell"
+            root.mkdir(parents=True)
+            _write_deg(root)
+            out = root / "integration_out"
+            result = extract_key_genes(root, out, top_n=1)
+            universe = pd.read_csv(out / "candidate_universe.csv")
+            self.assertEqual(len(result), 1)
+            self.assertEqual(len(universe), 3)
+            self.assertEqual(universe.iloc[0]["gene"], "GENE1")
 
     def test_duplicate_log2fc_columns_are_deduped(self):
         with tempfile.TemporaryDirectory() as tmp:
@@ -278,6 +293,140 @@ class TestExtractKeyGenes(unittest.TestCase):
             self.assertAlmostEqual(
                 float(result.iloc[0]["advanced_priority_score"]),
                 0.95,
+            )
+
+
+class TestDockingTargetSelection(unittest.TestCase):
+    def test_docking_uses_integrated_priority_when_available(self):
+        with tempfile.TemporaryDirectory() as tmp:
+            root = Path(tmp)
+            key_genes = root / "key_genes.csv"
+            evidence = root / "gene_evidence.csv"
+            priority = root / "integrated_target_priority.csv"
+            pd.DataFrame({"gene": ["GENE1", "GENE2"]}).to_csv(
+                key_genes,
+                index=False,
+            )
+            pd.DataFrame({"gene": ["GENE1", "GENE2"]}).to_csv(
+                evidence,
+                index=False,
+            )
+            pd.DataFrame(
+                {
+                    "gene": ["GENE2", "GENE1"],
+                    "integrated_score": [0.9, 0.5],
+                }
+            ).to_csv(priority, index=False)
+            captured: list[str] = []
+
+            def fake_docking(
+                gene,
+                workdir,
+                docking_config,
+                evidence_frame,
+                ligand_library,
+                force=False,
+            ):
+                captured.append(gene)
+                return {
+                    "gene": gene,
+                    "status": "ok",
+                    "pdb_id": "1ABC",
+                    "uniprot": "",
+                    "box_mode": "test",
+                    "ligand_count": 1,
+                    "hits": 1,
+                    "best_affinity": "-8.0",
+                    "output_dir": "",
+                    "error": "",
+                    "ligand_library": "",
+                    "ligand_library_sha256": "",
+                }
+
+            with mock.patch(
+                "pipeline.integration.run_target_docking",
+                side_effect=fake_docking,
+            ):
+                summary = run_docking_stage(
+                    root / "work",
+                    root / "docking.json",
+                    key_genes,
+                    evidence,
+                    max_targets=2,
+                    ligand_library=None,
+                    priority_csv=priority,
+                )
+            self.assertEqual(captured, ["GENE2", "GENE1"])
+            self.assertEqual(
+                summary["selection_source"],
+                "integrated_target_priority",
+            )
+
+
+class TestEvidenceHubIntegration(unittest.TestCase):
+    def test_local_evidence_hub_writes_priority_table(self):
+        with tempfile.TemporaryDirectory() as tmp:
+            root = Path(tmp)
+            local_table = root / "local.tsv"
+            pd.DataFrame(
+                {
+                    "gene": ["GENE1"],
+                    "score": [0.91],
+                }
+            ).to_csv(local_table, sep="\t", index=False)
+            hub_config = root / "evidence_sources.json"
+            hub_config.write_text(
+                json.dumps(
+                    {
+                        "strict": True,
+                        "sources": {
+                            "Local": {
+                                "enabled": True,
+                                "name": "LocalEvidence",
+                                "path": str(local_table),
+                                "source_version": "test",
+                                "evidence_type": "disease_gene_association",
+                                "relation": "associated_with",
+                                "tier": "CURATED",
+                                "subject_type": "disease",
+                                "subject_value": "liver cancer",
+                                "target_column": "gene",
+                                "score_column": "score",
+                            }
+                        },
+                        "scoring": {},
+                    }
+                ),
+                encoding="utf-8",
+            )
+            args = argparse.Namespace(
+                evidence_hub_enabled=True,
+                evidence_hub_config=str(hub_config),
+                evidence_max_targets=0,
+                evidence_max_records=100,
+                evidence_hub_timeout=30,
+                evidence_hub_allow_network=False,
+                skip_evidence_fetch=True,
+                evidence_disease="liver cancer",
+                evidence_disease_id="",
+                evidence_hub_strict=True,
+            )
+            priority, summary = _run_evidence_hub(
+                root / "work",
+                pd.DataFrame({"gene": ["GENE1", "GENE2"]}),
+                args,
+            )
+            self.assertEqual(summary["status"], "completed")
+            self.assertIn("GENE1", priority["target_symbol"].tolist())
+            self.assertTrue(
+                (
+                    root
+                    / "work"
+                    / "outputs"
+                    / "integration"
+                    / "evidence_hub"
+                    / "target_priority.csv"
+                ).exists()
             )
 
 
@@ -1206,10 +1355,11 @@ class TestStageOutputVerification(unittest.TestCase):
             args = _pipeline_args(cfg, dock, output, workdir)
             ctx = {"single_cell_root": output}
             paths = _stage_output_paths("03", workdir, ctx, args)
-            self.assertEqual(len(paths), 1)
+            self.assertEqual(len(paths), 3)
             self.assertFalse(_stage_outputs_ready("03", workdir, ctx, args))
-            paths[0].parent.mkdir(parents=True, exist_ok=True)
-            paths[0].write_text("evidence", encoding="utf-8")
+            for path in paths:
+                path.parent.mkdir(parents=True, exist_ok=True)
+                path.write_text("evidence", encoding="utf-8")
             self.assertTrue(_stage_outputs_ready("03", workdir, ctx, args))
 
 

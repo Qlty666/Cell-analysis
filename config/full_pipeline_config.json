@@ -4,6 +4,7 @@
   "workdir": "",
   "species": "auto",
   "top_genes": 50,
+  "candidate_universe_size": 0,
   "docking_targets": 3,
   "ml_model": "xgb",
   "keep_all_genes": false,
@@ -67,7 +68,28 @@
   "evidence": {
     "fetch": true,
     "max_workers": 6,
-    "timeout": 90
+    "timeout": 90,
+    "hub_enabled": true,
+    "hub_config": "config/evidence_sources.json",
+    "disease_name": "liver cancer",
+    "disease_id": "",
+    "max_targets": 300,
+    "max_records_per_source": 1000,
+    "hub_timeout": 120,
+    "allow_network": true,
+    "strict": false,
+    "legacy_pool_size": 50
+  },
+  "target_priority": {
+    "weights": {
+      "expression": 0.25,
+      "evidence": 0.45,
+      "knockout": 0.2,
+      "advanced": 0.1
+    },
+    "go_min_score": 0.75,
+    "go_min_coverage": 0.5,
+    "conditional_min_score": 0.5
   },
   "qc_gate": {
     "enabled": true,

@@ -30,6 +30,75 @@ def _render_table(frame: pd.DataFrame, columns: list[str]) -> str:
     return f"<table><thead><tr>{head}</tr></thead><tbody>{body}</tbody></table>"
 
 
+def _publication_readiness(
+    target_priority_summary: dict,
+    evidence_hub_summary: dict,
+    cadd_summary: dict,
+    docking_config: Path,
+    out_dir: Path,
+) -> dict:
+    """Summarize which publication-strength gates have actually been met."""
+    try:
+        cfg = load_config(docking_config)
+        positive_control = bool(
+            cfg.get("docking", "positive_control_pdbqt", None)
+        )
+        replicates = int(cfg.get("docking", "replicates", 1) or 1)
+    except Exception:
+        positive_control = False
+        replicates = 1
+    checks = {
+        "multi_source_evidence": (
+            str(evidence_hub_summary.get("status", "")) == "completed"
+            and int(evidence_hub_summary.get("source_count", 0) or 0) >= 3
+        ),
+        "candidate_universe_not_top50_only": int(
+            target_priority_summary.get("targets", 0) or 0
+        ) > 50,
+        "evidence_target_coverage": (
+            int(target_priority_summary.get("targets", 0) or 0) > 0
+            and int(
+                target_priority_summary.get("evidence_targets_queried", 0)
+                or 0
+            )
+            / max(1, int(target_priority_summary.get("targets", 0) or 0))
+            >= 0.50
+        ),
+        "docking_positive_control": positive_control,
+        "docking_replicates": replicates >= 3,
+        "md_completed": int(cadd_summary.get("md_completed", 0) or 0) > 0,
+        "external_validation": (
+            out_dir
+            / "external_validation"
+            / "validation_summary.json"
+        ).exists(),
+        "mechanistic_perturbation": False,
+    }
+    required = (
+        "multi_source_evidence",
+        "candidate_universe_not_top50_only",
+        "evidence_target_coverage",
+        "docking_positive_control",
+        "docking_replicates",
+        "md_completed",
+        "external_validation",
+    )
+    passed = sum(bool(checks[name]) for name in required)
+    if passed == len(required) and checks["mechanistic_perturbation"]:
+        level = "publication_grade"
+    elif passed >= 4:
+        level = "paper_supporting"
+    else:
+        level = "exploratory"
+    return {
+        "level": level,
+        "passed": passed,
+        "required": len(required),
+        "checks": checks,
+        "missing": [name for name in required if not checks[name]],
+    }
+
+
 def generate_integrated_report(
     workdir: Path,
     single_cell_root: Path,
@@ -43,6 +112,26 @@ def generate_integrated_report(
     dataset_mode = str(sc_summary.get("dataset_mode", "single_cell"))
     sample_label = "samples" if dataset_mode != "single_cell" else "cells"
     key_genes = pd.read_csv(out_dir / "key_genes.csv") if (out_dir / "key_genes.csv").exists() else pd.DataFrame()
+    candidate_universe = (
+        pd.read_csv(out_dir / "candidate_universe.csv")
+        if (out_dir / "candidate_universe.csv").exists()
+        else pd.DataFrame()
+    )
+    target_priority = (
+        pd.read_csv(out_dir / "integrated_target_priority.csv")
+        if (out_dir / "integrated_target_priority.csv").exists()
+        else (
+            pd.read_csv(out_dir / "target_priority.csv")
+            if (out_dir / "target_priority.csv").exists()
+            else pd.DataFrame()
+        )
+    )
+    target_priority_summary = _read_json(
+        out_dir / "integrated_target_priority_summary.json"
+    ) or _read_json(out_dir / "target_priority_summary.json")
+    evidence_hub_summary = _read_json(
+        out_dir / "evidence_hub" / "evidence_hub_summary.json"
+    )
     ko_summary = _read_json(out_dir / "knockout_summary.json")
     ko_top = pd.DataFrame()
     ko_ranked = (
@@ -143,6 +232,22 @@ def generate_integrated_report(
         qc_gate.get("checks") or [],
         columns=["name", "level", "ok", "message"],
     )
+    readiness = _publication_readiness(
+        target_priority_summary,
+        evidence_hub_summary,
+        cadd_summary,
+        docking_config,
+        out_dir,
+    )
+    readiness_frame = pd.DataFrame(
+        [
+            {
+                "check": name,
+                "passed": bool(value),
+            }
+            for name, value in (readiness.get("checks") or {}).items()
+        ]
+    )
 
     sc_html = _render_table(
         pd.DataFrame(
@@ -199,6 +304,21 @@ def generate_integrated_report(
             "database_sources",
         ]
         if c in evidence.columns
+    ]
+    priority_cols = [
+        c
+        for c in [
+            "priority_rank",
+            "gene",
+            "decision",
+            "integrated_score",
+            "evidence_score",
+            "coverage_ratio",
+            "knockout_score",
+            "evidence_status",
+            "missing_categories",
+        ]
+        if c in target_priority.columns
     ]
     feedback_cols = [
         c
@@ -374,6 +494,15 @@ a {{ color: #1d4ed8; }}
   <p><b>Docking summary:</b> {_esc(docking_display)}</p>
 </div>
 <div class="card">
+  <h2>Publication readiness ({_esc(readiness.get("level", "exploratory"))})</h2>
+  <p class="muted">
+    Passed {_esc(readiness.get("passed", 0))} of
+    {_esc(readiness.get("required", 0))} required gates.
+    Missing: {_esc(", ".join(readiness.get("missing") or []) or "none")}.
+  </p>
+  {_render_table(readiness_frame, ["check", "passed"])}
+</div>
+<div class="card">
   <h2>Expression analysis summary</h2>
   {sc_html}
 </div>
@@ -386,6 +515,17 @@ a {{ color: #1d4ed8; }}
   <h2>Differential abundance (cell type composition)</h2>
   <p class="muted">{_esc(differential_abundance_summary.get("reason", ""))}</p>
   {_render_table(differential_abundance, differential_abundance_cols)}
+</div>
+<div class="card">
+  <h2>Evidence-aware target priority (top 20)</h2>
+  <p class="muted">
+    Candidate universe: {_esc(len(candidate_universe))};
+    evidence hub: {_esc(evidence_hub_summary.get("status", "skipped"))};
+    GO: {_esc((target_priority_summary.get("decisions") or {}).get("GO", 0))};
+    median coverage:
+    {_esc(target_priority_summary.get("median_coverage_ratio", "NA"))}
+  </p>
+  {_render_table(target_priority, priority_cols)}
 </div>
 <div class="card">
   <h2>Key genes (top 20)</h2>
@@ -442,6 +582,11 @@ a {{ color: #1d4ed8; }}
   <h2>Outputs</h2>
   <ul>
     <li><a href="{rel(out_dir / 'key_genes.csv')}">key_genes.csv</a></li>
+    <li><a href="{rel(out_dir / 'candidate_universe.csv') if (out_dir / 'candidate_universe.csv').exists() else '#'}">candidate_universe.csv</a></li>
+    <li><a href="{rel(out_dir / 'target_priority.csv') if (out_dir / 'target_priority.csv').exists() else '#'}">target_priority.csv</a></li>
+    <li><a href="{rel(out_dir / 'integrated_target_priority.csv') if (out_dir / 'integrated_target_priority.csv').exists() else '#'}">integrated_target_priority.csv</a></li>
+    <li><a href="{rel(out_dir / 'evidence_hub' / 'evidence_coverage.csv') if (out_dir / 'evidence_hub' / 'evidence_coverage.csv').exists() else '#'}">evidence_coverage.csv</a></li>
+    <li><a href="{rel(out_dir / 'evidence_hub' / 'source_ablation.csv') if (out_dir / 'evidence_hub' / 'source_ablation.csv').exists() else '#'}">source_ablation.csv</a></li>
     <li><a href="{rel(out_dir / 'differential_abundance.csv') if (out_dir / 'differential_abundance.csv').exists() else '#'}">differential_abundance.csv</a></li>
     <li><a href="{rel(out_dir / 'qc_metrics.json')}">qc_metrics.json</a></li>
     <li><a href="{rel(ko_ranked) if ko_ranked.exists() else '#'}">fig_52_53_ranked_knockout.csv</a></li>
@@ -471,6 +616,12 @@ a {{ color: #1d4ed8; }}
         "qc_gate": qc_gate,
         "differential_abundance": differential_abundance_summary,
         "key_genes": len(key_genes),
+        "candidate_universe": len(candidate_universe),
+        "target_priority": {
+            **target_priority_summary,
+            "top_targets": target_priority.head(20).to_dict(orient="records"),
+        },
+        "publication_readiness": readiness,
         "knockout": {
             "genes_scored": (ko_summary.get("knockout") or {}).get("genes_scored", 0),
             "validation_candidates": (ko_summary.get("validation") or {}).get("candidates", 0),
@@ -500,6 +651,7 @@ a {{ color: #1d4ed8; }}
             "figures": feedback_summary.get("figures", []),
         },
         "evidence_genes": len(evidence),
+        "evidence_hub": evidence_hub_summary,
         "evidence_failures": evidence_summary.get("evidence_failures", []),
         "evidence_database_sources": (
             ",".join(
@@ -528,7 +680,15 @@ a {{ color: #1d4ed8; }}
         "full-pipeline",
         {
             "key_genes_csv": out_dir / "key_genes.csv",
+            "candidate_universe_csv": out_dir / "candidate_universe.csv",
+            "target_priority_csv": out_dir / "target_priority.csv",
+            "integrated_target_priority_csv": (
+                out_dir / "integrated_target_priority.csv"
+            ),
             "gene_evidence_csv": out_dir / "gene_evidence.csv",
+            "evidence_hub_summary_json": (
+                out_dir / "evidence_hub" / "evidence_hub_summary.json"
+            ),
             "integration_summary_json": out_dir / "integration_summary.json",
         },
         summary,

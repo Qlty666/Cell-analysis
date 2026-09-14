@@ -1957,6 +1957,12 @@ def start_full_job(data: dict) -> dict:
     top_genes = _int_field(data, "top_genes")
     if top_genes:
         cmd += ["--top-genes", str(top_genes)]
+    candidate_universe_size = _int_field(data, "candidate_universe_size")
+    if candidate_universe_size is not None:
+        cmd += [
+            "--candidate-universe-size",
+            str(candidate_universe_size),
+        ]
     docking_targets = _int_field(data, "docking_targets")
     if docking_targets is not None:
         cmd += ["--docking-targets", str(docking_targets)]
@@ -1998,6 +2004,9 @@ def start_full_job(data: dict) -> dict:
         "skip_download",
         "skip_deps",
         "skip_evidence_fetch",
+        "skip_evidence_hub",
+        "evidence_hub_offline",
+        "evidence_hub_strict",
         "skip_pseudobulk",
         "skip_knockout",
         "skip_docking",
@@ -2035,6 +2044,23 @@ def start_full_job(data: dict) -> dict:
     ).strip()
     if docking_ml_label_column:
         cmd += ["--docking-ml-label-column", docking_ml_label_column]
+    for attr in (
+        "evidence_hub_config",
+        "evidence_disease",
+        "evidence_disease_id",
+    ):
+        value = _first(data, attr, "").strip()
+        if value:
+            cmd += ["--" + attr.replace("_", "-"), value]
+    for attr in (
+        "evidence_max_targets",
+        "evidence_max_records",
+        "evidence_hub_timeout",
+        "evidence_legacy_pool_size",
+    ):
+        value = _int_field(data, attr)
+        if value is not None:
+            cmd += ["--" + attr.replace("_", "-"), str(value)]
     for attr in [
         "network_compound_targets_csv",
         "network_disease_genes_csv",
@@ -2604,6 +2630,7 @@ def full_results(workdir: Path) -> dict:
         "qc_metrics": {},
         "differential_abundance": [],
         "key_genes": [],
+        "target_priority": [],
         "knockout": [],
         "docking": [],
         "cadd_downstream_summary": {},
@@ -2617,6 +2644,8 @@ def full_results(workdir: Path) -> dict:
         "cell_feedback_enrichment_go": [],
         "cell_feedback_enrichment_kegg": [],
         "evidence": [],
+        "evidence_coverage": [],
+        "source_ablation": [],
     }
     if not out.exists():
         return result
@@ -2629,6 +2658,15 @@ def full_results(workdir: Path) -> dict:
         )
     except Exception:
         result["key_genes"] = []
+    priority_path = out / "integrated_target_priority.csv"
+    if not priority_path.exists():
+        priority_path = out / "target_priority.csv"
+    try:
+        result["target_priority"] = json.loads(
+            pd_read_csv(priority_path).head(200).to_json(orient="records")
+        )
+    except Exception:
+        result["target_priority"] = []
     try:
         # The page renders only the top knockout rows; cap the JSON payload.
         result["knockout"] = json.loads(
@@ -2725,6 +2763,22 @@ def full_results(workdir: Path) -> dict:
         )
     except Exception:
         result["evidence"] = []
+    try:
+        result["evidence_coverage"] = json.loads(
+            pd_read_csv(out / "evidence_hub" / "evidence_coverage.csv")
+            .head(200)
+            .to_json(orient="records")
+        )
+    except Exception:
+        result["evidence_coverage"] = []
+    try:
+        result["source_ablation"] = json.loads(
+            pd_read_csv(out / "evidence_hub" / "source_ablation.csv")
+            .head(200)
+            .to_json(orient="records")
+        )
+    except Exception:
+        result["source_ablation"] = []
     try:
         result["differential_abundance"] = json.loads(
             pd_read_csv(out / "differential_abundance.csv").to_json(

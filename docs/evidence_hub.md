@@ -135,6 +135,24 @@ The stage records each connector failure and continues unless `strict=true`.
 Set `LIVER_CONTACT_EMAIL` before large automated runs so remote services can
 contact the operator about API traffic.
 
+## Full-pipeline integration
+
+The full automated pipeline now uses the evidence hub in stage 03. Stage 02
+writes `candidate_universe.csv` before the legacy `key_genes.csv` Top-N view.
+Stage 03 collects evidence for `evidence.max_targets` candidates, writes the
+hub to `outputs/integration/evidence_hub/`, and produces
+`outputs/integration/target_priority.csv`. Stage 05 merges the heuristic
+perturbation score into `integrated_target_priority.csv`, and stage 06 uses
+that integrated ranking before falling back to `target_priority.csv` or
+`key_genes.csv`.
+
+Set `evidence.hub_config`, `evidence.disease_name`, `evidence.max_targets`,
+and `evidence.allow_network` in `config/full_pipeline_config.json`. Missing
+evidence remains `not_found` or `not_queried` in the target priority table and
+is never converted to a negative result. The integrated report also writes a
+`publication_readiness` block that distinguishes exploratory results from
+paper-supporting or publication-grade evidence gates.
+
 ## Scientific limits
 
 - Open Targets aggregates many underlying sources. Do not add its underlying

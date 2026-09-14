@@ -47,8 +47,9 @@ def extract_key_genes(
     keep_all: bool = False,
     blacklist_patterns: list[str] | None = None,
     advanced_priority_csv: str | Path | None = None,
+    universe_size: int = 0,
 ) -> pd.DataFrame:
-    """Rank significant DEGs into a compact key-gene table."""
+    """Rank DEGs into a full candidate universe and a compact key-gene table."""
     data_dir = single_cell_root / "results" / "data"
     significant_path = data_dir / "05_deg" / "fig_09_deg_significant.csv"
     all_path = data_dir / "05_deg" / "fig_08_deg_all.csv"
@@ -112,7 +113,7 @@ def extract_key_genes(
         raise IntegrationError(f"DEG table has no log2FC column: {deg_path}")
 
     frame = frame.copy()
-    frame["gene"] = frame["gene"].astype(str)
+    frame["gene"] = frame["gene"].astype(str).str.strip().str.upper()
     frame["avg_log2fc"] = pd.to_numeric(
         frame["avg_log2fc"],
         errors="coerce",
@@ -201,6 +202,7 @@ def extract_key_genes(
             frame = frame[~frame["gene"].str.match(expr)]
     frame = frame.reset_index(drop=True)
     frame["rank"] = np.arange(1, len(frame) + 1)
+    eligible_count = len(frame)
 
     ml_path = data_dir / "07_ml" / "fig_24_ml_feature_importance.csv"
     if ml_path.exists():
@@ -232,29 +234,50 @@ def extract_key_genes(
         "deg_rank",
         "ml_importance",
         "advanced_priority_score",
+        "ensembl",
+        "ensembl_id",
+        "gene_id",
+        "entrez",
+        "entrez_id",
     ]
     for col in out_cols:
         if col not in frame.columns:
             frame[col] = ""
-    frame = frame.head(top_n)[out_cols].reset_index(drop=True)
-    frame["source"] = "DEG"
+    universe = (
+        frame
+        if int(universe_size or 0) <= 0
+        else frame.head(int(universe_size))
+    )[out_cols].reset_index(drop=True)
+    universe["source"] = "DEG"
+    key_genes = (
+        frame.head(top_n)[out_cols]
+        .reset_index(drop=True)
+        .assign(source="DEG")
+    )
 
     out_dir.mkdir(parents=True, exist_ok=True)
     csv_path = out_dir / "key_genes.csv"
-    frame.to_csv(csv_path, index=False)
+    key_genes.to_csv(csv_path, index=False)
+    universe_path = out_dir / "candidate_universe.csv"
+    universe.to_csv(universe_path, index=False)
     summary = {
         "deg_table": str(deg_path),
         "deg_total": int(total_before),
-        "after_blacklist": int(len(frame)),
+        "after_blacklist": int(eligible_count),
+        "candidate_universe_size": int(len(universe)),
+        "candidate_universe_size_requested": int(universe_size or 0),
+        "candidate_universe_csv": str(universe_path),
+        "key_genes": int(len(key_genes)),
         "top_n": int(top_n),
         "keep_all": bool(keep_all),
         "output_csv": str(csv_path),
     }
     write_json(out_dir / "key_genes_summary.json", summary)
     log.info(
-        "key targets: %s genes kept from %s DEGs -> %s",
-        len(frame),
+        "key targets: %s candidate genes (%s key genes) from %s DEGs -> %s",
+        len(universe),
+        len(key_genes),
         total_before,
         csv_path,
     )
-    return frame
+    return key_genes

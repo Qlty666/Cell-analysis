@@ -59,6 +59,11 @@ from docking.utils import DockingError, ToolNotFoundError, safe_name, write_json
 from docking.validation import export_validation  # noqa: E402
 from common.html_utils import esc as _esc  # noqa: E402
 from data.geo_downloader import canonical_accession  # noqa: E402
+from evidence import (  # noqa: E402
+    EvidenceContext,
+    EvidenceHub,
+    SQLiteEvidenceStore,
+)
 
 from . import cell_feedback, orchestrator  # noqa: E402
 # The private helpers remain re-exported for existing callers.
@@ -83,6 +88,10 @@ from .qc import (  # noqa: E402
     evaluate_qc_gate,
     write_qc_metrics,
 )
+from .target_priority import (  # noqa: E402
+    build_target_priority,
+    write_target_priority_summary,
+)
 from .stage_paths import (  # noqa: E402
     _integration_dir,
     _marker,
@@ -94,10 +103,10 @@ log = logging.getLogger("full_pipeline")
 
 STAGES = [
     ("01", "single_cell", "expression analysis (download, QC, annotation, DEG)"),
-    ("02", "key_targets", "extract and rank key genes/proteins from DEGs"),
-    ("03", "evidence", "enrich genes with UniProt/PDB/ChEMBL/STRING/Reactome/Open Targets/KEGG evidence"),
+    ("02", "key_targets", "build the DEG candidate universe and compact key-gene table"),
+    ("03", "evidence", "collect per-target structural/ligand evidence and rank targets with the multi-source evidence hub"),
     ("04", "knockout_inputs", "build pseudobulk expression and knockout inputs"),
-    ("05", "knockout", "virtual knockout and multidimensional target scoring"),
+    ("05", "knockout", "heuristic perturbation scoring and integrated target prioritization"),
     ("06", "docking", "per-target virtual screening with AutoDock Vina"),
     ("07", "cadd_downstream", "MD preparation, ML rescoring and MD/external handoff"),
     ("08", "network", "compound-disease network toxicology on optional user evidence"),
@@ -110,10 +119,15 @@ STAGES = [
 STAGE_OUTPUTS = {
     "01": ("results/pipeline_complete.json",),
     "02": (
+        "outputs/integration/candidate_universe.csv",
         "outputs/integration/key_genes.csv",
         "outputs/integration/key_genes_summary.json",
     ),
-    "03": ("outputs/integration/gene_evidence.csv",),
+    "03": (
+        "outputs/integration/gene_evidence.csv",
+        "outputs/integration/target_priority.csv",
+        "outputs/integration/target_priority_summary.json",
+    ),
     "04": (
         "data/knockout/expression.csv",
         "data/knockout/metadata.csv",
@@ -121,6 +135,7 @@ STAGE_OUTPUTS = {
     ),
     "05": (
         "outputs/integration/knockout_summary.json",
+        "outputs/integration/integrated_target_priority.csv",
         "outputs/run_001/results/04_knockout/data/fig_52_53_ranked_knockout.csv",
         "outputs/run_001/results/05_validation/data/validation_plan.md",
     ),
@@ -173,6 +188,34 @@ DEFAULT_DOCKING_ML = {
     "model": "rf",
     "training_csv": None,
     "label_column": "active",
+}
+
+DEFAULT_EVIDENCE = {
+    "fetch": True,
+    "max_workers": 6,
+    "timeout": 90,
+    "hub_enabled": True,
+    "hub_config": "config/evidence_sources.json",
+    "disease_name": "liver cancer",
+    "disease_id": "",
+    "max_targets": 300,
+    "max_records_per_source": 1000,
+    "hub_timeout": 120,
+    "allow_network": True,
+    "strict": False,
+    "legacy_pool_size": 50,
+}
+
+DEFAULT_TARGET_PRIORITY = {
+    "weights": {
+        "expression": 0.25,
+        "evidence": 0.45,
+        "knockout": 0.20,
+        "advanced": 0.10,
+    },
+    "go_min_score": 0.75,
+    "go_min_coverage": 0.50,
+    "conditional_min_score": 0.50,
 }
 
 DEFAULT_NETWORK_TOXICOLOGY = {
@@ -335,6 +378,9 @@ def _stage_signature(code: str, args, workdir: Path, ctx: dict) -> str:
             {
                 "single_cell_root": str(ctx.get("single_cell_root") or ""),
                 "top_genes": int(getattr(args, "top_genes", 50) or 50),
+                "candidate_universe_size": int(
+                    getattr(args, "candidate_universe_size", 1000) or 0
+                ),
                 "keep_all_genes": bool(getattr(args, "keep_all_genes", False)),
                 "gene_blacklist": sorted(
                     getattr(args, "gene_blacklist", DEFAULT_GENE_BLACKLIST) or []
@@ -343,13 +389,51 @@ def _stage_signature(code: str, args, workdir: Path, ctx: dict) -> str:
         )
     elif code == "03":
         key_genes = ctx.get("key_genes_path") or integration / "key_genes.csv"
+        candidate_universe = (
+            ctx.get("candidate_universe_path")
+            or integration / "candidate_universe.csv"
+        )
+        hub_config = Path(
+            str(getattr(args, "evidence_hub_config", "") or "")
+        ).resolve()
         payload.update(
             {
                 "key_genes_csv": str(key_genes),
                 "key_genes_sha256": _sha256_file(Path(str(key_genes))),
+                "candidate_universe_csv": str(candidate_universe),
+                "candidate_universe_sha256": _sha256_file(
+                    Path(str(candidate_universe))
+                ),
                 "fetch": bool(not getattr(args, "skip_evidence_fetch", False)),
                 "max_workers": int(getattr(args, "evidence_workers", 6) or 6),
                 "timeout": int(getattr(args, "evidence_timeout", 90) or 90),
+                "hub_enabled": bool(
+                    getattr(args, "evidence_hub_enabled", False)
+                ),
+                "hub_config": str(hub_config),
+                "hub_config_sha256": _sha256_file(hub_config),
+                "disease": getattr(args, "evidence_disease", ""),
+                "max_targets": int(
+                    getattr(args, "evidence_max_targets", 300) or 0
+                ),
+                "max_records": int(
+                    getattr(args, "evidence_max_records", 1000) or 1000
+                ),
+                "hub_timeout": int(
+                    getattr(args, "evidence_hub_timeout", 120) or 120
+                ),
+                "allow_network": bool(
+                    getattr(args, "evidence_hub_allow_network", True)
+                ),
+                "strict": bool(
+                    getattr(args, "evidence_hub_strict", False)
+                ),
+                "legacy_pool_size": int(
+                    getattr(args, "evidence_legacy_pool_size", 50) or 50
+                ),
+                "target_priority_weights": _json_sorted(
+                    getattr(args, "target_priority_weights", {})
+                ),
             }
         )
     elif code == "04":
@@ -360,6 +444,9 @@ def _stage_signature(code: str, args, workdir: Path, ctx: dict) -> str:
             }
         )
     elif code == "05":
+        evidence_priority = (
+            integration / "evidence_hub" / "target_priority.csv"
+        )
         payload.update(
             {
                 "docking_config": str(docking_config),
@@ -369,11 +456,23 @@ def _stage_signature(code: str, args, workdir: Path, ctx: dict) -> str:
                 "ko_top_n": getattr(args, "ko_top_n", None),
                 "depmap_csv": getattr(args, "depmap_csv", None),
                 "skip_knockout": bool(getattr(args, "skip_knockout", False)),
+                "evidence_priority_csv": str(evidence_priority),
+                "evidence_priority_sha256": _sha256_file(
+                    evidence_priority
+                ),
+                "target_priority_weights": _json_sorted(
+                    getattr(args, "target_priority_weights", {})
+                ),
             }
         )
     elif code == "06":
         key_genes = ctx.get("key_genes_path") or integration / "key_genes.csv"
         evidence = ctx.get("evidence_path") or integration / "gene_evidence.csv"
+        target_priority = (
+            integration / "integrated_target_priority.csv"
+        )
+        if not target_priority.exists():
+            target_priority = integration / "target_priority.csv"
         # The ChEMBL ligand library is fetched at docking time and persisted to
         # outputs/integration/ligands/ (with a per-gene sha256 recorded in
         # docking_summary.json). It is an output, so it cannot be part of the
@@ -387,6 +486,8 @@ def _stage_signature(code: str, args, workdir: Path, ctx: dict) -> str:
                 "key_genes_sha256": _sha256_file(Path(str(key_genes))),
                 "evidence_csv": str(evidence),
                 "evidence_sha256": _sha256_file(Path(str(evidence))),
+                "target_priority_csv": str(target_priority),
+                "target_priority_sha256": _sha256_file(target_priority),
                 "max_targets": int(getattr(args, "docking_targets", 3) or 3),
                 "ligand_library": getattr(args, "ligand_library", None),
                 "skip_docking": bool(getattr(args, "skip_docking", False)),
@@ -1619,12 +1720,27 @@ def run_docking_stage(
     max_targets: int,
     ligand_library: str | None,
     force: bool = False,
+    priority_csv: Path | None = None,
 ) -> dict:
     out_dir = _integration_dir(workdir)
     out_dir.mkdir(parents=True, exist_ok=True)
+    selection_source = "key_genes"
+    selection = pd.DataFrame()
+    if priority_csv is not None and Path(priority_csv).exists():
+        try:
+            priority = pd.read_csv(priority_csv)
+            if "gene" in priority.columns and not priority.empty:
+                selection = priority
+                selection_source = "integrated_target_priority"
+        except (OSError, ValueError):
+            selection = pd.DataFrame()
+    if selection.empty:
+        selection = pd.read_csv(key_genes_csv)
     genes = (
-        pd.read_csv(key_genes_csv)["gene"]
+        selection["gene"]
         .astype(str)
+        .str.strip()
+        .str.upper()
         .head(max_targets)
         .tolist()
     )
@@ -1692,6 +1808,8 @@ def run_docking_stage(
             json.dumps(ligand_digests, sort_keys=True).encode("utf-8")
         ).hexdigest(),
         "ligand_libraries": ligand_digests,
+        "selection_source": selection_source,
+        "selection_csv": str(priority_csv or key_genes_csv),
     }
     write_json(out_dir / "docking_summary.json", summary)
     log.info(
@@ -1791,34 +1909,302 @@ def _stage_key_targets(args, workdir: Path, ctx: dict) -> None:
         top_n=args.top_genes,
         keep_all=args.keep_all_genes,
         advanced_priority_csv=getattr(args, "advanced_priority_csv", None),
+        universe_size=int(getattr(args, "candidate_universe_size", 0) or 0),
     )
     ctx["key_genes_path"] = _integration_dir(workdir) / "key_genes.csv"
     ctx["key_genes"] = frame
+    ctx["candidate_universe_path"] = (
+        _integration_dir(workdir) / "candidate_universe.csv"
+    )
+
+
+def _candidate_universe_frame(workdir: Path, ctx: dict) -> pd.DataFrame:
+    candidate_path = (
+        ctx.get("candidate_universe_path")
+        or _integration_dir(workdir) / "candidate_universe.csv"
+    )
+    key_path = (
+        ctx.get("key_genes_path")
+        or _integration_dir(workdir) / "key_genes.csv"
+    )
+    source = candidate_path if Path(candidate_path).exists() else key_path
+    if not Path(source).exists():
+        raise IntegrationError(
+            "candidate_universe.csv/key_genes.csv missing; run stage 02 first"
+        )
+    frame = pd.read_csv(source)
+    if "gene" not in frame.columns:
+        raise IntegrationError(f"candidate gene table has no gene column: {source}")
+    frame["gene"] = frame["gene"].astype(str).str.strip().str.upper()
+    return frame[frame["gene"] != ""].drop_duplicates("gene", keep="first")
+
+
+def _run_evidence_hub(
+    workdir: Path,
+    candidate_frame: pd.DataFrame,
+    args,
+) -> tuple[pd.DataFrame, dict]:
+    """Collect, score and export the multi-source evidence hub."""
+    out_dir = _integration_dir(workdir) / "evidence_hub"
+    out_dir.mkdir(parents=True, exist_ok=True)
+    enabled = bool(getattr(args, "evidence_hub_enabled", False))
+    config_value = str(
+        getattr(args, "evidence_hub_config", "") or ""
+    ).strip()
+    if not enabled:
+        summary = {
+            "status": "skipped",
+            "reason": "multi-source evidence hub disabled",
+            "output_dir": str(out_dir),
+        }
+        write_json(out_dir / "evidence_hub_summary.json", summary)
+        return pd.DataFrame(), summary
+    if not config_value:
+        summary = {
+            "status": "skipped",
+            "reason": "evidence hub config is empty",
+            "output_dir": str(out_dir),
+        }
+        write_json(out_dir / "evidence_hub_summary.json", summary)
+        return pd.DataFrame(), summary
+
+    config_path = _resolve_path(config_value, APP_ROOT)
+    if not config_path.exists():
+        summary = {
+            "status": "failed",
+            "reason": f"evidence hub config not found: {config_path}",
+            "output_dir": str(out_dir),
+        }
+        write_json(out_dir / "evidence_hub_summary.json", summary)
+        log.warning(summary["reason"])
+        return pd.DataFrame(), summary
+
+    max_targets = int(getattr(args, "evidence_max_targets", 300) or 0)
+    genes = candidate_frame["gene"].astype(str).tolist()
+    if max_targets > 0:
+        genes = genes[:max_targets]
+    if not genes:
+        summary = {
+            "status": "skipped",
+            "reason": "candidate universe is empty",
+            "output_dir": str(out_dir),
+        }
+        write_json(out_dir / "evidence_hub_summary.json", summary)
+        return pd.DataFrame(), summary
+
+    query_fingerprint = hashlib.sha256(
+        json.dumps(
+            {
+                "config": str(config_path),
+                "config_sha256": _sha256_file(config_path),
+                "disease": str(
+                    getattr(args, "evidence_disease", "") or "liver cancer"
+                ).strip(),
+                "targets": genes,
+                "allow_network": bool(
+                    getattr(args, "evidence_hub_allow_network", True)
+                    and not getattr(args, "skip_evidence_fetch", False)
+                ),
+            },
+            sort_keys=True,
+            ensure_ascii=False,
+        ).encode("utf-8")
+    ).hexdigest()
+    database = out_dir / "evidence.sqlite"
+    previous_summary = _read_json(out_dir / "evidence_hub_summary.json")
+    if (
+        database.exists()
+        and previous_summary.get("query_fingerprint") != query_fingerprint
+    ):
+        try:
+            database.unlink()
+        except OSError as exc:
+            log.warning(
+                "could not remove stale evidence database %s: %s",
+                database,
+                exc,
+            )
+
+    ensembl_ids: dict[str, str] = {}
+    for column in ("ensembl", "ensembl_id", "gene_id"):
+        if column not in candidate_frame.columns:
+            continue
+        for gene, value in zip(
+            candidate_frame["gene"],
+            candidate_frame[column],
+        ):
+            text = str(value or "").strip()
+            if text and text.lower() != "nan" and gene not in ensembl_ids:
+                ensembl_ids[str(gene).upper()] = text
+
+    allow_network = bool(
+        getattr(args, "evidence_hub_allow_network", True)
+        and not getattr(args, "skip_evidence_fetch", False)
+    )
+    disease_name = str(
+        getattr(args, "evidence_disease", "") or "liver cancer"
+    ).strip()
+    disease_id = str(
+        getattr(args, "evidence_disease_id", "") or ""
+    ).strip()
+    strict = bool(getattr(args, "evidence_hub_strict", False))
+    try:
+        config = json.loads(config_path.read_text(encoding="utf-8"))
+        if not isinstance(config, dict):
+            raise ValueError("evidence hub config must be a JSON object")
+        limits = config.get("limits") or {}
+        context = EvidenceContext(
+            disease={"name": disease_name, "id": disease_id},
+            target_symbols=genes,
+            ensembl_ids=ensembl_ids,
+            cache_dir=out_dir,
+            max_records_per_source=int(
+                getattr(
+                    args,
+                    "evidence_max_records",
+                    limits.get("max_records_per_source", 1000),
+                )
+                or 1000
+            ),
+            timeout_seconds=int(
+                getattr(
+                    args,
+                    "evidence_hub_timeout",
+                    limits.get("timeout_seconds", 120),
+                )
+                or 120
+            ),
+            allow_network=allow_network,
+            source_options={
+                str(name): dict(options or {})
+                for name, options in (config.get("sources") or {}).items()
+            },
+        )
+        if strict:
+            config["strict"] = True
+        with SQLiteEvidenceStore(database) as store:
+            hub = EvidenceHub.from_config(
+                database,
+                config,
+                store=store,
+            )
+            status = hub.collect(context)
+            scored = hub.score(target_symbols=genes)
+            paths = hub.export(
+                out_dir,
+                context=context,
+                source_status=status,
+                scored=scored,
+            )
+            store_summary = store.summary()
+        priority = scored.get("priority")
+        if not isinstance(priority, pd.DataFrame):
+            priority = pd.DataFrame()
+        summary = {
+            "status": "completed",
+            "reason": "",
+            "targets_queried": len(genes),
+            "sources": {
+                str(row["source"]): {
+                    "status": str(row.get("status", "")),
+                    "record_count": int(row.get("record_count", 0) or 0),
+                    "error": str(row.get("error", "")),
+                }
+                for row in status.to_dict(orient="records")
+            },
+            "source_count": int(store_summary.get("n_sources", 0) or 0),
+            "targets_with_evidence": int(store_summary.get("n_targets", 0) or 0),
+            "evidence_records": int(store_summary.get("n_records", 0) or 0),
+            "outputs": paths,
+            "output_dir": str(out_dir),
+            "config": str(config_path),
+            "disease": disease_name,
+            "allow_network": allow_network,
+            "query_fingerprint": query_fingerprint,
+        }
+        write_json(out_dir / "evidence_hub_summary.json", summary)
+        return priority, summary
+    except Exception as exc:  # noqa: BLE001
+        summary = {
+            "status": "failed",
+            "reason": str(exc),
+            "output_dir": str(out_dir),
+            "config": str(config_path),
+            "disease": disease_name,
+            "allow_network": allow_network,
+        }
+        write_json(out_dir / "evidence_hub_summary.json", summary)
+        log.warning("multi-source evidence hub failed: %s", exc)
+        return pd.DataFrame(), summary
 
 
 def _stage_evidence(args, workdir: Path, ctx: dict) -> None:
-    genes = pd.read_csv(ctx["key_genes_path"])["gene"].astype(str).tolist()
-    if not genes:
-        log.warning("key_genes.csv is empty; skipping evidence collection")
-        out_path = _integration_dir(workdir) / "gene_evidence.csv"
-        out_path.parent.mkdir(parents=True, exist_ok=True)
-        pd.DataFrame(columns=list(EVIDENCE_COLUMNS)).to_csv(out_path, index=False)
-        write_json(
-            out_path.parent / "evidence_summary.json",
-            {"genes": 0, "fetched": 0, "evidence_failures": []},
-        )
-        ctx["evidence"] = pd.DataFrame(columns=list(EVIDENCE_COLUMNS))
-        ctx["evidence_path"] = out_path
-        return
-    frame = ensure_gene_evidence(
-        genes,
+    candidate_frame = _candidate_universe_frame(workdir, ctx)
+    key_frame = pd.read_csv(ctx["key_genes_path"])
+    key_genes = key_frame["gene"].astype(str).str.strip().str.upper().tolist()
+
+    evidence_priority, hub_summary = _run_evidence_hub(
         workdir,
-        fetch=not args.skip_evidence_fetch,
-        max_workers=args.evidence_workers,
-        timeout=args.evidence_timeout,
+        candidate_frame,
+        args,
     )
-    ctx["evidence"] = frame
+    target_priority_path = _integration_dir(workdir) / "target_priority.csv"
+    target_priority = build_target_priority(
+        _integration_dir(workdir) / "candidate_universe.csv",
+        _integration_dir(workdir) / "evidence_hub" / "target_priority.csv"
+        if not evidence_priority.empty
+        else None,
+        target_priority_path,
+        weights=getattr(args, "target_priority_weights", None),
+        evidence_queried=(
+            str(hub_summary.get("status", "")) == "completed"
+        ),
+        go_min_score=float(getattr(args, "target_go_min_score", 0.75)),
+        go_min_coverage=float(
+            getattr(args, "target_go_min_coverage", 0.50)
+        ),
+        conditional_min_score=float(
+            getattr(args, "target_conditional_min_score", 0.50)
+        ),
+    )
+
+    legacy_pool_size = int(
+        getattr(args, "evidence_legacy_pool_size", 50) or 50
+    )
+    legacy_pool_size = max(
+        legacy_pool_size,
+        int(getattr(args, "docking_targets", 0) or 0) * 2,
+    )
+    ranked_genes = target_priority["gene"].astype(str).tolist()
+    legacy_genes = list(dict.fromkeys(key_genes + ranked_genes[:legacy_pool_size]))
+    legacy = ensure_gene_evidence(
+        legacy_genes,
+        workdir,
+        fetch=not getattr(args, "skip_evidence_fetch", False),
+        max_workers=int(getattr(args, "evidence_workers", 6) or 6),
+        timeout=int(getattr(args, "evidence_timeout", 90) or 90),
+    )
+    ctx["candidate_universe"] = candidate_frame
+    ctx["candidate_universe_path"] = (
+        _integration_dir(workdir) / "candidate_universe.csv"
+    )
+    ctx["evidence_hub_summary"] = hub_summary
+    ctx["evidence_hub_priority"] = evidence_priority
+    ctx["target_priority"] = target_priority
+    ctx["target_priority_path"] = target_priority_path
+    ctx["evidence"] = legacy
     ctx["evidence_path"] = _integration_dir(workdir) / "gene_evidence.csv"
+    write_target_priority_summary(
+        target_priority,
+        _integration_dir(workdir) / "target_priority_summary.json",
+        evidence_hub_used=(
+            str(hub_summary.get("status", "")) == "completed"
+        ),
+        evidence_source_count=int(hub_summary.get("source_count", 0) or 0),
+        evidence_targets_queried=int(
+            hub_summary.get("targets_queried", 0) or 0
+        ),
+    )
 
 
 def _stage_knockout_inputs(args, workdir: Path, ctx: dict) -> None:
@@ -1845,6 +2231,96 @@ def _stage_knockout(args, workdir: Path, ctx: dict) -> None:
         depmap_csv=args.depmap_csv,
         ppi_network_csv=args.ppi_network_csv,
     )
+    ko_candidates = [
+        workdir
+        / "outputs"
+        / "run_001"
+        / "results"
+        / "04_knockout"
+        / "data"
+        / name
+        for name in (
+            "fig_52_53_ranked_knockout.csv",
+            "fig_52_target_candidates.csv",
+        )
+    ]
+    ko_path = next((path for path in ko_candidates if path.exists()), None)
+    candidate_path = (
+        ctx.get("candidate_universe_path")
+        or _integration_dir(workdir) / "candidate_universe.csv"
+    )
+    evidence_priority_path = (
+        _integration_dir(workdir) / "evidence_hub" / "target_priority.csv"
+    )
+    integrated_path = (
+        _integration_dir(workdir) / "integrated_target_priority.csv"
+    )
+    if Path(candidate_path).exists():
+        integrated = build_target_priority(
+            Path(candidate_path),
+            evidence_priority_path if evidence_priority_path.exists() else None,
+            integrated_path,
+            knockout_csv=ko_path,
+            weights=getattr(args, "target_priority_weights", None),
+            evidence_queried=(
+                str(
+                    (
+                        ctx.get("evidence_hub_summary")
+                        or _read_json(
+                            _integration_dir(workdir)
+                            / "evidence_hub"
+                            / "evidence_hub_summary.json"
+                        )
+                    ).get("status", "")
+                )
+                == "completed"
+            ),
+            go_min_score=float(getattr(args, "target_go_min_score", 0.75)),
+            go_min_coverage=float(
+                getattr(args, "target_go_min_coverage", 0.50)
+            ),
+            conditional_min_score=float(
+                getattr(args, "target_conditional_min_score", 0.50)
+            ),
+        )
+        ctx["integrated_target_priority"] = integrated
+        ctx["integrated_target_priority_path"] = integrated_path
+        write_target_priority_summary(
+            integrated,
+            _integration_dir(workdir)
+            / "integrated_target_priority_summary.json",
+            evidence_hub_used=(
+                str(
+                    (
+                        ctx.get("evidence_hub_summary")
+                        or _read_json(
+                            _integration_dir(workdir)
+                            / "evidence_hub"
+                            / "evidence_hub_summary.json"
+                        )
+                    ).get("status", "")
+                )
+                == "completed"
+            ),
+            evidence_source_count=int(
+                (ctx.get("evidence_hub_summary") or {}).get(
+                    "source_count",
+                    0,
+                )
+                or 0
+            ),
+            evidence_targets_queried=int(
+                (
+                    ctx.get("evidence_hub_summary")
+                    or _read_json(
+                        _integration_dir(workdir)
+                        / "evidence_hub"
+                        / "evidence_hub_summary.json"
+                    )
+                ).get("targets_queried", 0)
+                or 0
+            ),
+        )
 
 
 def _stage_docking(args, workdir: Path, ctx: dict) -> None:
@@ -1873,6 +2349,14 @@ def _stage_docking(args, workdir: Path, ctx: dict) -> None:
                 "gene_evidence.csv missing; run stage 03 before docking"
             )
         ctx["evidence_path"] = evidence_path
+    priority_path = None
+    for candidate in (
+        _integration_dir(workdir) / "integrated_target_priority.csv",
+        _integration_dir(workdir) / "target_priority.csv",
+    ):
+        if candidate.exists() and candidate.stat().st_size > 0:
+            priority_path = candidate
+            break
     ctx["docking"] = run_docking_stage(
         workdir,
         ctx["docking_config"],
@@ -1881,6 +2365,7 @@ def _stage_docking(args, workdir: Path, ctx: dict) -> None:
         max_targets=args.docking_targets,
         ligand_library=args.ligand_library,
         force=args.force,
+        priority_csv=priority_path,
     )
 
 
@@ -2478,6 +2963,7 @@ def load_full_config(path: Path) -> dict:
         "workdir": "",
         "species": "auto",
         "top_genes": 50,
+        "candidate_universe_size": 0,
         "docking_targets": 3,
         "ml_model": "xgb",
         "keep_all_genes": False,
@@ -2499,7 +2985,8 @@ def load_full_config(path: Path) -> dict:
             "max_features": 8,
             "timeout_seconds": 3600,
         },
-        "evidence": {"fetch": True, "max_workers": 6, "timeout": 90},
+        "evidence": DEFAULT_EVIDENCE,
+        "target_priority": DEFAULT_TARGET_PRIORITY,
         "qc_gate": DEFAULT_QC_GATE,
         "differential_abundance": DEFAULT_DIFFERENTIAL_ABUNDANCE,
         "gene_blacklist": DEFAULT_GENE_BLACKLIST,
@@ -2522,6 +3009,16 @@ def load_full_config(path: Path) -> dict:
     config["cell_feedback"].update((raw.get("cell_feedback") or {}))
     config["evidence"] = dict(defaults["evidence"])
     config["evidence"].update((raw.get("evidence") or {}))
+    target_priority = dict(defaults["target_priority"])
+    target_priority_weights = dict(
+        defaults["target_priority"].get("weights") or {}
+    )
+    target_priority_weights.update(
+        ((raw.get("target_priority") or {}).get("weights") or {})
+    )
+    target_priority.update(raw.get("target_priority") or {})
+    target_priority["weights"] = target_priority_weights
+    config["target_priority"] = target_priority
     config["qc_gate"] = dict(defaults["qc_gate"])
     config["qc_gate"].update((raw.get("qc_gate") or {}))
     config["differential_abundance"] = dict(
@@ -2557,6 +3054,10 @@ def _apply_defaults(args, config: dict) -> None:
         args.species = config.get("species", "auto")
     if args.top_genes is None:
         args.top_genes = int(config.get("top_genes", 50))
+    if getattr(args, "candidate_universe_size", None) is None:
+        args.candidate_universe_size = int(
+            config.get("candidate_universe_size", 0)
+        )
     if getattr(args, "ml_model", None) is None:
         args.ml_model = config.get("ml_model", "xgb")
     if args.docking_targets is None:
@@ -2686,6 +3187,43 @@ def _apply_defaults(args, config: dict) -> None:
         args.skip_evidence_fetch = not bool(
             config.get("evidence", {}).get("fetch", True)
         )
+    evidence_section = dict(DEFAULT_EVIDENCE)
+    evidence_section.update(config.get("evidence") or {})
+    if getattr(args, "skip_evidence_hub", False):
+        args.evidence_hub_enabled = False
+    if getattr(args, "evidence_hub_offline", False):
+        args.evidence_hub_allow_network = False
+    evidence_defaults = {
+        "evidence_hub_enabled": "hub_enabled",
+        "evidence_hub_config": "hub_config",
+        "evidence_disease": "disease_name",
+        "evidence_disease_id": "disease_id",
+        "evidence_max_targets": "max_targets",
+        "evidence_max_records": "max_records_per_source",
+        "evidence_hub_timeout": "hub_timeout",
+        "evidence_hub_allow_network": "allow_network",
+        "evidence_hub_strict": "strict",
+        "evidence_legacy_pool_size": "legacy_pool_size",
+    }
+    for attr, key in evidence_defaults.items():
+        if getattr(args, attr, None) is None:
+            setattr(args, attr, evidence_section.get(key))
+    target_priority = dict(DEFAULT_TARGET_PRIORITY)
+    target_priority.update(config.get("target_priority") or {})
+    target_weights = dict(DEFAULT_TARGET_PRIORITY["weights"])
+    target_weights.update(
+        (config.get("target_priority") or {}).get("weights") or {}
+    )
+    args.target_priority_weights = target_weights
+    args.target_go_min_score = float(
+        target_priority.get("go_min_score", 0.75)
+    )
+    args.target_go_min_coverage = float(
+        target_priority.get("go_min_coverage", 0.50)
+    )
+    args.target_conditional_min_score = float(
+        target_priority.get("conditional_min_score", 0.50)
+    )
     if args.evidence_workers is None:
         args.evidence_workers = int(config.get("evidence", {}).get("max_workers", 6))
     if args.evidence_timeout is None:
@@ -2735,6 +3273,10 @@ def _apply_defaults(args, config: dict) -> None:
     if args.advanced_priority_csv:
         args.advanced_priority_csv = str(
             _resolve_path(args.advanced_priority_csv, Path.cwd())
+        )
+    if getattr(args, "evidence_hub_config", None):
+        args.evidence_hub_config = str(
+            _resolve_path(args.evidence_hub_config, APP_ROOT)
         )
     for attr in [
         "docking_ml_training_csv",
@@ -2816,6 +3358,12 @@ def build_parser() -> argparse.ArgumentParser:
     )
     parser.add_argument("--species", choices=["hs", "mm", "auto"])
     parser.add_argument("--top-genes", type=int, help="number of key genes to keep")
+    parser.add_argument(
+        "--candidate-universe-size",
+        type=int,
+        default=None,
+        help="maximum DEG candidates kept before evidence ranking; 0 keeps all",
+    )
     parser.add_argument(
         "--ml-model",
         choices=["xgb", "rf", "gbm", "mlp", "lasso_svm"],
@@ -2900,6 +3448,31 @@ def build_parser() -> argparse.ArgumentParser:
     parser.add_argument("--faers-min-count", type=int, default=None)
     parser.add_argument("--evidence-workers", type=int, default=None)
     parser.add_argument("--evidence-timeout", type=int, default=None)
+    parser.add_argument(
+        "--skip-evidence-hub",
+        action="store_true",
+        default=None,
+        help="skip the multi-source evidence hub while keeping legacy target evidence",
+    )
+    parser.add_argument("--evidence-hub-config", default=None)
+    parser.add_argument("--evidence-disease", default=None)
+    parser.add_argument("--evidence-disease-id", default=None)
+    parser.add_argument("--evidence-max-targets", type=int, default=None)
+    parser.add_argument("--evidence-max-records", type=int, default=None)
+    parser.add_argument("--evidence-hub-timeout", type=int, default=None)
+    parser.add_argument(
+        "--evidence-hub-strict",
+        action="store_true",
+        default=None,
+        help="fail the evidence stage when a configured source fails",
+    )
+    parser.add_argument(
+        "--evidence-hub-offline",
+        action="store_true",
+        default=None,
+        help="use only cached or local evidence sources",
+    )
+    parser.add_argument("--evidence-legacy-pool-size", type=int, default=None)
     parser.add_argument("--skip-scrna", action="store_true")
     parser.add_argument("--skip-download", action="store_true")
     parser.add_argument("--skip-deps", action="store_true")
@@ -2952,6 +3525,10 @@ def main(argv: list[str] | None = None) -> int:
         return 1
     except (OSError, ValueError) as exc:
         log.error("ERROR: invalid configuration or JSON input: %s", exc)
+        if getattr(args, "verbose", False):
+            import traceback
+
+            traceback.print_exc()
         return 1
     except KeyboardInterrupt:
         log.info("interrupted")

@@ -13,6 +13,8 @@ import unittest
 from unittest import mock
 from pathlib import Path
 
+import pandas as pd
+
 APP_ROOT = Path(__file__).resolve().parent.parent
 if str(APP_ROOT / "web") not in sys.path:
     sys.path.insert(0, str(APP_ROOT / "web"))
@@ -397,8 +399,30 @@ class TestWebRealWorkdirAndKnockout(unittest.TestCase):
                 for i in range(1, 301)
             )
             ranked.write_text("\n".join(lines), encoding="utf-8")
+            pd.DataFrame(
+                {
+                    "priority_rank": [1],
+                    "gene": ["GENE1"],
+                    "decision": ["CONDITIONAL_GO"],
+                }
+            ).to_csv(
+                integration / "integrated_target_priority.csv",
+                index=False,
+            )
+            evidence_hub = integration / "evidence_hub"
+            evidence_hub.mkdir()
+            pd.DataFrame(
+                {
+                    "source": ["Local"],
+                    "tier": ["CURATED"],
+                    "n_records": [1],
+                    "n_targets": [1],
+                }
+            ).to_csv(evidence_hub / "evidence_coverage.csv", index=False)
             data = full_results(workdir)
             self.assertEqual(len(data["knockout"]), 200)
+            self.assertEqual(data["target_priority"][0]["gene"], "GENE1")
+            self.assertEqual(data["evidence_coverage"][0]["source"], "Local")
 
 
 class TestResultDetails(unittest.TestCase):
@@ -930,6 +954,55 @@ class TestFullStatus(unittest.TestCase):
                     cmd[cmd.index("--network-enrichment-timeout") + 1],
                     "1200",
                 )
+            finally:
+                FULL_JOBS.pop(job_id, None)
+
+    def test_start_full_job_passes_candidate_and_evidence_hub_options(self):
+        with tempfile.TemporaryDirectory() as tmp:
+            base = Path(tmp)
+            output = base / "out"
+            workdir = base / "work"
+            hub_config = base / "evidence.json"
+            hub_config.write_text("{}", encoding="utf-8")
+            with mock.patch("web_ui._drain_full_queue"):
+                result = start_full_job(
+                    {
+                        "output": [str(output)],
+                        "workdir": [str(workdir)],
+                        "candidate_universe_size": ["750"],
+                        "evidence_hub_config": [str(hub_config)],
+                        "evidence_disease": ["hepatocellular carcinoma"],
+                        "evidence_max_targets": ["250"],
+                        "evidence_legacy_pool_size": ["80"],
+                        "evidence_hub_offline": ["1"],
+                        "evidence_hub_strict": ["1"],
+                    }
+                )
+            job_id = result["job"]
+            try:
+                cmd = FULL_JOBS[job_id]["cmd"]
+                self.assertEqual(
+                    cmd[cmd.index("--candidate-universe-size") + 1],
+                    "750",
+                )
+                self.assertEqual(
+                    cmd[cmd.index("--evidence-hub-config") + 1],
+                    str(hub_config.resolve()),
+                )
+                self.assertEqual(
+                    cmd[cmd.index("--evidence-disease") + 1],
+                    "hepatocellular carcinoma",
+                )
+                self.assertEqual(
+                    cmd[cmd.index("--evidence-max-targets") + 1],
+                    "250",
+                )
+                self.assertEqual(
+                    cmd[cmd.index("--evidence-legacy-pool-size") + 1],
+                    "80",
+                )
+                self.assertIn("--evidence-hub-offline", cmd)
+                self.assertIn("--evidence-hub-strict", cmd)
             finally:
                 FULL_JOBS.pop(job_id, None)
 

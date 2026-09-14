@@ -153,7 +153,7 @@ a.file-link { color: #1665c0; text-decoration: none; margin-right: 12px; }
 <div class="page-head">
   <div class="page-title">
     <h1>全自动流水线</h1>
-    <p class="page-sub">单细胞分析 → 关键基因/蛋白筛选 → 证据富集 → 虚拟敲除 → 虚拟筛选 → MD 准备/ML 重打分/工具交接 → 网络毒理学/FAERS → 细胞反馈 → 集成报告。支持断点续跑、参数指纹失效、QC 门控与 dry-run 预演。</p>
+    <p class="page-sub">表达分析 → 候选靶点宇宙 → 多来源证据排序 → 启发式扰动评分 → 虚拟筛选 → MD 准备/ML 重打分/工具交接 → 网络毒理学/FAERS → 细胞反馈 → 集成报告。支持断点续跑、参数指纹失效、QC 门控与 dry-run 预演。</p>
   </div>
 </div>
 
@@ -275,6 +275,23 @@ a.file-link { color: #1665c0; text-decoration: none; margin-right: 12px; }
         <label>关键基因数
           <input name="top_genes" type="number" min="1" value="50">
         </label>
+        <label>候选靶点宇宙大小
+          <input name="candidate_universe_size" type="number" min="0" value="0">
+          <span class="field-hint">0 表示保留全部符合条件的 DEG；该表用于多来源证据排序。</span>
+        </label>
+        <label>证据疾病名称
+          <input name="evidence_disease" value="liver cancer">
+        </label>
+        <label>证据检索靶点数
+          <input name="evidence_max_targets" type="number" min="0" value="300">
+          <span class="field-hint">控制联网证据中心规模；0 表示候选宇宙全部检索。</span>
+        </label>
+        <label>结构/配体证据池大小
+          <input name="evidence_legacy_pool_size" type="number" min="1" value="50">
+        </label>
+        <label>证据中心配置
+          <input name="evidence_hub_config" value="config/evidence_sources.json">
+        </label>
         <label>对接靶点数
           <input name="docking_targets" type="number" min="0" value="3">
         </label>
@@ -386,7 +403,7 @@ a.file-link { color: #1665c0; text-decoration: none; margin-right: 12px; }
             <option value="02">02 关键基因</option>
             <option value="03">03 证据富集</option>
             <option value="04">04 敲除输入</option>
-            <option value="05">05 虚拟敲除</option>
+            <option value="05">05 靶点优先级评分（启发式扰动）</option>
             <option value="06">06 虚拟筛选</option>
             <option value="07">07 MD/ML/工具交接</option>
             <option value="08">08 网络毒理学</option>
@@ -405,8 +422,11 @@ a.file-link { color: #1665c0; text-decoration: none; margin-right: 12px; }
         <label class="toggle"><input type="checkbox" name="skip_download" value="1"> 跳过数据下载</label>
         <label class="toggle"><input type="checkbox" name="skip_deps" value="1"> 跳过依赖检查</label>
         <label class="toggle"><input type="checkbox" name="skip_evidence_fetch" value="1"> 跳过联网证据</label>
+        <label class="toggle"><input type="checkbox" name="skip_evidence_hub" value="1"> 跳过多来源证据中心</label>
+        <label class="toggle"><input type="checkbox" name="evidence_hub_offline" value="1"> 证据中心仅用本地来源</label>
+        <label class="toggle"><input type="checkbox" name="evidence_hub_strict" value="1"> 证据来源失败即中断</label>
         <label class="toggle"><input type="checkbox" name="skip_pseudobulk" value="1"> 跳过伪 bulk 导出</label>
-        <label class="toggle"><input type="checkbox" name="skip_knockout" value="1"> 跳过虚拟敲除</label>
+        <label class="toggle"><input type="checkbox" name="skip_knockout" value="1"> 跳过启发式靶点优先级评分</label>
         <label class="toggle"><input type="checkbox" name="skip_docking" value="1"> 跳过虚拟筛选</label>
         <label class="toggle"><input type="checkbox" name="skip_md" value="1"> 跳过 MD/工具交接</label>
         <label class="toggle"><input type="checkbox" name="skip_handoff" value="1"> 跳过 MD/外部工具导出</label>
@@ -456,8 +476,11 @@ a.file-link { color: #1665c0; text-decoration: none; margin-right: 12px; }
   <div id="fileLinks"></div>
   <div class="tablebox"><table id="qcGateTable"><caption>QC 门控</caption></table></div>
   <div class="tablebox"><table id="diffAbundanceTable"><caption>细胞类型差异丰度</caption></table></div>
-  <div class="tablebox"><table id="keyTable"><caption>关键基因</caption></table></div>
-  <div class="tablebox"><table id="koTable"><caption>虚拟敲除 Top</caption></table></div>
+  <div class="tablebox"><table id="priorityTable"><caption>证据整合靶点优先级</caption></table></div>
+  <div class="tablebox"><table id="evidenceCoverageTable"><caption>证据来源覆盖</caption></table></div>
+  <div class="tablebox"><table id="sourceAblationTable"><caption>来源消融稳定性</caption></table></div>
+  <div class="tablebox"><table id="keyTable"><caption>关键基因（兼容视图）</caption></table></div>
+  <div class="tablebox"><table id="koTable"><caption>启发式扰动评分 Top</caption></table></div>
   <div class="tablebox"><table id="dockTable"><caption>虚拟筛选</caption></table></div>
   <div class="tablebox"><table id="caddTable"><caption>CADD 下游（MD/ML/工具交接）</caption></table></div>
   <div class="tablebox"><table id="networkTable"><caption>网络毒理学交集</caption></table></div>
@@ -842,8 +865,27 @@ function renderStats(data) {
   const network = summary.network || {};
   const faers = summary.faers || {};
   const fb = summary.cell_feedback || {};
+  const priority = summary.target_priority || {};
+  const readiness = summary.publication_readiness || {};
   const qc = (data.qc_metrics || {}).qc_gate || summary.qc_gate || {};
   const cards = [
+    {
+      label: '候选靶点宇宙',
+      value: summary.candidate_universe !== undefined ? summary.candidate_universe : 0,
+    },
+    {
+      label: '证据整合靶点',
+      value: priority.targets !== undefined ? priority.targets : (data.target_priority || []).length,
+    },
+    {
+      label: '证据覆盖靶点',
+      value: priority.evidence_covered !== undefined ? priority.evidence_covered : 0,
+    },
+    {
+      label: '论文就绪等级',
+      value: readiness.level || 'exploratory',
+      cls: readiness.level === 'paper_supporting' || readiness.level === 'publication_grade' ? 'ok' : 'warn',
+    },
     {
       label: '关键基因',
       value: summary.key_genes !== undefined ? summary.key_genes : (data.key_genes || []).length,
@@ -911,6 +953,11 @@ function renderResults(data) {
   const qcGate = qc.qc_gate || summary.qc_gate || {};
   document.getElementById('summaryRow').innerHTML =
     '<p class="muted">单细胞：' + esc(summary.single_cell ? summary.single_cell.dataset || '' : '') +
+    '；候选靶点宇宙：' + esc(summary.candidate_universe !== undefined ? summary.candidate_universe : 0) +
+    '；证据整合靶点：' + esc(priority.targets !== undefined ? priority.targets : (data.target_priority || []).length) +
+    '；论文就绪：' + esc(readiness.level || 'exploratory') +
+    '；GO：' + esc((priority.decisions || {}).GO || 0) +
+    '；证据覆盖中位数：' + esc(priority.median_coverage_ratio !== null && priority.median_coverage_ratio !== undefined ? Number(priority.median_coverage_ratio).toFixed(3) : 'NA') +
     '；关键基因：' + esc(summary.key_genes !== undefined ? summary.key_genes : data.key_genes.length) +
     '；敲除评分基因数：' + esc(ko.genes_scored !== undefined ? ko.genes_scored : 0) +
     '；对接成功：' + esc(dock.ok !== undefined ? dock.ok : 0) +
@@ -949,6 +996,9 @@ function renderResults(data) {
   renderTable('diffAbundanceTable', data.differential_abundance, [
     'celltype', 'n_cells', 'chi2', 'p_value', 'p_adjust', 'significant', 'direction'
   ]);
+  renderTable('priorityTable', data.target_priority, ['priority_rank', 'gene', 'decision', 'integrated_score', 'evidence_score', 'coverage_ratio', 'knockout_score', 'evidence_status']);
+  renderTable('evidenceCoverageTable', data.evidence_coverage, ['source', 'tier', 'evidence_type', 'relation', 'n_records', 'n_targets']);
+  renderTable('sourceAblationTable', data.source_ablation, ['target_symbol', 'ablation_rank_sd', 'max_rank_delta', 'rank_stability', 'ablation_runs']);
   renderTable('keyTable', data.key_genes, ['rank', 'gene', 'direction', 'avg_log2fc', 'p_val_adj']);
   renderTable('koTable', data.knockout, ['rank', 'gene', 'target_class', 'target_score', 'knockout_score', 'ppi_hub_score']);
   renderTable('dockTable', data.docking, ['gene', 'status', 'pdb_id', 'ligand_count', 'hits', 'best_affinity']);

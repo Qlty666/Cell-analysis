@@ -83,23 +83,29 @@
 
 ### 2.3 全自动集成流水线
 
-`scripts/run_full_pipeline.py` 把表达分析、关键基因筛选、证据富集、虚拟敲除、虚拟筛选和 CADD/安全性分析串成一条流水线：
+`scripts/run_full_pipeline.py` 把表达分析、候选靶点宇宙、多来源证据排序、启发式扰动评分、虚拟筛选和 CADD/安全性分析串成一条流水线：
 
 ```text
 01 single_cell           GEO 表达分析（下载、QC、注释、差异表达、富集；bulk/microarray 等按样本级运行）
-02 key_targets           从显著 DEG 中筛选并排序关键基因/蛋白
-03 evidence              UniProt / PDB / ChEMBL / STRING / Reactome / Open Targets / KEGG 证据富集（带本地缓存）
+02 key_targets           生成完整候选靶点宇宙，并保留兼容的关键基因 Top N 表
+03 evidence              结构/配体证据 + 多来源证据中心排序，输出覆盖率、来源消融和综合靶点优先级
 04 knockout_inputs       导出样本级伪 bulk 表达矩阵并生成敲除输入
-05 knockout              虚拟敲除 + 多维靶点评分 + 湿实验验证方案
+05 knockout              启发式扰动评分 + 证据整合靶点优先级 + 湿实验验证方案
 06 docking               对有 PDB 结构的靶点自动收集已知配体并跑 Vina 对接
 07 cadd_downstream       对成功对接靶点自动准备 GROMACS 输入、运行可选 MD、ML 重打分和 MD/外部工具导出
 08 network               网络毒理学（化合物-疾病靶点交集、PPI hub、Venn、C-T-P-D 网络与 Cytoscape XGMML/自动推送；无输入时自动跳过）
 09 faers                 FAERS 风格 ROR/PRR/BCPNN/EBGM 信号检测（无事件表时自动跳过）
-10 cell_feedback         把虚拟敲除/对接结果返回 Seurat 做细胞级反馈分析
+10 cell_feedback         把扰动评分/对接结果返回 Seurat 做细胞级反馈分析
 11 report                生成集成 HTML 报告和 run_manifest.json
 ```
 
 每一阶段写标记文件，重跑时自动断点续跑；`--start-stage` 可从任意阶段开始。标记文件不再只是时间戳：每个阶段会记录配置和输入指纹（`signature`），当 `top_genes`、物种、标签、证据/对接配置、关键基因表或证据表发生变化时，会自动使当前阶段及下游阶段失效，避免“参数改了但结果仍是旧值”的静默错误。每个阶段完成后还会按 `STAGE_OUTPUTS` 校验必需输出，缺失或空文件不会写入完成标记。
+
+阶段 02 现在同时写出 `candidate_universe.csv` 和 `key_genes.csv`。前者不再被 `top_genes` 截断，默认 `candidate_universe_size=0` 保留全部符合筛选条件的 DEG，也可设置正整数限制候选池；后者保留旧的 Top N 接口。阶段 03 会把 `src/evidence` 的证据中心接入全流程，默认检索 `config/evidence_sources.json` 中启用的来源，并输出 `target_priority.csv`、`target_priority_summary.json`、`evidence_coverage.csv` 和 `source_ablation.csv`。阶段 05 再把启发式扰动评分合并为 `integrated_target_priority.csv`，阶段 06 默认优先消费这张综合排序表，而不是旧的 `key_genes.csv`。
+
+证据中心支持 Open Targets、ChEMBL、BindingDB、PubChem BioAssay、GWAS Catalog、GTEx、HPA、DepMap，以及 CTD、Tox21/ToxCast、LINCS、DisGeNET 和授权数据库的本地快照。`evidence.max_targets` 控制联网检索规模，`evidence.hub_config` 指定来源配置，`evidence.allow_network=false` 或网页“仅用本地来源”用于离线运行；缺失证据会保留为 `not_found`/`not_queried`，不会被静默当作负证据。Open Targets 等聚合来源通过 `source_group` 做来源级去重，避免把同一底层证据重复计分。
+
+集成报告新增 `publication_readiness` 质量面板，明确区分 `exploratory`、`paper_supporting` 和 `publication_grade`，并列出多来源证据、候选池规模、候选靶点证据覆盖比例、对接阳性对照、重复种子、真实完成 MD、外部验证和机制性扰动等未通过门控。默认 MD 仍是 `prepare`，默认对接仍为单次运行，因此未主动完成这些验证时，流水线不会把结果标记为论文级闭环。
 
 新增 `--dry-run`，不执行任何阶段，只打印每个阶段会 `RUN` 还是 `DONE` 及原因；新增 `--skip-qc-gate` 和 `--skip-differential-abundance` 可分别关闭 QC 门控和细胞组成差异检验。
 
@@ -678,6 +684,9 @@ python scripts\run_full_pipeline.py \
   --output ../liver_cancer \
   --workdir y3 \
   --top-genes 50 \
+  --candidate-universe-size 0 \
+  --evidence-disease "liver cancer" \
+  --evidence-max-targets 300 \
   --docking-targets 3
 ```
 
@@ -685,9 +694,18 @@ python scripts\run_full_pipeline.py \
 
 - `--skip-scrna`：复用已完成的表达分析结果，直接从关键基因筛选开始。
 - `--skip-docking`：只跑虚拟敲除和验证方案，跳过对接。
-- `--skip-evidence-fetch`：不联网，使用已有证据缓存或置零。
+- `--skip-evidence-fetch`：不联网；旧证据使用缓存，证据中心只运行本地来源。
 - `--skip-download` / `--skip-deps` / `--skip-pseudobulk` / `--skip-knockout` / `--skip-cell-feedback`。
-- `--top-genes`：关键基因数量，默认 50。
+- `--top-genes`：兼容视图中的关键基因数量，默认 50。
+- `--candidate-universe-size`：进入证据排序前的候选靶点数量，默认 0，保留全部符合筛选条件的 DEG；也可设置为正整数限制候选池。
+- `--skip-evidence-hub`：关闭多来源证据中心，只保留旧结构/配体证据。
+- `--evidence-hub-config`：多来源证据源配置，默认 `config/evidence_sources.json`。
+- `--evidence-disease` / `--evidence-disease-id`：证据检索使用的疾病名称和可选本体 ID。
+- `--evidence-max-targets`：证据中心最多检索的候选靶点数，默认 300；设置为 0 时检索全部候选宇宙。
+- `--evidence-max-records` / `--evidence-hub-timeout`：每个来源记录上限和证据中心超时。
+- `--evidence-hub-offline`：证据中心只用本地或缓存来源，不访问公共 API。
+- `--evidence-hub-strict`：任一配置来源失败时让证据阶段失败；默认记录失败并继续。
+- `--evidence-legacy-pool-size`：为旧版结构/配体证据保留的候选数，默认 50，并会自动覆盖对接靶点数。
 - `--docking-targets`：参与对接的靶点数量，默认 3。
 - `--md-mode prepare|auto`：GROMACS MD 模式；`prepare` 只生成输入，`auto` 在本机运行完整模拟。
 - `--md-top-n`：每个靶点进入 MD 的 Top 命中数，默认 1。
@@ -958,12 +976,19 @@ liverbio analysis-export GSE125449
 - 表达分析输出目录（必填，例如 `y2`）。
 - 工作目录（必填，例如 `y3`）。
 - 可选配体库、病例/正常标签、DepMap CSV。
+- 候选靶点宇宙大小、证据疾病名称、证据检索靶点数、证据中心配置。
 
 输出（`<workdir>/outputs/integration/`）：
 
-- `key_genes.csv`：关键基因排序表。
+- `candidate_universe.csv`：经过 DEG 方向、显著性和黑名单筛选后的完整候选靶点宇宙。
+- `key_genes.csv`：兼容旧流程的关键基因 Top N 表。
+- `target_priority.csv`：表达证据与多来源数据库证据的覆盖感知排序。
+- `integrated_target_priority.csv`：进一步合并启发式扰动评分后的综合靶点排序。
+- `target_priority_summary.json` / `integrated_target_priority_summary.json`：靶点数量、证据覆盖、GO/CONDITIONAL_GO/REVIEW 分档和缺失来源摘要。
+- `evidence_hub/`：`evidence.sqlite`、`evidence_records.csv`、`evidence_coverage.csv`、`source_ablation.csv`、`target_priority.csv`、`evidence_hub_summary.json` 等可追溯证据文件。
 - `gene_evidence.csv`：每个基因的 UniProt、PDB、ChEMBL、STRING、Reactome、PharmGKB、AlphaFold、Open Targets、KEGG 证据与来源覆盖。
-- `knockout_summary.json`：虚拟敲除与验证方案汇总。
+- `knockout_summary.json`：启发式扰动评分与验证方案汇总。
+- `integration_summary.json` 中的 `publication_readiness`：论文支持等级和未通过的质量门控。
 - `docking_targets.csv`：每个靶点的对接状态、命中数和最佳亲和力。
 - `cadd_downstream_summary.json` / `cadd_targets.csv`：MD 准备/运行、ML 重打分和 MD/外部工具导出的逐靶点状态。
 - `network_summary.json`：网络毒理学汇总；`outputs/run_001/network_toxicology/` 下含交集表、Venn 图、C-T-P-D 节点/边、XGMML 网络文件，Cytoscape 在线导出时另含 `figures/ctpd_network_cytoscape.png`。
