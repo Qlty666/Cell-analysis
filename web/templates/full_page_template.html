@@ -510,6 +510,7 @@ a.file-link { color: #1665c0; text-decoration: none; margin-right: 12px; }
   <div class="tablebox"><table id="diffAbundanceTable"><caption>细胞类型差异丰度</caption></table></div>
   <div class="tablebox"><table id="priorityTable"><caption>证据整合靶点优先级</caption></table></div>
   <div class="tablebox"><table id="validationTable"><caption>五维靶点验证评分</caption></table></div>
+  <div class="tablebox"><table id="decisionTable"><caption>最终靶点决策</caption></table></div>
   <div class="tablebox"><table id="evidenceCoverageTable"><caption>证据来源覆盖</caption></table></div>
   <div class="tablebox"><table id="sourceAblationTable"><caption>来源消融稳定性</caption></table></div>
   <div class="tablebox"><table id="keyTable"><caption>关键基因（兼容视图）</caption></table></div>
@@ -903,6 +904,7 @@ function renderStats(data) {
   const benchmark = priority.benchmark || {};
   const validation = summary.target_validation || {};
   const externalValidation = summary.external_validation || {};
+  const decisions = summary.target_decisions || {};
   const qc = (data.qc_metrics || {}).qc_gate || summary.qc_gate || {};
   const cards = [
     {
@@ -929,6 +931,10 @@ function renderStats(data) {
       label: '外部队列 AUROC',
       value: externalValidation.auroc !== undefined && externalValidation.auroc !== null ? Number(externalValidation.auroc).toFixed(3) : 'NA',
       cls: externalValidation.status === 'completed' ? 'ok' : '',
+    },
+    {
+      label: '最终可推进靶点',
+      value: (decisions.actions || {}).PROCEED_VALIDATION || 0,
     },
     {
       label: '论文就绪等级',
@@ -1010,6 +1016,7 @@ function renderResults(data) {
     '；Benchmark AUROC：' + esc(benchmark.auroc !== undefined && benchmark.auroc !== null ? Number(benchmark.auroc).toFixed(3) : 'NA') +
     '；五维验证 GO：' + esc((validation.decisions || {}).GO || 0) +
     '；外部队列 AUROC：' + esc(externalValidation.auroc !== undefined && externalValidation.auroc !== null ? Number(externalValidation.auroc).toFixed(3) : 'NA') +
+    '；最终可推进靶点：' + esc((decisions.actions || {}).PROCEED_VALIDATION || 0) +
     '；关键基因：' + esc(summary.key_genes !== undefined ? summary.key_genes : data.key_genes.length) +
     '；敲除评分基因数：' + esc(ko.genes_scored !== undefined ? ko.genes_scored : 0) +
     '；对接成功：' + esc(dock.ok !== undefined ? dock.ok : 0) +
@@ -1050,6 +1057,7 @@ function renderResults(data) {
   ]);
   renderTable('priorityTable', data.target_priority, ['priority_rank', 'gene', 'candidate_origin', 'decision', 'integrated_score', 'evidence_score', 'coverage_ratio', 'knockout_score', 'evidence_status']);
   renderTable('validationTable', data.target_validation, ['validation_rank', 'gene', 'decision', 'adjusted_score', 'disease_association', 'druggability', 'chemical_matter', 'clinical_precedent', 'structural_data', 'safety_penalty']);
+  renderTable('decisionTable', data.target_decisions, ['gene', 'base_decision', 'final_decision', 'action', 'adjusted_score', 'safety_risk', 'conflict_flags']);
   renderTable('evidenceCoverageTable', data.evidence_coverage, ['source', 'tier', 'evidence_type', 'relation', 'n_records', 'n_targets']);
   renderTable('sourceAblationTable', data.source_ablation, ['target_symbol', 'ablation_rank_sd', 'max_rank_delta', 'rank_stability', 'ablation_runs']);
   renderTable('keyTable', data.key_genes, ['rank', 'gene', 'direction', 'avg_log2fc', 'p_val_adj']);

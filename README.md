@@ -997,6 +997,7 @@ liverbio analysis-export GSE125449
 - `integrated_target_priority.csv`：进一步合并启发式扰动评分后的综合靶点排序。
 - `target_validation_scores.csv`：按疾病关联、成药性、化学物质、临床先例和结构数据五个维度输出 0-100 的靶点验证分数，并应用安全风险惩罚和 `GO` / `CONDITIONAL_GO` / `REVIEW` / `NO_GO` 决策。
 - `external_validation_summary.json` / `external_validation_predictions.csv`：独立队列的 AUROC、AUPRC、置信区间、precision、recall 和混淆矩阵。
+- `target_decision_report.csv` / `target_decision_report.json`：把五维验证、外部队列、omics QC、安全性、结构质量冲突合并成最终行动，区分 `PROCEED_VALIDATION`、`CONDITIONAL_PROCEED`、`REVIEW_CONFLICT`、`REVIEW` 和 `NO_GO`。
 - `target_priority_summary.json` / `integrated_target_priority_summary.json`：靶点数量、证据覆盖、GO/CONDITIONAL_GO/REVIEW 分档和缺失来源摘要。
 - `evidence_hub/`：`evidence.sqlite`、`evidence_records.csv`、`evidence_coverage.csv`、`source_ablation.csv`、`target_priority.csv`、`evidence_hub_summary.json` 等可追溯证据文件。
 - `gene_evidence.csv`：每个基因的 UniProt、PDB、ChEMBL、STRING、Reactome、PharmGKB、AlphaFold、Open Targets、KEGG 证据与来源覆盖。

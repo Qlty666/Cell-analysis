@@ -2677,6 +2677,7 @@ def full_results(workdir: Path) -> dict:
         "target_priority": [],
         "target_validation": [],
         "external_validation": {},
+        "target_decisions": [],
         "knockout": [],
         "docking": [],
         "cadd_downstream_summary": {},
@@ -2724,6 +2725,14 @@ def full_results(workdir: Path) -> dict:
     result["external_validation"] = _read_json(
         out / "external_validation_summary.json"
     )
+    try:
+        result["target_decisions"] = json.loads(
+            pd_read_csv(out / "target_decision_report.csv")
+            .head(200)
+            .to_json(orient="records")
+        )
+    except Exception:
+        result["target_decisions"] = []
     try:
         # The page renders only the top knockout rows; cap the JSON payload.
         result["knockout"] = json.loads(

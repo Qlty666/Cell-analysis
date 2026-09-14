@@ -18,6 +18,7 @@ from .stage_paths import _integration_dir, _read_json  # noqa: E402
 from .reproducibility import write_reproducibility_manifest  # noqa: E402
 from .target_validation import build_target_validation  # noqa: E402
 from .external_validation import run_external_validation  # noqa: E402
+from .decision_report import build_decision_report  # noqa: E402
 
 log = logging.getLogger("full_pipeline")
 
@@ -254,6 +255,7 @@ def generate_integrated_report(
         workdir,
         out_dir,
     )
+    target_decisions, target_decision_summary = build_decision_report(out_dir)
     external_validation = run_external_validation(
         Path(str(ctx.get("external_validation_path")))
         if ctx.get("external_validation_path")
@@ -534,6 +536,19 @@ def generate_integrated_report(
         ]
         if c in target_validation.columns
     ]
+    decision_cols = [
+        column
+        for column in (
+            "gene",
+            "base_decision",
+            "final_decision",
+            "action",
+            "adjusted_score",
+            "safety_risk",
+            "conflict_flags",
+        )
+        if column in target_decisions.columns
+    ]
     feedback_cols = [
         c
         for c in [
@@ -740,6 +755,13 @@ a {{ color: #1d4ed8; }}
   </p>
 </div>
 <div class="card">
+  <h2>Final target decisions</h2>
+  <p class="muted">
+    Actions: {_esc(target_decision_summary.get("actions", {}))}
+  </p>
+  {_render_table(target_decisions, decision_cols)}
+</div>
+<div class="card">
   <h2>External validation</h2>
   <p class="muted">{_esc(external_validation.get("reason", ""))}</p>
   {_render_table(external_validation_frame, external_validation_cols)}
@@ -826,6 +848,7 @@ a {{ color: #1d4ed8; }}
     <li><a href="{rel(out_dir / 'integrated_target_priority.csv') if (out_dir / 'integrated_target_priority.csv').exists() else '#'}">integrated_target_priority.csv</a></li>
     <li><a href="{rel(out_dir / 'target_validation_scores.csv') if (out_dir / 'target_validation_scores.csv').exists() else '#'}">target_validation_scores.csv</a></li>
     <li><a href="{rel(out_dir / 'external_validation_summary.json') if (out_dir / 'external_validation_summary.json').exists() else '#'}">external_validation_summary.json</a></li>
+    <li><a href="{rel(out_dir / 'target_decision_report.csv') if (out_dir / 'target_decision_report.csv').exists() else '#'}">target_decision_report.csv</a></li>
     <li><a href="{rel(out_dir / 'evidence_hub' / 'evidence_coverage.csv') if (out_dir / 'evidence_hub' / 'evidence_coverage.csv').exists() else '#'}">evidence_coverage.csv</a></li>
     <li><a href="{rel(out_dir / 'evidence_hub' / 'source_ablation.csv') if (out_dir / 'evidence_hub' / 'source_ablation.csv').exists() else '#'}">source_ablation.csv</a></li>
     <li><a href="{rel(out_dir / 'differential_abundance.csv') if (out_dir / 'differential_abundance.csv').exists() else '#'}">differential_abundance.csv</a></li>
@@ -869,6 +892,7 @@ a {{ color: #1d4ed8; }}
         },
         "target_validation": target_validation_summary,
         "external_validation": external_validation,
+        "target_decisions": target_decision_summary,
         "publication_readiness": readiness,
         "knockout": {
             "genes_scored": (ko_summary.get("knockout") or {}).get("genes_scored", 0),
@@ -977,6 +1001,12 @@ a {{ color: #1d4ed8; }}
             ),
             "external_validation_summary_json": (
                 out_dir / "external_validation_summary.json"
+            ),
+            "target_decision_report_csv": (
+                out_dir / "target_decision_report.csv"
+            ),
+            "target_decision_report_json": (
+                out_dir / "target_decision_report.json"
             ),
             "gene_evidence_csv": out_dir / "gene_evidence.csv",
             "omics_qc_summary_json": out_dir / "omics_qc_summary.json",

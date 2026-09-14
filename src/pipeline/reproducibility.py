@@ -108,6 +108,11 @@ def write_reproducibility_manifest(
         "omics_qc_summary": out_dir / "omics_qc_summary.json",
         "omics_qc_sample_metrics": out_dir
         / "omics_qc_sample_metrics.csv",
+        "target_validation_scores": out_dir / "target_validation_scores.csv",
+        "external_validation_summary": out_dir
+        / "external_validation_summary.json",
+        "target_decision_report": out_dir
+        / "target_decision_report.csv",
         "target_priority": out_dir / "target_priority.csv",
         "integrated_target_priority": out_dir
         / "integrated_target_priority.csv",
