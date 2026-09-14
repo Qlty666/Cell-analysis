@@ -16,6 +16,7 @@ from docking.utils import write_json  # noqa: E402
 
 from .stage_paths import _integration_dir, _read_json  # noqa: E402
 from .reproducibility import write_reproducibility_manifest  # noqa: E402
+from .target_validation import build_target_validation  # noqa: E402
 
 log = logging.getLogger("full_pipeline")
 
@@ -225,6 +226,10 @@ def generate_integrated_report(
     target_priority_summary = _read_json(
         out_dir / "integrated_target_priority_summary.json"
     ) or _read_json(out_dir / "target_priority_summary.json")
+    target_validation, target_validation_summary = build_target_validation(
+        workdir,
+        out_dir,
+    )
     evidence_hub_summary = _read_json(
         out_dir / "evidence_hub" / "evidence_hub_summary.json"
     )
@@ -443,6 +448,22 @@ def generate_integrated_report(
         ]
         if c in target_priority.columns
     ]
+    validation_cols = [
+        c
+        for c in [
+            "validation_rank",
+            "gene",
+            "decision",
+            "adjusted_score",
+            "disease_association",
+            "druggability",
+            "chemical_matter",
+            "clinical_precedent",
+            "structural_data",
+            "safety_penalty",
+        ]
+        if c in target_validation.columns
+    ]
     feedback_cols = [
         c
         for c in [
@@ -640,6 +661,15 @@ a {{ color: #1d4ed8; }}
   {_render_table(differential_abundance, differential_abundance_cols)}
 </div>
 <div class="card">
+  <h2>Five-axis target validation (top 20)</h2>
+  <p class="muted">
+    GO: {_esc((target_validation_summary.get("decisions") or {}).get("GO", 0))};
+    median adjusted score:
+    {_esc(target_validation_summary.get("median_adjusted_score", "NA"))}
+  </p>
+  {_render_table(target_validation, validation_cols)}
+</div>
+<div class="card">
   <h2>Evidence-aware target priority (top 20)</h2>
   <p class="muted">
     Candidate universe: {_esc(len(candidate_universe))};
@@ -710,6 +740,7 @@ a {{ color: #1d4ed8; }}
     <li><a href="{rel(out_dir / 'candidate_universe_evidence_expanded.csv') if (out_dir / 'candidate_universe_evidence_expanded.csv').exists() else '#'}">candidate_universe_evidence_expanded.csv</a></li>
     <li><a href="{rel(out_dir / 'target_priority.csv') if (out_dir / 'target_priority.csv').exists() else '#'}">target_priority.csv</a></li>
     <li><a href="{rel(out_dir / 'integrated_target_priority.csv') if (out_dir / 'integrated_target_priority.csv').exists() else '#'}">integrated_target_priority.csv</a></li>
+    <li><a href="{rel(out_dir / 'target_validation_scores.csv') if (out_dir / 'target_validation_scores.csv').exists() else '#'}">target_validation_scores.csv</a></li>
     <li><a href="{rel(out_dir / 'evidence_hub' / 'evidence_coverage.csv') if (out_dir / 'evidence_hub' / 'evidence_coverage.csv').exists() else '#'}">evidence_coverage.csv</a></li>
     <li><a href="{rel(out_dir / 'evidence_hub' / 'source_ablation.csv') if (out_dir / 'evidence_hub' / 'source_ablation.csv').exists() else '#'}">source_ablation.csv</a></li>
     <li><a href="{rel(out_dir / 'differential_abundance.csv') if (out_dir / 'differential_abundance.csv').exists() else '#'}">differential_abundance.csv</a></li>
@@ -750,6 +781,7 @@ a {{ color: #1d4ed8; }}
             **target_priority_summary,
             "top_targets": target_priority.head(20).to_dict(orient="records"),
         },
+        "target_validation": target_validation_summary,
         "publication_readiness": readiness,
         "knockout": {
             "genes_scored": (ko_summary.get("knockout") or {}).get("genes_scored", 0),
@@ -813,6 +845,10 @@ a {{ color: #1d4ed8; }}
         docking_config,
         {
             "targets": len(target_priority),
+            "target_validation": target_validation_summary.get(
+                "decisions",
+                {},
+            ),
             "candidate_origins": target_priority_summary.get(
                 "candidate_origins",
                 {},
@@ -840,6 +876,12 @@ a {{ color: #1d4ed8; }}
             "target_priority_csv": out_dir / "target_priority.csv",
             "integrated_target_priority_csv": (
                 out_dir / "integrated_target_priority.csv"
+            ),
+            "target_validation_scores_csv": (
+                out_dir / "target_validation_scores.csv"
+            ),
+            "target_validation_summary_json": (
+                out_dir / "target_validation_summary.json"
             ),
             "gene_evidence_csv": out_dir / "gene_evidence.csv",
             "evidence_hub_summary_json": (

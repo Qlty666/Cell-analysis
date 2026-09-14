@@ -991,6 +991,7 @@ liverbio analysis-export GSE125449
 - `key_genes.csv`：兼容旧流程的关键基因 Top N 表。
 - `target_priority.csv`：表达证据与多来源数据库证据的覆盖感知排序。
 - `integrated_target_priority.csv`：进一步合并启发式扰动评分后的综合靶点排序。
+- `target_validation_scores.csv`：按疾病关联、成药性、化学物质、临床先例和结构数据五个维度输出 0-100 的靶点验证分数，并应用安全风险惩罚和 `GO` / `CONDITIONAL_GO` / `REVIEW` / `NO_GO` 决策。
 - `target_priority_summary.json` / `integrated_target_priority_summary.json`：靶点数量、证据覆盖、GO/CONDITIONAL_GO/REVIEW 分档和缺失来源摘要。
 - `evidence_hub/`：`evidence.sqlite`、`evidence_records.csv`、`evidence_coverage.csv`、`source_ablation.csv`、`target_priority.csv`、`evidence_hub_summary.json` 等可追溯证据文件。
 - `gene_evidence.csv`：每个基因的 UniProt、PDB、ChEMBL、STRING、Reactome、PharmGKB、AlphaFold、Open Targets、KEGG 证据与来源覆盖。

@@ -2641,6 +2641,7 @@ def full_results(workdir: Path) -> dict:
         "differential_abundance": [],
         "key_genes": [],
         "target_priority": [],
+        "target_validation": [],
         "knockout": [],
         "docking": [],
         "cadd_downstream_summary": {},
@@ -2677,6 +2678,14 @@ def full_results(workdir: Path) -> dict:
         )
     except Exception:
         result["target_priority"] = []
+    try:
+        result["target_validation"] = json.loads(
+            pd_read_csv(out / "target_validation_scores.csv")
+            .head(200)
+            .to_json(orient="records")
+        )
+    except Exception:
+        result["target_validation"] = []
     try:
         # The page renders only the top knockout rows; cap the JSON payload.
         result["knockout"] = json.loads(

@@ -159,6 +159,8 @@ STAGE_OUTPUTS = {
     "11": (
         "outputs/integration/integration_report.html",
         "outputs/integration/integration_summary.json",
+        "outputs/integration/target_validation_scores.csv",
+        "outputs/integration/target_validation_summary.json",
         "outputs/integration/reproducibility_manifest.json",
         "outputs/integration/run_manifest.json",
     ),

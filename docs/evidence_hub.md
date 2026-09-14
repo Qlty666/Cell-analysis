@@ -186,6 +186,22 @@ evidence such as Tox21/ToxCast is classified separately from positive target
 evidence and reduces the final priority through an explicit penalty instead of
 being counted as a beneficial category.
 
+The integrated report additionally computes a five-axis target validation
+table from the final target priority:
+
+| Axis | Meaning |
+|---|---|
+| disease association | genetic or curated disease association |
+| druggability | direct, curated or historical chemical tractability |
+| chemical matter | measured or curated compound activity |
+| clinical precedent | ClinicalTrials.gov or curated clinical evidence |
+| structural data | experimental or predicted structural support |
+
+Each axis is scaled to 0-20, summed, and adjusted by the safety-risk penalty.
+The resulting 0-100 score is mapped to `GO`, `CONDITIONAL_GO`, `REVIEW` or
+`NO_GO`. Missing evidence remains reviewable rather than being treated as a
+negative finding.
+
 ## Scientific limits
 
 - Open Targets aggregates many underlying sources. Do not add its underlying
