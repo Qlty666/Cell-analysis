@@ -161,6 +161,7 @@ STAGE_OUTPUTS = {
         "outputs/integration/integration_summary.json",
         "outputs/integration/target_validation_scores.csv",
         "outputs/integration/target_validation_summary.json",
+        "outputs/integration/external_validation_summary.json",
         "outputs/integration/reproducibility_manifest.json",
         "outputs/integration/run_manifest.json",
     ),
@@ -233,6 +234,16 @@ DEFAULT_TARGET_PRIORITY = {
 
 DEFAULT_DOCKING_SELECTION = {
     "allow_review": False,
+}
+
+DEFAULT_EXTERNAL_VALIDATION = {
+    "enabled": False,
+    "path": None,
+    "target_column": "gene",
+    "score_column": "score",
+    "label_column": "label",
+    "threshold": 0.5,
+    "bootstrap": 1000,
 }
 
 DEFAULT_NETWORK_TOXICOLOGY = {
@@ -3364,6 +3375,36 @@ def run_full_pipeline(args) -> int:
         "workdir": workdir,
         "full_config": Path(args.config).resolve(),
         "docking_config": cfg_path,
+        "external_validation_path": getattr(
+            args,
+            "external_validation_path",
+            None,
+        ),
+        "external_validation_target_column": getattr(
+            args,
+            "external_validation_target_column",
+            "gene",
+        ),
+        "external_validation_score_column": getattr(
+            args,
+            "external_validation_score_column",
+            "score",
+        ),
+        "external_validation_label_column": getattr(
+            args,
+            "external_validation_label_column",
+            "label",
+        ),
+        "external_validation_threshold": getattr(
+            args,
+            "external_validation_threshold",
+            0.5,
+        ),
+        "external_validation_bootstrap": getattr(
+            args,
+            "external_validation_bootstrap",
+            1000,
+        ),
     }
     if not args.force:
         _invalidate_markers_for_changed_root(workdir, ctx["single_cell_root"])
@@ -3471,6 +3512,7 @@ def load_full_config(path: Path) -> dict:
         "evidence": DEFAULT_EVIDENCE,
         "target_priority": DEFAULT_TARGET_PRIORITY,
         "docking_selection": DEFAULT_DOCKING_SELECTION,
+        "external_validation": DEFAULT_EXTERNAL_VALIDATION,
         "qc_gate": DEFAULT_QC_GATE,
         "differential_abundance": DEFAULT_DIFFERENTIAL_ABUNDANCE,
         "gene_blacklist": DEFAULT_GENE_BLACKLIST,
@@ -3506,6 +3548,9 @@ def load_full_config(path: Path) -> dict:
     docking_selection = dict(defaults["docking_selection"])
     docking_selection.update((raw.get("docking_selection") or {}))
     config["docking_selection"] = docking_selection
+    external_validation = dict(defaults["external_validation"])
+    external_validation.update((raw.get("external_validation") or {}))
+    config["external_validation"] = external_validation
     config["qc_gate"] = dict(defaults["qc_gate"])
     config["qc_gate"].update((raw.get("qc_gate") or {}))
     config["differential_abundance"] = dict(
@@ -3722,6 +3767,25 @@ def _apply_defaults(args, config: dict) -> None:
                 False,
             )
         )
+    external_validation = dict(DEFAULT_EXTERNAL_VALIDATION)
+    external_validation.update(config.get("external_validation") or {})
+    for attr in (
+        "external_validation_path",
+        "external_validation_target_column",
+        "external_validation_score_column",
+        "external_validation_label_column",
+    ):
+        if getattr(args, attr, None) is None:
+            key = attr.replace("external_validation_", "")
+            setattr(args, attr, external_validation.get(key))
+    if getattr(args, "external_validation_threshold", None) is None:
+        args.external_validation_threshold = float(
+            external_validation.get("threshold", 0.5)
+        )
+    if getattr(args, "external_validation_bootstrap", None) is None:
+        args.external_validation_bootstrap = int(
+            external_validation.get("bootstrap", 1000)
+        )
     if args.evidence_workers is None:
         args.evidence_workers = int(config.get("evidence", {}).get("max_workers", 6))
     if args.evidence_timeout is None:
@@ -3775,6 +3839,10 @@ def _apply_defaults(args, config: dict) -> None:
     if getattr(args, "evidence_hub_config", None):
         args.evidence_hub_config = str(
             _resolve_path(args.evidence_hub_config, APP_ROOT)
+        )
+    if getattr(args, "external_validation_path", None):
+        args.external_validation_path = str(
+            _resolve_path(args.external_validation_path, Path.cwd())
         )
     for attr in [
         "docking_ml_training_csv",
@@ -3874,6 +3942,20 @@ def build_parser() -> argparse.ArgumentParser:
         action="store_true",
         default=None,
         help="allow REVIEW targets to enter docking; default is GO/CONDITIONAL_GO only",
+    )
+    parser.add_argument("--external-validation-path", default=None)
+    parser.add_argument("--external-validation-target-column", default=None)
+    parser.add_argument("--external-validation-score-column", default=None)
+    parser.add_argument("--external-validation-label-column", default=None)
+    parser.add_argument(
+        "--external-validation-threshold",
+        type=float,
+        default=None,
+    )
+    parser.add_argument(
+        "--external-validation-bootstrap",
+        type=int,
+        default=None,
     )
     parser.add_argument("--ligand-library", help="ligand library file (.smi/.sdf/.csv)")
     parser.add_argument("--case-label", help="case group label for knockout")

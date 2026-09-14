@@ -2071,6 +2071,40 @@ def start_full_job(data: dict) -> dict:
         value = _first(data, attr, "").strip()
         if value:
             cmd += ["--" + attr.replace("_targets", "").replace("_", "-"), value]
+    external_validation_path = _first(
+        data,
+        "external_validation_path",
+        "",
+    ).strip()
+    if external_validation_path:
+        cmd += ["--external-validation-path", external_validation_path]
+    for attr in (
+        "external_validation_target_column",
+        "external_validation_score_column",
+        "external_validation_label_column",
+    ):
+        value = _first(data, attr, "").strip()
+        if value:
+            cmd += ["--" + attr.replace("_", "-"), value]
+    external_validation_threshold = _first(
+        data,
+        "external_validation_threshold",
+        "",
+    ).strip()
+    if external_validation_threshold:
+        cmd += [
+            "--external-validation-threshold",
+            external_validation_threshold,
+        ]
+    external_validation_bootstrap = _int_field(
+        data,
+        "external_validation_bootstrap",
+    )
+    if external_validation_bootstrap is not None:
+        cmd += [
+            "--external-validation-bootstrap",
+            str(external_validation_bootstrap),
+        ]
     for attr in [
         "network_compound_targets_csv",
         "network_disease_genes_csv",
@@ -2642,6 +2676,7 @@ def full_results(workdir: Path) -> dict:
         "key_genes": [],
         "target_priority": [],
         "target_validation": [],
+        "external_validation": {},
         "knockout": [],
         "docking": [],
         "cadd_downstream_summary": {},
@@ -2686,6 +2721,9 @@ def full_results(workdir: Path) -> dict:
         )
     except Exception:
         result["target_validation"] = []
+    result["external_validation"] = _read_json(
+        out / "external_validation_summary.json"
+    )
     try:
         # The page renders only the top knockout rows; cap the JSON payload.
         result["knockout"] = json.loads(

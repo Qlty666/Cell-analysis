@@ -107,6 +107,8 @@
 
 新增 `benchmark_positive_targets` / `benchmark_negative_targets` / `benchmark_top_n`，可在网页或 CLI 中用 `--benchmark-positive` / `--benchmark-negative` / `--benchmark-top-n` 指定阳性/阴性对照，输出 Recall@N、Precision@N、AUROC、AUPRC、富集倍数、AUROC bootstrap 置信区间和 permutation p 值。对接默认只选择 `GO` 或 `CONDITIONAL_GO` 靶点；需要保留 REVIEW 靶点时必须显式启用 `docking_selection.allow_review=true` 或 `--allow-review-docking`。
 
+新增外部验证入口 `external_validation.path`，或网页/CLI 的 `--external-validation-path`。验证表必须包含靶点、连续评分和二元标签列，输出 AUROC、AUPRC、bootstrap 置信区间、precision、recall 和混淆矩阵到 `external_validation_summary.json` / `external_validation_predictions.csv`。`paper_supporting` 要求外部验证 AUROC 至少达到 0.70。
+
 集成报告新增 `publication_readiness` 质量面板，明确区分 `exploratory`、`paper_supporting` 和 `publication_grade`，并列出多来源证据、候选池规模、候选靶点证据覆盖比例、基准排序、对接阳性对照、重复种子、真实完成 MD、外部验证和机制性扰动等未通过门控。`paper_supporting` 现在同时要求 benchmark 和外部验证文件；`publication_grade` 还要求检测到机制性扰动结果。默认 MD 仍是 `prepare`，默认对接仍为单次运行，因此未主动完成这些验证时，流水线不会把结果标记为论文级闭环。
 
 新增 `--dry-run`，不执行任何阶段，只打印每个阶段会 `RUN` 还是 `DONE` 及原因；新增 `--skip-qc-gate` 和 `--skip-differential-abundance` 可分别关闭 QC 门控和细胞组成差异检验。
@@ -712,6 +714,8 @@ python scripts\run_full_pipeline.py \
 - `--benchmark-positive` / `--benchmark-negative`：逗号分隔的阳性/阴性对照靶点，用于 Recall@N、AUROC 等排序评估。
 - `--benchmark-top-n`：benchmark 评估的 Top N，默认 20。
 - `--allow-review-docking`：显式允许 `REVIEW` 靶点进入对接；默认只允许 `GO` 和 `CONDITIONAL_GO`。
+- `--external-validation-path` / `--external-validation-target-column` / `--external-validation-score-column` / `--external-validation-label-column`：输入独立靶点验证表。
+- `--external-validation-threshold` / `--external-validation-bootstrap`：设置验证二分类阈值和 bootstrap 次数。
 - `--docking-targets`：参与对接的靶点数量，默认 3。
 - `--md-mode prepare|auto`：GROMACS MD 模式；`prepare` 只生成输入，`auto` 在本机运行完整模拟。
 - `--md-top-n`：每个靶点进入 MD 的 Top 命中数，默认 1。
@@ -992,6 +996,7 @@ liverbio analysis-export GSE125449
 - `target_priority.csv`：表达证据与多来源数据库证据的覆盖感知排序。
 - `integrated_target_priority.csv`：进一步合并启发式扰动评分后的综合靶点排序。
 - `target_validation_scores.csv`：按疾病关联、成药性、化学物质、临床先例和结构数据五个维度输出 0-100 的靶点验证分数，并应用安全风险惩罚和 `GO` / `CONDITIONAL_GO` / `REVIEW` / `NO_GO` 决策。
+- `external_validation_summary.json` / `external_validation_predictions.csv`：独立队列的 AUROC、AUPRC、置信区间、precision、recall 和混淆矩阵。
 - `target_priority_summary.json` / `integrated_target_priority_summary.json`：靶点数量、证据覆盖、GO/CONDITIONAL_GO/REVIEW 分档和缺失来源摘要。
 - `evidence_hub/`：`evidence.sqlite`、`evidence_records.csv`、`evidence_coverage.csv`、`source_ablation.csv`、`target_priority.csv`、`evidence_hub_summary.json` 等可追溯证据文件。
 - `gene_evidence.csv`：每个基因的 UniProt、PDB、ChEMBL、STRING、Reactome、PharmGKB、AlphaFold、Open Targets、KEGG 证据与来源覆盖。

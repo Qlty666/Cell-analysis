@@ -98,6 +98,15 @@
   "docking_selection": {
     "allow_review": false
   },
+  "external_validation": {
+    "enabled": false,
+    "path": null,
+    "target_column": "gene",
+    "score_column": "score",
+    "label_column": "label",
+    "threshold": 0.5,
+    "bootstrap": 1000
+  },
   "qc_gate": {
     "enabled": true,
     "min_cells_after_qc": 0,

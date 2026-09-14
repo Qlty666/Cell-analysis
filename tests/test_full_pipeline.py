@@ -722,6 +722,10 @@ class TestScientificGates(unittest.TestCase):
                         "mmpbsa_available": True,
                     }
                 },
+                {
+                    "status": "completed",
+                    "auroc": 0.82,
+                },
             )
             self.assertEqual(readiness["level"], "publication_grade")
 

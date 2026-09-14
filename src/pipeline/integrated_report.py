@@ -17,6 +17,7 @@ from docking.utils import write_json  # noqa: E402
 from .stage_paths import _integration_dir, _read_json  # noqa: E402
 from .reproducibility import write_reproducibility_manifest  # noqa: E402
 from .target_validation import build_target_validation  # noqa: E402
+from .external_validation import run_external_validation  # noqa: E402
 
 log = logging.getLogger("full_pipeline")
 
@@ -39,6 +40,7 @@ def _publication_readiness(
     docking_config: Path,
     out_dir: Path,
     structural_quality: dict | None = None,
+    external_validation_summary: dict | None = None,
 ) -> dict:
     """Summarize which publication-strength gates have actually been met."""
     try:
@@ -116,6 +118,16 @@ def _publication_readiness(
         / "in_silico"
         / "insilico_summary.json"
     )
+    external_validation_completed = (
+        str((external_validation_summary or {}).get("status", ""))
+        == "completed"
+    ) or any(path.exists() for path in external_validation_paths)
+    external_auroc = pd.to_numeric(
+        pd.Series(
+            [(external_validation_summary or {}).get("auroc")]
+        ),
+        errors="coerce",
+    ).iloc[0]
     checks = {
         "multi_source_evidence": (
             str(evidence_hub_summary.get("status", "")) == "completed"
@@ -147,8 +159,10 @@ def _publication_readiness(
             structural_gates.get("md_rmsd_stability", False)
         ),
         "benchmark": benchmark_passed,
-        "external_validation": any(
-            path.exists() for path in external_validation_paths
+        "external_validation": bool(
+            external_validation_completed
+            and pd.notna(external_auroc)
+            and float(external_auroc) >= 0.70
         ),
         "mechanistic_perturbation": mechanistic_path.exists(),
         "mmpbsa_available": bool(
@@ -229,6 +243,27 @@ def generate_integrated_report(
     target_validation, target_validation_summary = build_target_validation(
         workdir,
         out_dir,
+    )
+    external_validation = run_external_validation(
+        Path(str(ctx.get("external_validation_path")))
+        if ctx.get("external_validation_path")
+        else None,
+        out_dir,
+        target_column=str(
+            ctx.get("external_validation_target_column") or "gene"
+        ),
+        score_column=str(
+            ctx.get("external_validation_score_column") or "score"
+        ),
+        label_column=str(
+            ctx.get("external_validation_label_column") or "label"
+        ),
+        threshold=float(
+            ctx.get("external_validation_threshold") or 0.5
+        ),
+        bootstrap=int(
+            ctx.get("external_validation_bootstrap") or 1000
+        ),
     )
     evidence_hub_summary = _read_json(
         out_dir / "evidence_hub" / "evidence_hub_summary.json"
@@ -343,6 +378,7 @@ def generate_integrated_report(
         docking_config,
         out_dir,
         structural_quality,
+        external_validation,
     )
     readiness_frame = pd.DataFrame(
         [
@@ -374,6 +410,28 @@ def generate_integrated_report(
             "n_negative",
         )
         if column in benchmark_frame.columns
+    ]
+    external_validation_frame = (
+        pd.DataFrame([external_validation])
+        if external_validation
+        else pd.DataFrame()
+    )
+    external_validation_cols = [
+        column
+        for column in (
+            "status",
+            "n_samples",
+            "n_positive",
+            "n_negative",
+            "threshold",
+            "auroc",
+            "auroc_ci_low",
+            "auroc_ci_high",
+            "auprc",
+            "precision",
+            "recall",
+        )
+        if column in external_validation_frame.columns
     ]
 
     sc_html = _render_table(
@@ -661,6 +719,11 @@ a {{ color: #1d4ed8; }}
   {_render_table(differential_abundance, differential_abundance_cols)}
 </div>
 <div class="card">
+  <h2>External validation</h2>
+  <p class="muted">{_esc(external_validation.get("reason", ""))}</p>
+  {_render_table(external_validation_frame, external_validation_cols)}
+</div>
+<div class="card">
   <h2>Five-axis target validation (top 20)</h2>
   <p class="muted">
     GO: {_esc((target_validation_summary.get("decisions") or {}).get("GO", 0))};
@@ -741,6 +804,7 @@ a {{ color: #1d4ed8; }}
     <li><a href="{rel(out_dir / 'target_priority.csv') if (out_dir / 'target_priority.csv').exists() else '#'}">target_priority.csv</a></li>
     <li><a href="{rel(out_dir / 'integrated_target_priority.csv') if (out_dir / 'integrated_target_priority.csv').exists() else '#'}">integrated_target_priority.csv</a></li>
     <li><a href="{rel(out_dir / 'target_validation_scores.csv') if (out_dir / 'target_validation_scores.csv').exists() else '#'}">target_validation_scores.csv</a></li>
+    <li><a href="{rel(out_dir / 'external_validation_summary.json') if (out_dir / 'external_validation_summary.json').exists() else '#'}">external_validation_summary.json</a></li>
     <li><a href="{rel(out_dir / 'evidence_hub' / 'evidence_coverage.csv') if (out_dir / 'evidence_hub' / 'evidence_coverage.csv').exists() else '#'}">evidence_coverage.csv</a></li>
     <li><a href="{rel(out_dir / 'evidence_hub' / 'source_ablation.csv') if (out_dir / 'evidence_hub' / 'source_ablation.csv').exists() else '#'}">source_ablation.csv</a></li>
     <li><a href="{rel(out_dir / 'differential_abundance.csv') if (out_dir / 'differential_abundance.csv').exists() else '#'}">differential_abundance.csv</a></li>
@@ -782,6 +846,7 @@ a {{ color: #1d4ed8; }}
             "top_targets": target_priority.head(20).to_dict(orient="records"),
         },
         "target_validation": target_validation_summary,
+        "external_validation": external_validation,
         "publication_readiness": readiness,
         "knockout": {
             "genes_scored": (ko_summary.get("knockout") or {}).get("genes_scored", 0),
@@ -849,6 +914,7 @@ a {{ color: #1d4ed8; }}
                 "decisions",
                 {},
             ),
+            "external_validation": external_validation,
             "candidate_origins": target_priority_summary.get(
                 "candidate_origins",
                 {},
@@ -882,6 +948,9 @@ a {{ color: #1d4ed8; }}
             ),
             "target_validation_summary_json": (
                 out_dir / "target_validation_summary.json"
+            ),
+            "external_validation_summary_json": (
+                out_dir / "external_validation_summary.json"
             ),
             "gene_evidence_csv": out_dir / "gene_evidence.csv",
             "evidence_hub_summary_json": (
