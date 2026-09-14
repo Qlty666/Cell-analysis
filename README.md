@@ -1,6 +1,6 @@
 # Liver Cancer Bioinformatics Workflow
 
-> 当前版本：1.7.0
+> 当前版本：1.7.1
 
 面向肝癌研究的本地生信自动化工作流，整合多条可实际运行的流水线：
 
@@ -1155,6 +1155,11 @@ GSE165816 和 TCGA PanCancer Atlas 仅用于真实数据验证。
 MIT License. See `LICENSE` for details.
 
 ## 9. 更新日志
+
+### v1.7.1
+
+- 补齐实验方案一使用的 `beautifulsoup4`、`anndata`、`scanpy` 运行依赖，并同步 GitHub Actions 最小依赖回退列表，修复 Linux/Windows CI 测试收集阶段的模块缺失问题。
+- 全量测试通过：427 个测试用例 + 80 个 subtests；GitHub Actions 的 Ubuntu 与 Windows 任务均通过。
 
 ### v1.7.0
 

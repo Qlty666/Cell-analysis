@@ -37,7 +37,7 @@ jobs:
           python -m pip install pytest
           if ! python -m pip install -r requirements.txt; then
             echo "::warning::requirements.txt install failed; falling back to minimal test dependencies"
-            python -m pip install numpy pandas matplotlib pyyaml openpyxl h5py scipy scikit-learn umap-learn fpdf2
+            python -m pip install numpy pandas matplotlib pyyaml openpyxl h5py scipy scikit-learn umap-learn fpdf2 beautifulsoup4 anndata scanpy
           fi
 
       # Docking extras (rdkit, meeko, gemmi, py4cytoscape, ...). Best effort:

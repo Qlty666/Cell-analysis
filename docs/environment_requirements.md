@@ -41,7 +41,7 @@
 python -m pip install -r requirements.txt
 ```
 
-基础检查覆盖：`numpy`、`pandas`、`matplotlib`、`pyyaml`、`openpyxl`、`h5py`、`scipy`、`scikit-learn`、`fpdf2`。`requirements.txt` 还包含 `umap-learn`、`scTenifoldpy>=0.3.0`，供虚拟敲除 / 全自动流水线等扩展模块使用。
+基础检查覆盖：`numpy`、`pandas`、`matplotlib`、`pyyaml`、`openpyxl`、`h5py`、`scipy`、`scikit-learn`、`fpdf2`、`pillow`、`beautifulsoup4`。`requirements.txt` 还包含 `anndata`、`scanpy`、`umap-learn`、`scTenifoldpy==0.4.0`，供单细胞处理、虚拟敲除 / 全自动流水线等模块使用。
 
 **R 包：**
 

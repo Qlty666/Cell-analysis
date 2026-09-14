@@ -8,6 +8,7 @@ import json
 import tempfile
 import unittest
 from pathlib import Path
+from unittest import mock
 
 import numpy as np
 import pandas as pd
@@ -193,6 +194,19 @@ class TestExperimentPlanOne(unittest.TestCase):
         self.assertEqual(len(selected), 3)
         self.assertEqual(len(probabilities), len(y))
         self.assertGreaterEqual(metrics["auc"], 0.0)
+
+    def test_optional_boosting_models_can_be_absent(self):
+        with mock.patch(
+            "experiment_plan_one.ml._xgboost",
+            side_effect=RuntimeError("xgboost unavailable"),
+        ), mock.patch(
+            "experiment_plan_one.ml._lightgbm",
+            side_effect=RuntimeError("lightgbm unavailable"),
+        ):
+            models = _model_zoo(seed=7)
+        self.assertNotIn("XGBoost", models)
+        self.assertNotIn("LightGBM", models)
+        self.assertIn("RandomForest", models)
 
     def test_classify_results_creates_plan_tree(self):
         with tempfile.TemporaryDirectory() as tmp:

@@ -104,8 +104,6 @@ def _model_zoo(seed: int = 42) -> dict[str, Any]:
             max_depth=2,
             random_state=seed,
         ),
-        "XGBoost": _xgboost(seed),
-        "LightGBM": _lightgbm(seed),
         "MLP": MLPClassifier(
             hidden_layer_sizes=(32, 16),
             alpha=0.001,
@@ -115,6 +113,14 @@ def _model_zoo(seed: int = 42) -> dict[str, Any]:
             random_state=seed,
         ),
     }
+    for name, factory in {
+        "XGBoost": lambda: _xgboost(seed),
+        "LightGBM": lambda: _lightgbm(seed),
+    }.items():
+        try:
+            models[name] = factory()
+        except RuntimeError as exc:
+            LOG.warning("optional model %s unavailable: %s", name, exc)
     return models
 
 

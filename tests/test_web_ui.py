@@ -5,6 +5,7 @@ from __future__ import annotations
 
 import socket
 import json
+import os
 import sys
 import tempfile
 import time
@@ -875,6 +876,8 @@ class TestFullStatus(unittest.TestCase):
             workdir = base / "work"
             advanced = base / "advanced.json"
             mr = base / "mr.json"
+            advanced.write_text("{}", encoding="utf-8")
+            mr.write_text("{}", encoding="utf-8")
             with mock.patch("web_ui._drain_full_queue"):
                 result = start_full_job(
                     {
@@ -887,8 +890,10 @@ class TestFullStatus(unittest.TestCase):
             job_id = result["job"]
             try:
                 env = FULL_JOBS[job_id]["env"]
-                self.assertEqual(env["LIVER_ADVANCED_CONFIG"], str(advanced))
-                self.assertEqual(env["LIVER_MR_CONFIG"], str(mr))
+                self.assertTrue(
+                    os.path.samefile(env["LIVER_ADVANCED_CONFIG"], advanced)
+                )
+                self.assertTrue(os.path.samefile(env["LIVER_MR_CONFIG"], mr))
             finally:
                 FULL_JOBS.pop(job_id, None)
 
