@@ -133,6 +133,54 @@
       "subject_type": "disease",
       "target_column": "gene_symbol",
       "score_column": "trial_score"
+    },
+    "GTExEQTL": {
+      "enabled": false,
+      "connector": "local",
+      "path": "data/evidence/gtex_liver_eqtl.tsv",
+      "source_version": "GTEx v8 liver eQTL snapshot supplied by user",
+      "evidence_type": "eqtl_association",
+      "relation": "causally_associated_with",
+      "tier": "GENETIC",
+      "subject_type": "disease",
+      "target_column": "gene_symbol",
+      "score_column": "eqtl_score"
+    },
+    "eQTLGen": {
+      "enabled": false,
+      "connector": "local",
+      "path": "data/evidence/eqtlgen_cis.tsv",
+      "source_version": "eQTLGen snapshot supplied by user",
+      "evidence_type": "eqtl_association",
+      "relation": "causally_associated_with",
+      "tier": "GENETIC",
+      "subject_type": "disease",
+      "target_column": "gene_symbol",
+      "score_column": "eqtl_score"
+    },
+    "Colocalization": {
+      "enabled": false,
+      "connector": "local",
+      "path": "data/evidence/liver_gwas_eqtl_coloc.tsv",
+      "source_version": "colocalization snapshot supplied by user",
+      "evidence_type": "colocalization",
+      "relation": "colocalizes_with",
+      "tier": "GENETIC",
+      "subject_type": "disease",
+      "target_column": "gene_symbol",
+      "score_column": "pp_h4"
+    },
+    "TWAS": {
+      "enabled": false,
+      "connector": "local",
+      "path": "data/evidence/liver_twas.tsv",
+      "source_version": "TWAS snapshot supplied by user",
+      "evidence_type": "twass_association",
+      "relation": "causally_associated_with",
+      "tier": "GENETIC",
+      "subject_type": "disease",
+      "target_column": "gene_symbol",
+      "score_column": "twas_score"
     }
   },
   "limits": {
@@ -150,7 +198,8 @@
       "dependency": 0.1,
       "pathway": 0.05,
       "structure": 0.03,
-      "clinical_precedent": 0.08
+      "clinical_precedent": 0.08,
+      "genetic_causal": 0.12
     },
     "safety_penalty_weight": 0.15
   }

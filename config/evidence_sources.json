@@ -98,7 +98,8 @@
       "dependency": 0.1,
       "pathway": 0.05,
       "structure": 0.03,
-      "clinical_precedent": 0.08
+      "clinical_precedent": 0.08,
+      "genetic_causal": 0.12
     },
     "evidence_weight": 0.8,
     "coverage_weight": 0.2,

@@ -271,6 +271,21 @@ class TestConnectors(unittest.TestCase):
         priority, _, _ = score_targets(pd.DataFrame(rows))
         self.assertGreater(priority.iloc[0]["safety_penalty"], 0)
 
+    def test_colocalization_maps_to_genetic_causal_category(self):
+        record = _record(
+            source="Colocalization",
+            record_id="C1",
+            target="GPC3",
+            relation="colocalizes_with",
+            evidence_type="colocalization",
+            tier=EvidenceTier.GENETIC,
+            score=0.88,
+            subject_type="disease",
+        )
+        priority, _, _ = score_targets(pd.DataFrame([record.to_row()]))
+        self.assertIn("genetic_causal", priority.columns)
+        self.assertGreater(priority.iloc[0]["genetic_causal"], 0)
+
     def test_local_table_connector(self):
         with tempfile.TemporaryDirectory() as tmp:
             path = Path(tmp) / "local.csv"

@@ -23,6 +23,7 @@ DEFAULT_CATEGORY_WEIGHTS: dict[str, float] = {
     "pathway": 0.05,
     "structure": 0.03,
     "clinical_precedent": 0.08,
+    "genetic_causal": 0.12,
 }
 
 CATEGORY_LABELS = {
@@ -37,6 +38,7 @@ CATEGORY_LABELS = {
     "structure": "Experimental or predicted structure evidence",
     "clinical_precedent": "Clinical trial or translational precedent",
     "safety_risk": "Known toxicity or safety liability",
+    "genetic_causal": "Human genetic causal or colocalization evidence",
 }
 
 
@@ -111,6 +113,15 @@ def _evidence_category(row: Mapping) -> str:
         or relation in {"studied_in", "clinical_precedent"}
     ):
         return "clinical_precedent"
+    if (
+        "coloc" in evidence_type
+        or "eqtl" in evidence_type
+        or "pqtl" in evidence_type
+        or "sqlt" in evidence_type
+        or "twass" in evidence_type
+        or relation in {"colocalizes_with", "causally_associated_with"}
+    ):
+        return "genetic_causal"
     if tier == EvidenceTier.GENETIC or "genetic" in evidence_type:
         return "genetic_association"
     if subject_type == "disease" and relation in {
