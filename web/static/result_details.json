@@ -1572,7 +1572,7 @@
       "file": "target_validation_scores.csv",
       "name": "target_validation_scores.csv",
       "kind": "data",
-      "content": "五维靶点验证评分与 GO/NO-GO 决策",
+      "content": "五维靶点验证评分、证据轴来源与 GO/NO-GO 决策",
       "type": "CSV 数据表",
       "use": "比较疾病关联、成药性、化学物质、临床先例、结构数据和安全风险。",
       "optional": false
@@ -1581,9 +1581,9 @@
       "file": "external_validation_summary.json",
       "name": "external_validation_summary.json",
       "kind": "data",
-      "content": "独立验证队列的 AUROC、AUPRC、置信区间和混淆矩阵",
+      "content": "独立验证队列的 AUROC、AUPRC、置信区间、评分来源和目标匹配率",
       "type": "JSON 汇总文件",
-      "use": "判断靶点排序是否能在独立数据上复现。",
+      "use": "判断靶点排序是否能在独立数据上复现，并确认评分确实来自流水线而非外部输入。",
       "optional": false
     },
     {
@@ -1592,7 +1592,25 @@
       "kind": "data",
       "content": "伪 bulk 表达矩阵和样本元数据 QC",
       "type": "JSON 汇总文件",
-      "use": "检查重复基因、缺失率、负值、样本匹配、分组数量和组内样本数。",
+      "use": "检查重复基因、缺失率、负值、样本匹配、分组数量、PCA 离群点、样本相关性和批次混杂。",
+      "optional": false
+    },
+    {
+      "file": "omics_qc_pca.csv",
+      "name": "omics_qc_pca.csv",
+      "kind": "data",
+      "content": "样本 PCA 坐标和离群点标记",
+      "type": "CSV 数据表",
+      "use": "复核样本离群点和批次分离。",
+      "optional": false
+    },
+    {
+      "file": "omics_qc_correlation.csv",
+      "name": "omics_qc_correlation.csv",
+      "kind": "data",
+      "content": "样本两两相关矩阵的长表",
+      "type": "CSV 数据表",
+      "use": "定位低相关样本对并检查样本质量。",
       "optional": false
     },
     {
@@ -1601,7 +1619,7 @@
       "kind": "data",
       "content": "PoseBusters 结构合理性检查状态",
       "type": "JSON 汇总文件",
-      "use": "区分 skipped、unavailable、failed 和 passed，避免把未验证 pose 当作合格 pose。",
+      "use": "区分 skipped、unavailable、failed 和 passed；PDBQT 会先转换为 SDF 并绑定原始受体，避免把未验证 pose 当作合格 pose。",
       "optional": false
     },
     {
@@ -1617,9 +1635,9 @@
       "file": "target_decision_report.csv",
       "name": "target_decision_report.csv",
       "kind": "data",
-      "content": "冲突感知的最终靶点行动建议",
+      "content": "靶点层与平台层分离的冲突感知行动建议",
       "type": "CSV 数据表",
-      "use": "查看 PROCEED_VALIDATION、CONDITIONAL_PROCEED、REVIEW_CONFLICT、REVIEW 和 NO_GO。",
+      "use": "查看 target_action、platform_action、composite_action 以及 PROCEED_VALIDATION、CONDITIONAL_PROCEED、REVIEW_CONFLICT、REVIEW 和 NO_GO。",
       "optional": false
     },
     {

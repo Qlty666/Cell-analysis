@@ -15,6 +15,7 @@ from sklearn.metrics import (
 )
 
 from docking.utils import write_json
+from docking.provenance import sha256_file
 
 
 def _binary_label(value) -> int | None:
@@ -34,8 +35,10 @@ def run_external_validation(
     path: Path | None,
     out_dir: Path,
     *,
+    pipeline_scores_path: Path | None = None,
+    allow_external_score: bool = False,
     target_column: str = "gene",
-    score_column: str = "score",
+    score_column: str | None = "score",
     label_column: str = "label",
     threshold: float = 0.5,
     bootstrap: int = 1000,
@@ -53,7 +56,7 @@ def run_external_validation(
     frame = pd.read_csv(path)
     missing = [
         column
-        for column in (target_column, score_column, label_column)
+        for column in (target_column, label_column)
         if column not in frame.columns
     ]
     if missing:
@@ -61,16 +64,126 @@ def run_external_validation(
             "external validation table missing columns: "
             + ", ".join(missing)
         )
-    frame = frame[[target_column, score_column, label_column]].copy()
-    frame.columns = ["target", "score", "label"]
+    target_values = frame[target_column].astype(str).str.strip().str.upper()
+    labels = frame[label_column]
+    score_origin = "pipeline"
+    score_provenance_note = "scores loaded from the pipeline ranking table"
+    pipeline_path = Path(pipeline_scores_path) if pipeline_scores_path else None
+    if (
+        score_column
+        and score_column in frame.columns
+        and allow_external_score
+    ):
+        scores = pd.to_numeric(frame[score_column], errors="coerce")
+        frame = frame[[target_column, label_column]].copy()
+        frame.columns = ["target", "label"]
+        frame["score"] = scores.to_numpy()
+        score_origin = "external_allowed"
+        score_provenance_note = (
+            "external score column explicitly allowed; this is not an "
+            "independent validation of the pipeline ranking"
+        )
+    elif pipeline_path is not None and pipeline_path.exists():
+        ranked = pd.read_csv(pipeline_path)
+        ranked_gene = next(
+            (
+                column
+                for column in ("gene", "target_symbol")
+                if column in ranked.columns
+            ),
+            None,
+        )
+        ranked_score = next(
+            (
+                column
+                for column in (
+                    "integrated_score",
+                    "priority_score",
+                    "target_score",
+                    "score",
+                )
+                if column in ranked.columns
+            ),
+            None,
+        )
+        if ranked_gene is None or ranked_score is None:
+            raise ValueError(
+                "pipeline score table requires a gene and score column"
+            )
+        ranked = ranked[[ranked_gene, ranked_score]].rename(
+            columns={ranked_gene: "target", ranked_score: "score"}
+        )
+        ranked["target"] = (
+            ranked["target"].astype(str).str.strip().str.upper()
+        )
+        ranked["score"] = pd.to_numeric(ranked["score"], errors="coerce")
+        joined = pd.DataFrame(
+            {
+                "target": target_values,
+                "label": labels,
+            }
+        ).merge(
+            ranked.drop_duplicates("target", keep="first"),
+            on="target",
+            how="left",
+        )
+        frame = joined.copy()
+    elif score_column and score_column in frame.columns:
+        summary = {
+            "status": "skipped",
+            "reason": (
+                "external score column is present but allow_external_score=false; "
+                "provide a pipeline score table instead"
+            ),
+            "path": str(path),
+        }
+        write_json(out_dir / "external_validation_summary.json", summary)
+        return summary
+    else:
+        summary = {
+            "status": "skipped",
+            "reason": "no pipeline score table or external score column provided",
+            "path": str(path),
+        }
+        write_json(out_dir / "external_validation_summary.json", summary)
+        return summary
     frame["score"] = pd.to_numeric(frame["score"], errors="coerce")
     frame["label"] = frame["label"].map(_binary_label)
+    target_count = int(len(frame))
+    unmatched_targets = sorted(
+        {
+            str(value)
+            for value in frame.loc[frame["score"].isna(), "target"].tolist()
+            if str(value).strip()
+        }
+    )
     frame = frame.dropna(subset=["target", "score", "label"])
+    match_rate = len(frame) / target_count if target_count else 0.0
+    if frame.empty:
+        summary = {
+            "status": "skipped",
+            "reason": "no external validation targets matched pipeline scores",
+            "path": str(path),
+            "score_origin": score_origin,
+            "score_provenance_valid": False,
+            "score_provenance_note": score_provenance_note,
+            "target_match_count": 0,
+            "target_match_rate": 0.0,
+            "unmatched_targets": unmatched_targets,
+        }
+        write_json(out_dir / "external_validation_summary.json", summary)
+        return summary
     if frame["label"].nunique() < 2:
         summary = {
             "status": "skipped",
             "reason": "external validation requires positive and negative labels",
             "path": str(path),
+            "score_origin": score_origin,
+            "score_provenance_valid": bool(score_origin == "pipeline"),
+            "score_provenance_note": score_provenance_note,
+            "target_match_count": int(len(frame)),
+            "target_match_rate": float(match_rate),
+            "unmatched_targets": unmatched_targets,
         }
         write_json(out_dir / "external_validation_summary.json", summary)
         return summary
@@ -84,6 +197,12 @@ def run_external_validation(
         predictions,
         labels=[0, 1],
     ).ravel()
+    precision_value = float(
+        precision_score(labels, predictions, zero_division=0)
+    )
+    recall_value = float(
+        recall_score(labels, predictions, zero_division=0)
+    )
     rng = np.random.default_rng(42)
     boot_auroc = []
     boot_auprc = []
@@ -100,6 +219,20 @@ def run_external_validation(
     summary = {
         "status": "completed",
         "path": str(path),
+        "score_origin": score_origin,
+        "score_provenance_valid": bool(score_origin == "pipeline"),
+        "score_provenance_note": score_provenance_note,
+        "pipeline_scores_path": (
+            str(pipeline_path) if pipeline_path else ""
+        ),
+        "pipeline_scores_sha256": (
+            sha256_file(pipeline_path)
+            if pipeline_path is not None and pipeline_path.exists()
+            else None
+        ),
+        "target_match_count": int(len(frame)),
+        "target_match_rate": float(match_rate),
+        "unmatched_targets": unmatched_targets,
         "n_samples": int(len(frame)),
         "n_positive": int(labels.sum()),
         "n_negative": int(len(labels) - labels.sum()),
@@ -118,8 +251,20 @@ def run_external_validation(
         "auprc_ci_high": (
             float(np.percentile(boot_auprc, 97.5)) if boot_auprc else None
         ),
-        "precision": float(precision_score(labels, predictions, zero_division=0)),
-        "recall": float(recall_score(labels, predictions, zero_division=0)),
+        "precision": precision_value,
+        "recall": recall_value,
+        "f1": float(
+            (
+                2
+                * precision_value
+                * recall_value
+            )
+            / max(
+                1e-12,
+                precision_value + recall_value,
+            )
+        ),
+        "specificity": float(tn / max(1, tn + fp)),
         "confusion_matrix": {
             "tn": int(tn),
             "fp": int(fp),

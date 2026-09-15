@@ -65,6 +65,31 @@ class TestDecisionReport(unittest.TestCase):
             )
             self.assertEqual(summary["targets"], 2)
 
+    def test_platform_conflict_does_not_rewrite_target_action(self):
+        with tempfile.TemporaryDirectory() as tmp:
+            out = Path(tmp)
+            pd.DataFrame(
+                {
+                    "gene": ["GENE1"],
+                    "decision": ["GO"],
+                    "adjusted_score": [88.0],
+                    "safety_risk": [0.0],
+                }
+            ).to_csv(out / "target_validation_scores.csv", index=False)
+            frame, summary = build_decision_report(out)
+            row = frame.iloc[0]
+            self.assertEqual(row["target_action"], "PROCEED_VALIDATION")
+            self.assertEqual(row["platform_action"], "PLATFORM_REVIEW")
+            self.assertEqual(row["composite_action"], "REVIEW_CONFLICT")
+            self.assertEqual(
+                row["platform_conflicts"].split(";")[0],
+                "evidence_hub_incomplete",
+            )
+            self.assertEqual(
+                summary["platform_action"],
+                "PLATFORM_REVIEW",
+            )
+
 
 if __name__ == "__main__":
     unittest.main()

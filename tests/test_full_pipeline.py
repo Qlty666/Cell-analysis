@@ -703,7 +703,13 @@ class TestScientificGates(unittest.TestCase):
                 {
                     "targets": 100,
                     "evidence_targets_queried": 100,
-                    "benchmark": {"auroc": 0.82},
+                    "benchmark": {
+                        "auroc": 0.82,
+                        "benchmark_source": "curated_reference",
+                        "benchmark_version": "2026-01",
+                        "benchmark_independent": True,
+                        "benchmark_independent_verified": True,
+                    },
                 },
                 {
                     "status": "completed",
@@ -726,6 +732,8 @@ class TestScientificGates(unittest.TestCase):
                 {
                     "status": "completed",
                     "auroc": 0.82,
+                    "score_provenance_valid": True,
+                    "target_match_rate": 1.0,
                 },
                 {
                     "status": "completed",

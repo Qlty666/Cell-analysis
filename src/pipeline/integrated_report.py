@@ -84,11 +84,26 @@ def _publication_readiness(
         pd.Series([benchmark.get("recall_at_n")]),
         errors="coerce",
     ).iloc[0]
+    benchmark_independent = bool(
+        benchmark.get("benchmark_independent_verified", False)
+    )
+    benchmark_source = str(benchmark.get("benchmark_source") or "").strip()
+    benchmark_version = str(
+        benchmark.get("benchmark_version") or ""
+    ).strip()
+    benchmark_provenance = bool(
+        (benchmark_source and benchmark_version)
+        or benchmark.get("benchmark_evidence_mode") == "source_holdout"
+    )
     benchmark_passed = bool(
-        (pd.notna(benchmark_auroc) and float(benchmark_auroc) >= 0.70)
-        or (
-            pd.notna(benchmark_recall)
-            and float(benchmark_recall) >= 0.50
+        benchmark_independent
+        and benchmark_provenance
+        and (
+            (pd.notna(benchmark_auroc) and float(benchmark_auroc) >= 0.70)
+            or (
+                pd.notna(benchmark_recall)
+                and float(benchmark_recall) >= 0.50
+            )
         )
     )
     external_validation_paths = (
@@ -165,8 +180,22 @@ def _publication_readiness(
             structural_gates.get("md_rmsd_stability", False)
         ),
         "benchmark": benchmark_passed,
+        "benchmark_independent": benchmark_independent,
+        "benchmark_provenance": benchmark_provenance,
         "external_validation": bool(
             external_validation_completed
+            and (external_validation_summary or {}).get(
+                "score_provenance_valid",
+                False,
+            )
+            and float(
+                (external_validation_summary or {}).get(
+                    "target_match_rate",
+                    1.0,
+                )
+                or 0.0
+            )
+            >= 0.80
             and pd.notna(external_auroc)
             and float(external_auroc) >= 0.70
         ),
@@ -188,6 +217,8 @@ def _publication_readiness(
         "md_completed",
         "md_rmsd_stability",
         "benchmark",
+        "benchmark_independent",
+        "benchmark_provenance",
         "external_validation",
     )
     passed = sum(bool(checks[name]) for name in required)
@@ -261,6 +292,14 @@ def generate_integrated_report(
         if ctx.get("external_validation_path")
         else None,
         out_dir,
+        pipeline_scores_path=(
+            out_dir / "integrated_target_priority.csv"
+            if (out_dir / "integrated_target_priority.csv").exists()
+            else out_dir / "target_priority.csv"
+        ),
+        allow_external_score=bool(
+            ctx.get("external_validation_allow_external_score", False)
+        ),
         target_column=str(
             ctx.get("external_validation_target_column") or "gene"
         ),
@@ -418,10 +457,19 @@ def generate_integrated_report(
             "auroc_ci_low",
             "auroc_ci_high",
             "auprc",
+            "auprc_ci_low",
+            "auprc_ci_high",
             "enrichment_factor",
             "permutation_p_value",
             "n_positive",
             "n_negative",
+            "benchmark_source",
+            "benchmark_version",
+            "benchmark_independent",
+            "benchmark_independent_verified",
+            "benchmark_evidence_mode",
+            "source_leakage",
+            "source_overlap",
         )
         if column in benchmark_frame.columns
     ]
@@ -442,8 +490,15 @@ def generate_integrated_report(
             "auroc_ci_low",
             "auroc_ci_high",
             "auprc",
+            "auprc_ci_low",
+            "auprc_ci_high",
             "precision",
             "recall",
+            "f1",
+            "specificity",
+            "score_origin",
+            "score_provenance_valid",
+            "target_match_rate",
         )
         if column in external_validation_frame.columns
     ]
@@ -530,11 +585,14 @@ def generate_integrated_report(
             "gene",
             "decision",
             "adjusted_score",
+            "evidence_completeness",
             "disease_association",
             "druggability",
             "chemical_matter",
             "clinical_precedent",
             "structural_data",
+            "clinical_evidence_quality",
+            "clinical_evidence_cap_applied",
             "safety_penalty",
         ]
         if c in target_validation.columns
@@ -544,10 +602,17 @@ def generate_integrated_report(
         for column in (
             "gene",
             "base_decision",
+            "target_decision",
             "final_decision",
+            "composite_decision",
+            "target_action",
+            "platform_action",
+            "composite_action",
             "action",
             "adjusted_score",
             "safety_risk",
+            "target_flags",
+            "platform_conflicts",
             "conflict_flags",
         )
         if column in target_decisions.columns

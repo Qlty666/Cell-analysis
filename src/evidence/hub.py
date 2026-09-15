@@ -138,6 +138,10 @@ class EvidenceHub:
         benchmark_positives: Iterable[str] | None = None,
         benchmark_negatives: Iterable[str] | None = None,
         benchmark_top_n: int = 20,
+        benchmark_source: str = "",
+        benchmark_version: str = "",
+        benchmark_independent: bool = False,
+        benchmark_exclude_sources: Iterable[str] | None = None,
     ) -> dict[str, Any]:
         evidence = self.store.records(target_symbols=target_symbols)
         priority, matrix, ablation = score_targets(
@@ -151,12 +155,71 @@ class EvidenceHub:
             "ablation": ablation,
         }
         if benchmark_positives:
-            result["benchmark"] = benchmark_ranking(
+            source_column = (
+                "source_group"
+                if "source_group" in evidence.columns
+                else "source"
+                if "source" in evidence.columns
+                else None
+            )
+            source_groups_by_target: dict[str, set[str]] = {}
+            if source_column is not None and "target_symbol" in evidence.columns:
+                for target, group in zip(
+                    evidence["target_symbol"],
+                    evidence[source_column],
+                ):
+                    target_key = str(target).upper().strip()
+                    group_key = str(group).strip().lower()
+                    if target_key and group_key:
+                        source_groups_by_target.setdefault(
+                            target_key,
+                            set(),
+                        ).add(group_key)
+            benchmark = benchmark_ranking(
                 priority,
                 positive_targets=benchmark_positives,
                 negative_targets=benchmark_negatives,
                 top_n=benchmark_top_n,
+                benchmark_source=benchmark_source,
+                benchmark_version=benchmark_version,
+                benchmark_independent=benchmark_independent,
+                exclude_sources=benchmark_exclude_sources,
+                source_groups_by_target=source_groups_by_target,
             )
+            excluded_sources = {
+                str(value).strip().lower()
+                for value in (benchmark_exclude_sources or [])
+                if str(value).strip()
+            }
+            if excluded_sources and source_column is not None:
+                held_out = evidence[
+                    ~evidence[source_column]
+                    .fillna("")
+                    .astype(str)
+                    .str.lower()
+                    .isin(excluded_sources)
+                ]
+                holdout_priority, _, _ = score_targets(
+                    held_out,
+                    config=self.scoring,
+                )
+                holdout = benchmark_ranking(
+                    holdout_priority,
+                    positive_targets=benchmark_positives,
+                    negative_targets=benchmark_negatives,
+                    top_n=benchmark_top_n,
+                    benchmark_source=benchmark_source,
+                    benchmark_version=benchmark_version,
+                    benchmark_independent=True,
+                    exclude_sources=excluded_sources,
+                    source_groups_by_target=source_groups_by_target,
+                )
+                benchmark["holdout"] = holdout
+                benchmark["benchmark_evidence_mode"] = "source_holdout"
+                benchmark["benchmark_independent_verified"] = bool(
+                    holdout.get("benchmark_independent_verified", False)
+                )
+            result["benchmark"] = benchmark
         return result
 
     def export(

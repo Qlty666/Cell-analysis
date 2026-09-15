@@ -95,11 +95,22 @@ def build_structural_quality(
                         errors="coerce",
                     ).max()
                 )
-            mmpbsa_available = any(
-                column.lower().startswith("mmpbsa")
-                and pd.to_numeric(md_results[column], errors="coerce").notna().any()
-                for column in md_results.columns
-            )
+            for column in md_results.columns:
+                if not column.lower().startswith("mmpbsa"):
+                    continue
+                numeric = pd.to_numeric(md_results[column], errors="coerce")
+                if numeric.notna().any() and (numeric.abs() > 1e-12).any():
+                    mmpbsa_available = True
+                    break
+        protein_ok = bool(
+            protein_std is not None
+            and protein_std <= protein_rmsd_std_cutoff_nm
+        )
+        ligand_ok = bool(
+            ligand_std is not None
+            and ligand_std <= ligand_rmsd_std_cutoff_nm
+        )
+        md_rmsd_stable = bool(protein_ok and ligand_ok)
         rows.append(
             {
                 "gene": gene,
@@ -116,6 +127,7 @@ def build_structural_quality(
                 "protein_rmsd_tail_std_nm": protein_std,
                 "ligand_rmsd_tail_std_nm": ligand_std,
                 "mmpbsa_available": mmpbsa_available,
+                "md_rmsd_stable": md_rmsd_stable,
             }
         )
     frame = pd.DataFrame(rows)
@@ -129,23 +141,7 @@ def build_structural_quality(
             not frame.empty and (frame["md_completed"] > 0).any()
         ),
         "md_rmsd_stability": bool(
-            not frame.empty
-            and (
-                (
-                    frame["protein_rmsd_tail_std_nm"].notna()
-                    & (
-                        frame["protein_rmsd_tail_std_nm"]
-                        <= protein_rmsd_std_cutoff_nm
-                    )
-                )
-                | (
-                    frame["ligand_rmsd_tail_std_nm"].notna()
-                    & (
-                        frame["ligand_rmsd_tail_std_nm"]
-                        <= ligand_rmsd_std_cutoff_nm
-                    )
-                )
-            ).any()
+            not frame.empty and frame["md_rmsd_stable"].any()
         ),
         "mmpbsa_available": bool(
             not frame.empty and frame["mmpbsa_available"].any()

@@ -305,6 +305,17 @@ a.file-link { color: #1665c0; text-decoration: none; margin-right: 12px; }
         <label>Benchmark Top N
           <input name="benchmark_top_n" type="number" min="1" value="20">
         </label>
+        <label>Benchmark 来源
+          <input name="benchmark_source" placeholder="如 OncoKB / CIViC / publication">
+        </label>
+        <label>Benchmark 版本
+          <input name="benchmark_version" placeholder="如 2026-01 或 PMID">
+        </label>
+        <label>Benchmark 留出来源
+          <input name="benchmark_exclude_sources" placeholder="opentargets,chembl">
+          <span class="field-hint">用于来源留出评分；来源名按 evidence_hub 的 source_group。</span>
+        </label>
+        <label class="toggle"><input type="checkbox" name="benchmark_independent" value="1"> Benchmark 标签独立于排序证据</label>
         <label>外部验证表（CSV，可选）
           <input name="external_validation_path" placeholder="data/validation/holdout_targets.csv">
         </label>
@@ -323,6 +334,7 @@ a.file-link { color: #1665c0; text-decoration: none; margin-right: 12px; }
         <label>外部验证 Bootstrap 次数
           <input name="external_validation_bootstrap" type="number" min="1" value="1000">
         </label>
+        <label class="toggle"><input type="checkbox" name="external_validation_allow_external_score" value="1"> 允许外部验证使用非流水线评分</label>
         <label>对接靶点数
           <input name="docking_targets" type="number" min="0" value="3">
         </label>
@@ -1096,9 +1108,9 @@ function renderResults(data) {
     'celltype', 'n_cells', 'chi2', 'p_value', 'p_adjust', 'significant', 'direction'
   ]);
   renderTable('priorityTable', data.target_priority, ['priority_rank', 'gene', 'candidate_origin', 'decision', 'integrated_score', 'evidence_score', 'genetic_causal', 'clinical_precedent', 'safety_risk', 'coverage_ratio', 'knockout_score', 'evidence_status', 'missing_categories']);
-  renderTable('validationTable', data.target_validation, ['validation_rank', 'gene', 'decision', 'adjusted_score', 'disease_association', 'druggability', 'chemical_matter', 'clinical_precedent', 'structural_data', 'safety_penalty']);
-  renderTable('decisionTable', data.target_decisions, ['gene', 'base_decision', 'final_decision', 'action', 'adjusted_score', 'safety_risk', 'conflict_flags']);
-  renderTable('benchmarkTable', Object.keys(benchmark).length ? [benchmark] : [], ['recall_at_n', 'precision_at_n', 'auroc', 'auroc_ci_low', 'auroc_ci_high', 'auprc', 'enrichment_factor', 'permutation_p_value']);
+  renderTable('validationTable', data.target_validation, ['validation_rank', 'gene', 'decision', 'adjusted_score', 'evidence_completeness', 'disease_association', 'druggability', 'chemical_matter', 'clinical_precedent', 'structural_data', 'clinical_evidence_quality', 'clinical_evidence_cap_applied', 'safety_penalty']);
+  renderTable('decisionTable', data.target_decisions, ['gene', 'base_decision', 'target_decision', 'final_decision', 'target_action', 'platform_action', 'composite_action', 'adjusted_score', 'safety_risk', 'target_flags', 'platform_conflicts', 'conflict_flags']);
+  renderTable('benchmarkTable', Object.keys(benchmark).length ? [benchmark] : [], ['recall_at_n', 'precision_at_n', 'f1_at_n', 'auroc', 'auroc_ci_low', 'auroc_ci_high', 'auprc', 'auprc_ci_low', 'auprc_ci_high', 'enrichment_factor', 'permutation_p_value', 'benchmark_source', 'benchmark_version', 'benchmark_independent_verified', 'benchmark_evidence_mode', 'source_leakage']);
   renderTable('externalValidationTable', Object.keys(externalValidation).length ? [externalValidation] : [], ['status', 'n_samples', 'n_positive', 'n_negative', 'threshold', 'auroc', 'auroc_ci_low', 'auroc_ci_high', 'auprc', 'precision', 'recall']);
   renderTable('omicsQcTable', Object.keys(omicsQc).length ? [omicsQc] : [], ['status', 'n_genes', 'n_samples', 'duplicate_genes', 'missing_fraction', 'zero_fraction', 'negative_values', 'sample_metadata_match', 'group_counts', 'gate_passed']);
   renderTable('poseQcTable', Object.keys(poseQc).length ? [poseQc] : [], ['status', 'reason', 'sdf_files', 'poses', 'pb_valid', 'pb_valid_rate', 'gate_passed']);

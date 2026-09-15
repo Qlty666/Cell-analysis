@@ -159,6 +159,66 @@ class TestEvidenceScoring(unittest.TestCase):
         self.assertIsNotNone(result["permutation_p_value"])
         self.assertIsNotNone(result["enrichment_factor"])
 
+    def test_benchmark_reports_provenance_and_source_leakage(self):
+        priority = pd.DataFrame(
+            {
+                "target_symbol": ["EGFR", "GPAT3", "PPP2R2A", "APP"],
+                "priority_score": [0.9, 0.8, 0.7, 0.6],
+            }
+        )
+        result = benchmark_ranking(
+            priority,
+            positive_targets=["GPAT3", "PPP2R2A"],
+            negative_targets=["APP"],
+            top_n=2,
+            benchmark_source="OncoKB",
+            benchmark_version="2026-01",
+            benchmark_independent=True,
+            exclude_sources=["chembl"],
+            source_groups_by_target={
+                "GPAT3": {"opentargets"},
+                "PPP2R2A": {"opentargets"},
+                "APP": {"gwas_catalog"},
+                "EGFR": {"chembl"},
+            },
+        )
+        self.assertEqual(result["benchmark_source"], "OncoKB")
+        self.assertEqual(result["benchmark_version"], "2026-01")
+        self.assertEqual(result["benchmark_evidence_mode"], "source_holdout")
+        self.assertTrue(result["source_leakage_checked"])
+        self.assertTrue(result["source_leakage"])
+        self.assertFalse(result["benchmark_independent_verified"])
+        self.assertIn("opentargets", result["source_overlap"])
+
+    def test_benchmark_source_holdout_removes_excluded_sources(self):
+        priority = pd.DataFrame(
+            {
+                "target_symbol": ["GPAT3", "PPP2R2A", "APP"],
+                "priority_score": [0.8, 0.7, 0.6],
+            }
+        )
+        result = benchmark_ranking(
+            priority,
+            positive_targets=["GPAT3", "PPP2R2A"],
+            negative_targets=["APP"],
+            top_n=2,
+            benchmark_source="curated_reference",
+            benchmark_version="2026-01",
+            benchmark_independent=True,
+            exclude_sources=["opentargets"],
+            source_groups_by_target={
+                "GPAT3": {"opentargets"},
+                "PPP2R2A": {"opentargets"},
+                "APP": {"opentargets"},
+            },
+        )
+        self.assertEqual(
+            result["benchmark_evidence_mode"],
+            "source_holdout",
+        )
+        self.assertFalse(result["source_leakage"])
+        self.assertTrue(result["benchmark_independent_verified"])
+
 
 class TestConnectors(unittest.TestCase):
     def test_connector_registry_rejects_unknown_name(self):

@@ -2082,6 +2082,21 @@ def start_full_job(data: dict) -> dict:
         value = _first(data, attr, "").strip()
         if value:
             cmd += ["--" + attr.replace("_targets", "").replace("_", "-"), value]
+    for attr in (
+        "benchmark_source",
+        "benchmark_version",
+        "benchmark_exclude_sources",
+    ):
+        value = _first(data, attr, "").strip()
+        if value:
+            cmd += ["--" + attr.replace("_", "-"), value]
+    if _first(data, "benchmark_independent", "") in (
+        "1",
+        "true",
+        "on",
+        "yes",
+    ):
+        cmd.append("--benchmark-independent")
     external_validation_path = _first(
         data,
         "external_validation_path",
@@ -2116,6 +2131,12 @@ def start_full_job(data: dict) -> dict:
             "--external-validation-bootstrap",
             str(external_validation_bootstrap),
         ]
+    if _first(
+        data,
+        "external_validation_allow_external_score",
+        "",
+    ) in ("1", "true", "on", "yes"):
+        cmd.append("--allow-external-validation-score")
     for attr in [
         "network_compound_targets_csv",
         "network_disease_genes_csv",

@@ -82,7 +82,11 @@
     "candidate_expansion_max_targets": 1000,
     "benchmark_positive_targets": "",
     "benchmark_negative_targets": "",
-    "benchmark_top_n": 20
+    "benchmark_top_n": 20,
+    "benchmark_source": "",
+    "benchmark_version": "",
+    "benchmark_independent": false,
+    "benchmark_exclude_sources": ""
   },
   "target_priority": {
     "weights": {
@@ -101,6 +105,7 @@
   "external_validation": {
     "enabled": false,
     "path": null,
+    "allow_external_score": false,
     "target_column": "gene",
     "score_column": "score",
     "label_column": "label",

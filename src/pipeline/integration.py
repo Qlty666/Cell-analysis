@@ -139,6 +139,8 @@ STAGE_OUTPUTS = {
         "data/knockout/inputs_summary.json",
         "outputs/integration/omics_qc_summary.json",
         "outputs/integration/omics_qc_sample_metrics.csv",
+        "outputs/integration/omics_qc_pca.csv",
+        "outputs/integration/omics_qc_correlation.csv",
     ),
     "05": (
         "outputs/integration/knockout_summary.json",
@@ -225,6 +227,10 @@ DEFAULT_EVIDENCE = {
     "benchmark_positive_targets": "",
     "benchmark_negative_targets": "",
     "benchmark_top_n": 20,
+    "benchmark_source": "",
+    "benchmark_version": "",
+    "benchmark_independent": False,
+    "benchmark_exclude_sources": "",
 }
 
 DEFAULT_TARGET_PRIORITY = {
@@ -246,6 +252,7 @@ DEFAULT_DOCKING_SELECTION = {
 DEFAULT_EXTERNAL_VALIDATION = {
     "enabled": False,
     "path": None,
+    "allow_external_score": False,
     "target_column": "gene",
     "score_column": "score",
     "label_column": "label",
@@ -1344,6 +1351,20 @@ def _split_pdb_ids(value) -> list[str]:
         for part in re.split(r"[,;|\s]+", text)
         if re.fullmatch(r"[0-9][A-Za-z0-9]{3}", part.strip())
     ]
+
+
+def _split_source_names(value) -> list[str]:
+    if isinstance(value, (list, tuple, set)):
+        parts = value
+    else:
+        parts = re.split(r"[,;|\s]+", str(value or ""))
+    return list(
+        dict.fromkeys(
+            str(part).strip()
+            for part in parts
+            if str(part).strip()
+        )
+    )
 
 
 def _download_pdb(pdb_id: str, target_dir: Path, timeout: int = 90) -> Path | None:
@@ -2508,6 +2529,18 @@ def _run_evidence_hub(
                 benchmark_top_n=int(
                     getattr(args, "benchmark_top_n", 20) or 20
                 ),
+                benchmark_source=str(
+                    getattr(args, "benchmark_source", "") or ""
+                ),
+                benchmark_version=str(
+                    getattr(args, "benchmark_version", "") or ""
+                ),
+                benchmark_independent=bool(
+                    getattr(args, "benchmark_independent", False)
+                ),
+                benchmark_exclude_sources=_split_source_names(
+                    getattr(args, "benchmark_exclude_sources", "")
+                ),
             )
             paths = hub.export(
                 out_dir,
@@ -3416,6 +3449,11 @@ def run_full_pipeline(args) -> int:
             "external_validation_bootstrap",
             1000,
         ),
+        "external_validation_allow_external_score": getattr(
+            args,
+            "external_validation_allow_external_score",
+            False,
+        ),
     }
     if not args.force:
         _invalidate_markers_for_changed_root(workdir, ctx["single_cell_root"])
@@ -3751,6 +3789,10 @@ def _apply_defaults(args, config: dict) -> None:
         "benchmark_positive_targets": "benchmark_positive_targets",
         "benchmark_negative_targets": "benchmark_negative_targets",
         "benchmark_top_n": "benchmark_top_n",
+        "benchmark_source": "benchmark_source",
+        "benchmark_version": "benchmark_version",
+        "benchmark_independent": "benchmark_independent",
+        "benchmark_exclude_sources": "benchmark_exclude_sources",
     }
     for attr, key in evidence_defaults.items():
         if getattr(args, attr, None) is None:
@@ -3796,6 +3838,10 @@ def _apply_defaults(args, config: dict) -> None:
     if getattr(args, "external_validation_bootstrap", None) is None:
         args.external_validation_bootstrap = int(
             external_validation.get("bootstrap", 1000)
+        )
+    if getattr(args, "external_validation_allow_external_score", None) is None:
+        args.external_validation_allow_external_score = bool(
+            external_validation.get("allow_external_score", False)
         )
     if args.evidence_workers is None:
         args.evidence_workers = int(config.get("evidence", {}).get("max_workers", 6))
@@ -3968,6 +4014,11 @@ def build_parser() -> argparse.ArgumentParser:
         type=int,
         default=None,
     )
+    parser.add_argument(
+        "--allow-external-validation-score",
+        action="store_true",
+        default=None,
+    )
     parser.add_argument("--ligand-library", help="ligand library file (.smi/.sdf/.csv)")
     parser.add_argument("--case-label", help="case group label for knockout")
     parser.add_argument("--normal-label", help="normal group label for knockout")
@@ -4089,6 +4140,27 @@ def build_parser() -> argparse.ArgumentParser:
         help="comma-separated negative control target symbols",
     )
     parser.add_argument("--benchmark-top-n", type=int, default=None)
+    parser.add_argument(
+        "--benchmark-source",
+        default=None,
+        help="reference database or publication used for benchmark labels",
+    )
+    parser.add_argument(
+        "--benchmark-version",
+        default=None,
+        help="version or release date of the benchmark reference",
+    )
+    parser.add_argument(
+        "--benchmark-independent",
+        action="store_true",
+        default=None,
+        help="assert that benchmark labels are independent of ranking evidence",
+    )
+    parser.add_argument(
+        "--benchmark-exclude-sources",
+        default=None,
+        help="comma-separated evidence source groups excluded for holdout scoring",
+    )
     parser.add_argument("--skip-scrna", action="store_true")
     parser.add_argument("--skip-download", action="store_true")
     parser.add_argument("--skip-deps", action="store_true")

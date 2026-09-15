@@ -105,11 +105,13 @@
 
 证据中心支持 Open Targets、ChEMBL、BindingDB、PubChem BioAssay、GWAS Catalog、ClinVar、ClinicalTrials.gov、GTEx、HPA、DepMap，以及 CTD、Tox21/ToxCast、LINCS、DisGeNET 和授权数据库的本地快照。`evidence.max_targets` 控制联网检索规模，`evidence.hub_config` 指定来源配置，`evidence.allow_network=false` 或网页“仅用本地来源”用于离线运行；缺失证据会保留为 `not_found`/`not_queried`，不会被静默当作负证据。Open Targets 等聚合来源通过 `source_group` 做来源级去重，避免把同一底层证据重复计分。旧版 gene evidence 中的 ChEMBL 活性、PDB/AlphaFold 结构、Reactome 和 KEGG 证据也会转换成 canonical evidence records 参与排序。`evidence.strict=true` 或网页“证据来源失败即中断”会在来源或配置失败时真正终止阶段；非严格模式下，当前运行失败的来源会清除旧记录后再评分，避免使用过期成功结果。Tox21/ToxCast 等安全性证据会作为独立安全风险维度对最终优先级施加惩罚，而不会与正向疾病证据混为一类。
 
-新增 `benchmark_positive_targets` / `benchmark_negative_targets` / `benchmark_top_n`，可在网页或 CLI 中用 `--benchmark-positive` / `--benchmark-negative` / `--benchmark-top-n` 指定阳性/阴性对照，输出 Recall@N、Precision@N、AUROC、AUPRC、富集倍数、AUROC bootstrap 置信区间和 permutation p 值。对接默认只选择 `GO` 或 `CONDITIONAL_GO` 靶点；需要保留 REVIEW 靶点时必须显式启用 `docking_selection.allow_review=true` 或 `--allow-review-docking`。
+新增 `benchmark_positive_targets` / `benchmark_negative_targets` / `benchmark_top_n`，可在网页或 CLI 中用 `--benchmark-positive` / `--benchmark-negative` / `--benchmark-top-n` 指定阳性/阴性对照，输出 Recall@N、Precision@N、F1@N、AUROC、AUPRC、富集倍数、bootstrap 置信区间和 permutation p 值。另提供 `benchmark_source` / `benchmark_version` / `benchmark_independent` / `benchmark_exclude_sources`，用于记录参考标签来源和版本、标记标签独立性，并对指定 `source_group` 做留出评分；只有来源独立或留出验证通过且指标达到阈值时，`paper_supporting` 才认可 benchmark。对接默认只选择 `GO` 或 `CONDITIONAL_GO` 靶点；需要保留 REVIEW 靶点时必须显式启用 `docking_selection.allow_review=true` 或 `--allow-review-docking`。
 
-新增外部验证入口 `external_validation.path`，或网页/CLI 的 `--external-validation-path`。验证表必须包含靶点、连续评分和二元标签列，输出 AUROC、AUPRC、bootstrap 置信区间、precision、recall 和混淆矩阵到 `external_validation_summary.json` / `external_validation_predictions.csv`。`paper_supporting` 要求外部验证 AUROC 至少达到 0.70。
+新增外部验证入口 `external_validation.path`，或网页/CLI 的 `--external-validation-path`。验证表默认只需要靶点和二元标签，评分强制从 `integrated_target_priority.csv` / `target_priority.csv` 回接，避免把外部评分误当成流水线评分；只有显式启用 `allow_external_score` 时才允许读取外部 `score` 列，该模式会标记 `score_provenance_valid=false`，不计入论文级门控。输出 AUROC、AUPRC、bootstrap 置信区间、precision、recall、F1、specificity、目标匹配率、未匹配靶点和混淆矩阵到 `external_validation_summary.json` / `external_validation_predictions.csv`。`paper_supporting` 要求流水线评分来源、目标匹配率至少 0.80 且 AUROC 至少达到 0.70。
 
-集成报告新增 `publication_readiness` 质量面板，明确区分 `exploratory`、`paper_supporting` 和 `publication_grade`，并列出多来源证据、候选池规模、候选靶点证据覆盖比例、基准排序、对接阳性对照、重复种子、真实完成 MD、外部验证和机制性扰动等未通过门控。`paper_supporting` 现在同时要求 benchmark 和外部验证文件；`publication_grade` 还要求检测到机制性扰动结果。默认 MD 仍是 `prepare`，默认对接仍为单次运行，因此未主动完成这些验证时，流水线不会把结果标记为论文级闭环。
+集成报告新增 `publication_readiness` 质量面板，明确区分 `exploratory`、`paper_supporting` 和 `publication_grade`，并列出多来源证据、候选池规模、候选靶点证据覆盖比例、基准排序、对接阳性对照、重复种子、真实完成 MD、外部验证和机制性扰动等未通过门控。`paper_supporting` 现在同时要求 benchmark（来源、版本和独立性可追踪）与流水线评分来源的外部验证文件；`publication_grade` 还要求检测到机制性扰动结果。默认 MD 仍是 `prepare`，默认对接仍为单次运行，因此未主动完成这些验证时，流水线不会把结果标记为论文级闭环。
+
+伪 bulk omics QC 现在除矩阵完整性、缺失率、零值率和分组检查外，还输出 PCA 离群点、样本相关矩阵摘要、低相关样本对、样本分布检查和批次指标（batch silhouette、batch-condition 混杂、卡方关联 p 值），写入 `omics_qc_pca.csv`、`omics_qc_correlation.csv`、`omics_qc_sample_metrics.csv` 和 `omics_qc_summary.json`。批次与条件完全或高度对齐时会明确标记混杂，而不是只依赖样本元数据匹配。
 
 新增 `--dry-run`，不执行任何阶段，只打印每个阶段会 `RUN` 还是 `DONE` 及原因；新增 `--skip-qc-gate` 和 `--skip-differential-abundance` 可分别关闭 QC 门控和细胞组成差异检验。
 
@@ -996,20 +998,20 @@ liverbio analysis-export GSE125449
 - `key_genes.csv`：兼容旧流程的关键基因 Top N 表。
 - `target_priority.csv`：表达证据与多来源数据库证据的覆盖感知排序。
 - `integrated_target_priority.csv`：进一步合并启发式扰动评分后的综合靶点排序。
-- `target_validation_scores.csv`：按疾病关联、成药性、化学物质、临床先例和结构数据五个维度输出 0-100 的靶点验证分数，并应用安全风险惩罚和 `GO` / `CONDITIONAL_GO` / `REVIEW` / `NO_GO` 决策。
-- `external_validation_summary.json` / `external_validation_predictions.csv`：独立队列的 AUROC、AUPRC、置信区间、precision、recall 和混淆矩阵。
-- `target_decision_report.csv` / `target_decision_report.json`：把五维验证、外部队列、omics QC、安全性、结构质量冲突合并成最终行动，区分 `PROCEED_VALIDATION`、`CONDITIONAL_PROCEED`、`REVIEW_CONFLICT`、`REVIEW` 和 `NO_GO`。
+- `target_validation_scores.csv`：按疾病关联、成药性、化学物质、临床先例和结构数据五个互斥证据轴输出 0-100 的靶点验证分数；同时输出每个轴的来源、证据状态、`evidence_completeness` 和临床检索质量。仅由 ClinicalTrials.gov 文本命中支持的临床轴最高计 10/20，并标记 `text_search_only`；应用安全风险惩罚和 `GO` / `CONDITIONAL_GO` / `REVIEW` / `NO_GO` 决策。
+- `external_validation_summary.json` / `external_validation_predictions.csv`：独立队列的 AUROC、AUPRC、置信区间、precision、recall、F1、specificity、评分来源、目标匹配率、未匹配靶点和混淆矩阵。
+- `target_decision_report.csv` / `target_decision_report.json`：把靶点自身证据与平台级冲突分开，输出 `target_action`、`platform_action`、`composite_action`、`target_decision` 和 `final_decision`，避免外部验证/omics/结构缺失被错误地写成每个靶点的独立结论。
 - `target_priority_summary.json` / `integrated_target_priority_summary.json`：靶点数量、证据覆盖、GO/CONDITIONAL_GO/REVIEW 分档和缺失来源摘要。
 - `evidence_hub/`：`evidence.sqlite`、`evidence_records.csv`、`evidence_coverage.csv`、`source_ablation.csv`、`target_priority.csv`、`evidence_hub_summary.json` 等可追溯证据文件。
 - `gene_evidence.csv`：每个基因的 UniProt、PDB、ChEMBL、STRING、Reactome、PharmGKB、AlphaFold、Open Targets、KEGG 证据与来源覆盖。
 - `knockout_summary.json`：启发式扰动评分与验证方案汇总。
 - `integration_summary.json` 中的 `publication_readiness`：论文支持等级和未通过的质量门控。
 - `reproducibility_manifest.json`：记录 Git 提交与 dirty 状态、Python/平台、关键依赖版本、配置/输入文件 SHA256、关键输出哈希和运行参数，便于跨机器复现和审计。
-- `omics_qc_summary.json` / `omics_qc_sample_metrics.csv`：伪 bulk 表达矩阵的基因/样本数、重复基因、缺失率、零值率、负值、样本元数据匹配、分组样本数和每个样本的表达分布。
+- `omics_qc_summary.json` / `omics_qc_sample_metrics.csv` / `omics_qc_pca.csv` / `omics_qc_correlation.csv`：伪 bulk 表达矩阵的基因/样本数、重复基因、缺失率、零值率、负值、样本元数据匹配、分组样本数、PCA 离群点、样本相关性和批次/条件混杂诊断。
 - `docking_targets.csv`：每个靶点的对接状态、命中数和最佳亲和力。
 - `cadd_downstream_summary.json` / `cadd_targets.csv`：MD 准备/运行、ML 重打分和 MD/外部工具导出的逐靶点状态。
 - `structural_quality_summary.json` / `structural_quality_targets.csv`：结构验证门控，分别记录对接阳性对照、重复种子一致性、MD 完成状态、蛋白/配体 RMSD 尾部稳定性和 MM-PBSA 可用性。
-- `pose_qc_summary.json` / `pose_qc_results.csv`：当存在 SDF poses 且安装 PoseBusters 时执行物理合理性检查；缺少 SDF 或 PoseBusters 时会明确标记 unavailable/skipped，不会伪造通过状态。
+- `pose_qc_summary.json` / `pose_qc_results.csv`：优先检查 SDF poses；只有 PDBQT 时通过 Meeko 转换后检查，并保留原始受体的对应关系。安装 PoseBusters 时执行物理合理性检查；缺少 poses、受体或 PoseBusters 时会明确标记 unavailable/skipped，不会伪造通过状态。
 - `network_summary.json`：网络毒理学汇总；`outputs/run_001/network_toxicology/` 下含交集表、Venn 图、C-T-P-D 节点/边、XGMML 网络文件，Cytoscape 在线导出时另含 `figures/ctpd_network_cytoscape.png`。
 - `faers_summary.json`：FAERS 信号汇总；`outputs/run_001/faers/data/faers_signals.csv` 为信号表。
 - `cell_feedback/`：细胞反馈阶段输出，包括 `data/cell_scores.csv`、`data/feedback_targets.csv`、`data/celltype_summary.csv`、`data/celltype_enrichment.csv`、`data/condition_summary.csv`、`data/feedback_deg.csv`、`data/feedback_enrichment_go.csv`、`data/feedback_enrichment_kegg.csv`，以及 `fig_54` 至 `fig_62` 的结果图；其中 `fig_61/fig_62` 为反馈靶基因 GO/KEGG 富集 Top5 的通路-基因网络图。

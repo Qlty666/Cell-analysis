@@ -399,6 +399,11 @@ def benchmark_ranking(
     positive_targets: Iterable[str],
     negative_targets: Iterable[str] | None = None,
     top_n: int = 20,
+    benchmark_source: str = "",
+    benchmark_version: str = "",
+    benchmark_independent: bool = False,
+    exclude_sources: Iterable[str] | None = None,
+    source_groups_by_target: Mapping[str, Iterable[str]] | None = None,
 ) -> dict:
     """Evaluate recovery of a reference target set without inventing labels."""
     positives = {
@@ -411,11 +416,64 @@ def benchmark_ranking(
         for value in (negative_targets or [])
         if str(value).strip()
     }
+    overlapping_reference_labels = sorted(positives & negatives)
+    negatives = negatives - positives
+    excluded_sources = {
+        str(value).strip().lower()
+        for value in (exclude_sources or [])
+        if str(value).strip()
+    }
+    source_groups = {
+        str(target).upper().strip(): {
+            str(value).strip().lower()
+            for value in values
+            if str(value).strip()
+        }
+        for target, values in (source_groups_by_target or {}).items()
+        if str(target).strip()
+    }
+    for values in source_groups.values():
+        values.difference_update(excluded_sources)
     ranked = [
         str(value).upper()
         for value in priority.get("target_symbol", pd.Series(dtype=str)).tolist()
     ]
     rank_map = {target: rank for rank, target in enumerate(ranked, start=1)}
+    score_column = next(
+        (
+            column
+            for column in ("priority_score", "integrated_score", "score")
+            if column in priority.columns
+        ),
+        None,
+    )
+    if score_column:
+        score_values = pd.to_numeric(
+            priority[score_column],
+            errors="coerce",
+        )
+        score_map = {
+            str(target).upper(): (
+                float(score)
+                if pd.notna(score)
+                else 1.0 / math.log1p(rank_map.get(
+                    str(target).upper(),
+                    len(rank_map) + 1,
+                ))
+            )
+            for target, score in zip(
+                priority.get("target_symbol", pd.Series(dtype=str)),
+                score_values,
+            )
+        }
+        score_metric = str(score_column)
+    else:
+        score_map = {
+            target: 1.0 / math.log1p(rank)
+            for target, rank in rank_map.items()
+        }
+        score_metric = "reciprocal_rank"
+    top_n = max(1, int(top_n))
     recovered_top_n = [target for target in ranked[:top_n] if target in positives]
     positive_ranks = [
         rank_map[target] for target in positives if target in rank_map
@@ -437,26 +495,94 @@ def benchmark_ranking(
             if ranked
             else None
         ),
+        "f1_at_n": None,
         "enrichment_factor": None,
+        "benchmark_source": str(benchmark_source or ""),
+        "benchmark_version": str(benchmark_version or ""),
+        "benchmark_independent": bool(benchmark_independent),
+        "benchmark_independent_verified": False,
+        "benchmark_evidence_mode": (
+            "source_holdout" if excluded_sources else "not_established"
+        ),
+        "excluded_sources": sorted(excluded_sources),
+        "source_leakage_checked": bool(source_groups or excluded_sources),
+        "source_leakage": None,
+        "source_overlap": [],
+        "positive_source_groups": {
+            target: sorted(source_groups.get(target, set()))
+            for target in sorted(positives & set(rank_map))
+        },
+        "negative_source_groups": {
+            target: sorted(source_groups.get(target, set()))
+            for target in sorted(negatives & set(rank_map))
+        },
+        "overlapping_reference_labels": overlapping_reference_labels,
+        "score_metric": score_metric,
     }
-    labeled = [(target, 1) for target in positives if target in rank_map]
+    labeled = [
+        (target, 1)
+        for target in sorted(positives)
+        if target in rank_map
+    ]
     labeled.extend(
-        (target, 0) for target in negatives if target in rank_map
+        (target, 0)
+        for target in sorted(negatives)
+        if target in rank_map
     )
+    result["n_positive"] = int(sum(label for _, label in labeled))
+    result["n_negative"] = int(
+        sum(1 for _, label in labeled if label == 0)
+    )
+    result["n_missing_positive"] = int(
+        len([target for target in positives if target not in rank_map])
+    )
+    result["n_missing_negative"] = int(
+        len([target for target in negatives if target not in rank_map])
+    )
+    reference_source_groups = {
+        source
+        for target, _ in labeled
+        for source in source_groups.get(target, set())
+    }
+    ranking_source_groups = {
+        source
+        for target in ranked
+        for source in source_groups.get(target, set())
+    }
+    source_overlap = sorted(
+        reference_source_groups & ranking_source_groups
+    )
+    result["source_overlap"] = source_overlap
+    if source_groups:
+        result["source_leakage"] = bool(source_overlap)
+    result["benchmark_independent_verified"] = bool(
+        benchmark_independent and result["source_leakage"] is not True
+    )
+    if result["precision_at_n"] is not None:
+        recall_at_n = result["recall_at_n"]
+        if recall_at_n is not None and (
+            result["precision_at_n"] + recall_at_n
+        ) > 0:
+            result["f1_at_n"] = float(
+                2
+                * result["precision_at_n"]
+                * recall_at_n
+                / (result["precision_at_n"] + recall_at_n)
+            )
     if len({label for _, label in labeled}) < 2:
         result["auroc"] = None
         result["auprc"] = None
         result["auroc_ci_low"] = None
         result["auroc_ci_high"] = None
+        result["auprc_ci_low"] = None
+        result["auprc_ci_high"] = None
         result["permutation_p_value"] = None
+        result["permutation_n"] = 0
         result["n_labeled"] = len(labeled)
         return result
     labels = np.asarray([label for _, label in labeled], dtype=int)
     scores = np.asarray(
-        [
-            1.0 / math.log1p(rank_map[target])
-            for target, _ in labeled
-        ],
+        [score_map.get(target, 0.0) for target, _ in labeled],
         dtype=float,
     )
     auroc = _binary_auroc(labels, scores)
@@ -483,6 +609,7 @@ def benchmark_ranking(
 
     rng = np.random.default_rng(42)
     boot = []
+    boot_auprc = []
     permutation_scores = []
     for _ in range(1000):
         indices = rng.integers(0, len(labels), size=len(labels))
@@ -491,6 +618,22 @@ def benchmark_ranking(
         if len(set(sampled_labels)) < 2:
             continue
         boot.append(_binary_auroc(sampled_labels, sampled_scores))
+        order = np.argsort(-sampled_scores)
+        cumulative = np.cumsum(sampled_labels[order])
+        precision_values = cumulative / np.arange(
+            1,
+            len(cumulative) + 1,
+        )
+        recall_values = cumulative / max(1, int(cumulative[-1]))
+        ap = 0.0
+        previous = 0.0
+        for precision_value, recall_value in zip(
+            precision_values,
+            recall_values,
+        ):
+            ap += (recall_value - previous) * precision_value
+            previous = recall_value
+        boot_auprc.append(ap)
         permuted = rng.permutation(labels)
         permutation_scores.append(_binary_auroc(permuted, scores))
     if boot:
@@ -499,6 +642,12 @@ def benchmark_ranking(
     else:
         result["auroc_ci_low"] = None
         result["auroc_ci_high"] = None
+    if boot_auprc:
+        result["auprc_ci_low"] = float(np.percentile(boot_auprc, 2.5))
+        result["auprc_ci_high"] = float(np.percentile(boot_auprc, 97.5))
+    else:
+        result["auprc_ci_low"] = None
+        result["auprc_ci_high"] = None
     if permutation_scores:
         result["permutation_p_value"] = float(
             (
@@ -510,8 +659,10 @@ def benchmark_ranking(
             )
             / (len(permutation_scores) + 1)
         )
+        result["permutation_n"] = len(permutation_scores)
     else:
         result["permutation_p_value"] = None
+        result["permutation_n"] = 0
     return result
 
 

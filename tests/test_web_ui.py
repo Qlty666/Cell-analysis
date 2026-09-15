@@ -618,8 +618,16 @@ class TestRecentWebIntegration(unittest.TestCase):
         self.assertIn('name="advanced_priority_csv"', full)
         self.assertIn('name="candidate_expansion_max_targets"', full)
         self.assertIn('name="benchmark_positive_targets"', full)
+        self.assertIn('name="benchmark_source"', full)
+        self.assertIn('name="benchmark_version"', full)
+        self.assertIn('name="benchmark_exclude_sources"', full)
+        self.assertIn('name="benchmark_independent"', full)
         self.assertIn('name="external_validation_path"', full)
         self.assertIn('name="external_validation_bootstrap"', full)
+        self.assertIn(
+            'name="external_validation_allow_external_score"',
+            full,
+        )
         self.assertIn('name="allow_review_docking"', full)
         for table_id in (
             "priorityTable",
@@ -1052,9 +1060,14 @@ class TestFullStatus(unittest.TestCase):
                         "benchmark_positive_targets": ["GPC3,TP53"],
                         "benchmark_negative_targets": ["ALB"],
                         "benchmark_top_n": ["30"],
+                        "benchmark_source": ["OncoKB"],
+                        "benchmark_version": ["2026-01"],
+                        "benchmark_exclude_sources": ["opentargets"],
+                        "benchmark_independent": ["1"],
                         "external_validation_path": [str(validation_csv)],
                         "external_validation_threshold": ["0.6"],
                         "external_validation_bootstrap": ["250"],
+                        "external_validation_allow_external_score": ["1"],
                         "evidence_hub_offline": ["1"],
                         "evidence_hub_strict": ["1"],
                         "allow_review_docking": ["1"],
@@ -1102,6 +1115,19 @@ class TestFullStatus(unittest.TestCase):
                     "30",
                 )
                 self.assertEqual(
+                    cmd[cmd.index("--benchmark-source") + 1],
+                    "OncoKB",
+                )
+                self.assertEqual(
+                    cmd[cmd.index("--benchmark-version") + 1],
+                    "2026-01",
+                )
+                self.assertEqual(
+                    cmd[cmd.index("--benchmark-exclude-sources") + 1],
+                    "opentargets",
+                )
+                self.assertIn("--benchmark-independent", cmd)
+                self.assertEqual(
                     cmd[cmd.index("--external-validation-path") + 1],
                     str(validation_csv),
                 )
@@ -1116,6 +1142,7 @@ class TestFullStatus(unittest.TestCase):
                 self.assertIn("--evidence-hub-offline", cmd)
                 self.assertIn("--evidence-hub-strict", cmd)
                 self.assertIn("--allow-review-docking", cmd)
+                self.assertIn("--allow-external-validation-score", cmd)
             finally:
                 FULL_JOBS.pop(job_id, None)
 
