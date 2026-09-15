@@ -102,3 +102,4 @@ config/analysis_workspace.json
 scripts/_test_h5ad_reader.R
 scripts/_test_*.R
 .tmp_*
+/$null

@@ -65,7 +65,7 @@ class TestPrivacyHygiene(unittest.TestCase):
         template = (
             APP_ROOT / "web" / "templates" / "full_page_template.html"
         ).read_text(encoding="utf-8")
-        for value in ("C:\\Users", "D:\\AAA Liver cancer", "BaiduNetdisk"):
+        for value in ("C:\\Users", "D:\\example\\project", "BaiduNetdisk"):
             self.assertNotIn(value, template)
 
     def test_env_example_contains_no_values(self):
