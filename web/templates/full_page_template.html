@@ -596,6 +596,7 @@ a.file-link { color: #1665c0; text-decoration: none; margin-right: 12px; }
   <div id="fileLinks"></div>
   <div class="tablebox"><table id="planCoverageTable"><caption>实验方案一：未完成或不达标 Panel</caption></table></div>
   <div class="tablebox"><table id="planPerformanceTable"><caption>实验方案一：性能目标未达标 Panel</caption></table></div>
+  <div class="tablebox"><table id="planEnvironmentTable"><caption>实验方案一：外部工具版本</caption></table></div>
   <div class="tablebox"><table id="planStageTable"><caption>实验方案一：阶段状态</caption></table></div>
   <div class="tablebox"><table id="qcGateTable"><caption>QC 门控</caption></table></div>
   <div class="tablebox"><table id="diffAbundanceTable"><caption>细胞类型差异丰度</caption></table></div>
@@ -1145,6 +1146,15 @@ function renderPlanOneResults(data) {
   const plan = data.plan_one || {};
   const coverage = plan.coverage || {};
   const status = plan.status || {};
+  const environmentRows = Object.entries(coverage.environment || {}).map(([tool, value]) => ({
+    tool,
+    version: value && typeof value === 'object' ? (value.version || '') : '',
+    expected: value && typeof value === 'object' ? (value.expected || '') : '',
+    available: value && typeof value === 'object'
+      ? (value.available !== undefined ? value.available : (value.match !== undefined ? value.match : ''))
+      : '',
+    path: value && typeof value === 'object' ? (value.path || '') : '',
+  }));
   const stageRows = Object.entries(status.stages || {}).map(([stage, value]) => ({
     stage,
     status: value && typeof value === 'object' ? (value.status || '') : String(value || ''),
@@ -1191,6 +1201,7 @@ function renderPlanOneResults(data) {
   });
   renderTable('planCoverageTable', coverage.missing_or_unmet_panels || [], ['figure', 'panel', 'label', 'current_status', 'audit_verdict', 'dependency', 'note']);
   renderTable('planPerformanceTable', coverage.performance_targets_not_met || [], ['figure', 'panel', 'label', 'audit_verdict', 'note']);
+  renderTable('planEnvironmentTable', environmentRows, ['tool', 'version', 'expected', 'available', 'path']);
   renderTable('planStageTable', stageRows, ['stage', 'status', 'elapsed_seconds']);
   [
     'qcGateTable', 'diffAbundanceTable', 'priorityTable', 'validationTable',
@@ -1268,6 +1279,7 @@ function renderResults(data) {
   const qcGate = qc.qc_gate || summary.qc_gate || {};
   renderTable('planCoverageTable', [], []);
   renderTable('planPerformanceTable', [], []);
+  renderTable('planEnvironmentTable', [], []);
   renderTable('planStageTable', [], []);
   document.getElementById('summaryRow').innerHTML =
     '<p class="muted">单细胞：' + esc(summary.single_cell ? summary.single_cell.dataset || '' : '') +

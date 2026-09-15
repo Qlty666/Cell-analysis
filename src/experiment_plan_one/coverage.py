@@ -2,6 +2,10 @@
 
 from __future__ import annotations
 
+import importlib.util
+import re
+import shutil
+import subprocess
 from dataclasses import dataclass
 from pathlib import Path
 from typing import Any
@@ -109,6 +113,111 @@ def _status(
     return "available"
 
 
+def _command_output(command: list[str], timeout: int = 20) -> str:
+    try:
+        result = subprocess.run(
+            command,
+            capture_output=True,
+            text=True,
+            encoding="utf-8",
+            errors="replace",
+            timeout=timeout,
+            check=False,
+        )
+    except Exception:  # noqa: BLE001
+        return ""
+    return (result.stdout or "") + "\n" + (result.stderr or "")
+
+
+def audit_plan_environment() -> dict[str, Any]:
+    """Record exact external-tool versions required by the plan."""
+    root = Path(__file__).resolve().parents[2]
+    vina_path = root / "dock" / "tools" / "vina.exe"
+    if not vina_path.exists():
+        discovered = shutil.which("vina") or shutil.which("vina.exe")
+        vina_path = Path(discovered) if discovered else None
+    vina_text = (
+        _command_output([str(vina_path), "--version"])
+        if vina_path
+        else ""
+    )
+    vina_match = re.search(r"v?(\d+\.\d+(?:\.\d+)?)", vina_text)
+
+    gmx_path = shutil.which("gmx") or shutil.which("gmx.exe")
+    gmx_text = (
+        _command_output([str(gmx_path), "--version"])
+        if gmx_path
+        else ""
+    )
+    gmx_match = re.search(r"GROMACS version:\s*([^\s]+)", gmx_text)
+
+    gmx_mmpbsa = (
+        shutil.which("gmx_MMPBSA")
+        or shutil.which("gmx_MMPBSA.py")
+        or shutil.which("gmx_MMPBSA.exe")
+    )
+    gmx_mmpbsa_text = (
+        _command_output([str(gmx_mmpbsa), "--version"])
+        if gmx_mmpbsa
+        else ""
+    )
+    rscript = shutil.which("Rscript") or shutil.which("Rscript.exe")
+    cellchat_text = (
+        _command_output(
+            [
+                str(rscript),
+                "-e",
+                'cat(requireNamespace("CellChat", quietly=TRUE))',
+            ],
+            timeout=30,
+        )
+        if rscript
+        else ""
+    )
+    return {
+        "vina": {
+            "path": str(vina_path) if vina_path else "",
+            "version": vina_match.group(1) if vina_match else "",
+            "expected": "1.2.3",
+            "match": bool(
+                vina_match and vina_match.group(1).startswith("1.2.3")
+            ),
+        },
+        "gromacs": {
+            "path": str(gmx_path) if gmx_path else "",
+            "version": gmx_match.group(1) if gmx_match else "",
+            "expected": "2022",
+            "match": bool(
+                gmx_match and gmx_match.group(1).startswith("2022")
+            ),
+        },
+        "gmx_mmpbsa": {
+            "path": str(gmx_mmpbsa) if gmx_mmpbsa else "",
+            "available": bool(gmx_mmpbsa),
+            "version": (
+                gmx_mmpbsa_text.strip().splitlines()[0]
+                if gmx_mmpbsa_text.strip()
+                else ""
+            ),
+        },
+        "cellchat": {
+            "rscript": str(rscript) if rscript else "",
+            "available": "TRUE" in cellchat_text.upper(),
+        },
+        "python_packages": {
+            name: bool(importlib.util.find_spec(name))
+            for name in (
+                "rdkit",
+                "scanpy",
+                "shap",
+                "torch",
+                "posebusters",
+                "meeko",
+            )
+        },
+    }
+
+
 def audit_plan_coverage(output_root: Path) -> dict[str, Any]:
     """Score code support and actual result coverage against the 42 plan panels."""
     output_root = output_root.resolve()
@@ -199,6 +308,7 @@ def audit_plan_coverage(output_root: Path) -> dict[str, Any]:
                 "note",
             ]
         ].to_dict("records"),
+        "environment": audit_plan_environment(),
         "csv": "10_reports/plan_coverage/plan_coverage.csv",
         "json": "10_reports/plan_coverage/plan_coverage.json",
         "markdown": "10_reports/plan_coverage/plan_coverage.md",
@@ -206,6 +316,10 @@ def audit_plan_coverage(output_root: Path) -> dict[str, Any]:
     out_dir = ensure_dir(output_root / "10_reports" / "plan_coverage")
     frame.to_csv(out_dir / "plan_coverage.csv", index=False, encoding="utf-8-sig")
     write_json(out_dir / "plan_coverage.json", summary)
+    write_json(
+        out_dir / "environment_audit.json",
+        summary["environment"],
+    )
     (out_dir / "plan_coverage.md").write_text(
         _render_markdown(frame, summary),
         encoding="utf-8",

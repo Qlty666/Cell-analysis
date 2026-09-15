@@ -330,6 +330,7 @@ class TestExperimentPlanOne(unittest.TestCase):
                 0.0,
             )
             self.assertIn("current_result_completion_percent", summary)
+            self.assertIn("environment", summary)
 
 
 if __name__ == "__main__":

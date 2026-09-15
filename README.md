@@ -510,7 +510,10 @@ python scripts\run_experiment_plan_one.py --stage report --skip-stage md
 - 方案网页入口已集成到全自动流水线页面的“实验方案一：6PPD-Q / NAFLD”
   表单，可直接配置本地 GeneCards/OMIM/TTD 导出、化合物靶点预测表、
   CellChat-like 置换次数和 100 ns GROMACS 运行开关，并展示 plan coverage、
-  性能未达标 Panel 和阶段状态。
+  外部工具版本、性能未达标 Panel 和阶段状态。当前自动检查到的本机版本包括
+  Vina 1.2.7 和 GROMACS 2020.6-MODIFIED，与方案文字中的 1.2.3 和 2022
+  不同；gmx_MMPBSA 与 R CellChat 当前未安装，论文中必须记录这些偏差或
+  更换到方案指定版本。
 
 ### 4.2 虚拟筛选命令行
 

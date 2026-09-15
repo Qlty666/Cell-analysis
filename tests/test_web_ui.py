@@ -691,6 +691,7 @@ class TestRecentWebIntegration(unittest.TestCase):
             "source_overlap",
             "planCoverageTable",
             "planPerformanceTable",
+            "planEnvironmentTable",
             "planStageTable",
             "startPlanOneRun",
         ):

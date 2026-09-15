@@ -259,6 +259,7 @@ STAGE_REQUIRED_OUTPUTS: dict[str, list[Path]] = {
     "figure_audit": [
         Path("10_reports/figure_quality_audit/figure_quality_audit.json"),
         Path("10_reports/plan_coverage/plan_coverage.json"),
+        Path("10_reports/plan_coverage/environment_audit.json"),
     ],
     "report": [Path("10_reports/experiment_plan_one_report.html")],
 }
