@@ -419,10 +419,61 @@ class TestWebRealWorkdirAndKnockout(unittest.TestCase):
                     "n_targets": [1],
                 }
             ).to_csv(evidence_hub / "evidence_coverage.csv", index=False)
+            pd.DataFrame(
+                {
+                    "validation_rank": [1],
+                    "gene": ["GENE1"],
+                    "decision": ["CONDITIONAL_GO"],
+                    "adjusted_score": [64.0],
+                }
+            ).to_csv(integration / "target_validation_scores.csv", index=False)
+            pd.DataFrame(
+                {
+                    "gene": ["GENE1"],
+                    "base_decision": ["CONDITIONAL_GO"],
+                    "final_decision": ["CONDITIONAL_GO"],
+                    "action": ["CONDITIONAL_PROCEED"],
+                }
+            ).to_csv(integration / "target_decision_report.csv", index=False)
+            for name, payload in {
+                "external_validation_summary.json": {
+                    "status": "completed",
+                    "auroc": 0.81,
+                },
+                "omics_qc_summary.json": {
+                    "status": "completed",
+                    "gate_passed": True,
+                },
+                "pose_qc_summary.json": {
+                    "status": "unavailable",
+                    "gate_passed": False,
+                },
+                "structural_quality_summary.json": {
+                    "gates": {"positive_control": True}
+                },
+                "reproducibility_manifest.json": {
+                    "git": {"commit": "abc123"}
+                },
+            }.items():
+                (integration / name).write_text(
+                    json.dumps(payload),
+                    encoding="utf-8",
+                )
             data = full_results(workdir)
             self.assertEqual(len(data["knockout"]), 200)
             self.assertEqual(data["target_priority"][0]["gene"], "GENE1")
             self.assertEqual(data["evidence_coverage"][0]["source"], "Local")
+            self.assertEqual(
+                data["target_decisions"][0]["action"],
+                "CONDITIONAL_PROCEED",
+            )
+            self.assertEqual(data["external_validation"]["auroc"], 0.81)
+            self.assertTrue(data["omics_qc"]["gate_passed"])
+            self.assertEqual(data["pose_qc"]["status"], "unavailable")
+            self.assertEqual(
+                data["reproducibility"]["git"]["commit"],
+                "abc123",
+            )
 
 
 class TestResultDetails(unittest.TestCase):
@@ -565,6 +616,24 @@ class TestRecentWebIntegration(unittest.TestCase):
         self.assertIn('name="ppi_network_csv"', full)
         self.assertIn('name="depmap_csv"', full)
         self.assertIn('name="advanced_priority_csv"', full)
+        self.assertIn('name="candidate_expansion_max_targets"', full)
+        self.assertIn('name="benchmark_positive_targets"', full)
+        self.assertIn('name="external_validation_path"', full)
+        self.assertIn('name="external_validation_bootstrap"', full)
+        self.assertIn('name="allow_review_docking"', full)
+        for table_id in (
+            "priorityTable",
+            "validationTable",
+            "decisionTable",
+            "benchmarkTable",
+            "externalValidationTable",
+            "omicsQcTable",
+            "poseQcTable",
+            "structuralQualityTable",
+            "readinessTable",
+            "reproducibilityTable",
+        ):
+            self.assertIn(f'id="{table_id}"', full)
         self.assertIn('name="network_target_sources_dir"', full)
         self.assertIn('name="network_run_enrichment"', full)
         self.assertIn('name="model"', dock)
@@ -964,6 +1033,11 @@ class TestFullStatus(unittest.TestCase):
             workdir = base / "work"
             hub_config = base / "evidence.json"
             hub_config.write_text("{}", encoding="utf-8")
+            validation_csv = base / "validation.csv"
+            validation_csv.write_text(
+                "gene,score,label\nGENE1,0.9,1\nGENE2,0.1,0\n",
+                encoding="utf-8",
+            )
             with mock.patch("web_ui._drain_full_queue"):
                 result = start_full_job(
                     {
@@ -978,6 +1052,9 @@ class TestFullStatus(unittest.TestCase):
                         "benchmark_positive_targets": ["GPC3,TP53"],
                         "benchmark_negative_targets": ["ALB"],
                         "benchmark_top_n": ["30"],
+                        "external_validation_path": [str(validation_csv)],
+                        "external_validation_threshold": ["0.6"],
+                        "external_validation_bootstrap": ["250"],
                         "evidence_hub_offline": ["1"],
                         "evidence_hub_strict": ["1"],
                         "allow_review_docking": ["1"],
@@ -1023,6 +1100,18 @@ class TestFullStatus(unittest.TestCase):
                 self.assertEqual(
                     cmd[cmd.index("--benchmark-top-n") + 1],
                     "30",
+                )
+                self.assertEqual(
+                    cmd[cmd.index("--external-validation-path") + 1],
+                    str(validation_csv),
+                )
+                self.assertEqual(
+                    cmd[cmd.index("--external-validation-threshold") + 1],
+                    "0.6",
+                )
+                self.assertEqual(
+                    cmd[cmd.index("--external-validation-bootstrap") + 1],
+                    "250",
                 )
                 self.assertIn("--evidence-hub-offline", cmd)
                 self.assertIn("--evidence-hub-strict", cmd)

@@ -1549,6 +1549,87 @@
       "type": "CSV 数据表",
       "use": "查看 PP.H4 与共享因果变量证据；仅 R coloc 后端成功时生成。",
       "optional": true
+    },
+    {
+      "file": "candidate_universe_evidence_expanded.csv",
+      "name": "candidate_universe_evidence_expanded.csv",
+      "kind": "data",
+      "content": "DEG 与疾病、遗传证据靶点的并集候选宇宙",
+      "type": "CSV 数据表",
+      "use": "检查哪些靶点来自 DEG，哪些来自 Open Targets、GWAS、ClinVar 或其他证据源。",
+      "optional": false
+    },
+    {
+      "file": "target_priority.csv",
+      "name": "target_priority.csv",
+      "kind": "data",
+      "content": "覆盖率感知的多来源证据靶点优先级表",
+      "type": "CSV 数据表",
+      "use": "查看证据分数、覆盖率、缺失类别、来源消融稳定性和 GO/CONDITIONAL_GO/REVIEW 决策。",
+      "optional": false
+    },
+    {
+      "file": "target_validation_scores.csv",
+      "name": "target_validation_scores.csv",
+      "kind": "data",
+      "content": "五维靶点验证评分与 GO/NO-GO 决策",
+      "type": "CSV 数据表",
+      "use": "比较疾病关联、成药性、化学物质、临床先例、结构数据和安全风险。",
+      "optional": false
+    },
+    {
+      "file": "external_validation_summary.json",
+      "name": "external_validation_summary.json",
+      "kind": "data",
+      "content": "独立验证队列的 AUROC、AUPRC、置信区间和混淆矩阵",
+      "type": "JSON 汇总文件",
+      "use": "判断靶点排序是否能在独立数据上复现。",
+      "optional": false
+    },
+    {
+      "file": "omics_qc_summary.json",
+      "name": "omics_qc_summary.json",
+      "kind": "data",
+      "content": "伪 bulk 表达矩阵和样本元数据 QC",
+      "type": "JSON 汇总文件",
+      "use": "检查重复基因、缺失率、负值、样本匹配、分组数量和组内样本数。",
+      "optional": false
+    },
+    {
+      "file": "pose_qc_summary.json",
+      "name": "pose_qc_summary.json",
+      "kind": "data",
+      "content": "PoseBusters 结构合理性检查状态",
+      "type": "JSON 汇总文件",
+      "use": "区分 skipped、unavailable、failed 和 passed，避免把未验证 pose 当作合格 pose。",
+      "optional": false
+    },
+    {
+      "file": "structural_quality_summary.json",
+      "name": "structural_quality_summary.json",
+      "kind": "data",
+      "content": "对接阳性对照、重复一致性、MD 稳定性、MM-PBSA 和 PoseBusters 门控",
+      "type": "JSON 汇总文件",
+      "use": "判断结构结果是否达到论文级验证门槛。",
+      "optional": false
+    },
+    {
+      "file": "target_decision_report.csv",
+      "name": "target_decision_report.csv",
+      "kind": "data",
+      "content": "冲突感知的最终靶点行动建议",
+      "type": "CSV 数据表",
+      "use": "查看 PROCEED_VALIDATION、CONDITIONAL_PROCEED、REVIEW_CONFLICT、REVIEW 和 NO_GO。",
+      "optional": false
+    },
+    {
+      "file": "reproducibility_manifest.json",
+      "name": "reproducibility_manifest.json",
+      "kind": "data",
+      "content": "代码、配置、输入输出哈希、软件版本和运行参数清单",
+      "type": "JSON 清单",
+      "use": "用于跨机器复现、审计和论文方法记录。",
+      "optional": false
     }
   ]
 }

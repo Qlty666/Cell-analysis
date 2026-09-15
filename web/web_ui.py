@@ -1274,10 +1274,21 @@ def run_environment_check(module: str, with_ml: bool = False) -> dict:
             timeout=420,
         )
         output = (result.stdout or "") + (result.stderr or "")
+        optional = {}
+        if module == "full":
+            import importlib.util
+
+            posebusters = importlib.util.find_spec("posebusters") is not None
+            optional["posebusters"] = posebusters
+            output += (
+                "\n[optional] PoseBusters: "
+                + ("available" if posebusters else "not installed")
+            )
         return {
             "module": module,
             "ok": result.returncode == 0,
             "output": output[-8000:] or "环境检查完成。",
+            "optional": optional,
         }
     except subprocess.TimeoutExpired:
         return {
@@ -2675,9 +2686,17 @@ def full_results(workdir: Path) -> dict:
         "differential_abundance": [],
         "key_genes": [],
         "target_priority": [],
+        "target_priority_summary": {},
         "target_validation": [],
         "external_validation": {},
         "target_decisions": [],
+        "target_decision_summary": {},
+        "omics_qc": {},
+        "pose_qc": {},
+        "structural_quality": {},
+        "publication_readiness": {},
+        "benchmark": {},
+        "reproducibility": {},
         "knockout": [],
         "docking": [],
         "cadd_downstream_summary": {},
@@ -2698,6 +2717,28 @@ def full_results(workdir: Path) -> dict:
         return result
     result["summary"] = _read_json(out / "integration_summary.json")
     result["qc_metrics"] = _read_json(out / "qc_metrics.json")
+    result["target_priority_summary"] = (
+        result["summary"].get("target_priority") or {}
+    )
+    result["publication_readiness"] = (
+        result["summary"].get("publication_readiness") or {}
+    )
+    result["benchmark"] = (
+        result["target_priority_summary"].get("benchmark")
+        or (result["summary"].get("evidence_hub") or {}).get("benchmark")
+        or {}
+    )
+    result["target_decision_summary"] = (
+        result["summary"].get("target_decisions") or {}
+    )
+    result["omics_qc"] = _read_json(out / "omics_qc_summary.json")
+    result["pose_qc"] = _read_json(out / "pose_qc_summary.json")
+    result["structural_quality"] = _read_json(
+        out / "structural_quality_summary.json"
+    )
+    result["reproducibility"] = _read_json(
+        out / "reproducibility_manifest.json"
+    )
     result["files"] = _full_result_files(workdir)
     try:
         result["key_genes"] = json.loads(

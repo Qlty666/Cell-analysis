@@ -511,6 +511,13 @@ a.file-link { color: #1665c0; text-decoration: none; margin-right: 12px; }
   <div class="tablebox"><table id="priorityTable"><caption>证据整合靶点优先级</caption></table></div>
   <div class="tablebox"><table id="validationTable"><caption>五维靶点验证评分</caption></table></div>
   <div class="tablebox"><table id="decisionTable"><caption>最终靶点决策</caption></table></div>
+  <div class="tablebox"><table id="benchmarkTable"><caption>Benchmark 排序评估</caption></table></div>
+  <div class="tablebox"><table id="externalValidationTable"><caption>外部队列验证</caption></table></div>
+  <div class="tablebox"><table id="omicsQcTable"><caption>伪 bulk 组学 QC</caption></table></div>
+  <div class="tablebox"><table id="poseQcTable"><caption>PoseBusters 结构合理性</caption></table></div>
+  <div class="tablebox"><table id="structuralQualityTable"><caption>结构验证门控</caption></table></div>
+  <div class="tablebox"><table id="readinessTable"><caption>论文就绪度门控</caption></table></div>
+  <div class="tablebox"><table id="reproducibilityTable"><caption>可复现性清单</caption></table></div>
   <div class="tablebox"><table id="evidenceCoverageTable"><caption>证据来源覆盖</caption></table></div>
   <div class="tablebox"><table id="sourceAblationTable"><caption>来源消融稳定性</caption></table></div>
   <div class="tablebox"><table id="keyTable"><caption>关键基因（兼容视图）</caption></table></div>
@@ -901,10 +908,14 @@ function renderStats(data) {
   const fb = summary.cell_feedback || {};
   const priority = summary.target_priority || {};
   const readiness = summary.publication_readiness || {};
-  const benchmark = priority.benchmark || {};
+  const benchmark = priority.benchmark || data.benchmark || {};
   const validation = summary.target_validation || {};
-  const externalValidation = summary.external_validation || {};
+  const externalValidation = summary.external_validation || data.external_validation || {};
   const decisions = summary.target_decisions || {};
+  const omicsQc = data.omics_qc || {};
+  const poseQc = data.pose_qc || {};
+  const structuralQuality = data.structural_quality || {};
+  const structuralGates = structuralQuality.gates || {};
   const qc = (data.qc_metrics || {}).qc_gate || summary.qc_gate || {};
   const cards = [
     {
@@ -935,6 +946,26 @@ function renderStats(data) {
     {
       label: '最终可推进靶点',
       value: (decisions.actions || {}).PROCEED_VALIDATION || 0,
+    },
+    {
+      label: 'Omics QC',
+      value: omicsQc.status || 'skipped',
+      cls: omicsQc.gate_passed ? 'ok' : 'warn',
+    },
+    {
+      label: 'Pose QC',
+      value: poseQc.status || 'skipped',
+      cls: poseQc.gate_passed ? 'ok' : 'warn',
+    },
+    {
+      label: '结构门控通过',
+      value: Object.values(structuralGates).filter(Boolean).length + ' / ' + Object.keys(structuralGates).length,
+      cls: structuralQuality.all_publication_structural_gates ? 'ok' : 'warn',
+    },
+    {
+      label: '可追溯性',
+      value: data.reproducibility && data.reproducibility.git ? '已生成' : 'NA',
+      cls: data.reproducibility && data.reproducibility.git ? 'ok' : 'warn',
     },
     {
       label: '论文就绪等级',
@@ -998,6 +1029,15 @@ function renderStats(data) {
 function renderResults(data) {
   const summary = data.summary || {};
   renderStats(data);
+  const priority = summary.target_priority || {};
+  const readiness = summary.publication_readiness || {};
+  const benchmark = data.benchmark || priority.benchmark || {};
+  const validation = summary.target_validation || {};
+  const externalValidation = data.external_validation || summary.external_validation || {};
+  const decisions = summary.target_decisions || {};
+  const omicsQc = data.omics_qc || {};
+  const poseQc = data.pose_qc || {};
+  const structuralQuality = data.structural_quality || {};
   const ko = summary.knockout || {};
   const dock = summary.docking || {};
   const cadd = summary.cadd_downstream || {};
@@ -1055,9 +1095,24 @@ function renderResults(data) {
   renderTable('diffAbundanceTable', data.differential_abundance, [
     'celltype', 'n_cells', 'chi2', 'p_value', 'p_adjust', 'significant', 'direction'
   ]);
-  renderTable('priorityTable', data.target_priority, ['priority_rank', 'gene', 'candidate_origin', 'decision', 'integrated_score', 'evidence_score', 'coverage_ratio', 'knockout_score', 'evidence_status']);
+  renderTable('priorityTable', data.target_priority, ['priority_rank', 'gene', 'candidate_origin', 'decision', 'integrated_score', 'evidence_score', 'genetic_causal', 'clinical_precedent', 'safety_risk', 'coverage_ratio', 'knockout_score', 'evidence_status', 'missing_categories']);
   renderTable('validationTable', data.target_validation, ['validation_rank', 'gene', 'decision', 'adjusted_score', 'disease_association', 'druggability', 'chemical_matter', 'clinical_precedent', 'structural_data', 'safety_penalty']);
   renderTable('decisionTable', data.target_decisions, ['gene', 'base_decision', 'final_decision', 'action', 'adjusted_score', 'safety_risk', 'conflict_flags']);
+  renderTable('benchmarkTable', Object.keys(benchmark).length ? [benchmark] : [], ['recall_at_n', 'precision_at_n', 'auroc', 'auroc_ci_low', 'auroc_ci_high', 'auprc', 'enrichment_factor', 'permutation_p_value']);
+  renderTable('externalValidationTable', Object.keys(externalValidation).length ? [externalValidation] : [], ['status', 'n_samples', 'n_positive', 'n_negative', 'threshold', 'auroc', 'auroc_ci_low', 'auroc_ci_high', 'auprc', 'precision', 'recall']);
+  renderTable('omicsQcTable', Object.keys(omicsQc).length ? [omicsQc] : [], ['status', 'n_genes', 'n_samples', 'duplicate_genes', 'missing_fraction', 'zero_fraction', 'negative_values', 'sample_metadata_match', 'group_counts', 'gate_passed']);
+  renderTable('poseQcTable', Object.keys(poseQc).length ? [poseQc] : [], ['status', 'reason', 'sdf_files', 'poses', 'pb_valid', 'pb_valid_rate', 'gate_passed']);
+  renderTable('structuralQualityTable', Object.entries(structuralQuality.gates || {}).map(([gate, passed]) => ({gate, passed})), ['gate', 'passed']);
+  renderTable('readinessTable', Object.entries(readiness.checks || {}).map(([gate, passed]) => ({gate, passed})), ['gate', 'passed']);
+  const reproduction = data.reproducibility || {};
+  renderTable('reproducibilityTable', reproduction.git ? [{
+    commit: (reproduction.git || {}).short_commit || (reproduction.git || {}).commit || '',
+    branch: (reproduction.git || {}).branch || '',
+    dirty: (reproduction.git || {}).dirty,
+    python: reproduction.python || '',
+    inputs: Object.keys(reproduction.inputs || {}).length,
+    outputs: Object.keys(reproduction.outputs || {}).length,
+  }] : [], ['commit', 'branch', 'dirty', 'python', 'inputs', 'outputs']);
   renderTable('evidenceCoverageTable', data.evidence_coverage, ['source', 'tier', 'evidence_type', 'relation', 'n_records', 'n_targets']);
   renderTable('sourceAblationTable', data.source_ablation, ['target_symbol', 'ablation_rank_sd', 'max_rank_delta', 'rank_stability', 'ablation_runs']);
   renderTable('keyTable', data.key_genes, ['rank', 'gene', 'direction', 'avg_log2fc', 'p_val_adj']);
