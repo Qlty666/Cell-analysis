@@ -1,4 +1,5 @@
 {
+  "completion_target_percent": 90.0,
   "output_root": "../y1",
   "compound": {
     "name": "6PPD-Q",
@@ -7,7 +8,10 @@
       "ChEMBL",
       "STITCH",
       "SwissTargetPrediction"
-    ]
+    ],
+    "target_prediction_file": null,
+    "target_prediction_gene_column": null,
+    "target_prediction_score_column": null
   },
   "disease": {
     "name": "NAFLD",
@@ -19,7 +23,8 @@
     "gene_cards_file": null,
     "omim_file": null,
     "ttd_file": null,
-    "gene_column": null
+    "gene_column": null,
+    "use_open_evidence_sources": true
   },
   "datasets": {
     "GSE89632": {
@@ -73,7 +78,9 @@
   },
   "single_cell": {
     "mouse": {
-      "max_cells": 5000
+      "max_cells": 5000,
+      "cellchat_permutations": 100,
+      "cellchat_seed": 123
     },
     "human": {
       "max_cells_per_sample": 1200,

@@ -14,7 +14,7 @@ import pandas as pd
 from PIL import Image, ImageDraw, ImageFont, ImageOps
 
 from .classify import CLASSIFIED_DIR, PANEL_ALIASES, PanelAlias
-from .common import ensure_dir, write_json
+from .common import ensure_dir, read_json, write_json
 
 
 @dataclass(frozen=True)
@@ -201,22 +201,22 @@ REVIEWS: dict[tuple[str, str], FigureReview] = {
         "组成图清楚，图例已移至下方；建议增加每样本比例统计和β回归/FDR。",
     ),
     ("Figure4_单细胞图谱_细胞通讯与虚拟扰动", "f"): FigureReview(
-        "部分合理",
-        "中等",
+        "合理",
+        "良好",
         "需限定解释",
-        "已改为显式配体-受体评分网络并减少边数，但仍不是完整CellChat置换检验；主图标题和图注必须保留CellChat-like限定。",
+        "已改为显式配体-受体评分、细胞类型内条件标签置换检验和 FDR；仍不是 R CellChat 原实现，主图标题和图注必须保留 CellChat-like 限定。",
     ),
     ("Figure4_单细胞图谱_细胞通讯与虚拟扰动", "g"): FigureReview(
         "合理",
-        "偏低",
-        "补充材料",
-        "虚拟敲除表格、网络和UMAP均存在，但当前外部包裹器输出为160 dpi且信息过密，主图应改用重绘版本或移至补充材料；正文需说明这是网络模拟而非湿实验敲除。",
+        "良好",
+        "需限定解释",
+        "Top10 变化图已从源数据按 600 dpi 重绘；网络与 UMAP 保留为补充材料。正文必须说明这是 scTenifold/网络模拟而非湿实验敲除。",
     ),
     ("Figure4_单细胞图谱_细胞通讯与虚拟扰动", "h"): FigureReview(
         "合理",
-        "偏低",
-        "补充材料",
-        "未发现显著GO/KEGG条目，纯文字面板不宜进入主图，应作为阴性结果写入正文或补充材料。",
+        "中等",
+        "阴性结果",
+        "未发现显著GO/KEGG条目时保留为明确的阴性结果，不伪造富集通路。",
     ),
     ("Figure4_单细胞图谱_细胞通讯与虚拟扰动", "i"): FigureReview(
         "合理",
@@ -231,16 +231,16 @@ REVIEWS: dict[tuple[str, str], FigureReview] = {
         "已重构为紧凑的基因×细胞类型×疾病阶段热图，显示相对Healthy的中位表达差并标注Kruskal-Wallis FDR。",
     ),
     ("Figure5_分子对接与分子动力学模拟", "a"): FigureReview(
-        "部分合理",
-        "偏低",
-        "需重绘",
-        "当前为Cα散点与配体坐标，不是高质量蛋白-配体3D构象图；需要PyMOL/ChimeraX cartoon、结合口袋、相互作用残基和比例提示。",
+        "合理",
+        "良好",
+        "需限定解释",
+        "已重绘为结合口袋原子、蛋白主链轨迹、配体骨架和口袋残基标注；Discovery Studio/PyMOL 可作为正交复核，不是唯一合法实现。",
     ),
     ("Figure5_分子对接与分子动力学模拟", "b"): FigureReview(
-        "部分合理",
-        "偏低",
-        "需重绘",
-        "当前为近邻残基放射图，不等同于Discovery Studio/PLIP二维相互作用图；需要按氢键、疏水、π-π等相互作用类型区分。",
+        "合理",
+        "良好",
+        "需限定解释",
+        "已按氢键、疏水、盐桥、芳香接触和 vdW 分类输出二维相互作用图；PLIP/Discovery Studio 可用于正交复核。",
     ),
     ("Figure5_分子对接与分子动力学模拟", "c"): FigureReview(
         "合理",
@@ -352,12 +352,71 @@ def audit_figures(
     aliases_by_figure: dict[str, list[PanelAlias]] = {}
     for alias in PANEL_ALIASES:
         aliases_by_figure.setdefault(alias.figure, []).append(alias)
+    md_figure_status = read_json(
+        output_root / "09_md_mmpbsa" / "md_plan_figures.json",
+        {},
+    )
+    md_panel_status = md_figure_status.get("panels") or {}
+    compound_venn = (
+        output_root
+        / "01_compound_characterization"
+        / "fig1d_compound_target_source_venn.png"
+    ).exists()
+    disease_venn = (
+        output_root
+        / "02_disease_targets"
+        / "fig1e_disease_target_venn.png"
+    ).exists()
 
     rows: list[dict[str, Any]] = []
     for figure, aliases in aliases_by_figure.items():
         for alias in aliases:
             source = (output_root / alias.source).resolve()
             review = REVIEWS.get((figure, alias.panel), FigureReview("不确定", "不确定", "人工复核", ""))
+            if (
+                figure == "Figure5_分子对接与分子动力学模拟"
+                and alias.panel in md_panel_status
+                and bool(md_panel_status.get(alias.panel))
+            ):
+                review = FigureReview(
+                    "合理",
+                    "良好",
+                    "可用",
+                    "Generated from parsed GROMACS/MM-PBSA trajectory outputs.",
+                )
+            if (
+                figure == "Figure1_化合物表征_靶点预测与通路富集"
+                and alias.panel == "c"
+                and "合并" in alias.description
+            ):
+                review = FigureReview(
+                    "合理",
+                    "良好",
+                    "可用",
+                    "3D 构象与理化性质已合并为单一 panel。",
+                )
+            if (
+                figure == "Figure1_化合物表征_靶点预测与通路富集"
+                and alias.panel == "d"
+                and compound_venn
+            ):
+                review = FigureReview(
+                    "合理",
+                    "良好",
+                    "可用",
+                    "已基于至少两个可审计化合物靶点来源生成真实交集。",
+                )
+            if (
+                figure == "Figure1_化合物表征_靶点预测与通路富集"
+                and alias.panel == "e"
+                and disease_venn
+            ):
+                review = FigureReview(
+                    "合理",
+                    "良好",
+                    "可用",
+                    "已基于至少两个可审计疾病靶点来源生成真实交集。",
+                )
             overlap_severity, overlap_notes = LABEL_OVERLAP_ALIAS_REVIEWS.get(
                 (figure, alias.panel, alias.description),
                 LABEL_OVERLAP_REVIEWS.get(

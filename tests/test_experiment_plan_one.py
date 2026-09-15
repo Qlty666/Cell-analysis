@@ -12,16 +12,24 @@ from unittest import mock
 
 import numpy as np
 import pandas as pd
+import anndata as ad
 
 from experiment_plan_one.common import bh_fdr, split_gene_symbol
 from experiment_plan_one.classify import classify_experiment_plan_results
+from experiment_plan_one.coverage import audit_plan_coverage
+from experiment_plan_one.md_figures import generate_plan_md_figures
 from experiment_plan_one.ml import _nested_cv_evaluation, _pipeline, _model_zoo
 from experiment_plan_one.pipeline import (
     ExperimentPlanOne,
     default_config,
     merge_config,
 )
-from experiment_plan_one.targets import _parse_swiss_target_table, make_venn_figure
+from experiment_plan_one.single_cell import _cellchat_like_analysis
+from experiment_plan_one.targets import (
+    _parse_swiss_target_table,
+    load_compound_target_file,
+    make_venn_figure,
+)
 
 
 class TestExperimentPlanOne(unittest.TestCase):
@@ -224,6 +232,104 @@ class TestExperimentPlanOne(unittest.TestCase):
                 ).exists()
             )
             self.assertTrue((classified / "分类清单.csv").exists())
+
+    def test_compound_target_file_loader(self):
+        with tempfile.TemporaryDirectory() as tmp:
+            path = Path(tmp) / "predictions.csv"
+            pd.DataFrame(
+                {
+                    "gene": ["EGFR", "GPAT3"],
+                    "probability": [0.9, 0.4],
+                }
+            ).to_csv(path, index=False)
+            frame, status = load_compound_target_file(
+                "LocalPrediction",
+                path,
+                score_column="probability",
+            )
+            self.assertEqual(status["status"], "completed")
+            self.assertEqual(set(frame["gene"]), {"EGFR", "GPAT3"})
+            self.assertEqual(set(frame["source"]), {"LocalPrediction"})
+
+    def test_md_figures_parse_real_xvg_files(self):
+        with tempfile.TemporaryDirectory() as tmp:
+            root = Path(tmp)
+            docking = root / "08_docking"
+            run = docking / "targets" / "GENE1" / "outputs" / "md" / "06_md" / "lig1"
+            run.mkdir(parents=True)
+            pd.DataFrame(
+                {
+                    "id": ["lig1"],
+                    "mmpbsa_status": ["completed"],
+                    "mmpbsa_delta_total_kj_mol": [-42.0],
+                }
+            ).to_csv(docking / "md_simulation_results.csv", index=False)
+            for name, values in {
+                "rmsd_protein.xvg": [0.1, 0.11, 0.12],
+                "rmsd_ligand.xvg": [0.05, 0.06, 0.07],
+                "gyrate_protein.xvg": [2.1, 2.11, 2.12],
+            }.items():
+                run.joinpath(name).write_text(
+                    "\n".join(
+                        f"{index * 10} {value}"
+                        for index, value in enumerate(values)
+                    ),
+                    encoding="utf-8",
+                )
+            run.joinpath("rmsf_protein_residue.xvg").write_text(
+                "1 0.1\n2 0.2\n",
+                encoding="utf-8",
+            )
+            result = generate_plan_md_figures(docking, root / "09_md_mmpbsa")
+            self.assertTrue(result["panels"]["d_rmsd"])
+            self.assertTrue(result["panels"]["e_ligand_rmsd"])
+            self.assertTrue(result["panels"]["f_rmsf"])
+            self.assertTrue(result["panels"]["g_rg"])
+            self.assertTrue(result["panels"]["h_mmpbsa"])
+
+    def test_cellchat_permutation_outputs_fdr(self):
+        rng = np.random.default_rng(3)
+        data = ad.AnnData(
+            X=rng.poisson(1, size=(40, 4)).astype(float),
+            obs=pd.DataFrame(
+                {
+                    "cell_type": ["A"] * 20 + ["B"] * 20,
+                    "condition": ["NCD", "HFD"] * 20,
+                }
+            ),
+        )
+        data.var_names = ["TNF", "TNFRSF1A", "IL6", "IL6R"]
+        result = _cellchat_like_analysis(
+            data,
+            n_permutations=10,
+            seed=1,
+        )
+        self.assertFalse(result["interactions"].empty)
+        self.assertIn("p_value", result["interactions"].columns)
+        self.assertIn("fdr", result["interactions"].columns)
+        self.assertIn("significant", result["interactions"].columns)
+
+    def test_plan_coverage_separates_implementation_from_results(self):
+        with tempfile.TemporaryDirectory() as tmp:
+            root = Path(tmp)
+            audit_dir = root / "10_reports" / "figure_quality_audit"
+            audit_dir.mkdir(parents=True)
+            pd.DataFrame(
+                {
+                    "figure": [
+                        "Figure1_化合物表征_靶点预测与通路富集",
+                    ],
+                    "panel": ["a"],
+                    "status": ["available"],
+                    "audit_verdict": ["可用"],
+                }
+            ).to_csv(audit_dir / "figure_quality_audit.csv", index=False)
+            summary = audit_plan_coverage(root)
+            self.assertGreaterEqual(
+                summary["implementation_completion_percent"],
+                0.0,
+            )
+            self.assertIn("current_result_completion_percent", summary)
 
 
 if __name__ == "__main__":

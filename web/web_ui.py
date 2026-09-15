@@ -1927,7 +1927,144 @@ def _molecular_docking_status(info: dict) -> dict:
     }
 
 
+def _start_plan_one_job(data: dict) -> dict:
+    output_value = _first(data, "plan_output_root", "").strip()
+    if not output_value:
+        raise ValueError("实验方案一结果目录不能为空")
+    output_root = Path(output_value).expanduser()
+    if not output_root.is_absolute():
+        output_root = APP_ROOT / output_root
+    output_root = output_root.resolve()
+    output_root.mkdir(parents=True, exist_ok=True)
+
+    base_config_path = APP_ROOT / "config" / "experiment_plan_one.json"
+    config = json.loads(base_config_path.read_text(encoding="utf-8"))
+    config["output_root"] = str(output_root)
+    compound = config.setdefault("compound", {})
+    disease = config.setdefault("disease", {})
+    md = config.setdefault("md", {})
+    docking = config.setdefault("docking", {})
+    single_cell = config.setdefault("single_cell", {}).setdefault("mouse", {})
+
+    for field, key in (
+        ("plan_compound_name", "name"),
+        ("plan_pubchem_cid", "pubchem_cid"),
+        ("plan_target_prediction_file", "target_prediction_file"),
+        ("plan_target_prediction_gene_column", "target_prediction_gene_column"),
+        ("plan_target_prediction_score_column", "target_prediction_score_column"),
+    ):
+        value = _first(data, field, "").strip()
+        if value:
+            compound[key] = value
+    for field, key in (
+        ("plan_disease_name", "name"),
+        ("plan_gene_cards_file", "gene_cards_file"),
+        ("plan_omim_file", "omim_file"),
+        ("plan_ttd_file", "ttd_file"),
+    ):
+        value = _first(data, field, "").strip()
+        if value:
+            disease[key] = value
+    disease["use_open_evidence_sources"] = _first(
+        data,
+        "plan_use_open_evidence",
+        "",
+    ) in ("1", "true", "on", "yes")
+
+    for field, key, default in (
+        ("plan_docking_targets", "targets", 5),
+        ("plan_docking_exhaustiveness", "exhaustiveness", 16),
+        ("plan_docking_cpu", "cpu", 4),
+    ):
+        value = _int_field(data, field)
+        if value is not None:
+            docking[key] = value
+        elif key not in docking:
+            docking[key] = default
+    md["run"] = _first(data, "plan_md_run", "") in (
+        "1",
+        "true",
+        "on",
+        "yes",
+    )
+    md["gpu"] = _first(data, "plan_md_gpu", "") in (
+        "1",
+        "true",
+        "on",
+        "yes",
+    )
+    md_cpu = _int_field(data, "plan_md_cpu")
+    if md_cpu is not None:
+        md["cpu"] = md_cpu
+    mouse_cells = _int_field(data, "plan_mouse_max_cells")
+    if mouse_cells is not None:
+        single_cell["max_cells"] = mouse_cells
+    permutations = _int_field(data, "plan_cellchat_permutations")
+    if permutations is not None:
+        single_cell["cellchat_permutations"] = permutations
+
+    config_path = output_root / "web_experiment_plan_one_config.json"
+    config_path.write_text(
+        json.dumps(config, ensure_ascii=False, indent=2),
+        encoding="utf-8",
+    )
+    job_id = uuid.uuid4().hex[:8]
+    log_path = output_root / "logs" / f"web_plan_one_{job_id}.log"
+    log_path.parent.mkdir(parents=True, exist_ok=True)
+    cmd = [
+        sys.executable,
+        str(SCRIPTS_DIR / "run_experiment_plan_one.py"),
+        "--config",
+        str(config_path),
+        "--output-root",
+        str(output_root),
+    ]
+    start_stage = _first(data, "plan_start_stage", "").strip()
+    if start_stage:
+        cmd += ["--start-stage", start_stage]
+    for value in _first(data, "plan_stages", "").replace("\n", ",").split(","):
+        if value.strip():
+            cmd += ["--stage", value.strip()]
+    for value in _first(data, "plan_skip_stages", "").replace(
+        "\n",
+        ",",
+    ).split(","):
+        if value.strip():
+            cmd += ["--skip-stage", value.strip()]
+    if _first(data, "plan_force", "") in ("1", "true", "on", "yes"):
+        cmd.append("--force")
+    if _first(data, "plan_verbose", "") in ("1", "true", "on", "yes"):
+        cmd.append("--verbose")
+    if _first(data, "plan_dry_run", "") in ("1", "true", "on", "yes"):
+        cmd.append("--dry-run")
+    env = os.environ.copy()
+    env["PYTHONIOENCODING"] = "utf-8"
+    FULL_JOBS[job_id] = {
+        "job_id": job_id,
+        "mode": "experiment_plan_one",
+        "log": log_path,
+        "proc": None,
+        "started": time.time(),
+        "workdir": output_root,
+        "output": str(output_root),
+        "cmd": cmd,
+        "env": env,
+        "queued": True,
+        "notified": False,
+    }
+    with FULL_QUEUE_LOCK:
+        FULL_QUEUE.append(FULL_JOBS[job_id])
+    _drain_full_queue()
+    return {
+        "job": job_id,
+        "log_url": f"/full/log?job={job_id}",
+        "status_url": f"/full/status?job={job_id}",
+    }
+
+
 def start_full_job(data: dict) -> dict:
+    if _first(data, "run_mode", "").strip() == "experiment_plan_one":
+        return _start_plan_one_job(data)
     output_value = _first(data, "output", "").strip()
     if not output_value:
         raise ValueError("表达分析结果目录不能为空，请输入结果保存地址")
@@ -2247,7 +2384,62 @@ def _drain_full_queue() -> None:
     _drain_store(FULL_QUEUE, FULL_QUEUE_LOCK)
 
 
+def _plan_one_status(info: dict) -> dict:
+    queued = info.get("proc") is None
+    if queued:
+        return {
+            "running": False,
+            "ok": False,
+            "queued": True,
+            "paused": False,
+            "stage": "",
+            "error": "",
+        }
+    proc = info["proc"]
+    running = proc.poll() is None
+    log_text = (
+        info["log"].read_text(encoding="utf-8", errors="replace")[-12000:]
+        if info["log"].exists()
+        else ""
+    )
+    stage = ""
+    for line in reversed(log_text.splitlines()):
+        match = re.search(r"(?:starting stage|completed stage)\s+([A-Za-z_]+)", line)
+        if match:
+            stage = match.group(1)
+            break
+    error = ""
+    if not running and proc.returncode != 0:
+        error_lines = [
+            line
+            for line in log_text.splitlines()
+            if line.strip().startswith("ERROR:")
+        ]
+        error = error_lines[-1] if error_lines else "experiment plan one failed"
+    if not running:
+        _notify_finished(
+            info,
+            "full",
+            "实验方案一",
+            "6PPD-Q / NAFLD 实验方案一",
+            "finished" if proc.returncode == 0 else "failed",
+            stage,
+            error,
+            exit_code=proc.returncode,
+        )
+    return {
+        "running": running,
+        "ok": not running and proc.returncode == 0,
+        "queued": False,
+        "paused": False,
+        "stage": stage,
+        "error": error,
+    }
+
+
 def _full_status(info: dict) -> dict:
+    if info.get("mode") == "experiment_plan_one":
+        return _plan_one_status(info)
     queued = info.get("proc") is None
     if queued:
         return {"running": False, "ok": False, "queued": True, "paused": False, "stage": "", "error": ""}
@@ -2695,9 +2887,107 @@ def _full_result_files(workdir: Path) -> list[str]:
     return sorted(set(files))
 
 
+PLAN_ONE_RESULT_SUFFIXES = {
+    ".png",
+    ".jpg",
+    ".jpeg",
+    ".svg",
+    ".pdf",
+    ".csv",
+    ".json",
+    ".md",
+    ".txt",
+    ".html",
+    ".tsv",
+    ".xlsx",
+    ".dat",
+    ".xvg",
+    ".gro",
+    ".tpr",
+    ".xtc",
+    ".pdb",
+    ".pdbqt",
+    ".itp",
+    ".top",
+    ".log",
+}
+
+
+def _plan_one_result_files(workdir: Path) -> list[str]:
+    files: list[str] = []
+    roots = [
+        "01_compound_characterization",
+        "02_disease_targets",
+        "02b_evidence",
+        "03_intersection_ppi",
+        "04_bulk_training",
+        "05_machine_learning",
+        "06_single_cell_mouse",
+        "07_single_cell_human",
+        "08_docking",
+        "09_md_mmpbsa",
+        "10_reports",
+        "按方案分类",
+    ]
+    summary = workdir / "RESULTS_SUMMARY.md"
+    if summary.exists():
+        files.append(summary.name)
+    for name in roots:
+        root = workdir / name
+        if not root.exists():
+            continue
+        for path in root.rglob("*"):
+            if (
+                path.is_file()
+                and path.suffix.lower() in PLAN_ONE_RESULT_SUFFIXES
+            ):
+                files.append(
+                    f"{name}/{path.relative_to(root).as_posix()}"
+                )
+    return sorted(set(files))
+
+
+def _plan_one_results(workdir: Path) -> dict:
+    workdir = Path(workdir).expanduser().resolve()
+    coverage = _read_json(
+        workdir / "10_reports" / "plan_coverage" / "plan_coverage.json"
+    )
+    figure_audit = _read_json(
+        workdir
+        / "10_reports"
+        / "figure_quality_audit"
+        / "figure_quality_audit.json"
+    )
+    status = _read_json(workdir / "10_reports" / "analysis_status.json")
+    summary_path = workdir / "RESULTS_SUMMARY.md"
+    summary_text = (
+        summary_path.read_text(encoding="utf-8", errors="replace")
+        if summary_path.exists()
+        else ""
+    )
+    return {
+        "workdir": str(workdir),
+        "exists": bool(coverage or figure_audit or status),
+        "mode": "experiment_plan_one",
+        "files": _plan_one_result_files(workdir),
+        "plan_one": {
+            "coverage": coverage,
+            "figure_audit": figure_audit,
+            "status": status,
+            "summary_markdown": summary_text,
+        },
+        "summary": {},
+    }
+
+
 def full_results(workdir: Path) -> dict:
     workdir = Path(workdir).expanduser().resolve()
     out = workdir / "outputs" / "integration"
+    if (
+        (workdir / "10_reports" / "plan_coverage" / "plan_coverage.json").exists()
+        or (not out.exists() and (workdir / "10_reports").exists())
+    ):
+        return _plan_one_results(workdir)
     result = {
         "workdir": str(workdir),
         "exists": out.exists(),
@@ -2936,6 +3226,24 @@ def _full_workdir_for_query(job: str, workdir: str) -> str:
 
 def _full_file_path(workdir: Path, name: str) -> Path | None:
     workdir = Path(workdir).expanduser().resolve()
+    name_path = Path(name)
+    if name_path.is_absolute():
+        return None
+    if (
+        (workdir / "10_reports" / "plan_coverage" / "plan_coverage.json").exists()
+        or (
+            not (workdir / "outputs" / "integration").exists()
+            and (workdir / "10_reports").exists()
+        )
+    ):
+        target = (workdir / name_path).resolve()
+        if (
+            target.is_relative_to(workdir)
+            and target.is_file()
+            and target.suffix.lower() in PLAN_ONE_RESULT_SUFFIXES
+        ):
+            return target
+        return None
     single_cell_root = _single_cell_root_from_workdir(workdir)
     allowed_roots = [
         (workdir / "outputs" / "integration").resolve(),
@@ -2949,9 +3257,6 @@ def _full_file_path(workdir: Path, name: str) -> Path | None:
     ]
     if single_cell_root:
         allowed_roots.append(single_cell_root.resolve())
-    name_path = Path(name)
-    if name_path.is_absolute():
-        return None
     if name.startswith("single_cell/") and single_cell_root:
         target = single_cell_root.joinpath(*name_path.parts[1:]).resolve()
     elif name.startswith(("outputs/", "work/", "data/")):

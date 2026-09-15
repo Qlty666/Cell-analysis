@@ -218,6 +218,81 @@ a.file-link { color: #1665c0; text-decoration: none; margin-right: 12px; }
   <p class="muted" style="margin-top: 6px;">全自动流水线支持 single-cell、bulk RNA-seq、microarray 等表达数据集；非单细胞数据按样本级分析运行；含多模态的 10x H5 自动选用 Gene Expression 矩阵。</p>
 </div>
 
+<div class="card" id="experiment-plan-one">
+  <h2>实验方案一：6PPD-Q / NAFLD</h2>
+  <form id="planOneForm">
+    <input type="hidden" name="run_mode" value="experiment_plan_one">
+    <details class="form-section" open>
+      <summary>方案参数</summary>
+      <div class="grid wide">
+        <label>结果根目录（必填）
+          <input name="plan_output_root" placeholder="D:\AAA Liver cancer\y1" required>
+          <span class="field-hint">该目录会写入 Figure 1-5 分目录、报告和 plan coverage。</span>
+        </label>
+        <label>化合物名称
+          <input name="plan_compound_name" value="6PPD-Q">
+        </label>
+        <label>PubChem CID
+          <input name="plan_pubchem_cid" value="154926030">
+        </label>
+        <label>疾病名称
+          <input name="plan_disease_name" value="NAFLD">
+        </label>
+        <label>化合物靶点预测 CSV（可选）
+          <input name="plan_target_prediction_file" placeholder="data/compound_targets.csv">
+        </label>
+        <label>GeneCards 导出（CSV/TSV，可选）
+          <input name="plan_gene_cards_file" placeholder="data/GeneCards_NAFLD.csv">
+        </label>
+        <label>OMIM 导出（CSV/TSV，可选）
+          <input name="plan_omim_file" placeholder="data/OMIM_NAFLD.csv">
+        </label>
+        <label>TTD 导出（CSV/TSV，可选）
+          <input name="plan_ttd_file" placeholder="data/TTD_NAFLD.csv">
+        </label>
+        <label class="toggle"><input type="checkbox" name="plan_use_open_evidence" value="1" checked> 使用开放证据源补齐疾病靶点</label>
+        <label>对接靶点数
+          <input name="plan_docking_targets" type="number" min="1" value="5">
+        </label>
+        <label>对接 exhaustiveness
+          <input name="plan_docking_exhaustiveness" type="number" min="1" value="16">
+        </label>
+        <label>对接 CPU
+          <input name="plan_docking_cpu" type="number" min="1" value="4">
+        </label>
+        <label>小鼠单细胞抽样上限
+          <input name="plan_mouse_max_cells" type="number" min="500" value="5000">
+        </label>
+        <label>CellChat-like 置换次数
+          <input name="plan_cellchat_permutations" type="number" min="1" value="100">
+        </label>
+        <label class="toggle"><input type="checkbox" name="plan_md_run" value="1"> 运行 100 ns GROMACS 生产模拟</label>
+        <label class="toggle"><input type="checkbox" name="plan_md_gpu" value="1" checked> MD 使用 GPU</label>
+        <label>MD CPU
+          <input name="plan_md_cpu" type="number" min="1" value="4">
+        </label>
+        <label>从指定阶段开始
+          <input name="plan_start_stage" placeholder="如 md 或 figure_audit">
+        </label>
+        <label>只运行阶段（逗号分隔）
+          <input name="plan_stages" placeholder="如 targets,disease,evidence,ppi">
+        </label>
+        <label>跳过阶段（逗号分隔）
+          <input name="plan_skip_stages" placeholder="如 data,human">
+        </label>
+        <label class="toggle"><input type="checkbox" name="plan_force" value="1"> 强制重跑已完成的阶段</label>
+        <label class="toggle"><input type="checkbox" name="plan_dry_run" value="1"> 仅预演，不执行分析</label>
+      </div>
+    </details>
+    <div class="actions">
+      <button type="button" data-primary onclick="startPlanOneRun()">开始实验方案一</button>
+      <button id="planPauseBtn" class="secondary" type="button" onclick="pauseFullJob()" disabled>暂停</button>
+      <button id="planResumeBtn" class="secondary" type="button" onclick="resumeFullJob()" disabled>继续</button>
+    </div>
+  </form>
+  <div id="planMessage"></div>
+</div>
+
 <div class="card" id="full-pipeline">
   <form id="form">
     <div class="page-actions" style="margin-bottom: 12px;">
@@ -519,6 +594,9 @@ a.file-link { color: #1665c0; text-decoration: none; margin-right: 12px; }
   <div id="resultStats" class="stat-grid"></div>
   <div id="summaryRow"></div>
   <div id="fileLinks"></div>
+  <div class="tablebox"><table id="planCoverageTable"><caption>实验方案一：未完成或不达标 Panel</caption></table></div>
+  <div class="tablebox"><table id="planPerformanceTable"><caption>实验方案一：性能目标未达标 Panel</caption></table></div>
+  <div class="tablebox"><table id="planStageTable"><caption>实验方案一：阶段状态</caption></table></div>
   <div class="tablebox"><table id="qcGateTable"><caption>QC 门控</caption></table></div>
   <div class="tablebox"><table id="diffAbundanceTable"><caption>细胞类型差异丰度</caption></table></div>
   <div class="tablebox"><table id="priorityTable"><caption>证据整合靶点优先级</caption></table></div>
@@ -831,21 +909,31 @@ async function poll() {
     const status = await statusResp.json();
     const pauseBtn = document.getElementById('pauseBtn');
     const resumeBtn = document.getElementById('resumeBtn');
+    const planPauseBtn = document.getElementById('planPauseBtn');
+    const planResumeBtn = document.getElementById('planResumeBtn');
     if (status.queued) {
       pauseBtn.disabled = true;
       resumeBtn.disabled = true;
+      if (planPauseBtn) planPauseBtn.disabled = true;
+      if (planResumeBtn) planResumeBtn.disabled = true;
       msg('任务已进入队列，等待前面的任务完成...', 'ok');
       return;
     }
     if (status.running) {
       pauseBtn.disabled = false;
       resumeBtn.disabled = true;
+      if (planPauseBtn) planPauseBtn.disabled = false;
+      if (planResumeBtn) planResumeBtn.disabled = true;
     } else if (status.paused) {
       pauseBtn.disabled = true;
       resumeBtn.disabled = false;
+      if (planPauseBtn) planPauseBtn.disabled = true;
+      if (planResumeBtn) planResumeBtn.disabled = false;
     } else {
       pauseBtn.disabled = true;
       resumeBtn.disabled = true;
+      if (planPauseBtn) planPauseBtn.disabled = true;
+      if (planResumeBtn) planResumeBtn.disabled = true;
     }
     if (!status.running) {
       clearInterval(pollTimer);
@@ -1053,7 +1141,112 @@ function renderStats(data) {
   }).join('');
 }
 
+function renderPlanOneResults(data) {
+  const plan = data.plan_one || {};
+  const coverage = plan.coverage || {};
+  const status = plan.status || {};
+  const stageRows = Object.entries(status.stages || {}).map(([stage, value]) => ({
+    stage,
+    status: value && typeof value === 'object' ? (value.status || '') : String(value || ''),
+    elapsed_seconds: value && typeof value === 'object' ? (value.elapsed_seconds || '') : '',
+  }));
+  resultStats.innerHTML = [
+    {
+      label: '代码实现覆盖',
+      value: coverage.implementation_completion_percent !== undefined ? Number(coverage.implementation_completion_percent).toFixed(1) + '%' : 'NA',
+      cls: coverage.above_90_implementation ? 'ok' : 'warn',
+    },
+    {
+      label: '当前结果覆盖',
+      value: coverage.current_result_completion_percent !== undefined ? Number(coverage.current_result_completion_percent).toFixed(1) + '%' : 'NA',
+      cls: coverage.current_90pct_ready ? 'ok' : 'warn',
+    },
+    {
+      label: '配置前提后预计覆盖',
+      value: coverage.projected_completion_percent_with_prerequisites !== undefined ? Number(coverage.projected_completion_percent_with_prerequisites).toFixed(1) + '%' : 'NA',
+      cls: coverage.above_90_projected_with_prerequisites ? 'ok' : 'warn',
+    },
+    {
+      label: '性能目标达标 Panel',
+      value: (coverage.performance_targets_met !== undefined ? coverage.performance_targets_met : 'NA') + ' / ' + (coverage.panels || 'NA'),
+    },
+  ].map((card) => (
+    '<div class="stat-card ' + (card.cls || '') + '">' +
+    '<div class="stat-label">' + esc(card.label) + '</div>' +
+    '<div class="stat-value">' + esc(card.value) + '</div></div>'
+  )).join('');
+  document.getElementById('summaryRow').innerHTML =
+    '<p class="muted">实验方案一：' + esc((coverage.panels || 0)) + ' 个 Panel；' +
+    '代码实现覆盖 ' + esc(coverage.implementation_completion_percent !== undefined ? Number(coverage.implementation_completion_percent).toFixed(2) + '%' : 'NA') +
+    '；当前执行结果覆盖 ' + esc(coverage.current_result_completion_percent !== undefined ? Number(coverage.current_result_completion_percent).toFixed(2) + '%' : 'NA') +
+    '；满足外部前提后的预计覆盖 ' + esc(coverage.projected_completion_percent_with_prerequisites !== undefined ? Number(coverage.projected_completion_percent_with_prerequisites).toFixed(2) + '%' : 'NA') + '</p>';
+  const links = document.getElementById('fileLinks');
+  links.innerHTML = '';
+  (data.files || []).forEach((name) => {
+    const a = document.createElement('a');
+    a.className = 'file-link';
+    a.href = '/full/file?job=' + (currentJob || '') + '&workdir=' + encodeURIComponent(data.workdir) + '&name=' + encodeURIComponent(name);
+    a.textContent = name.split('/').pop();
+    links.appendChild(a);
+  });
+  renderTable('planCoverageTable', coverage.missing_or_unmet_panels || [], ['figure', 'panel', 'label', 'current_status', 'audit_verdict', 'dependency', 'note']);
+  renderTable('planPerformanceTable', coverage.performance_targets_not_met || [], ['figure', 'panel', 'label', 'audit_verdict', 'note']);
+  renderTable('planStageTable', stageRows, ['stage', 'status', 'elapsed_seconds']);
+  [
+    'qcGateTable', 'diffAbundanceTable', 'priorityTable', 'validationTable',
+    'decisionTable', 'benchmarkTable', 'externalValidationTable', 'omicsQcTable',
+    'poseQcTable', 'structuralQualityTable', 'readinessTable',
+    'reproducibilityTable', 'evidenceCoverageTable', 'sourceAblationTable',
+    'keyTable', 'koTable', 'dockTable', 'caddTable', 'networkTable',
+    'faersTable', 'feedbackTable', 'feedbackDegTable', 'feedbackGoTable',
+    'feedbackKeggTable',
+  ].forEach((id) => renderTable(id, [], []));
+}
+
+async function startPlanOneRun() {
+  const form = document.getElementById('planOneForm');
+  const data = new FormData(form);
+  const output = (data.get('plan_output_root') || '').trim();
+  const message = document.getElementById('planMessage');
+  if (!output) {
+    message.className = 'error';
+    message.textContent = '请填写实验方案一结果根目录。';
+    return;
+  }
+  const startButton = form.querySelector('button[data-primary]');
+  if (startButton) startButton.disabled = true;
+  jobAlerted = false;
+  closeJobToast();
+  message.className = '';
+  message.textContent = '正在启动实验方案一...';
+  try {
+    const resp = await fetch('/full/start', {method: 'POST', body: data});
+    const result = await resp.json();
+    if (!resp.ok) throw new Error(result.error || '启动失败');
+    currentJob = result.job;
+    saveJobRecord();
+    document.getElementById('log').textContent = '';
+    document.getElementById('pauseBtn').disabled = false;
+    document.getElementById('resumeBtn').disabled = false;
+    document.getElementById('planPauseBtn').disabled = false;
+    document.getElementById('planResumeBtn').disabled = false;
+    message.className = 'ok';
+    message.textContent = '实验方案一已启动。';
+    if (pollTimer) clearInterval(pollTimer);
+    pollTimer = setInterval(poll, 1500);
+  } catch (e) {
+    message.className = 'error';
+    message.textContent = String(e.message || e);
+  } finally {
+    if (startButton) startButton.disabled = false;
+  }
+}
+
 function renderResults(data) {
+  if (data.mode === 'experiment_plan_one') {
+    renderPlanOneResults(data);
+    return;
+  }
   const summary = data.summary || {};
   renderStats(data);
   const priority = summary.target_priority || {};
@@ -1073,6 +1266,9 @@ function renderResults(data) {
   const fb = summary.cell_feedback || {};
   const qc = data.qc_metrics || {};
   const qcGate = qc.qc_gate || summary.qc_gate || {};
+  renderTable('planCoverageTable', [], []);
+  renderTable('planPerformanceTable', [], []);
+  renderTable('planStageTable', [], []);
   document.getElementById('summaryRow').innerHTML =
     '<p class="muted">单细胞：' + esc(summary.single_cell ? summary.single_cell.dataset || '' : '') +
     '；候选靶点宇宙：' + esc(summary.candidate_universe !== undefined ? summary.candidate_universe : 0) +

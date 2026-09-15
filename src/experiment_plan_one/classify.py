@@ -25,6 +25,8 @@ class PanelAlias:
     source: str
     destination: str
     status: str = "available"
+    fallback_sources: tuple[str, ...] = ()
+    fallback_status: str = ""
 
 
 PLAN_GROUPS: dict[str, tuple[str, ...]] = {
@@ -85,6 +87,13 @@ PANEL_ALIASES: tuple[PanelAlias, ...] = (
         "理化性质表",
         "01_compound_characterization/fig1c_physicochemical_properties.png",
         "Fig1c_理化性质表.png",
+    ),
+    PanelAlias(
+        "Figure1_化合物表征_靶点预测与通路富集",
+        "c",
+        "3D 结构 + 理化性质合并 panel",
+        "01_compound_characterization/fig1c_compound_3d_properties.png",
+        "Fig1c_3D结构_理化性质合并.png",
     ),
     PanelAlias(
         "Figure1_化合物表征_靶点预测与通路富集",
@@ -349,41 +358,46 @@ PANEL_ALIASES: tuple[PanelAlias, ...] = (
         "Figure5_分子对接与分子动力学模拟",
         "d",
         "蛋白主链 RMSD",
-        "09_md_mmpbsa/fig5d_rmsd_NOT_RUN.png",
-        "Fig5d_蛋白主链RMSD_未运行.png",
-        "prepared_not_run",
+        "09_md_mmpbsa/fig5d_rmsd.png",
+        "Fig5d_蛋白主链RMSD.png",
+        fallback_sources=("09_md_mmpbsa/fig5d_rmsd_NOT_RUN.png",),
+        fallback_status="prepared_not_run",
     ),
     PanelAlias(
         "Figure5_分子对接与分子动力学模拟",
         "e",
         "配体 RMSD",
-        "09_md_mmpbsa/fig5e_ligand_rmsd_NOT_RUN.png",
-        "Fig5e_配体RMSD_未运行.png",
-        "prepared_not_run",
+        "09_md_mmpbsa/fig5e_ligand_rmsd.png",
+        "Fig5e_配体RMSD.png",
+        fallback_sources=("09_md_mmpbsa/fig5e_ligand_rmsd_NOT_RUN.png",),
+        fallback_status="prepared_not_run",
     ),
     PanelAlias(
         "Figure5_分子对接与分子动力学模拟",
         "f",
         "关键残基 RMSF",
-        "09_md_mmpbsa/fig5f_rmsf_NOT_RUN.png",
-        "Fig5f_关键残基RMSF_未运行.png",
-        "prepared_not_run",
+        "09_md_mmpbsa/fig5f_rmsf.png",
+        "Fig5f_关键残基RMSF.png",
+        fallback_sources=("09_md_mmpbsa/fig5f_rmsf_NOT_RUN.png",),
+        fallback_status="prepared_not_run",
     ),
     PanelAlias(
         "Figure5_分子对接与分子动力学模拟",
         "g",
         "回旋半径 Rg",
-        "09_md_mmpbsa/fig5g_rg_NOT_RUN.png",
-        "Fig5g_回旋半径_未运行.png",
-        "prepared_not_run",
+        "09_md_mmpbsa/fig5g_rg.png",
+        "Fig5g_回旋半径.png",
+        fallback_sources=("09_md_mmpbsa/fig5g_rg_NOT_RUN.png",),
+        fallback_status="prepared_not_run",
     ),
     PanelAlias(
         "Figure5_分子对接与分子动力学模拟",
         "h",
         "MM-PBSA 结合自由能分解",
-        "09_md_mmpbsa/fig5h_mmpbsa_NOT_RUN.png",
-        "Fig5h_MMPBSA_未运行.png",
-        "prepared_not_run",
+        "09_md_mmpbsa/fig5h_mmpbsa.png",
+        "Fig5h_MMPBSA.png",
+        fallback_sources=("09_md_mmpbsa/fig5h_mmpbsa_NOT_RUN.png",),
+        fallback_status="prepared_not_run",
     ),
 )
 
@@ -493,11 +507,18 @@ def classify_experiment_plan_results(
     alias_records: list[dict[str, Any]] = []
     for alias in PANEL_ALIASES:
         source = (output_root / alias.source).resolve()
+        actual_status = alias.status
+        if not source.exists():
+            for fallback in alias.fallback_sources:
+                candidate = (output_root / fallback).resolve()
+                if candidate.exists():
+                    source = candidate
+                    actual_status = alias.fallback_status or alias.status
+                    break
         destination = target / alias.figure / alias.destination
         destinations: list[Path] = []
         if source.exists():
             destinations.extend(_link_alias_variants(source, destination))
-            actual_status = alias.status
             note = ""
         else:
             actual_status = "missing"

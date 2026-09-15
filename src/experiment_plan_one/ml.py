@@ -516,6 +516,7 @@ def run_ml_validation(
             output_dir=output_dir,
             dataset_name=dataset_name,
             title=spec.get("title") or dataset_name,
+            endpoint_warning=str(spec.get("endpoint_warning") or ""),
         )
         validation_rows.append(result)
     validation = pd.DataFrame(validation_rows)
@@ -567,6 +568,7 @@ def validate_external_model(
     output_dir: Path,
     dataset_name: str,
     title: str,
+    endpoint_warning: str = "",
 ) -> dict[str, Any]:
     training = read_expression(training_expression_path)
     validation = read_expression(validation_expression_path)
@@ -601,6 +603,30 @@ def validate_external_model(
     y = mapped[valid].astype(int)
     probabilities = fitted_model.predict_proba(X)[:, 1]
     auc = float(roc_auc_score(y, probabilities))
+    rng = np.random.default_rng(42)
+    auc_boot: list[float] = []
+    ap_boot: list[float] = []
+    for _ in range(1000):
+        indices = rng.integers(0, len(y), size=len(y))
+        sampled = y.to_numpy()[indices]
+        if len(set(sampled)) < 2:
+            continue
+        sampled_probability = probabilities[indices]
+        auc_boot.append(
+            float(roc_auc_score(sampled, sampled_probability))
+        )
+        ap_boot.append(
+            float(
+                average_precision_score(
+                    sampled,
+                    sampled_probability,
+                )
+            )
+        )
+    calibration = _calibration_parameters(
+        y.to_numpy(),
+        probabilities,
+    )
     fpr, tpr, thresholds = roc_curve(y, probabilities)
     prediction = pd.DataFrame(
         {
@@ -633,9 +659,24 @@ def validate_external_model(
         "n_positive": int(y.sum()),
         "auc": auc,
         "average_precision": float(average_precision_score(y, probabilities)),
+        "auroc_ci_low": (
+            float(np.percentile(auc_boot, 2.5)) if auc_boot else None
+        ),
+        "auroc_ci_high": (
+            float(np.percentile(auc_boot, 97.5)) if auc_boot else None
+        ),
+        "auprc_ci_low": (
+            float(np.percentile(ap_boot, 2.5)) if ap_boot else None
+        ),
+        "auprc_ci_high": (
+            float(np.percentile(ap_boot, 97.5)) if ap_boot else None
+        ),
         "brier": float(brier_score_loss(y, probabilities)),
+        "calibration_slope": calibration["slope"],
+        "calibration_intercept": calibration["intercept"],
         "target_auc": 0.8,
         "target_met": bool(auc >= 0.8),
+        "endpoint_warning": endpoint_warning,
     }
 
 
@@ -712,6 +753,7 @@ def _plot_calibration(
         strategy="quantile",
     )
     hl_p = _hosmer_lemeshow(y, probability)
+    calibration = _calibration_parameters(y, probability)
     fig, ax = plt.subplots(figsize=(4.8, 4.6))
     ax.plot(predicted, observed, marker="o", color="#2f6bb3", lw=1.8, label="Observed")
     ax.plot([0, 1], [0, 1], linestyle="--", color="#8a949e", lw=1)
@@ -721,7 +763,11 @@ def _plot_calibration(
     ax.text(
         0.03,
         0.97,
-        f"Hosmer-Lemeshow p={hl_p:.3g}",
+        (
+            f"Hosmer-Lemeshow p={hl_p:.3g}\n"
+            f"Brier={brier_score_loss(y, probability):.3f}\n"
+            f"slope={calibration['slope']:.2f}; intercept={calibration['intercept']:.2f}"
+        ),
         transform=ax.transAxes,
         ha="left",
         va="top",
@@ -731,8 +777,32 @@ def _plot_calibration(
     save_figure(fig, output)
     return {
         "hosmer_lemeshow_p": hl_p,
+        "brier": float(brier_score_loss(y, probability)),
+        "calibration_slope": calibration["slope"],
+        "calibration_intercept": calibration["intercept"],
         "target_met": bool(hl_p is not None and np.isfinite(hl_p) and hl_p > 0.05),
     }
+
+
+def _calibration_parameters(
+    y: np.ndarray,
+    probability: np.ndarray,
+) -> dict[str, float]:
+    clipped = np.clip(probability, 1e-6, 1 - 1e-6)
+    logits = np.log(clipped / (1 - clipped)).reshape(-1, 1)
+    try:
+        model = LogisticRegression(
+            penalty=None,
+            solver="lbfgs",
+            max_iter=2000,
+        )
+        model.fit(logits, y)
+        return {
+            "slope": float(model.coef_[0, 0]),
+            "intercept": float(model.intercept_[0]),
+        }
+    except Exception:  # noqa: BLE001
+        return {"slope": float("nan"), "intercept": float("nan")}
 
 
 def _hosmer_lemeshow(y: np.ndarray, probability: np.ndarray, bins: int = 8) -> float:

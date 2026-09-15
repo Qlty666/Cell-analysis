@@ -645,6 +645,16 @@ class TestRecentWebIntegration(unittest.TestCase):
         self.assertIn('name="benchmark_version"', full)
         self.assertIn('name="benchmark_exclude_sources"', full)
         self.assertIn('name="benchmark_independent"', full)
+        for plan_field in (
+            "plan_output_root",
+            "plan_target_prediction_file",
+            "plan_gene_cards_file",
+            "plan_omim_file",
+            "plan_ttd_file",
+            "plan_md_run",
+            "plan_cellchat_permutations",
+        ):
+            self.assertIn(f'name="{plan_field}"', full)
         self.assertIn('name="external_validation_path"', full)
         self.assertIn('name="external_validation_bootstrap"', full)
         self.assertIn(
@@ -679,6 +689,10 @@ class TestRecentWebIntegration(unittest.TestCase):
             "benchmark_source",
             "benchmark_evidence_mode",
             "source_overlap",
+            "planCoverageTable",
+            "planPerformanceTable",
+            "planStageTable",
+            "startPlanOneRun",
         ):
             self.assertIn(rendered_field, full)
         self.assertIn('name="network_target_sources_dir"', full)
@@ -1036,6 +1050,79 @@ class TestFullStatus(unittest.TestCase):
                 self.assertTrue(os.path.samefile(env["LIVER_MR_CONFIG"], mr))
             finally:
                 FULL_JOBS.pop(job_id, None)
+
+    def test_start_plan_one_job_builds_config_and_command(self):
+        with tempfile.TemporaryDirectory() as tmp:
+            base = Path(tmp)
+            output = base / "plan-one"
+            target_prediction = base / "targets.csv"
+            target_prediction.write_text("gene,score\nEGFR,0.9\n", encoding="utf-8")
+            with mock.patch("web_ui._drain_full_queue"):
+                result = start_full_job(
+                    {
+                        "run_mode": ["experiment_plan_one"],
+                        "plan_output_root": [str(output)],
+                        "plan_compound_name": ["6PPD-Q"],
+                        "plan_pubchem_cid": ["154926030"],
+                        "plan_disease_name": ["NAFLD"],
+                        "plan_target_prediction_file": [str(target_prediction)],
+                        "plan_use_open_evidence": ["1"],
+                        "plan_docking_targets": ["3"],
+                        "plan_docking_exhaustiveness": ["8"],
+                        "plan_cellchat_permutations": ["20"],
+                        "plan_md_run": ["1"],
+                        "plan_md_gpu": ["1"],
+                    }
+                )
+            job_id = result["job"]
+            try:
+                info = FULL_JOBS[job_id]
+                self.assertEqual(info["mode"], "experiment_plan_one")
+                self.assertIn("run_experiment_plan_one.py", " ".join(info["cmd"]))
+                config_path = output / "web_experiment_plan_one_config.json"
+                self.assertTrue(config_path.exists())
+                config = json.loads(config_path.read_text(encoding="utf-8"))
+                self.assertEqual(config["docking"]["targets"], 3)
+                self.assertEqual(
+                    config["single_cell"]["mouse"]["cellchat_permutations"],
+                    20,
+                )
+                self.assertTrue(config["md"]["run"])
+            finally:
+                FULL_JOBS.pop(job_id, None)
+
+    def test_plan_one_results_reads_coverage_and_files(self):
+        with tempfile.TemporaryDirectory() as tmp:
+            root = Path(tmp)
+            coverage_dir = root / "10_reports" / "plan_coverage"
+            coverage_dir.mkdir(parents=True)
+            (coverage_dir / "plan_coverage.json").write_text(
+                json.dumps(
+                    {
+                        "panels": 42,
+                        "implementation_completion_percent": 96.0,
+                        "current_result_completion_percent": 70.0,
+                    }
+                ),
+                encoding="utf-8",
+            )
+            (root / "RESULTS_SUMMARY.md").write_text(
+                "# Summary\n",
+                encoding="utf-8",
+            )
+            result = full_results(root)
+            self.assertEqual(result["mode"], "experiment_plan_one")
+            self.assertEqual(
+                result["plan_one"]["coverage"]["panels"],
+                42,
+            )
+            self.assertIn("RESULTS_SUMMARY.md", result["files"])
+            self.assertIsNotNone(
+                _full_file_path(
+                    root,
+                    "10_reports/plan_coverage/plan_coverage.json",
+                )
+            )
 
     def test_start_full_job_passes_advanced_priority_and_network_options(self):
         with tempfile.TemporaryDirectory() as tmp:

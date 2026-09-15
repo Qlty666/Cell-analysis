@@ -220,7 +220,49 @@ def write_compound_figures(
         color="#5d6670",
     )
     save_figure(fig, path_props)
-    return {"structure_2d": path_2d, "structure_3d": path_3d, "properties": path_props}
+    path_combined = out_dir / "fig1c_compound_3d_properties.png"
+    fig, axes = plt.subplots(
+        1,
+        2,
+        figsize=(7.2, 4.4),
+        gridspec_kw={"width_ratios": [1.12, 0.88]},
+    )
+    with Image.open(path_3d) as image:
+        axes[0].imshow(image)
+    axes[0].axis("off")
+    axes[0].set_title("6PPD-Q 3D conformer", fontsize=10, fontweight="bold")
+    axes[1].axis("off")
+    y = 0.96
+    for label, value, unit in values:
+        shown = "NA" if value is None else f"{float(value):.3g}"
+        axes[1].text(0.0, y, label, ha="left", va="top", fontsize=8.5)
+        axes[1].text(
+            1.0,
+            y,
+            f"{shown} {unit}".strip(),
+            ha="right",
+            va="top",
+            fontsize=8.5,
+            fontweight="bold",
+        )
+        y -= 0.115
+    axes[1].text(
+        0.0,
+        0.02,
+        "Local RDKit descriptors",
+        ha="left",
+        va="bottom",
+        fontsize=7,
+        color="#5d6670",
+    )
+    fig.tight_layout()
+    save_figure(fig, path_combined)
+    return {
+        "structure_2d": path_2d,
+        "structure_3d": path_3d,
+        "properties": path_props,
+        "structure_3d_properties": path_combined,
+    }
 
 
 def _fetch_swiss_target(
@@ -821,6 +863,127 @@ def open_targets_disease_targets(
     }
 
 
+def gwas_catalog_disease_targets(
+    disease_terms: list[str],
+    *,
+    max_records: int = 1000,
+    timeout: int = 120,
+) -> tuple[pd.DataFrame, dict[str, Any]]:
+    """Collect disease genes from GWAS Catalog as an open, auditable source."""
+    try:
+        from evidence.connectors import GWASCatalogConnector
+        from evidence.context import EvidenceContext
+    except Exception as exc:  # noqa: BLE001
+        return pd.DataFrame(), {
+            "status": "failed",
+            "reason": f"evidence connector unavailable: {exc}",
+        }
+    rows: list[dict[str, Any]] = []
+    statuses: dict[str, Any] = {}
+    for term in disease_terms:
+        try:
+            records = GWASCatalogConnector().collect(
+                EvidenceContext(
+                    disease={"name": term},
+                    max_records_per_source=max_records,
+                    timeout_seconds=timeout,
+                    allow_network=True,
+                )
+            )
+            statuses[term] = {"status": "completed", "count": len(records)}
+        except Exception as exc:  # noqa: BLE001
+            statuses[term] = {"status": "failed", "reason": str(exc)}
+            continue
+        for record in records:
+            rows.append(
+                {
+                    "gene": split_gene_symbol(record.target_symbol),
+                    "score": float(record.score or 0.0),
+                    "source": "GWAS_Catalog",
+                }
+            )
+    frame = pd.DataFrame(rows)
+    if frame.empty:
+        return frame, {
+            "status": "empty",
+            "terms": statuses,
+        }
+    frame = (
+        frame[frame["gene"] != ""]
+        .groupby("gene", as_index=False)
+        .agg(
+            score=("score", "max"),
+            source=("source", lambda _: "GWAS_Catalog"),
+        )
+        .sort_values(["score", "gene"], ascending=[False, True])
+    )
+    return frame, {
+        "status": "completed",
+        "count": int(len(frame)),
+        "terms": statuses,
+    }
+
+
+def clinvar_disease_targets(
+    target_symbols: list[str],
+    *,
+    max_records: int = 500,
+    timeout: int = 120,
+) -> tuple[pd.DataFrame, dict[str, Any]]:
+    """Collect ClinVar evidence for candidate disease genes."""
+    try:
+        from evidence.connectors import ClinVarConnector
+        from evidence.context import EvidenceContext
+    except Exception as exc:  # noqa: BLE001
+        return pd.DataFrame(), {
+            "status": "failed",
+            "reason": f"evidence connector unavailable: {exc}",
+        }
+    symbols = [
+        split_gene_symbol(value)
+        for value in target_symbols
+        if split_gene_symbol(value)
+    ]
+    if not symbols:
+        return pd.DataFrame(), {
+            "status": "empty",
+            "reason": "no target symbols supplied",
+        }
+    try:
+        records = ClinVarConnector().collect(
+            EvidenceContext(
+                disease={"name": "NAFLD"},
+                target_symbols=symbols,
+                max_records_per_source=max_records,
+                timeout_seconds=timeout,
+                allow_network=True,
+            )
+        )
+    except Exception as exc:  # noqa: BLE001
+        return pd.DataFrame(), {"status": "failed", "reason": str(exc)}
+    rows = [
+        {
+            "gene": split_gene_symbol(record.target_symbol),
+            "score": float(record.score or 0.0),
+            "source": "ClinVar",
+        }
+        for record in records
+    ]
+    frame = pd.DataFrame(rows)
+    if frame.empty:
+        return frame, {"status": "empty"}
+    frame = (
+        frame[frame["gene"] != ""]
+        .groupby("gene", as_index=False)
+        .agg(
+            score=("score", "max"),
+            source=("source", lambda _: "ClinVar"),
+        )
+        .sort_values(["score", "gene"], ascending=[False, True])
+    )
+    return frame, {"status": "completed", "count": int(len(frame))}
+
+
 def _graphql(query: str, variables: dict[str, Any]) -> dict[str, Any]:
     body = json.dumps({"query": query, "variables": variables}).encode("utf-8")
     request = urllib.request.Request(
@@ -871,6 +1034,61 @@ def load_disease_source_file(
         }
     )
     output = output[output["gene"] != ""].drop_duplicates("gene")
+    return output.reset_index(drop=True), {
+        "status": "completed",
+        "source": str(source),
+        "count": int(len(output)),
+    }
+
+
+def load_compound_target_file(
+    name: str,
+    path: str | Path | None,
+    *,
+    gene_column: str | None = None,
+    score_column: str | None = None,
+) -> tuple[pd.DataFrame, dict[str, Any]]:
+    """Load a user-supplied compound-target prediction table."""
+    if path in (None, ""):
+        return pd.DataFrame(), {
+            "status": "not_configured",
+            "reason": "no local compound-target prediction table supplied",
+        }
+    source = Path(path).expanduser()
+    if not source.is_absolute():
+        source = (Path.cwd() / source).resolve()
+    if not source.exists():
+        return pd.DataFrame(), {
+            "status": "failed",
+            "reason": f"file not found: {source}",
+        }
+    sep = "\t" if source.suffix.lower() in {".tsv", ".txt"} else ","
+    frame = pd.read_csv(source, sep=sep, dtype=str)
+    gene_column = gene_column or _guess_gene_column(frame)
+    if not gene_column or gene_column not in frame.columns:
+        return pd.DataFrame(), {
+            "status": "failed",
+            "reason": f"no gene column in {source}: {list(frame.columns)}",
+        }
+    if score_column and score_column in frame.columns:
+        score = pd.to_numeric(frame[score_column], errors="coerce")
+    else:
+        score = pd.Series(1.0, index=frame.index, dtype=float)
+    output = pd.DataFrame(
+        {
+            "gene": frame[gene_column].map(split_gene_symbol),
+            "score": score.fillna(0.0),
+            "source": name,
+        }
+    )
+    output = (
+        output[output["gene"] != ""]
+        .groupby("gene", as_index=False)
+        .agg(
+            score=("score", "max"),
+            source=("source", lambda _: name),
+        )
+    )
     return output.reset_index(drop=True), {
         "status": "completed",
         "source": str(source),

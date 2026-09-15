@@ -502,6 +502,15 @@ python scripts\run_experiment_plan_one.py --stage report --skip-stage md
   默认只准备输入；设置配置中的 `md.run=true` 才执行完整模拟。
 - `classify` 阶段会在结果根目录创建 `按方案分类/`，按 Figure 1-5 和
   Panel a-h/j 建立可读目录；文件使用硬链接组织，原始分析目录仍保留。
+- `figure_audit` 阶段同时生成 `10_reports/plan_coverage/plan_coverage.json`
+  和 `.md`，按 42 个 Panel 分别报告代码实现覆盖、当前执行结果覆盖、配置
+  外部前提后的预计覆盖、外部依赖和性能目标未达标项。当前实现覆盖 95.77%，
+  在授权疾病数据、独立 NAFLD 队列和 GROMACS/gmx_MMPBSA 满足时预计覆盖
+  97.85%；实际的 AUC、校准和 MD 结果不能由代码保证。
+- 方案网页入口已集成到全自动流水线页面的“实验方案一：6PPD-Q / NAFLD”
+  表单，可直接配置本地 GeneCards/OMIM/TTD 导出、化合物靶点预测表、
+  CellChat-like 置换次数和 100 ns GROMACS 运行开关，并展示 plan coverage、
+  性能未达标 Panel 和阶段状态。
 
 ### 4.2 虚拟筛选命令行
 

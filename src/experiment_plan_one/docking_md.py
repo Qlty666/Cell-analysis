@@ -6,6 +6,7 @@ import json
 import logging
 import math
 import os
+import re
 import shutil
 import subprocess
 import urllib.parse
@@ -550,8 +551,8 @@ def _write_interaction_figure(target_dir: Path, output: Path, gene: str) -> None
         pose_path = target_dir / pose_path
     if not pose_path.exists():
         return
-    ligand_atoms = _parse_pdbqt_coordinates(pose_path)
-    contacts = _receptor_contacts(receptor, ligand_atoms)
+    ligand_atoms = _parse_pdbqt_atoms(pose_path)
+    contacts = _typed_interactions(receptor, ligand_atoms)
     contacts.to_csv(output.with_suffix(".csv"), index=False)
     fig, ax = plt.subplots(figsize=(7.2, 5.2))
     ax.axis("off")
@@ -579,27 +580,64 @@ def _write_interaction_figure(target_dir: Path, output: Path, gene: str) -> None
     if contacts.empty:
         ax.text(0.5, 0.42, "No contact within 4.5 A", ha="center", transform=ax.transAxes)
     else:
-        top = contacts.head(14)
-        for index, row in top.iterrows():
-            angle = 2 * math.pi * index / max(len(top), 1)
+        top = contacts.sort_values(
+            ["interaction_type", "distance_angstrom"]
+        ).head(18)
+        type_colors = {
+            "hydrogen_bond": "#2f6bb3",
+            "hydrophobic": "#d29b32",
+            "salt_bridge": "#c0392b",
+            "aromatic_contact": "#6c5fa7",
+            "vdw_contact": "#7b8794",
+        }
+        for position, (_, row) in enumerate(top.iterrows()):
+            angle = 2 * math.pi * position / max(len(top), 1)
             x = 0.5 + 0.38 * math.cos(angle)
             y = 0.5 + 0.38 * math.sin(angle)
+            interaction = str(row["interaction_type"])
             ax.annotate(
-                f"{row['residue']}{row['residue_number']}",
+                f"{row['residue']}{row['residue_number']}\n{interaction}",
                 xy=(0.5, 0.5),
                 xytext=(x, y),
                 ha="center",
                 va="center",
-                fontsize=8,
-                arrowprops={"arrowstyle": "-", "color": "#7b8794", "lw": 0.8},
-                bbox={"boxstyle": "round,pad=0.3", "facecolor": "white", "edgecolor": "#a7b1bb"},
+                fontsize=6.8,
+                arrowprops={
+                    "arrowstyle": "-",
+                    "color": type_colors.get(interaction, "#7b8794"),
+                    "lw": 1.0,
+                },
+                bbox={
+                    "boxstyle": "round,pad=0.3",
+                    "facecolor": "white",
+                    "edgecolor": type_colors.get(interaction, "#a7b1bb"),
+                },
                 xycoords=ax.transAxes,
                 textcoords=ax.transAxes,
+            )
+        handles = [
+            plt.Line2D(
+                [0],
+                [0],
+                color=color,
+                lw=2,
+                label=interaction.replace("_", " "),
+            )
+            for interaction, color in type_colors.items()
+            if interaction in set(contacts["interaction_type"])
+        ]
+        if handles:
+            ax.legend(
+                handles=handles,
+                loc="lower left",
+                frameon=False,
+                fontsize=7,
             )
     ax.text(
         0.5,
         0.02,
-        "Contacts are geometric approximations; Discovery Studio interaction typing was not used.",
+        "Interaction types are geometric approximations. PLIP/Discovery Studio "
+        "can be used for orthogonal review.",
         ha="center",
         va="bottom",
         fontsize=7.5,
@@ -629,13 +667,14 @@ def _write_docking_pose_figure(target_dir: Path, output: Path, gene: str) -> Non
     pose_path = Path(str(results.iloc[0].get("pose_file") or ""))
     if not pose_path.is_absolute():
         pose_path = target_dir / pose_path
-    ligand = _parse_pdbqt_coordinates(pose_path)
-    if ligand.size == 0:
+    ligand_atoms = _parse_pdbqt_atoms(pose_path)
+    if not ligand_atoms:
         return
-    protein_atoms: list[np.ndarray] = []
+    ligand = np.asarray([atom["coordinate"] for atom in ligand_atoms])
+    protein_atoms: list[dict[str, Any]] = []
     with receptor.open("r", encoding="utf-8", errors="replace") as handle:
         for line in handle:
-            if not line.startswith("ATOM") or line[12:16].strip() != "CA":
+            if not line.startswith("ATOM"):
                 continue
             try:
                 coordinate = [
@@ -646,8 +685,20 @@ def _write_docking_pose_figure(target_dir: Path, output: Path, gene: str) -> Non
             except ValueError:
                 continue
             if np.linalg.norm(np.asarray(coordinate) - ligand.mean(axis=0)) <= 18.0:
-                protein_atoms.append(np.asarray(coordinate))
-    protein = np.asarray(protein_atoms)
+                protein_atoms.append(
+                    {
+                        "coordinate": np.asarray(coordinate),
+                        "atom": line[12:16].strip(),
+                        "residue": line[17:20].strip(),
+                        "residue_number": int(line[22:26]),
+                        "chain": line[21:22].strip(),
+                        "element": (
+                            line[76:78].strip().upper()
+                            or re.sub(r"[^A-Za-z]", "", line[12:16])[:1].upper()
+                        ),
+                    }
+                )
+    protein = np.asarray([atom["coordinate"] for atom in protein_atoms])
     fig = plt.figure(figsize=(6.4, 5.8))
     ax = fig.add_subplot(111, projection="3d")
     if protein.size:
@@ -657,41 +708,282 @@ def _write_docking_pose_figure(target_dir: Path, output: Path, gene: str) -> Non
             protein[:, 2],
             s=10,
             c="#7b8794",
-            alpha=0.55,
+            alpha=0.30,
             depthshade=False,
-            label="Protein C-alpha",
+            label="Protein binding-site atoms",
         )
-    ax.scatter(
-        ligand[:, 0],
-        ligand[:, 1],
-        ligand[:, 2],
-        s=36,
-        c="#cf4f45",
-        depthshade=False,
+    ca_trace: dict[str, list[np.ndarray]] = {}
+    for atom in protein_atoms:
+        if atom["atom"] == "CA":
+            ca_trace.setdefault(str(atom["chain"]), []).append(atom["coordinate"])
+    for trace in ca_trace.values():
+        if len(trace) >= 2:
+            points = np.asarray(trace)
+            ax.plot(
+                points[:, 0],
+                points[:, 1],
+                points[:, 2],
+                color="#5e6b78",
+                alpha=0.55,
+                linewidth=1.0,
+            )
+    element_colors = {
+        "C": "#d3544f",
+        "N": "#4169a8",
+        "O": "#c0392b",
+        "S": "#d6a62f",
+        "H": "#d9dde1",
+        "F": "#4e9b6e",
+        "CL": "#4e9b6e",
+    }
+    for atom in ligand_atoms:
+        coordinate = atom["coordinate"]
+        element = str(atom["element"]).upper()
+        ax.scatter(
+            [coordinate[0]],
+            [coordinate[1]],
+            [coordinate[2]],
+            s=42,
+            c=element_colors.get(element, "#cf4f45"),
+            depthshade=False,
+            edgecolors="white",
+            linewidths=0.4,
+        )
+    for left in range(len(ligand)):
+        for right in range(left + 1, len(ligand)):
+            distance = float(np.linalg.norm(ligand[left] - ligand[right]))
+            if distance <= 1.9:
+                ax.plot(
+                    ligand[[left, right], 0],
+                    ligand[[left, right], 1],
+                    ligand[[left, right], 2],
+                    color="#7c3f3a",
+                    linewidth=1.4,
+                )
+    pocket = _receptor_contacts(receptor, ligand, cutoff=4.5)
+    if not pocket.empty:
+        labels = []
+        for row in pocket.head(8).itertuples(index=False):
+            labels.append(f"{row.residue}{row.residue_number}")
+            match = next(
+                (
+                    atom
+                    for atom in protein_atoms
+                    if atom["residue"] == row.residue
+                    and int(atom["residue_number"]) == int(row.residue_number)
+                ),
+                None,
+            )
+            if match is not None:
+                coordinate = match["coordinate"]
+                ax.text(
+                    coordinate[0],
+                    coordinate[1],
+                    coordinate[2],
+                    f"{row.residue}{row.residue_number}",
+                    fontsize=6.5,
+                    color="#39424c",
+                )
+        fig.text(
+            0.02,
+            0.02,
+            "Pocket residues: " + ", ".join(labels),
+            fontsize=7,
+            color="#5d6670",
+        )
+    ligand_handle = plt.Line2D(
+        [0],
+        [0],
+        marker="o",
+        color="none",
+        markerfacecolor="#cf4f45",
+        markersize=6,
         label="6PPD-Q",
     )
-    ax.set_xlabel("x (A)")
-    ax.set_ylabel("y (A)")
-    ax.set_zlabel("z (A)")
+    protein_handle = plt.Line2D(
+        [0],
+        [0],
+        color="#5e6b78",
+        linewidth=1.4,
+        label="Protein backbone trace",
+    )
+    ax.set_xlabel("x (Angstrom)")
+    ax.set_ylabel("y (Angstrom)")
+    ax.set_zlabel("z (Angstrom)")
     ax.set_title(f"{gene}-6PPD-Q best docking pose", fontweight="bold")
-    ax.legend(loc="upper right")
+    ax.legend(handles=[protein_handle, ligand_handle], loc="upper right")
     ax.view_init(elev=18, azim=42)
     save_figure(fig, output)
 
 
 def _parse_pdbqt_coordinates(path: Path) -> np.ndarray:
-    coordinates: list[list[float]] = []
+    atoms = _parse_pdbqt_atoms(path)
+    return np.asarray([atom["coordinate"] for atom in atoms])
+
+
+def _parse_pdbqt_atoms(path: Path) -> list[dict[str, Any]]:
+    atoms: list[dict[str, Any]] = []
     with path.open("r", encoding="utf-8", errors="replace") as handle:
         for line in handle:
             if not line.startswith(("ATOM", "HETATM")):
                 continue
             try:
-                coordinates.append(
-                    [float(line[30:38]), float(line[38:46]), float(line[46:54])]
+                coordinate = np.asarray(
+                    [
+                        float(line[30:38]),
+                        float(line[38:46]),
+                        float(line[46:54]),
+                    ]
                 )
             except ValueError:
                 continue
-    return np.asarray(coordinates)
+            atom_type = re.sub(r"[^A-Za-z]", "", line[76:79]).upper()
+            atoms.append(
+                {
+                    "coordinate": coordinate,
+                    "atom": line[12:16].strip(),
+                    "element": atom_type[:1] or line[12:16].strip()[:1].upper(),
+                    "atom_type": atom_type,
+                }
+            )
+    return atoms
+
+
+def _typed_interactions(
+    receptor: Path,
+    ligand_atoms: list[dict[str, Any]],
+    cutoff: float = 4.5,
+) -> pd.DataFrame:
+    if not ligand_atoms:
+        return pd.DataFrame(
+            columns=[
+                "interaction_type",
+                "ligand_atom",
+                "residue",
+                "residue_number",
+                "chain",
+                "distance_angstrom",
+            ]
+        )
+    protein_atoms: list[dict[str, Any]] = []
+    with receptor.open("r", encoding="utf-8", errors="replace") as handle:
+        for line in handle:
+            if not line.startswith("ATOM"):
+                continue
+            try:
+                coordinate = np.asarray(
+                    [
+                        float(line[30:38]),
+                        float(line[38:46]),
+                        float(line[46:54]),
+                    ]
+                )
+                residue_number = int(line[22:26])
+            except ValueError:
+                continue
+            protein_atoms.append(
+                {
+                    "coordinate": coordinate,
+                    "atom": line[12:16].strip().upper(),
+                    "residue": line[17:20].strip().upper(),
+                    "residue_number": residue_number,
+                    "chain": line[21:22].strip(),
+                    "element": (
+                        line[76:78].strip().upper()
+                        or re.sub(r"[^A-Za-z]", "", line[12:16])[:1].upper()
+                    ),
+                }
+            )
+    if not protein_atoms:
+        return pd.DataFrame()
+    ligand_coordinates = np.asarray(
+        [atom["coordinate"] for atom in ligand_atoms]
+    )
+    tree = cKDTree(ligand_coordinates)
+    records: dict[tuple[str, str, str, int, str], float] = {}
+    aromatic_residues = {"PHE", "TYR", "TRP", "HIS"}
+    negative_atoms = {
+        ("ASP", "OD1"),
+        ("ASP", "OD2"),
+        ("GLU", "OE1"),
+        ("GLU", "OE2"),
+    }
+    positive_atoms = {
+        ("LYS", "NZ"),
+        ("ARG", "NE"),
+        ("ARG", "NH1"),
+        ("ARG", "NH2"),
+        ("HIS", "ND1"),
+        ("HIS", "NE2"),
+    }
+    for protein in protein_atoms:
+        distance, ligand_index = tree.query(protein["coordinate"])
+        distance = float(distance)
+        if distance > cutoff:
+            continue
+        ligand = ligand_atoms[int(ligand_index)]
+        ligand_element = str(ligand["element"]).upper()
+        protein_element = str(protein["element"]).upper()
+        interactions: list[str] = []
+        if (
+            protein_element in {"N", "O", "S"}
+            and ligand_element in {"N", "O", "S"}
+            and distance <= 3.5
+        ):
+            interactions.append("hydrogen_bond")
+        if (
+            (protein["residue"], protein["atom"]) in negative_atoms
+            and ligand_element in {"N", "O"}
+            and distance <= 4.0
+        ) or (
+            (protein["residue"], protein["atom"]) in positive_atoms
+            and ligand_element in {"N", "O"}
+            and distance <= 4.0
+        ):
+            interactions.append("salt_bridge")
+        if (
+            protein["residue"] in aromatic_residues
+            and ligand_element in {"C", "N", "O"}
+            and distance <= 4.5
+        ):
+            interactions.append("aromatic_contact")
+        if (
+            protein_element == "C"
+            and ligand_element == "C"
+            and distance <= 4.5
+        ):
+            interactions.append("hydrophobic")
+        if not interactions:
+            interactions.append("vdw_contact")
+        for interaction in interactions:
+            key = (
+                interaction,
+                str(ligand["atom"]),
+                str(protein["residue"]),
+                int(protein["residue_number"]),
+                str(protein["chain"]),
+            )
+            records[key] = min(records.get(key, float("inf")), distance)
+    rows = [
+        {
+            "interaction_type": key[0],
+            "ligand_atom": key[1],
+            "residue": key[2],
+            "residue_number": key[3],
+            "chain": key[4],
+            "distance_angstrom": distance,
+        }
+        for key, distance in records.items()
+    ]
+    return (
+        pd.DataFrame(rows)
+        .sort_values(
+            ["interaction_type", "distance_angstrom", "residue_number"]
+        )
+        .reset_index(drop=True)
+        if rows
+        else pd.DataFrame()
+    )
 
 
 def _receptor_contacts(receptor: Path, ligand: np.ndarray, cutoff: float = 4.5) -> pd.DataFrame:

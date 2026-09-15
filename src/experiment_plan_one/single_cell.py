@@ -270,6 +270,8 @@ def run_mouse_single_cell(
     output_dir: Path,
     *,
     sample_key: str | None = None,
+    cellchat_permutations: int = 100,
+    cellchat_seed: int = 123,
 ) -> dict[str, Any]:
     ensure_dir(output_dir)
     data_path = output_dir / "mouse_liver_processed.h5ad"
@@ -349,14 +351,45 @@ def run_mouse_single_cell(
     interaction_path = output_dir / "cellchat_like_interactions.csv"
     pathway_path = output_dir / "cellchat_like_pathways.csv"
     if interaction_path.exists() and pathway_path.exists():
-        lr = {
-            "interactions": pd.read_csv(interaction_path),
-            "pathways": pd.read_csv(pathway_path),
-        }
+        cached_interactions = pd.read_csv(interaction_path)
+        if "p_value" in cached_interactions.columns:
+            lr = {
+                "interactions": cached_interactions,
+                "pathways": pd.read_csv(pathway_path),
+            }
+        else:
+            lr = _cellchat_like_analysis(
+                data,
+                n_permutations=cellchat_permutations,
+                seed=cellchat_seed,
+            )
+            lr["interactions"].to_csv(interaction_path, index=False)
+            lr["pathways"].to_csv(pathway_path, index=False)
     else:
-        lr = _cellchat_like_analysis(data)
+        lr = _cellchat_like_analysis(
+            data,
+            n_permutations=cellchat_permutations,
+            seed=cellchat_seed,
+        )
         lr["interactions"].to_csv(interaction_path, index=False)
         lr["pathways"].to_csv(pathway_path, index=False)
+    write_json(
+        output_dir / "cellchat_permutation_summary.json",
+        {
+            "method": "within-cell-type condition-label permutation",
+            "n_permutations": int(cellchat_permutations),
+            "n_interactions": int(len(lr["interactions"])),
+            "n_significant": (
+                int(lr["interactions"]["significant"].sum())
+                if "significant" in lr["interactions"].columns
+                else 0
+            ),
+            "note": (
+                "This is an auditable CellChat-like approximation, not the "
+                "R CellChat implementation."
+            ),
+        },
+    )
     _plot_cell_communication(
         lr["interactions"],
         lr["pathways"],
@@ -372,9 +405,10 @@ def run_mouse_single_cell(
             "cell_types": data.obs["cell_type"].value_counts().to_dict(),
             "core_genes": core,
             "cellchat_note": (
-                "CellChat-like ligand-receptor scoring was performed with an "
-                "explicit local receptor-pair table; it is a transparent "
-                "screening approximation, not the full CellChat permutation test."
+                "Ligand-receptor communication was tested with an explicit "
+                "local receptor-pair table and within-cell-type label "
+                "permutations; it is an auditable CellChat-like approximation, "
+                "not the R CellChat implementation."
             ),
         },
     )
@@ -582,68 +616,201 @@ def _plot_composition(composition: pd.DataFrame, output: Path) -> None:
     save_figure(fig, output)
 
 
-def _cellchat_like_analysis(data: ad.AnnData) -> dict[str, pd.DataFrame]:
-    """Score explicit ligand-receptor pairs in NCD and HFD conditions."""
+def _cellchat_like_analysis(
+    data: ad.AnnData,
+    *,
+    n_permutations: int = 100,
+    seed: int = 123,
+    max_cells: int = 5000,
+) -> dict[str, pd.DataFrame]:
+    """Score LR pairs with a within-cell-type label-permutation test.
+
+    This is deliberately an auditable CellChat-like approximation rather than
+    an imitation of the R CellChat implementation. It tests whether the
+    HFD-minus-NCD communication score is larger than expected after permuting
+    condition labels within each annotated cell type.
+    """
     normalized = data.raw.to_adata() if data.raw is not None else data
-    expression = normalized.X
-    cell_types = sorted(data.obs["cell_type"].astype(str).unique())
+    observation = data.obs.copy()
     conditions = ["NCD", "HFD"]
-    records: list[dict[str, Any]] = []
+    work = pd.DataFrame(
+        {
+            "__position": np.arange(len(observation), dtype=int),
+            "cell_type": observation["cell_type"].astype(str).to_numpy(),
+            "condition": observation["condition"].astype(str).to_numpy(),
+        },
+        index=observation.index,
+    )
+    work = work[work["condition"].isin(conditions)]
+    if work.empty:
+        return {"interactions": pd.DataFrame(), "pathways": pd.DataFrame()}
+
+    rng = np.random.default_rng(seed)
+    sampled_indices: list[int] = []
+    for _, group in work.groupby(["cell_type", "condition"], observed=True):
+        take = max(1, int(round(max_cells / max(1, work.groupby(["cell_type", "condition"]).ngroups))))
+        sampled_indices.extend(
+            rng.choice(
+                group["__position"].to_numpy(),
+                size=min(take, len(group)),
+                replace=False,
+            ).tolist()
+        )
+    sampled = work.loc[work["__position"].isin(sampled_indices)]
+    if len(sampled) > max_cells:
+        sampled = sampled.sample(n=max_cells, random_state=seed)
+    cell_types = sorted(sampled["cell_type"].unique())
+    cell_type_codes = pd.Categorical(
+        sampled["cell_type"],
+        categories=cell_types,
+    ).codes
+    condition_codes = (sampled["condition"].to_numpy() == "HFD").astype(int)
+    n_cell_types = len(cell_types)
+    expression = normalized.X
+    pair_data: dict[tuple[str, str, str], dict[str, np.ndarray]] = {}
     for pathway, ligand, receptor in LIGAND_RECEPTOR_DB:
         ligand_gene = _resolve_genes(normalized.var_names, [ligand])
         receptor_gene = _resolve_genes(normalized.var_names, [receptor])
         if not ligand_gene or not receptor_gene:
             continue
-        ligand_values = _gene_matrix_column(expression, normalized.var_names, ligand_gene[0])
-        receptor_values = _gene_matrix_column(expression, normalized.var_names, receptor_gene[0])
-        for condition in conditions:
-            condition_mask = (data.obs["condition"].astype(str) == condition).to_numpy()
-            for source in cell_types:
-                source_mask = condition_mask & (data.obs["cell_type"].astype(str) == source).to_numpy()
-                if source_mask.sum() < 5:
+        ligand_values = _gene_matrix_column(
+            expression,
+            normalized.var_names,
+            ligand_gene[0],
+        )[sampled["__position"].to_numpy()]
+        receptor_values = _gene_matrix_column(
+            expression,
+            normalized.var_names,
+            receptor_gene[0],
+        )[sampled["__position"].to_numpy()]
+        pair_data[(pathway, ligand_gene[0], receptor_gene[0])] = {
+            "ligand": np.asarray(ligand_values, dtype=float),
+            "receptor": np.asarray(receptor_values, dtype=float),
+        }
+
+    def means(
+        values: np.ndarray,
+        condition_labels: np.ndarray,
+    ) -> np.ndarray:
+        output = np.full((2, n_cell_types), np.nan, dtype=float)
+        for condition_index in (0, 1):
+            mask = condition_labels == condition_index
+            if not mask.any():
+                continue
+            counts = np.bincount(
+                cell_type_codes[mask],
+                minlength=n_cell_types,
+            )
+            sums = np.bincount(
+                cell_type_codes[mask],
+                weights=values[mask],
+                minlength=n_cell_types,
+            )
+            valid = counts > 0
+            output[condition_index, valid] = sums[valid] / counts[valid]
+        return output
+
+    group_indices = {
+        cell_type: np.flatnonzero(cell_type_codes == index)
+        for index, cell_type in enumerate(cell_types)
+    }
+    permutation_deltas: dict[tuple[str, str, str], np.ndarray] = {
+        key: np.full(
+            (max(1, n_permutations), n_cell_types, n_cell_types),
+            np.nan,
+            dtype=float,
+        )
+        for key in pair_data
+    }
+    for permutation_index in range(max(1, n_permutations)):
+        permuted = condition_codes.copy()
+        for indices in group_indices.values():
+            permuted[indices] = rng.permutation(permuted[indices])
+        for key, values in pair_data.items():
+            ligand_means = means(values["ligand"], permuted)
+            receptor_means = means(values["receptor"], permuted)
+            scores = np.fmin(
+                ligand_means[:, :, None],
+                receptor_means[:, None, :],
+            )
+            permutation_deltas[key][permutation_index] = scores[1] - scores[0]
+
+    records: list[dict[str, Any]] = []
+    for (pathway, ligand, receptor), values in pair_data.items():
+        ligand_means = means(values["ligand"], condition_codes)
+        receptor_means = means(values["receptor"], condition_codes)
+        scores = np.fmin(
+            ligand_means[:, :, None],
+            receptor_means[:, None, :],
+        )
+        delta = scores[1] - scores[0]
+        null = permutation_deltas[(pathway, ligand, receptor)]
+        for source_index, source in enumerate(cell_types):
+            for target_index, target in enumerate(cell_types):
+                observed_delta = float(delta[source_index, target_index])
+                if not np.isfinite(observed_delta):
                     continue
-                ligand_mean = float(np.mean(ligand_values[source_mask]))
-                for target in cell_types:
-                    target_mask = condition_mask & (data.obs["cell_type"].astype(str) == target).to_numpy()
-                    if target_mask.sum() < 5:
-                        continue
-                    receptor_mean = float(np.mean(receptor_values[target_mask]))
-                    score = min(ligand_mean, receptor_mean)
-                    records.append(
-                        {
-                            "pathway": pathway,
-                            "ligand": ligand_gene[0],
-                            "receptor": receptor_gene[0],
-                            "condition": condition,
-                            "source": source,
-                            "target": target,
-                            "communication_score": score,
-                        }
+                null_values = null[:, source_index, target_index]
+                null_values = null_values[np.isfinite(null_values)]
+                p_value = (
+                    float(
+                        (
+                            1
+                            + np.sum(
+                                np.abs(null_values)
+                                >= abs(observed_delta)
+                            )
+                        )
+                        / (len(null_values) + 1)
                     )
+                    if len(null_values)
+                    else np.nan
+                )
+                records.append(
+                    {
+                        "pathway": pathway,
+                        "ligand": ligand,
+                        "receptor": receptor,
+                        "source": source,
+                        "target": target,
+                        "NCD": (
+                            float(scores[0, source_index, target_index])
+                            if np.isfinite(scores[0, source_index, target_index])
+                            else np.nan
+                        ),
+                        "HFD": (
+                            float(scores[1, source_index, target_index])
+                            if np.isfinite(scores[1, source_index, target_index])
+                            else np.nan
+                        ),
+                        "delta_HFD_NCD": observed_delta,
+                        "p_value": p_value,
+                    }
+                )
     interactions = pd.DataFrame(records)
     if interactions.empty:
         return {"interactions": interactions, "pathways": pd.DataFrame()}
-    wide = interactions.pivot_table(
-        index=["pathway", "ligand", "receptor", "source", "target"],
-        columns="condition",
-        values="communication_score",
-        fill_value=0.0,
-    ).reset_index()
-    for condition in conditions:
-        if condition not in wide:
-            wide[condition] = 0.0
-    wide["delta_HFD_NCD"] = wide["HFD"] - wide["NCD"]
+    finite_p = interactions["p_value"].map(
+        lambda value: float(value) if pd.notna(value) else 1.0
+    )
+    interactions["fdr"] = bh_fdr(finite_p.tolist())
+    interactions["significant"] = (
+        pd.to_numeric(interactions["fdr"], errors="coerce") < 0.05
+    )
+    interactions["n_permutations"] = int(max(1, n_permutations))
     pathways = (
-        wide.groupby("pathway", as_index=False)
+        interactions.groupby("pathway", as_index=False)
         .agg(
             NCD=("NCD", "sum"),
             HFD=("HFD", "sum"),
             delta_HFD_NCD=("delta_HFD_NCD", "sum"),
             n_pairs=("pathway", "size"),
+            min_fdr=("fdr", "min"),
+            n_significant=("significant", "sum"),
         )
-        .sort_values("delta_HFD_NCD", ascending=False)
+        .sort_values(["n_significant", "delta_HFD_NCD"], ascending=False)
     )
-    return {"interactions": wide, "pathways": pathways}
+    return {"interactions": interactions, "pathways": pathways}
 
 
 def _gene_matrix_column(matrix: Any, var_names: pd.Index, gene: str) -> np.ndarray:

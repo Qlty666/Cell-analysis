@@ -50,10 +50,12 @@ from .common import (
     write_json,
 )
 from .classify import classify_experiment_plan_results
+from .coverage import audit_plan_coverage
 from .figure_audit import audit_figures
 from .docking_md import prepare_or_run_md, run_docking_for_targets
 from .enrichment import run_go_kegg
 from .ml import run_ml_validation
+from .md_figures import generate_plan_md_figures
 from .ppi import run_ppi_analysis
 from .single_cell import (
     parse_geo_soft_samples,
@@ -61,9 +63,12 @@ from .single_cell import (
     run_mouse_single_cell,
 )
 from .targets import (
+    clinvar_disease_targets,
     collect_compound_targets,
     combine_disease_sources,
     compound_properties,
+    gwas_catalog_disease_targets,
+    load_compound_target_file,
     load_disease_source_file,
     make_workflow_figure,
     make_venn_figure,
@@ -246,10 +251,14 @@ STAGE_REQUIRED_OUTPUTS: dict[str, list[Path]] = {
     "mouse": [Path("06_single_cell_mouse/mouse_single_cell_summary.json")],
     "human": [Path("07_single_cell_human/human_single_cell_summary.json")],
     "docking": [Path("08_docking/docking_summary.json")],
-    "md": [Path("09_md_mmpbsa/md_stage_summary.json")],
+    "md": [
+        Path("09_md_mmpbsa/md_stage_summary.json"),
+        Path("09_md_mmpbsa/md_plan_figures.json"),
+    ],
     "classify": [Path("按方案分类/分类汇总.json")],
     "figure_audit": [
-        Path("10_reports/figure_quality_audit/figure_quality_audit.json")
+        Path("10_reports/figure_quality_audit/figure_quality_audit.json"),
+        Path("10_reports/plan_coverage/plan_coverage.json"),
     ],
     "report": [Path("10_reports/experiment_plan_one_report.html")],
 }
@@ -257,10 +266,14 @@ STAGE_REQUIRED_OUTPUTS: dict[str, list[Path]] = {
 
 def default_config() -> dict[str, Any]:
     return {
+        "completion_target_percent": 90.0,
         "compound": {
             "name": "6PPD-Q",
             "pubchem_cid": "154926030",
             "target_databases": ["ChEMBL", "STITCH", "SwissTargetPrediction"],
+            "target_prediction_file": None,
+            "target_prediction_gene_column": None,
+            "target_prediction_score_column": None,
         },
         "disease": {
             "name": "NAFLD",
@@ -273,6 +286,7 @@ def default_config() -> dict[str, Any]:
             "omim_file": None,
             "ttd_file": None,
             "gene_column": None,
+            "use_open_evidence_sources": True,
         },
         "datasets": {
             "GSE89632": {
@@ -318,7 +332,11 @@ def default_config() -> dict[str, Any]:
             "benchmark_exclude_sources": [],
         },
         "single_cell": {
-            "mouse": {"max_cells": 5000},
+            "mouse": {
+                "max_cells": 5000,
+                "cellchat_permutations": 100,
+                "cellchat_seed": 123,
+            },
             "human": {"max_cells_per_sample": 1200, "seed": 42},
         },
         "docking": {
@@ -518,6 +536,43 @@ class ExperimentPlanOne:
             cache_dir=self.context.output_root / "00_data" / "cache",
         )
         source_dir = out_dir / "sources"
+        extra_prediction, extra_status = load_compound_target_file(
+            "LocalPrediction",
+            self.context.config["compound"].get("target_prediction_file"),
+            gene_column=self.context.config["compound"].get(
+                "target_prediction_gene_column"
+            ),
+            score_column=self.context.config["compound"].get(
+                "target_prediction_score_column"
+            ),
+        )
+        statuses["LocalPrediction"] = extra_status
+        if not extra_prediction.empty:
+            extra_prediction.to_csv(
+                source_dir / "LocalPrediction.csv",
+                index=False,
+            )
+            source_frames: dict[str, pd.DataFrame] = {}
+            for path in sorted(source_dir.glob("*.csv")):
+                frame = pd.read_csv(path)
+                if frame.empty or "gene" not in frame.columns:
+                    continue
+                score_column = next(
+                    (
+                        column
+                        for column in ("score", "probability", "best_score")
+                        if column in frame.columns
+                    ),
+                    None,
+                )
+                if score_column is None:
+                    frame["score"] = 1.0
+                    score_column = "score"
+                source_frames[path.stem] = frame[
+                    ["gene", score_column]
+                ].rename(columns={score_column: "score"})
+            targets = combine_disease_sources(source_frames)
+            targets.to_csv(out_dir / "compound_targets.csv", index=False)
         source_sets: dict[str, set[str]] = {}
         for path in sorted(source_dir.glob("*.csv")):
             if not path.exists():
@@ -598,6 +653,46 @@ class ExperimentPlanOne:
             statuses[name] = status
             if not frame.empty:
                 sources[name] = frame
+        if (
+            bool(
+                self.context.config["disease"].get(
+                    "use_open_evidence_sources",
+                    True,
+                )
+            )
+            and bool(
+                (self.context.config.get("evidence") or {}).get(
+                    "allow_network",
+                    True,
+                )
+            )
+        ):
+            terms = [
+                str(term)
+                for term in (
+                    self.context.config["disease"].get("open_targets_terms")
+                    or [self.context.config["disease"]["name"]]
+                )
+                if str(term).strip()
+            ]
+            gwas_frame, gwas_status = gwas_catalog_disease_targets(terms)
+            statuses["GWAS_Catalog"] = gwas_status
+            if not gwas_frame.empty:
+                sources["GWAS_Catalog"] = gwas_frame
+            seed_genes = list(
+                dict.fromkeys(
+                    str(value)
+                    for frame in sources.values()
+                    for value in frame["gene"].astype(str).tolist()
+                    if str(value).strip()
+                )
+            )
+            clinvar_frame, clinvar_status = clinvar_disease_targets(
+                seed_genes[:120]
+            )
+            statuses["ClinVar"] = clinvar_status
+            if not clinvar_frame.empty:
+                sources["ClinVar"] = clinvar_frame
         if not sources:
             raise RuntimeError(
                 "no disease-target source could be loaded; provide local "
@@ -1188,6 +1283,11 @@ class ExperimentPlanOne:
                 "condition_map": {"mild_fibrosis": 0, "advanced_fibrosis": 1},
                 "comparison": ("advanced fibrosis", "mild fibrosis"),
                 "title": "GSE49541: advanced vs mild fibrosis",
+                "endpoint_warning": (
+                    "Fibrosis stage is not the same endpoint as healthy "
+                    "versus NAFLD; do not interpret this AUC as the primary "
+                    "NAFLD endpoint."
+                ),
             },
             "GSE164441_tumor": {
                 "expression": str(paths["GSE164441_expression"]),
@@ -1195,6 +1295,10 @@ class ExperimentPlanOne:
                 "condition_map": {"adjacent_normal": 0, "tumor": 1},
                 "comparison": ("tumor", "adjacent normal"),
                 "title": "GSE164441: tumor vs adjacent non-tumor",
+                "endpoint_warning": (
+                    "Tumor versus adjacent normal is an HCC endpoint, not a "
+                    "healthy versus NAFLD endpoint."
+                ),
             },
             "GSE135251_NAFLD": {
                 "expression": str(paths["GSE135251_expression"]),
@@ -1258,6 +1362,18 @@ class ExperimentPlanOne:
             soft,
             core_genes,
             out_dir,
+            cellchat_permutations=int(
+                self.context.config["single_cell"]["mouse"].get(
+                    "cellchat_permutations",
+                    100,
+                )
+            ),
+            cellchat_seed=int(
+                self.context.config["single_cell"]["mouse"].get(
+                    "cellchat_seed",
+                    123,
+                )
+            ),
         )
         knockout = self._run_insilico_knockout(out_dir, core_genes)
         return {
@@ -1356,6 +1472,7 @@ class ExperimentPlanOne:
                     destination = out_dir / "prepared_inputs" / relative
                     ensure_dir(destination.parent)
                     shutil.copy2(path, destination)
+        md_figures = generate_plan_md_figures(docking_dir, out_dir)
         _plot_md_status(
             result,
             out_dir / "fig5d_md_preparation_status.png",
@@ -1378,7 +1495,7 @@ class ExperimentPlanOne:
                     panel,
                     out_dir / f"fig5{panel}_NOT_RUN.png",
                 )
-        return _serializable(result)
+        return _serializable({**result, "plan_figures": md_figures})
 
     def stage_report(self) -> dict[str, Any]:
         out_dir = self.context.dir("10_reports")
@@ -1410,6 +1527,33 @@ class ExperimentPlanOne:
                 "output_root": str(self.context.output_root),
                 "stages": status,
                 "files": int(len(inventory)),
+                "plan_coverage": read_json(
+                    out_dir / "plan_coverage" / "plan_coverage.json",
+                    {},
+                ),
+                "completion_target_percent": float(
+                    self.context.config.get("completion_target_percent", 90.0)
+                ),
+                "projected_completion_target_met": bool(
+                    float(
+                        read_json(
+                            out_dir
+                            / "plan_coverage"
+                            / "plan_coverage.json",
+                            {},
+                        ).get(
+                            "projected_completion_percent_with_prerequisites",
+                            0.0,
+                        )
+                        or 0.0
+                    )
+                    >= float(
+                        self.context.config.get(
+                            "completion_target_percent",
+                            90.0,
+                        )
+                    )
+                ),
                 "notes": [
                     "GSE164441 is tumor versus adjacent non-tumor, not a healthy-versus-NAFLD cohort.",
                     "CellChat-like communication scoring uses an explicit local ligand-receptor table.",
@@ -1432,7 +1576,13 @@ class ExperimentPlanOne:
 
     def stage_figure_audit(self) -> dict[str, Any]:
         result = audit_figures(self.context.output_root)
-        return _serializable(result)
+        coverage = audit_plan_coverage(self.context.output_root)
+        return _serializable(
+            {
+                "figure_audit": result,
+                "plan_coverage": coverage,
+            }
+        )
 
     def _core_candidate_genes(self) -> list[str]:
         path = (
@@ -1741,6 +1891,40 @@ def _export_knockout_outputs(knockout_root: Path, mouse_dir: Path) -> None:
     for source, destination in mappings.items():
         if source.exists():
             shutil.copy2(source, destination)
+    top15_path = mouse_dir / "virtual_knockout_top15.csv"
+    if top15_path.exists():
+        top15 = pd.read_csv(top15_path)
+        required = {"gene", "wt_mean", "ko_mean"}
+        if required.issubset(top15.columns):
+            top15 = top15.copy()
+            top15["_effect"] = (
+                pd.to_numeric(top15["delta"], errors="coerce").abs()
+                if "delta" in top15.columns
+                else (
+                    pd.to_numeric(top15["wt_mean"], errors="coerce")
+                    - pd.to_numeric(top15["ko_mean"], errors="coerce")
+                ).abs()
+            )
+            top15 = top15.sort_values("_effect", ascending=False).head(10)
+            genes = top15["gene"].astype(str).tolist()
+            wt = pd.to_numeric(top15["wt_mean"], errors="coerce").to_numpy()
+            ko = pd.to_numeric(top15["ko_mean"], errors="coerce").to_numpy()
+            fig, ax = plt.subplots(figsize=(7.2, 4.8))
+            y = np.arange(len(genes))
+            height = 0.36
+            ax.barh(y - height / 2, wt, height=height, color="#466b8a", label="WT")
+            ax.barh(y + height / 2, ko, height=height, color="#c05b4d", label="Virtual KO")
+            ax.set_yticks(y)
+            ax.set_yticklabels(genes)
+            ax.invert_yaxis()
+            ax.set_xlabel("Mean expression")
+            ax.set_title(
+                "Top virtual-knockout expression changes",
+                fontweight="bold",
+            )
+            ax.legend(frameon=False)
+            ax.grid(axis="x", alpha=0.2)
+            save_figure(fig, mouse_dir / "fig4g_virtual_knockout_top10.png")
     go = data / "insilico_go_enrichment.csv"
     kegg = data / "insilico_kegg_enrichment.csv"
     go_text = go.read_text(encoding="utf-8", errors="replace") if go.exists() else ""
@@ -2118,6 +2302,37 @@ def _render_results_summary(
                 "`10_reports/figure_quality_audit/figure_quality_audit.md`"
             ),
         ]
+    coverage_path = (
+        context.output_root
+        / "10_reports"
+        / "plan_coverage"
+        / "plan_coverage.json"
+    )
+    if coverage_path.exists():
+        coverage = read_json(coverage_path, {})
+        lines += [
+            "",
+            "## Plan Coverage",
+            "",
+            (
+                "- Code/implementation coverage: "
+                f"{coverage.get('implementation_completion_percent', 'NA')}%"
+            ),
+            (
+                "- Current executed-result coverage: "
+                f"{coverage.get('current_result_completion_percent', 'NA')}%"
+            ),
+            (
+                "- Projected coverage with prerequisites: "
+                f"{coverage.get('projected_completion_percent_with_prerequisites', 'NA')}%"
+            ),
+            (
+                "- Performance targets met: "
+                f"{coverage.get('performance_targets_met', 'NA')}/"
+                f"{coverage.get('panels', 'NA')}"
+            ),
+            "- Detailed panel matrix: `10_reports/plan_coverage/plan_coverage.md`",
+        ]
     lines += [
         "",
         "## Important Limits",
@@ -2128,11 +2343,12 @@ def _render_results_summary(
         "validation cohort.",
         "- GeneCards, OMIM and TTD are not available without licensed or "
         "credentialed bulk access; local files can be supplied in the config.",
-        "- The CellChat panel is a transparent ligand-receptor score, not a "
-        "full CellChat permutation analysis.",
-        "- The 100 ns GROMACS production run is prepared but not started. "
-        "The RMSD, ligand-RMSD, RMSF, Rg and MM-PBSA panels are explicitly "
-        "marked as not run.",
+        "- The CellChat-like panel uses ligand-receptor scoring with "
+        "within-cell-type condition-label permutations and FDR; it is not the "
+        "R CellChat implementation.",
+        "- The Figure 5d-h panels are generated from GROMACS/MM-PBSA outputs "
+        "only when the 100 ns production run is actually executed; otherwise "
+        "they are explicitly marked not run.",
         "",
         "## Main Folders",
         "",
@@ -2192,8 +2408,11 @@ def _figure_index(root: Path) -> pd.DataFrame:
         ("Figure 5", "a", "3D 对接构象", "08_docking/fig5a_*.png"),
         ("Figure 5", "b", "相互作用平面图", "08_docking/fig5b_*.png"),
         ("Figure 5", "c", "结合能热图", "08_docking/fig5c_*.png"),
-        ("Figure 5", "d-g", "MD RMSD/RMSF/Rg", "09_md_mmpbsa/fig5*_NOT_RUN.png"),
-        ("Figure 5", "h", "MM-PBSA", "09_md_mmpbsa/fig5h_*_NOT_RUN.png"),
+        ("Figure 5", "d-g", "MD RMSD/RMSF/Rg", "09_md_mmpbsa/fig5d_*.png"),
+        ("Figure 5", "d-g", "MD RMSD/RMSF/Rg", "09_md_mmpbsa/fig5e_*.png"),
+        ("Figure 5", "d-g", "MD RMSD/RMSF/Rg", "09_md_mmpbsa/fig5f_*.png"),
+        ("Figure 5", "d-g", "MD RMSD/RMSF/Rg", "09_md_mmpbsa/fig5g_*.png"),
+        ("Figure 5", "h", "MM-PBSA", "09_md_mmpbsa/fig5h_*.png"),
     ]
     rows: list[dict[str, str]] = []
     for figure, panel, purpose, pattern in specs:

@@ -1686,6 +1686,24 @@
       "optional": false
     },
     {
+      "file": "plan_coverage.json",
+      "name": "plan_coverage.json",
+      "kind": "data",
+      "content": "实验方案一 42 个 Panel 的实现覆盖、结果覆盖和外部依赖",
+      "type": "JSON 汇总文件",
+      "use": "判断代码实现是否达到 90%，并区分当前结果缺口、外部数据依赖和性能目标未达标。",
+      "optional": false
+    },
+    {
+      "file": "plan_coverage.md",
+      "name": "plan_coverage.md",
+      "kind": "report",
+      "content": "实验方案一加权 Panel 覆盖矩阵和改进清单",
+      "type": "Markdown 报告",
+      "use": "逐 Panel 查看实现状态、当前状态、依赖条件和性能目标。",
+      "optional": false
+    },
+    {
       "file": "reproducibility_manifest.json",
       "name": "reproducibility_manifest.json",
       "kind": "data",
