@@ -988,10 +988,10 @@ Cytoscape 集成采用自动降级策略：`network_toxicology.cytoscape` 为 `a
 - PPI hub 评分用于把 STRING 拓扑信息纳入候选靶点排序，配合虚拟敲除可形成“网络毒理学 → 靶点优先级”的闭环。
 - FAERS 信号表用于从药物不良反应报告中发现风险信号，不能单独证明因果关系，需要结合机制和临床证据复核。
 
-### 7.5 实验方案一（6PPD-Q / NAFLD）
+### 7.5 私密本地流水线（仅在显式启用时显示）
 
 - `plan_coverage.json/md` 用于查看 42 个 Panel 的代码实现覆盖、当前结果覆盖、外部依赖条件和性能目标未达标项。代码覆盖高不等于结果已经完成。
-- `environment_audit.json` 记录 Vina、GROMACS、gmx_MMPBSA、R CellChat、PoseBusters、Meeko 等版本。方案指定 Vina 1.2.3 和 GROMACS 2022，实际版本不同必须在论文方法中记录。
+- `environment_audit.json` 记录 Vina、GROMACS、gmx_MMPBSA、R CellChat、PoseBusters、Meeko 等版本。具体方案版本要求必须由本地配置和论文方法记录。
 - 疾病靶点 Panel 只有在至少两个可审计来源存在时才生成真实交集；GeneCards、OMIM、TTD 缺失时使用开放来源必须改名说明，不能写成原三库 Venn。
 - CellChat-like 网络必须显示置换次数、p 值或 FDR 和限制说明；不能把近似结果写成 R CellChat 原实现。
 - Figure 5d-h 只能来自真实 GROMACS/MMPBSA 轨迹和输出；没有运行或没有解析到结果时应显示 unavailable/not run。

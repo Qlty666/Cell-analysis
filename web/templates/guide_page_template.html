@@ -221,15 +221,17 @@ launchers\run_web_ui.bat</pre>
           <li>首次运行可先使用 <code>dry-run</code> 查看每个阶段会运行还是已完成。</li>
         </ul>
       </div>
+      <!--PRIVATE_PLAN_ONE_START-->
       <div class="workflow-item">
-        <h3>6PPD-Q / NAFLD 实验方案一</h3>
+        <h3>私密本地研究流水线（需显式启用）</h3>
         <ul>
-          <li>在“全自动流水线”页顶部的实验方案一表单填写结果根目录、化合物、疾病、本地授权靶点表和可选化合物预测表。</li>
+          <li>在“全自动流水线”页顶部的私密流水线表单填写结果根目录、化合物、疾病、本地授权靶点表和可选化合物预测表。</li>
           <li>可单独选择阶段，或启用 100 ns GROMACS；结果区会显示 42 Panel 的代码覆盖、当前覆盖、外部前提覆盖和性能未达标项。</li>
           <li>GeneCards、OMIM、TTD 没有本地授权导出时，可启用 Open Targets/GWAS/ClinVar 开放来源替代，但不能写成原三库交集。</li>
           <li>CellChat-like 置换、版本文本和限制必须跟随实际结果，不能用占位图替代未运行分析。</li>
         </ul>
       </div>
+      <!--PRIVATE_PLAN_ONE_END-->
       <div class="workflow-item">
         <h3>虚拟筛选与独立分子对接</h3>
         <ul>
@@ -285,7 +287,9 @@ launchers\run_web_ui.bat</pre>
       <li>结果清单支持按文件名、类型和用途筛选，点击行可展开说明，并联动打开对应指南章节。</li>
       <li>每个结果图的判读标准、输出路径和用途见结果清单页的“结果图说明与判断指南”。</li>
       <li>集成报告、run_manifest 等文件仍保留在对应工作目录的 <code>outputs</code> 中，可作为复现记录。</li>
-      <li>实验方案一额外输出 <code>plan_coverage.json</code>、<code>plan_coverage.md</code> 和 <code>environment_audit.json</code>，用于审计 42 Panel 完成度和外部工具版本。</li>
+      <!--PRIVATE_PLAN_ONE_START-->
+      <li>私密流水线额外输出 <code>plan_coverage.json</code>、<code>plan_coverage.md</code> 和 <code>environment_audit.json</code>，用于审计 42 Panel 完成度和外部工具版本。</li>
+      <!--PRIVATE_PLAN_ONE_END-->
     </ul>
   </section>
 

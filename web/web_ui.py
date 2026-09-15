@@ -29,6 +29,13 @@ ENVIRONMENT_TEMPLATE_PATH = TEMPLATE_DIR / "environment_page_template.html"
 INSTALL_LOG = WEB_DIR / "install_log.txt"
 
 log = logging.getLogger("web_ui")
+PRIVATE_PLAN_ONE_ENV = "LIVER_ENABLE_PRIVATE_PLAN_ONE"
+PRIVATE_PLAN_ONE_RESULT_FILES = {
+    "plan_coverage.json",
+    "plan_coverage.md",
+    "environment_audit.json",
+    "RESULTS_SUMMARY.md",
+}
 
 HEARTBEAT_LAST_SEEN_AT: float | None = None
 
@@ -39,6 +46,15 @@ if str(APP_ROOT) not in sys.path:
     sys.path.insert(0, str(APP_ROOT))
 if str(SCRIPTS_DIR) not in sys.path:
     sys.path.insert(0, str(SCRIPTS_DIR))
+
+
+def private_plan_one_enabled() -> bool:
+    return os.environ.get(PRIVATE_PLAN_ONE_ENV, "").strip().lower() in {
+        "1",
+        "true",
+        "yes",
+        "on",
+    }
 
 from web_state import (  # noqa: E402
     JOB_STORE_MAX_RECORDS,
@@ -236,6 +252,8 @@ def environment_module_cards() -> str:
     """Return the per-module environment cards for the web board."""
     cards = []
     for name, meta in ENV_MODULES.items():
+        if name == "private-pipeline" and not private_plan_one_enabled():
+            continue
         badges = []
         if meta["r_deps"]:
             badges.append('<span class="badge env-r">R 包</span>')
@@ -647,10 +665,14 @@ def get_versions() -> list[dict]:
             "install": "",
         },
     )
-    try:
-        from experiment_plan_one.coverage import audit_plan_environment
+    if private_plan_one_enabled():
+        try:
+            from experiment_plan_one.coverage import audit_plan_environment
 
-        environment = audit_plan_environment()
+            environment = audit_plan_environment()
+        except Exception as exc:
+            log.debug("private pipeline environment versions unavailable: %s", exc)
+            environment = {}
         vina = environment.get("vina") or {}
         gromacs = environment.get("gromacs") or {}
         mmpbsa = environment.get("gmx_mmpbsa") or {}
@@ -716,8 +738,6 @@ def get_versions() -> list[dict]:
                 },
             ]
         )
-    except Exception as exc:
-        log.debug("plan one environment versions unavailable: %s", exc)
     return out
 
 
@@ -1162,9 +1182,32 @@ def render_dock_page() -> str:
     )
 
 
-def _render_template(path: Path, missing: str) -> str:
+def _private_plan_one_html(html: str) -> str:
+    if private_plan_one_enabled():
+        return re.sub(
+            r"<!--PRIVATE_PLAN_ONE_(?:START|END)-->",
+            "",
+            html,
+        )
+    return re.sub(
+        r"<!--PRIVATE_PLAN_ONE_START-->.*?<!--PRIVATE_PLAN_ONE_END-->",
+        "",
+        html,
+        flags=re.DOTALL,
+    )
+
+
+def _render_template(
+    path: Path,
+    missing: str,
+    *,
+    private_gate: bool = False,
+) -> str:
     if path.exists():
-        return _with_shared_nav(path.read_text(encoding="utf-8"))
+        html = path.read_text(encoding="utf-8")
+        if private_gate:
+            html = _private_plan_one_html(html)
+        return _with_shared_nav(html)
     return f"<html><body><h1>{missing}</h1></body></html>"
 
 
@@ -1214,6 +1257,7 @@ def render_full_page() -> str:
     return _render_template(
         FULL_TEMPLATE_PATH,
         "full pipeline template missing",
+        private_gate=True,
     )
 
 
@@ -1228,6 +1272,7 @@ def render_guide_page() -> str:
     return _render_template(
         GUIDE_TEMPLATE_PATH,
         "guide template missing",
+        private_gate=True,
     )
 
 
@@ -1239,6 +1284,7 @@ def render_environment_page() -> str:
             "</body></html>"
         )
     html = ENVIRONMENT_TEMPLATE_PATH.read_text(encoding="utf-8")
+    html = _private_plan_one_html(html)
     html = html.replace(
         "<!--ENV_MODULE_CARDS-->",
         environment_module_cards(),
@@ -1256,6 +1302,12 @@ def result_guide_data() -> dict:
             "files": [],
         }
     text = RESULT_GUIDE_PATH.read_text(encoding="utf-8", errors="replace")
+    if not private_plan_one_enabled():
+        text = re.sub(
+            r"(?ms)^### 7\.5 .*?(?=^## 8\.)",
+            "",
+            text,
+        )
     sections: list[dict] = []
     title = "总览"
     lines: list[str] = []
@@ -1312,6 +1364,13 @@ def result_details_data() -> dict:
     try:
         data = json.loads(RESULT_DETAILS_PATH.read_text(encoding="utf-8"))
         data["available"] = True
+        if not private_plan_one_enabled():
+            data["entries"] = [
+                entry
+                for entry in data.get("entries") or []
+                if Path(str(entry.get("file") or "")).name
+                not in PRIVATE_PLAN_ONE_RESULT_FILES
+            ]
         return data
     except (OSError, ValueError):
         return {"available": False, "entries": []}
@@ -1339,7 +1398,13 @@ def render_analysis_page() -> str:
 
 
 def run_environment_check(module: str, with_ml: bool = False) -> dict:
-    if module == "experiment-plan-one":
+    if module == "private-pipeline":
+        if not private_plan_one_enabled():
+            return {
+                "module": module,
+                "ok": False,
+                "output": "私密流水线未启用。",
+            }
         try:
             from experiment_plan_one.coverage import audit_plan_environment
 
@@ -1357,7 +1422,7 @@ def run_environment_check(module: str, with_ml: bool = False) -> dict:
                 and packages.get("shap")
             )
             lines = [
-                "实验方案一环境检查",
+                "私密流水线环境检查",
                 f"Vina: {vina.get('version') or 'not found'} "
                 f"(expected {vina.get('expected', '1.2.3')})",
                 f"GROMACS: {gromacs.get('version') or 'not found'} "
@@ -1387,7 +1452,7 @@ def run_environment_check(module: str, with_ml: bool = False) -> dict:
             return {
                 "module": module,
                 "ok": False,
-                "output": f"实验方案一环境检查失败：{exc}",
+                "output": f"私密流水线环境检查失败：{exc}",
             }
     cmd = [
         sys.executable,
@@ -2062,9 +2127,14 @@ def _molecular_docking_status(info: dict) -> dict:
 
 
 def _start_plan_one_job(data: dict) -> dict:
+    if not private_plan_one_enabled():
+        raise ValueError(
+            "私密本地流水线未启用；请设置 "
+            f"{PRIVATE_PLAN_ONE_ENV}=1 后仅在本机使用。"
+        )
     output_value = _first(data, "plan_output_root", "").strip()
     if not output_value:
-        raise ValueError("实验方案一结果目录不能为空")
+        raise ValueError("私密流水线结果目录不能为空")
     output_root = Path(output_value).expanduser()
     if not output_root.is_absolute():
         output_root = APP_ROOT / output_root
@@ -2554,8 +2624,8 @@ def _plan_one_status(info: dict) -> dict:
         _notify_finished(
             info,
             "full",
-            "实验方案一",
-            "6PPD-Q / NAFLD 实验方案一",
+            "私密本地流水线",
+            "私密本地研究流水线",
             "finished" if proc.returncode == 0 else "failed",
             stage,
             error,
@@ -3121,6 +3191,14 @@ def full_results(workdir: Path) -> dict:
         (workdir / "10_reports" / "plan_coverage" / "plan_coverage.json").exists()
         or (not out.exists() and (workdir / "10_reports").exists())
     ):
+        if not private_plan_one_enabled():
+            return {
+                "workdir": str(workdir),
+                "exists": True,
+                "mode": "private_disabled",
+                "files": [],
+                "summary": {},
+            }
         return _plan_one_results(workdir)
     result = {
         "workdir": str(workdir),
@@ -3370,6 +3448,8 @@ def _full_file_path(workdir: Path, name: str) -> Path | None:
             and (workdir / "10_reports").exists()
         )
     ):
+        if not private_plan_one_enabled():
+            return None
         target = (workdir / name_path).resolve()
         if (
             target.is_relative_to(workdir)
@@ -3975,6 +4055,16 @@ def main() -> int:
         ),
     )
     args = parser.parse_args()
+    if private_plan_one_enabled() and args.host not in (
+        "127.0.0.1",
+        "localhost",
+        "::1",
+    ):
+        print(
+            "ERROR: private local pipeline is enabled and may only bind "
+            "to loopback."
+        )
+        return 2
 
     for extra in args.allow_path:
         EXTRA_WORKDIR_ROOTS.append(Path(extra).expanduser().resolve())

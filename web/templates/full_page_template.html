@@ -218,8 +218,9 @@ a.file-link { color: #1665c0; text-decoration: none; margin-right: 12px; }
   <p class="muted" style="margin-top: 6px;">全自动流水线支持 single-cell、bulk RNA-seq、microarray 等表达数据集；非单细胞数据按样本级分析运行；含多模态的 10x H5 自动选用 Gene Expression 矩阵。</p>
 </div>
 
+<!--PRIVATE_PLAN_ONE_START-->
 <div class="card" id="experiment-plan-one">
-  <h2>实验方案一：6PPD-Q / NAFLD</h2>
+  <h2>私密本地研究流水线（仅本机）</h2>
   <p class="field-hint">
     联网运行会向公开数据库发送疾病、基因、化合物和数据集标识；
     未公开课题建议使用本地来源。发布前请阅读
@@ -235,25 +236,25 @@ a.file-link { color: #1665c0; text-decoration: none; margin-right: 12px; }
           <span class="field-hint">该目录会写入 Figure 1-5 分目录、报告和 plan coverage。</span>
         </label>
         <label>化合物名称
-          <input name="plan_compound_name" value="6PPD-Q">
+          <input name="plan_compound_name" placeholder="本地输入，不公开">
         </label>
         <label>PubChem CID
-          <input name="plan_pubchem_cid" value="154926030">
+          <input name="plan_pubchem_cid" placeholder="本地输入，不公开">
         </label>
         <label>疾病名称
-          <input name="plan_disease_name" value="NAFLD">
+          <input name="plan_disease_name" placeholder="本地输入，不公开">
         </label>
         <label>化合物靶点预测 CSV（可选）
           <input name="plan_target_prediction_file" placeholder="data/compound_targets.csv">
         </label>
         <label>GeneCards 导出（CSV/TSV，可选）
-          <input name="plan_gene_cards_file" placeholder="data/GeneCards_NAFLD.csv">
+          <input name="plan_gene_cards_file" placeholder="本地授权导出文件">
         </label>
         <label>OMIM 导出（CSV/TSV，可选）
-          <input name="plan_omim_file" placeholder="data/OMIM_NAFLD.csv">
+          <input name="plan_omim_file" placeholder="本地授权导出文件">
         </label>
         <label>TTD 导出（CSV/TSV，可选）
-          <input name="plan_ttd_file" placeholder="data/TTD_NAFLD.csv">
+          <input name="plan_ttd_file" placeholder="本地授权导出文件">
         </label>
         <label class="toggle"><input type="checkbox" name="plan_use_open_evidence" value="1" checked> 使用开放证据源补齐疾病靶点</label>
         <label>对接靶点数
@@ -290,13 +291,14 @@ a.file-link { color: #1665c0; text-decoration: none; margin-right: 12px; }
       </div>
     </details>
     <div class="actions">
-      <button type="button" data-primary onclick="startPlanOneRun()">开始实验方案一</button>
+      <button type="button" data-primary onclick="startPlanOneRun()">启动私密本地流水线</button>
       <button id="planPauseBtn" class="secondary" type="button" onclick="pauseFullJob()" disabled>暂停</button>
       <button id="planResumeBtn" class="secondary" type="button" onclick="resumeFullJob()" disabled>继续</button>
     </div>
   </form>
   <div id="planMessage"></div>
 </div>
+<!--PRIVATE_PLAN_ONE_END-->
 
 <div class="card" id="full-pipeline">
   <form id="form">
@@ -599,10 +601,12 @@ a.file-link { color: #1665c0; text-decoration: none; margin-right: 12px; }
   <div id="resultStats" class="stat-grid"></div>
   <div id="summaryRow"></div>
   <div id="fileLinks"></div>
-  <div class="tablebox"><table id="planCoverageTable"><caption>实验方案一：未完成或不达标 Panel</caption></table></div>
-  <div class="tablebox"><table id="planPerformanceTable"><caption>实验方案一：性能目标未达标 Panel</caption></table></div>
-  <div class="tablebox"><table id="planEnvironmentTable"><caption>实验方案一：外部工具版本</caption></table></div>
-  <div class="tablebox"><table id="planStageTable"><caption>实验方案一：阶段状态</caption></table></div>
+  <!--PRIVATE_PLAN_ONE_START-->
+  <div class="tablebox"><table id="planCoverageTable"><caption>私密流水线：未完成或不达标 Panel</caption></table></div>
+  <div class="tablebox"><table id="planPerformanceTable"><caption>私密流水线：性能目标未达标 Panel</caption></table></div>
+  <div class="tablebox"><table id="planEnvironmentTable"><caption>私密流水线：外部工具版本</caption></table></div>
+  <div class="tablebox"><table id="planStageTable"><caption>私密流水线：阶段状态</caption></table></div>
+  <!--PRIVATE_PLAN_ONE_END-->
   <div class="tablebox"><table id="qcGateTable"><caption>QC 门控</caption></table></div>
   <div class="tablebox"><table id="diffAbundanceTable"><caption>细胞类型差异丰度</caption></table></div>
   <div class="tablebox"><table id="priorityTable"><caption>证据整合靶点优先级</caption></table></div>
@@ -846,6 +850,7 @@ function msg(text, cls) {
 
 function renderTable(id, rows, columns) {
   const table = document.getElementById(id);
+  if (!table) return;
   table.innerHTML = '';
   const cols = columns || (rows && rows.length ? Object.keys(rows[0]) : []);
   if (!rows || !rows.length) {
@@ -1191,7 +1196,7 @@ function renderPlanOneResults(data) {
     '<div class="stat-value">' + esc(card.value) + '</div></div>'
   )).join('');
   document.getElementById('summaryRow').innerHTML =
-    '<p class="muted">实验方案一：' + esc((coverage.panels || 0)) + ' 个 Panel；' +
+    '<p class="muted">私密本地流水线：' + esc((coverage.panels || 0)) + ' 个 Panel；' +
     '代码实现覆盖 ' + esc(coverage.implementation_completion_percent !== undefined ? Number(coverage.implementation_completion_percent).toFixed(2) + '%' : 'NA') +
     '；当前执行结果覆盖 ' + esc(coverage.current_result_completion_percent !== undefined ? Number(coverage.current_result_completion_percent).toFixed(2) + '%' : 'NA') +
     '；满足外部前提后的预计覆盖 ' + esc(coverage.projected_completion_percent_with_prerequisites !== undefined ? Number(coverage.projected_completion_percent_with_prerequisites).toFixed(2) + '%' : 'NA') + '</p>';
@@ -1226,7 +1231,7 @@ async function startPlanOneRun() {
   const message = document.getElementById('planMessage');
   if (!output) {
     message.className = 'error';
-    message.textContent = '请填写实验方案一结果根目录。';
+    message.textContent = '请填写私密流水线结果根目录。';
     return;
   }
   const startButton = form.querySelector('button[data-primary]');
@@ -1234,7 +1239,7 @@ async function startPlanOneRun() {
   jobAlerted = false;
   closeJobToast();
   message.className = '';
-  message.textContent = '正在启动实验方案一...';
+  message.textContent = '正在启动私密流水线...';
   try {
     const resp = await fetch('/full/start', {method: 'POST', body: data});
     const result = await resp.json();
@@ -1247,7 +1252,7 @@ async function startPlanOneRun() {
     document.getElementById('planPauseBtn').disabled = false;
     document.getElementById('planResumeBtn').disabled = false;
     message.className = 'ok';
-    message.textContent = '实验方案一已启动。';
+    message.textContent = '私密流水线已启动。';
     if (pollTimer) clearInterval(pollTimer);
     pollTimer = setInterval(poll, 1500);
   } catch (e) {

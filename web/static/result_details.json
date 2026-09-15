@@ -1689,7 +1689,7 @@
       "file": "plan_coverage.json",
       "name": "plan_coverage.json",
       "kind": "data",
-      "content": "实验方案一 42 个 Panel 的实现覆盖、结果覆盖和外部依赖",
+      "content": "私密本地流水线 42 个 Panel 的实现覆盖、结果覆盖和外部依赖",
       "type": "JSON 汇总文件",
       "use": "判断代码实现是否达到 90%，并区分当前结果缺口、外部数据依赖和性能目标未达标。",
       "optional": false
@@ -1698,7 +1698,7 @@
       "file": "plan_coverage.md",
       "name": "plan_coverage.md",
       "kind": "report",
-      "content": "实验方案一加权 Panel 覆盖矩阵和改进清单",
+      "content": "私密本地流水线加权 Panel 覆盖矩阵和改进清单",
       "type": "Markdown 报告",
       "use": "逐 Panel 查看实现状态、当前状态、依赖条件和性能目标。",
       "optional": false
@@ -1707,7 +1707,7 @@
       "file": "environment_audit.json",
       "name": "environment_audit.json",
       "kind": "data",
-      "content": "实验方案一外部工具和 Python/R 包版本检查",
+      "content": "私密本地流水线外部工具和 Python/R 包版本检查",
       "type": "JSON 汇总文件",
       "use": "核对 Vina、GROMACS、gmx_MMPBSA、CellChat、PoseBusters 等版本是否与方案一致。",
       "optional": false
@@ -1716,7 +1716,7 @@
       "file": "RESULTS_SUMMARY.md",
       "name": "RESULTS_SUMMARY.md",
       "kind": "report",
-      "content": "实验方案一主要结果、外部验证、单细胞、对接、MD 和覆盖度摘要",
+      "content": "私密本地流水线主要结果、外部验证、单细胞、对接、MD 和覆盖度摘要",
       "type": "Markdown 报告",
       "use": "作为结果总览，不能替代原始表格和统计检验。",
       "optional": false

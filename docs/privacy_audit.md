@@ -13,6 +13,9 @@
 
 - 网页“实验方案一”表单曾包含一个本机绝对路径占位示例，现改为相对路径
   `../experiment_plan_one_results`。
+- 私密专用流水线默认不在网页显示，相关表单、教程、环境卡、结果说明和版本
+  条目只有在显式设置 `LIVER_ENABLE_PRIVATE_PLAN_ONE=1` 时才渲染；启用时网页
+  只允许绑定 loopback，不能监听公开主机。
 - 新增 `.env.example`，只包含变量名和空值；真实 `.env`、`.env.*`、私钥、
   证书、SQLite、日志和历史记录继续由 `.gitignore` 排除。
 

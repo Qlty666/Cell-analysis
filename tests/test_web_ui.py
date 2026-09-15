@@ -645,16 +645,6 @@ class TestRecentWebIntegration(unittest.TestCase):
         self.assertIn('name="benchmark_version"', full)
         self.assertIn('name="benchmark_exclude_sources"', full)
         self.assertIn('name="benchmark_independent"', full)
-        for plan_field in (
-            "plan_output_root",
-            "plan_target_prediction_file",
-            "plan_gene_cards_file",
-            "plan_omim_file",
-            "plan_ttd_file",
-            "plan_md_run",
-            "plan_cellchat_permutations",
-        ):
-            self.assertIn(f'name="{plan_field}"', full)
         self.assertIn('name="external_validation_path"', full)
         self.assertIn('name="external_validation_bootstrap"', full)
         self.assertIn(
@@ -689,11 +679,6 @@ class TestRecentWebIntegration(unittest.TestCase):
             "benchmark_source",
             "benchmark_evidence_mode",
             "source_overlap",
-            "planCoverageTable",
-            "planPerformanceTable",
-            "planEnvironmentTable",
-            "planStageTable",
-            "startPlanOneRun",
         ):
             self.assertIn(rendered_field, full)
         self.assertIn('name="network_target_sources_dir"', full)
@@ -737,6 +722,49 @@ class TestRecentWebIntegration(unittest.TestCase):
             / "molecular_docking_template.html"
         ).read_text(encoding="utf-8")
         self.assertIn('name="moderate_cutoff"', molecular)
+
+    def test_private_plan_one_web_gate(self):
+        default_full = web_ui_module.render_full_page()
+        self.assertNotIn('id="experiment-plan-one"', default_full)
+        self.assertNotIn("6PPD-Q", default_full)
+        self.assertNotIn("NAFLD", default_full)
+        self.assertNotIn("实验方案一", default_full)
+        default_guide = web_ui_module.render_guide_page()
+        self.assertNotIn("6PPD-Q", default_guide)
+        self.assertNotIn("NAFLD", default_guide)
+        self.assertNotIn("实验方案一", default_guide)
+        self.assertIn('id="privacy"', default_guide)
+        default_environment = web_ui_module.render_environment_page()
+        self.assertNotIn("6PPD-Q", default_environment)
+        self.assertNotIn("NAFLD", default_environment)
+        self.assertNotIn("实验方案一", default_environment)
+        default_names = {
+            entry["name"]
+            for entry in web_ui_module.result_details_data()["entries"]
+        }
+        self.assertNotIn("plan_coverage.json", default_names)
+        default_guide_titles = {
+            section["title"]
+            for section in web_ui_module.result_guide_data()["sections"]
+        }
+        self.assertFalse(
+            any("6PPD-Q" in title or "NAFLD" in title for title in default_guide_titles)
+        )
+        with mock.patch.dict(
+            os.environ,
+            {"LIVER_ENABLE_PRIVATE_PLAN_ONE": "1"},
+        ):
+            private_full = web_ui_module.render_full_page()
+            private_guide = web_ui_module.render_guide_page()
+            private_names = {
+                entry["name"]
+                for entry in web_ui_module.result_details_data()["entries"]
+            }
+        self.assertIn('id="experiment-plan-one"', private_full)
+        self.assertIn('name="plan_output_root"', private_full)
+        self.assertIn("私密本地研究流水线", private_full)
+        self.assertIn("私密本地研究流水线", private_guide)
+        self.assertIn("plan_coverage.json", private_names)
 
     def test_figures_and_manifest_include_calibration(self):
         self.assertIn(
@@ -1058,7 +1086,20 @@ class TestFullStatus(unittest.TestCase):
             output = base / "plan-one"
             target_prediction = base / "targets.csv"
             target_prediction.write_text("gene,score\nEGFR,0.9\n", encoding="utf-8")
-            with mock.patch("web_ui._drain_full_queue"):
+            with self.assertRaises(ValueError):
+                start_full_job(
+                    {
+                        "run_mode": ["experiment_plan_one"],
+                        "plan_output_root": [str(output)],
+                    }
+                )
+            with (
+                mock.patch("web_ui._drain_full_queue"),
+                mock.patch.dict(
+                    os.environ,
+                    {"LIVER_ENABLE_PRIVATE_PLAN_ONE": "1"},
+                ),
+            ):
                 result = start_full_job(
                     {
                         "run_mode": ["experiment_plan_one"],
@@ -1111,19 +1152,25 @@ class TestFullStatus(unittest.TestCase):
                 "# Summary\n",
                 encoding="utf-8",
             )
-            result = full_results(root)
+            disabled = full_results(root)
+            self.assertEqual(disabled["mode"], "private_disabled")
+            with mock.patch.dict(
+                os.environ,
+                {"LIVER_ENABLE_PRIVATE_PLAN_ONE": "1"},
+            ):
+                result = full_results(root)
+                self.assertIsNotNone(
+                    _full_file_path(
+                        root,
+                        "10_reports/plan_coverage/plan_coverage.json",
+                    )
+                )
             self.assertEqual(result["mode"], "experiment_plan_one")
             self.assertEqual(
                 result["plan_one"]["coverage"]["panels"],
                 42,
             )
             self.assertIn("RESULTS_SUMMARY.md", result["files"])
-            self.assertIsNotNone(
-                _full_file_path(
-                    root,
-                    "10_reports/plan_coverage/plan_coverage.json",
-                )
-            )
 
     def test_start_full_job_passes_advanced_priority_and_network_options(self):
         with tempfile.TemporaryDirectory() as tmp:
@@ -1775,10 +1822,18 @@ class TestTemplatePolish(unittest.TestCase):
         self.assertIn("/environment/check", env)
         self.assertIn('data-module="expression"', env)
         self.assertIn('data-module="full"', env)
-        self.assertIn('data-module="experiment-plan-one"', env)
-        self.assertIn("数据与隐私", env)
-        self.assertIn("gmx_MMPBSA", env)
+        self.assertNotIn('data-module="private-pipeline"', env)
+        self.assertNotIn("6PPD-Q", env)
+        self.assertNotIn("NAFLD", env)
         self.assertIn("一键补全", env)
+        with mock.patch.dict(
+            os.environ,
+            {"LIVER_ENABLE_PRIVATE_PLAN_ONE": "1"},
+        ):
+            private_env = web_ui_module.render_environment_page()
+        self.assertIn('data-module="private-pipeline"', private_env)
+        self.assertIn("私密流水线额外要求", private_env)
+        self.assertIn("gmx_MMPBSA", private_env)
 
     def test_environment_board_matches_installer_modules(self):
         if str(APP_ROOT / "launchers") not in sys.path:
@@ -1801,13 +1856,23 @@ class TestTemplatePolish(unittest.TestCase):
                 )
 
     def test_plan_one_environment_check_and_versions(self):
-        check = web_ui_module.run_environment_check(
-            "experiment-plan-one"
+        disabled = web_ui_module.run_environment_check("private-pipeline")
+        self.assertFalse(disabled["ok"])
+        self.assertNotIn(
+            "Plan One Vina",
+            {item["name"] for item in web_ui_module.get_versions()},
         )
-        self.assertEqual(check["module"], "experiment-plan-one")
+        with mock.patch.dict(
+            os.environ,
+            {"LIVER_ENABLE_PRIVATE_PLAN_ONE": "1"},
+        ):
+            check = web_ui_module.run_environment_check(
+                "private-pipeline"
+            )
+            versions = web_ui_module.get_versions()
+        self.assertEqual(check["module"], "private-pipeline")
         self.assertIn("Vina", check["output"])
         self.assertIn("GROMACS", check["output"])
-        versions = web_ui_module.get_versions()
         names = {item["name"] for item in versions}
         self.assertIn("Plan One Vina", names)
         self.assertIn("Plan One GROMACS", names)
