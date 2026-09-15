@@ -1,0 +1,63 @@
+#!/usr/bin/env python3
+"""Orchestrator with per-stage resume markers for the docking pipeline."""
+
+from __future__ import annotations
+
+import logging
+import shutil
+from datetime import datetime
+
+from . import analysis, docking, ligands, receptor, redock, report
+from .config import ResolvedConfig
+from .utils import DockingError
+
+STAGES = [
+    ("01", "prepare-receptor", receptor.prepare_receptor),
+    ("02", "prepare-ligands", ligands.prepare_ligands),
+    ("03", "dock", docking.run_docking),
+    ("04", "analyze", analysis.analyze_results),
+    ("05", "redock", redock.run_redock),
+    ("06", "report", report.generate_report),
+]
+
+
+def run_pipeline(
+    cfg: ResolvedConfig,
+    force: bool = False,
+    start_stage: str | None = None,
+    stages: list | None = None,
+    logger_name: str = "docking",
+    complete_message: str = "pipeline complete",
+    stage_error: str = "refusing to remove an unexpected stage directory",
+) -> None:
+    """Run the configured stages with per-stage resume markers.
+
+    ``stages``/``logger_name``/``complete_message`` let the standalone
+    molecular docking board reuse this runner with its own stage list.
+    """
+    log = logging.getLogger(logger_name)
+    stage_dir = cfg.stage_dir()
+    if force and stage_dir.exists():
+        resolved_out = cfg.output_dir.resolve()
+        resolved_stage = stage_dir.resolve()
+        if (
+            resolved_stage.parent != resolved_out
+            or resolved_stage.name != ".stages"
+        ):
+            raise DockingError(stage_error)
+        shutil.rmtree(stage_dir)
+    stage_dir.mkdir(parents=True, exist_ok=True)
+
+    for code, name, fn in stages or STAGES:
+        marker = stage_dir / f"{code}_{name}.done"
+        if not force and marker.exists():
+            log.info("skip stage %s %s (already done)", code, name)
+            continue
+        if start_stage and code < start_stage:
+            log.info("skip stage %s %s (start at %s)", code, name, start_stage)
+            continue
+        log.info("=== stage %s %s ===", code, name)
+        fn(cfg, log)
+        marker.write_text(datetime.now().isoformat(timespec="seconds"), encoding="utf-8")
+        log.info("stage %s %s complete", code, name)
+    log.info("%s", complete_message)

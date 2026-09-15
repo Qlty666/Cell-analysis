@@ -1,0 +1,101 @@
+<!DOCTYPE html>
+<html lang="zh-CN">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1">
+<link rel="stylesheet" href="/static/app.css">
+<script src="/static/nav.js" defer></script>
+<title>网络毒理学</title>
+</head>
+<body>
+<div class="topnav"></div>
+<div class="wrap">
+  <div class="page-head">
+    <div class="page-title">
+      <h1>网络毒理学分析</h1>
+      <p class="page-sub">化合物-疾病靶点交集、多来源计数、STRING PPI hub 评分、Venn 图与 Cytoscape C-T-P-D 网络。</p>
+    </div>
+    <div class="page-actions">
+      <a class="link-button" href="/faers">FAERS</a>
+      <a class="link-button" href="/results">结果清单</a>
+    </div>
+  </div>
+
+  <div class="card" id="network-card">
+    <form id="netForm">
+      <div class="page-actions" style="margin-bottom:8px;">
+        <button type="button" class="secondary" onclick="saveModuleForm('netForm', 'liver_ui_network_form', 'netMessage')">保存设置</button>
+        <button type="button" class="secondary" onclick="restoreModuleForm('netForm', 'liver_ui_network_form', 'netMessage')">恢复设置</button>
+        <button type="button" class="secondary" onclick="resetModuleForm('netForm', 'liver_ui_network_form', 'netMessage')">恢复默认</button>
+      </div>
+      <details class="form-section" open>
+        <summary>交集与网络参数</summary>
+      <div class="grid wide">
+        <label>工作目录（目录）
+          <input name="net_workdir" placeholder="默认 dock">
+        </label>
+        <label>化合物名称
+          <input name="net_compound_name" placeholder="Bisphenol A">
+        </label>
+        <label>疾病名称
+          <input name="net_disease_name" placeholder="Hepatocellular Carcinoma">
+        </label>
+        <label>化合物靶点表（CSV / TSV / JSON / JSONL，相对工作目录）
+          <input name="net_compound_targets" placeholder="data/network/compound_targets.csv">
+        </label>
+        <label>多来源靶点目录（目录，相对工作目录）
+          <input name="net_target_sources_dir" placeholder="data/network/targets">
+        </label>
+        <label>疾病基因表（CSV / TSV / TXT，相对工作目录）
+          <input name="net_disease_genes" placeholder="data/network/disease_genes.csv" required>
+        </label>
+        <label>疾病基因列（可选）
+          <input name="net_disease_gene_column" placeholder="gene">
+        </label>
+        <label>PPI 边表（CSV / TSV / TXT，可选）
+          <input name="net_ppi" placeholder="data/network/string_edges.tsv">
+        </label>
+        <label class="toggle"><input type="checkbox" name="net_venn" value="1" checked> 输出 Venn 图</label>
+        <label>Cytoscape 推送模式
+          <select name="net_cytoscape">
+            <option value="auto" selected>auto（可用时推送，否则 XGMML）</option>
+            <option value="on">on（必须推送）</option>
+            <option value="off">off</option>
+          </select>
+        </label>
+        <label>Cytoscape CyREST 地址
+          <input name="net_cytoscape_url" value="http://127.0.0.1:1234">
+        </label>
+        <label>Cytoscape 布局
+          <input name="net_cytoscape_layout" placeholder="cose" value="cose">
+        </label>
+        <label>PPI 网络最大边数
+          <input name="net_max_ppi_edges" type="number" min="0" value="2000">
+        </label>
+        <label>GO/KEGG 富集超时（秒）
+          <input name="net_enrichment_timeout" type="number" min="1" value="900">
+        </label>
+        <label class="toggle"><input type="checkbox" name="net_run_enrichment" value="1"> 对交集基因运行 GO/KEGG 富集</label>
+        <label class="toggle"><input type="checkbox" name="net_cytoscape_session" value="1"> 同时保存 .cys 会话</label>
+      </div>
+      </details>
+      <div class="actions">
+        <button type="button" data-primary onclick="runNetwork(this)">运行网络毒理学</button>
+      </div>
+    </form>
+    <div id="netMessage"></div>
+    <div id="netSummary"></div>
+    <div id="netFiles"></div>
+    <div class="tablebox"><table id="netTable"></table></div>
+    <div id="netGallery" class="gallery"></div>
+  </div>
+</div>
+
+<script src="/static/dock_app.js"></script>
+<div id="jobToast" class="job-toast" hidden>
+  <div class="job-toast-title" id="jobToastTitle"></div>
+  <div class="job-toast-body" id="jobToastBody"></div>
+  <button type="button" class="job-toast-close" onclick="closeJobToast()">知道了</button>
+</div>
+</body>
+</html>

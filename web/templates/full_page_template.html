@@ -1,0 +1,1425 @@
+<!DOCTYPE html>
+<html lang="zh-CN">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1">
+<script src="/static/nav.js" defer></script>
+<title>全自动流水线</title>
+<style>
+body {
+  font-family: "Segoe UI", Arial, sans-serif;
+  margin: 0;
+  color: #1f2933;
+  background: url('/static/background.png') no-repeat center center fixed;
+  background-size: cover;
+}
+.topnav {
+  position: sticky;
+  top: 0;
+  z-index: 100;
+  background: #0f172a;
+  padding: 12px 28px;
+  display: flex;
+  gap: 18px;
+  align-items: center;
+  flex-wrap: wrap;
+  box-shadow: 0 2px 8px rgba(15, 23, 42, 0.35);
+}
+.topnav a {
+  color: #ffffff;
+  text-decoration: none;
+  font-size: 15px;
+  font-weight: 600;
+  padding: 6px 10px;
+  border-radius: 6px;
+  background: rgba(255, 255, 255, 0.08);
+}
+.topnav a:hover, .topnav a.active { background: #1665c0; color: #fff; }
+.topnav .nav-right { margin-left: auto; }
+.wrap { max-width: 1180px; margin: 0 auto; padding: 28px; }
+h1 { font-size: 26px; margin: 0 0 6px; }
+h2 { font-size: 17px; margin: 0 0 10px; }
+.muted { color: #6b7280; font-size: 13px; }
+.card {
+  background: rgba(255, 255, 255, 0.95);
+  border: 1px solid #d7dde4;
+  border-radius: 8px;
+  padding: 20px;
+  margin-bottom: 18px;
+  box-shadow: 0 1px 4px rgba(15, 23, 42, 0.08);
+}
+.grid { display: grid; grid-template-columns: repeat(auto-fit, minmax(220px, 1fr)); gap: 10px; }
+.grid.wide { grid-template-columns: repeat(auto-fit, minmax(260px, 1fr)); }
+label { display: block; margin: 10px 0 4px; font-weight: 600; font-size: 13px; }
+input, select {
+  width: 100%;
+  padding: 9px;
+  border: 1px solid #cbd2d9;
+  border-radius: 6px;
+  box-sizing: border-box;
+  font-size: 13px;
+}
+.actions { display: flex; gap: 12px; margin-top: 18px; flex-wrap: wrap; }
+button {
+  padding: 10px 18px;
+  border: 0;
+  border-radius: 6px;
+  background: #1665c0;
+  color: #fff;
+  font-size: 14px;
+  cursor: pointer;
+}
+button.secondary { background: #475569; }
+button:disabled { background: #9aa5b1; cursor: not-allowed; }
+.toggles { display: grid; grid-template-columns: repeat(auto-fit, minmax(230px, 1fr)); gap: 8px; margin-top: 14px; }
+.toggle { display: flex; align-items: center; gap: 8px; font-weight: 600; margin: 0; }
+.toggle input { width: auto; }
+.badge {
+  display: inline-block;
+  padding: 2px 8px;
+  border-radius: 999px;
+  font-size: 11px;
+  font-weight: 700;
+}
+.badge.single-cell { background: #dcfce7; color: #166534; }
+.badge.bulk { background: #fef3c7; color: #92400e; }
+.badge.other { background: #e5e7eb; color: #374151; }
+pre {
+  background: #0f172a;
+  color: #dbeafe;
+  padding: 14px;
+  border-radius: 8px;
+  height: 380px;
+  overflow: auto;
+  font-size: 12px;
+  white-space: pre-wrap;
+}
+.error { color: #b91c1c; margin-top: 10px; }
+.ok { color: #047857; margin-top: 10px; }
+table { width: 100%; border-collapse: collapse; background: #fff; font-size: 12px; }
+th, td { border: 1px solid #e5e7eb; padding: 6px 7px; text-align: left; }
+th { background: #eef2f7; position: sticky; top: 0; }
+.tablebox { max-height: 360px; overflow: auto; border: 1px solid #e5e7eb; border-radius: 6px; margin-top: 8px; }
+.tablebox + .tablebox { margin-top: 18px; }
+a.file-link { color: #1665c0; text-decoration: none; margin-right: 12px; }
+.job-toast {
+  position: fixed;
+  top: 76px;
+  right: 24px;
+  z-index: 999;
+  max-width: 440px;
+  background: #ffffff;
+  border: 1px solid #d7dde4;
+  border-left: 6px solid #1665c0;
+  border-radius: 8px;
+  box-shadow: 0 12px 32px rgba(15, 23, 42, 0.28);
+  padding: 14px 16px;
+}
+.job-toast.ok { border-left-color: #047857; }
+.job-toast.error { border-left-color: #b91c1c; }
+.job-toast.paused { border-left-color: #b45309; }
+.job-toast-title { font-weight: 700; font-size: 15px; margin-bottom: 6px; }
+.job-toast-body {
+  font-size: 13px;
+  color: #334155;
+  white-space: pre-wrap;
+  word-break: break-all;
+  max-height: 190px;
+  overflow: auto;
+}
+.job-toast-close {
+  margin-top: 10px;
+  padding: 6px 14px;
+  border: 0;
+  border-radius: 6px;
+  background: #1665c0;
+  color: #fff;
+  cursor: pointer;
+}
+</style>
+<link rel="stylesheet" href="/static/app.css">
+</head>
+<body>
+<div class="topnav">
+  <a href="/full" class="active">全自动流水线</a>
+  <a href="/">表达分析</a>
+  <a href="/datasets">数据集搜索</a>
+  <a href="/dock">虚拟筛选</a>
+  <a href="/molecular-docking">分子对接</a>
+  <a href="/results">结果清单</a>
+  <a href="/tasks" class="nav-right">任务进度</a>
+</div>
+<div class="wrap">
+<div class="page-head">
+  <div class="page-title">
+    <h1>全自动流水线</h1>
+    <p class="page-sub">表达分析 → 候选靶点宇宙 → 多来源证据排序 → 启发式扰动评分 → 虚拟筛选 → MD 准备/ML 重打分/工具交接 → 网络毒理学/FAERS → 细胞反馈 → 集成报告。支持断点续跑、参数指纹失效、QC 门控与 dry-run 预演。</p>
+  </div>
+</div>
+
+<nav class="quicknav" aria-label="本页功能">
+  <a href="#full-search">搜索数据集</a>
+  <a href="#full-pipeline">流水线设置</a>
+  <a href="#full-existing">加载已有结果</a>
+  <a href="#full-progress">实时进度</a>
+  <a href="#full-results">流程结果</a>
+</nav>
+
+<div class="card" id="full-search">
+  <h2>数据集搜索</h2>
+  <form id="pipelineSearchForm">
+    <div class="grid">
+      <label>疾病名称 <input name="disease" placeholder="liver cancer"></label>
+      <label>研究方向 <input name="research_direction" placeholder="single cell RNA-seq"></label>
+      <label>原始查询 <input name="query" placeholder="可选"></label>
+      <label>最大结果数 <input type="number" name="max_results" value="10" min="1" max="100"></label>
+    </div>
+    <details class="form-section">
+      <summary>过滤选项</summary>
+      <div class="grid wide">
+        <label>物种过滤
+          <select name="organism">
+            <option value="">全部</option>
+            <option value="hs">Human (hs)</option>
+            <option value="mm">Mouse (mm)</option>
+          </select>
+        </label>
+        <label>关键词过滤 <input name="keyword" placeholder="可选"></label>
+        <label>数据类型过滤
+          <select name="data_type">
+            <option value="">全部</option>
+            <option value="single-cell">single-cell</option>
+            <option value="bulk">bulk</option>
+            <option value="other">other</option>
+          </select>
+        </label>
+        <label>最小样本数 <input type="number" name="min_samples" min="1" placeholder="可选"></label>
+        <label>最大样本数 <input type="number" name="max_samples" min="1" placeholder="可选"></label>
+        <label>起始日期 <input type="date" name="start_date"></label>
+        <label>结束日期 <input type="date" name="end_date"></label>
+        <label>平台过滤 <input name="platform" placeholder="GPL24676 或平台名称"></label>
+        <label>数据集类型过滤 <input name="dataset_type" placeholder="high throughput sequencing"></label>
+        <label>ML/DL 模型路径（.joblib） <input name="model" placeholder="data_cache\dataset_search\relevance_model.joblib"></label>
+      </div>
+    </details>
+    <div class="actions">
+      <button id="pipelineSearchBtn" type="button" data-primary onclick="searchPipelineDatasets()">搜索数据集</button>
+    </div>
+  </form>
+  <div id="pipelineSearchMessage"></div>
+  <div class="tablebox">
+    <table>
+      <thead>
+        <tr><th>#</th><th>编号</th><th>标题</th><th>物种</th><th>数据类型</th><th>操作</th></tr>
+      </thead>
+      <tbody id="pipelineSearchBody"><tr><td colspan="6" class="muted">暂无结果</td></tr></tbody>
+    </table>
+  </div>
+  <p class="muted" style="margin-top: 6px;">全自动流水线支持 single-cell、bulk RNA-seq、microarray 等表达数据集；非单细胞数据按样本级分析运行；含多模态的 10x H5 自动选用 Gene Expression 矩阵。</p>
+</div>
+
+<!--PRIVATE_PLAN_ONE_START-->
+<div class="card" id="experiment-plan-one">
+  <h2>私密本地研究流水线（仅本机）</h2>
+  <p class="field-hint">
+    联网运行会向公开数据库发送疾病、基因、化合物和数据集标识；
+    未公开课题建议使用本地来源。发布前请阅读
+    <a href="/guide#privacy">数据与隐私</a>。
+  </p>
+  <form id="planOneForm">
+    <input type="hidden" name="run_mode" value="experiment_plan_one">
+    <details class="form-section" open>
+      <summary>方案参数</summary>
+      <div class="grid wide">
+        <label>结果根目录（必填）
+          <input name="plan_output_root" placeholder="../experiment_plan_one_results" required>
+          <span class="field-hint">该目录会写入 Figure 1-5 分目录、报告和 plan coverage。</span>
+        </label>
+        <label>化合物名称
+          <input name="plan_compound_name" placeholder="本地输入，不公开">
+        </label>
+        <label>PubChem CID
+          <input name="plan_pubchem_cid" placeholder="本地输入，不公开">
+        </label>
+        <label>疾病名称
+          <input name="plan_disease_name" placeholder="本地输入，不公开">
+        </label>
+        <label>化合物靶点预测 CSV（可选）
+          <input name="plan_target_prediction_file" placeholder="data/compound_targets.csv">
+        </label>
+        <label>GeneCards 导出（CSV/TSV，可选）
+          <input name="plan_gene_cards_file" placeholder="本地授权导出文件">
+        </label>
+        <label>OMIM 导出（CSV/TSV，可选）
+          <input name="plan_omim_file" placeholder="本地授权导出文件">
+        </label>
+        <label>TTD 导出（CSV/TSV，可选）
+          <input name="plan_ttd_file" placeholder="本地授权导出文件">
+        </label>
+        <label class="toggle"><input type="checkbox" name="plan_use_open_evidence" value="1" checked> 使用开放证据源补齐疾病靶点</label>
+        <label>对接靶点数
+          <input name="plan_docking_targets" type="number" min="1" value="5">
+        </label>
+        <label>对接 exhaustiveness
+          <input name="plan_docking_exhaustiveness" type="number" min="1" value="16">
+        </label>
+        <label>对接 CPU
+          <input name="plan_docking_cpu" type="number" min="1" value="4">
+        </label>
+        <label>小鼠单细胞抽样上限
+          <input name="plan_mouse_max_cells" type="number" min="500" value="5000">
+        </label>
+        <label>CellChat-like 置换次数
+          <input name="plan_cellchat_permutations" type="number" min="1" value="100">
+        </label>
+        <label class="toggle"><input type="checkbox" name="plan_md_run" value="1"> 运行 100 ns GROMACS 生产模拟</label>
+        <label class="toggle"><input type="checkbox" name="plan_md_gpu" value="1" checked> MD 使用 GPU</label>
+        <label>MD CPU
+          <input name="plan_md_cpu" type="number" min="1" value="4">
+        </label>
+        <label>从指定阶段开始
+          <input name="plan_start_stage" placeholder="如 md 或 figure_audit">
+        </label>
+        <label>只运行阶段（逗号分隔）
+          <input name="plan_stages" placeholder="如 targets,disease,evidence,ppi">
+        </label>
+        <label>跳过阶段（逗号分隔）
+          <input name="plan_skip_stages" placeholder="如 data,human">
+        </label>
+        <label class="toggle"><input type="checkbox" name="plan_force" value="1"> 强制重跑已完成的阶段</label>
+        <label class="toggle"><input type="checkbox" name="plan_dry_run" value="1"> 仅预演，不执行分析</label>
+      </div>
+    </details>
+    <div class="actions">
+      <button type="button" data-primary onclick="startPlanOneRun()">启动私密本地流水线</button>
+      <button id="planPauseBtn" class="secondary" type="button" onclick="pauseFullJob()" disabled>暂停</button>
+      <button id="planResumeBtn" class="secondary" type="button" onclick="resumeFullJob()" disabled>继续</button>
+    </div>
+  </form>
+  <div id="planMessage"></div>
+</div>
+<!--PRIVATE_PLAN_ONE_END-->
+
+<div class="card" id="full-pipeline">
+  <form id="form">
+    <div class="page-actions" style="margin-bottom: 12px;">
+      <button type="button" class="secondary" onclick="saveFormState()">保存设置</button>
+      <button type="button" class="secondary" onclick="restoreFormState()">恢复设置</button>
+      <button type="button" class="secondary" onclick="resetForm()">恢复默认</button>
+    </div>
+    <details class="form-section" open>
+      <summary>基础设置</summary>
+      <div class="grid wide">
+        <label>数据集编号
+          <input name="accession" value="" placeholder="请输入数据集编号">
+          <span class="field-hint">支持 GSE125449、E-MTAB-1234 或 S-BSST123；GEO / ArrayExpress / Expression Atlas 均可自动下载并运行。</span>
+        </label>
+        <label>表达分析结果目录（目录）
+          <input name="output" placeholder="请输入结果保存地址" required>
+        </label>
+        <label>工作目录（目录）
+          <input name="workdir" placeholder="请输入工作目录" required>
+          <span class="field-hint">填到包含 outputs 的上一层目录。</span>
+        </label>
+        <label>配体库（SDF / SMI / CSV，可选）
+          <input name="ligand_library" placeholder="data/ligands/library.smi">
+        </label>
+      </div>
+    </details>
+    <details class="form-section" open>
+      <summary>分析参数</summary>
+      <div class="grid wide">
+        <label>物种
+          <select name="species">
+            <option value="auto">auto</option>
+            <option value="hs">hs - Human</option>
+            <option value="mm">mm - Mouse</option>
+          </select>
+        </label>
+        <label>单细胞 ML 模型
+          <select name="ml_model">
+            <option value="xgb">xgb - XGBoost</option>
+            <option value="rf">rf - Random Forest</option>
+            <option value="gbm">gbm - GBM</option>
+            <option value="mlp">mlp - MLP</option>
+            <option value="lasso_svm">lasso_svm - LASSO+SVM-RFE</option>
+          </select>
+        </label>
+        <label>DepMap 依赖 CSV（CSV，可选）
+          <input name="depmap_csv" placeholder="data/knockout/depmap_gene_effect.csv">
+        </label>
+        <label>PPI 网络边表（CSV / TSV，可选）
+          <input name="ppi_network_csv" placeholder="data/network/string_edges.tsv">
+        </label>
+        <label>高级分析优先级表（CSV，可选）
+          <input name="advanced_priority_csv" placeholder="results/advanced/integrated_priority.csv">
+        </label>
+        <label>关键基因数
+          <input name="top_genes" type="number" min="1" value="50">
+        </label>
+        <label>候选靶点宇宙大小
+          <input name="candidate_universe_size" type="number" min="0" value="0">
+          <span class="field-hint">0 表示保留全部符合条件的 DEG；该表用于多来源证据排序。</span>
+        </label>
+        <label>证据疾病名称
+          <input name="evidence_disease" value="liver cancer">
+        </label>
+        <label>证据检索靶点数
+          <input name="evidence_max_targets" type="number" min="0" value="300">
+          <span class="field-hint">控制联网证据中心规模；0 表示候选宇宙全部检索。</span>
+        </label>
+        <label>结构/配体证据池大小
+          <input name="evidence_legacy_pool_size" type="number" min="1" value="50">
+        </label>
+        <label>证据中心配置
+          <input name="evidence_hub_config" value="config/evidence_sources.json">
+        </label>
+        <label>候选靶点扩展上限
+          <input name="candidate_expansion_max_targets" type="number" min="0" value="1000">
+          <span class="field-hint">从疾病和遗传证据中额外并入的非 DEG 靶点数量。</span>
+        </label>
+        <label>Benchmark 阳性靶点
+          <input name="benchmark_positive_targets" placeholder="GPC3,TP53,CTNNB1">
+        </label>
+        <label>Benchmark 阴性靶点
+          <input name="benchmark_negative_targets" placeholder="ALB,APOA1">
+        </label>
+        <label>Benchmark Top N
+          <input name="benchmark_top_n" type="number" min="1" value="20">
+        </label>
+        <label>Benchmark 来源
+          <input name="benchmark_source" placeholder="如 OncoKB / CIViC / publication">
+        </label>
+        <label>Benchmark 版本
+          <input name="benchmark_version" placeholder="如 2026-01 或 PMID">
+        </label>
+        <label>Benchmark 留出来源
+          <input name="benchmark_exclude_sources" placeholder="opentargets,chembl">
+          <span class="field-hint">用于来源留出评分；来源名按 evidence_hub 的 source_group。</span>
+        </label>
+        <label class="toggle"><input type="checkbox" name="benchmark_independent" value="1"> Benchmark 标签独立于排序证据</label>
+        <label>外部验证表（CSV，可选）
+          <input name="external_validation_path" placeholder="data/validation/holdout_targets.csv">
+        </label>
+        <label>外部验证靶点列
+          <input name="external_validation_target_column" value="gene">
+        </label>
+        <label>外部验证评分列
+          <input name="external_validation_score_column" value="score">
+        </label>
+        <label>外部验证标签列
+          <input name="external_validation_label_column" value="label">
+        </label>
+        <label>外部验证阈值
+          <input name="external_validation_threshold" type="number" step="0.01" min="0" max="1" value="0.5">
+        </label>
+        <label>外部验证 Bootstrap 次数
+          <input name="external_validation_bootstrap" type="number" min="1" value="1000">
+        </label>
+        <label class="toggle"><input type="checkbox" name="external_validation_allow_external_score" value="1"> 允许外部验证使用非流水线评分</label>
+        <span class="field-hint">仅用于排错；启用后 score_provenance_valid=false，不计入论文级门控。</span>
+        <label>对接靶点数
+          <input name="docking_targets" type="number" min="0" value="3">
+        </label>
+        <label>敲除报告 Top N
+          <input name="ko_top_n" type="number" min="1" value="50">
+        </label>
+        <label>MD 模式
+          <select name="md_mode">
+            <option value="prepare">prepare - 只准备 GROMACS 输入</option>
+            <option value="auto">auto - 本地运行 GROMACS</option>
+          </select>
+        </label>
+        <label>MD Top 命中数
+          <input name="md_top_n" type="number" min="1" value="1">
+        </label>
+        <label>对接 ML 模型（可选）
+          <select name="docking_ml_model">
+            <option value="rf">rf - Random Forest</option>
+            <option value="gbm">gbm - GBM</option>
+            <option value="mlp">mlp - MLP</option>
+            <option value="lasso_svm">lasso_svm - LASSO+SVM-RFE</option>
+            <option value="torch">torch - PyTorch MLP</option>
+          </select>
+        </label>
+        <label>对接 ML 训练 CSV（CSV，可选）
+          <input name="docking_ml_training_csv" placeholder="data/ml/training.csv">
+        </label>
+        <label>对接 ML 标签列
+          <input name="docking_ml_label_column" value="active">
+        </label>
+        <label>网络毒理学：化合物靶点表（CSV / TSV / JSON / JSONL，可选）
+          <input name="network_compound_targets_csv" placeholder="data/network/compound_targets.csv">
+        </label>
+        <label>网络毒理学：多来源靶点目录（目录，可选）
+          <input name="network_target_sources_dir" placeholder="data/network/targets">
+        </label>
+        <label>网络毒理学：疾病基因表（CSV / TSV / TXT，可选，默认关键基因）
+          <input name="network_disease_genes_csv" placeholder="默认 outputs/integration/key_genes.csv">
+        </label>
+        <label>网络毒理学：疾病基因列
+          <input name="network_disease_gene_column" placeholder="gene">
+        </label>
+        <label>网络毒理学：PPI 边表（CSV / TSV，可选）
+          <input name="network_ppi_network_csv" placeholder="data/network/string_edges.tsv">
+        </label>
+        <label>网络毒理学：Cytoscape 模式
+          <select name="network_cytoscape">
+            <option value="auto" selected>auto（可用时推送，否则 XGMML）</option>
+            <option value="on">on（必须推送）</option>
+            <option value="off">off</option>
+          </select>
+        </label>
+        <label>网络毒理学：Cytoscape CyREST 地址
+          <input name="network_cytoscape_url" value="http://127.0.0.1:1234">
+        </label>
+        <label>网络毒理学：Cytoscape 布局
+          <input name="network_cytoscape_layout" value="cose" placeholder="cose">
+        </label>
+        <label>网络毒理学：PPI 最大边数
+          <input name="network_max_ppi_edges" type="number" min="0" value="2000">
+        </label>
+        <label>网络毒理学：富集超时（秒）
+          <input name="network_enrichment_timeout" type="number" min="1" value="900">
+        </label>
+        <label class="toggle"><input type="checkbox" name="network_cytoscape_session" value="1"> 网络毒理学保存 .cys 会话</label>
+        <label class="toggle"><input type="checkbox" name="network_run_enrichment" value="1"> 对交集基因运行 GO/KEGG 富集</label>
+        <label>FAERS 事件表（CSV，可选）
+          <input name="faers_input" placeholder="data/faers/events.csv">
+        </label>
+        <label>FAERS 药物列
+          <input name="faers_drug_column" value="drug">
+        </label>
+        <label>FAERS 事件列
+          <input name="faers_event_column" value="event">
+        </label>
+        <label>FAERS 计数列（可选）
+          <input name="faers_count_column" placeholder="count">
+        </label>
+        <label>FAERS 最小计数
+          <input name="faers_min_count" type="number" min="1" value="3">
+        </label>
+        <label>病例标签（可选）
+          <input name="case_label" placeholder="Tumor / iCCA">
+        </label>
+        <label>正常标签（可选）
+          <input name="normal_label" placeholder="Normal / HCC">
+        </label>
+        <label>多队列分析配置（JSON，可选）
+          <input name="advanced_config" placeholder="config/advanced_analysis.json">
+        </label>
+        <label>MR / 共定位配置（JSON，可选）
+          <input name="mr_config" placeholder="config/mr_coloc.json">
+        </label>
+      </div>
+    </details>
+    <details class="form-section">
+      <summary>反馈与起始阶段</summary>
+      <div class="grid wide">
+        <label>反馈基因数
+          <input name="feedback_top_n" type="number" min="1" value="12">
+        </label>
+        <label>反馈展示基因数
+          <input name="feedback_max_features" type="number" min="1" value="8">
+        </label>
+        <label>起始阶段
+          <select name="start_stage">
+            <option value="">自动（断点续跑）</option>
+            <option value="01">01 单细胞分析</option>
+            <option value="02">02 关键基因</option>
+            <option value="03">03 证据富集</option>
+            <option value="04">04 敲除输入</option>
+            <option value="05">05 靶点优先级评分（启发式扰动）</option>
+            <option value="06">06 虚拟筛选</option>
+            <option value="07">07 MD/ML/工具交接</option>
+            <option value="08">08 网络毒理学</option>
+            <option value="09">09 FAERS</option>
+            <option value="10">10 细胞反馈</option>
+            <option value="11">11 集成报告</option>
+          </select>
+        </label>
+      </div>
+    </details>
+    <details class="form-section">
+      <summary>运行开关</summary>
+      <p class="muted field-hint">勾选后对应参数会追加到命令行；dry-run 只预演不执行。</p>
+      <div class="toggles">
+        <label class="toggle"><input type="checkbox" name="skip_scrna" value="1"> 跳过单细胞分析</label>
+        <label class="toggle"><input type="checkbox" name="skip_download" value="1"> 跳过数据下载</label>
+        <label class="toggle"><input type="checkbox" name="skip_deps" value="1"> 跳过依赖检查</label>
+        <label class="toggle"><input type="checkbox" name="skip_evidence_fetch" value="1"> 跳过联网证据</label>
+        <label class="toggle"><input type="checkbox" name="skip_evidence_hub" value="1"> 跳过多来源证据中心</label>
+        <label class="toggle"><input type="checkbox" name="evidence_hub_offline" value="1"> 证据中心仅用本地来源</label>
+        <label class="toggle"><input type="checkbox" name="evidence_hub_strict" value="1"> 证据来源失败即中断</label>
+        <label class="toggle"><input type="checkbox" name="skip_pseudobulk" value="1"> 跳过伪 bulk 导出</label>
+        <label class="toggle"><input type="checkbox" name="skip_knockout" value="1"> 跳过启发式靶点优先级评分</label>
+        <label class="toggle"><input type="checkbox" name="skip_docking" value="1"> 跳过虚拟筛选</label>
+        <label class="toggle"><input type="checkbox" name="allow_review_docking" value="1"> 允许 REVIEW 靶点进入对接</label>
+        <label class="toggle"><input type="checkbox" name="skip_md" value="1"> 跳过 MD/工具交接</label>
+        <label class="toggle"><input type="checkbox" name="skip_handoff" value="1"> 跳过 MD/外部工具导出</label>
+        <label class="toggle"><input type="checkbox" name="skip_docking_ml" value="1"> 跳过对接 ML 重打分</label>
+        <label class="toggle"><input type="checkbox" name="skip_network" value="1"> 跳过网络毒理学</label>
+        <label class="toggle"><input type="checkbox" name="skip_faers" value="1"> 跳过 FAERS</label>
+        <label class="toggle"><input type="checkbox" name="skip_cell_feedback" value="1"> 跳过细胞反馈</label>
+        <label class="toggle"><input type="checkbox" name="skip_qc_gate" value="1"> 跳过 QC 门控</label>
+        <label class="toggle"><input type="checkbox" name="skip_differential_abundance" value="1"> 跳过差异丰度检验</label>
+        <label class="toggle"><input type="checkbox" name="keep_all_genes" value="1"> 保留全部基因</label>
+        <label class="toggle"><input type="checkbox" name="force" value="1"> 强制重跑</label>
+        <label class="toggle"><input type="checkbox" name="dry_run" value="1"> 仅预演（dry run）</label>
+      </div>
+    </details>
+    <div id="datasetPrefillNote" class="ok"></div>
+    <div class="actions">
+      <button id="startBtn" type="button" data-primary onclick="startRun()">开始全自动流水线</button>
+      <button id="pauseBtn" class="secondary" type="button" onclick="pauseFullJob()" disabled>暂停</button>
+      <button id="resumeBtn" class="secondary" type="button" onclick="resumeFullJob()" disabled>继续</button>
+    </div>
+  </form>
+  <div id="message"></div>
+</div>
+
+<div class="card" id="full-existing">
+  <h2>查看已有结果</h2>
+  <div class="grid wide">
+      <label>工作目录（目录）
+      <input id="existingWorkdir" placeholder="填到 outputs 的上一层目录">
+    </label>
+  </div>
+  <div class="actions" style="margin-top:10px;">
+    <button type="button" class="secondary" onclick="loadByWorkdir()">加载已有结果</button>
+  </div>
+  <div id="loadMessage"></div>
+</div>
+
+<div class="card" id="full-progress">
+  <h2>实时进度</h2>
+  <pre id="log">等待开始...</pre>
+</div>
+
+<div class="card" id="full-results">
+  <h2>流程结果</h2>
+  <div id="resultStats" class="stat-grid"></div>
+  <div id="summaryRow"></div>
+  <div id="fileLinks"></div>
+  <!--PRIVATE_PLAN_ONE_START-->
+  <div class="tablebox"><table id="planCoverageTable"><caption>私密流水线：未完成或不达标 Panel</caption></table></div>
+  <div class="tablebox"><table id="planPerformanceTable"><caption>私密流水线：性能目标未达标 Panel</caption></table></div>
+  <div class="tablebox"><table id="planEnvironmentTable"><caption>私密流水线：外部工具版本</caption></table></div>
+  <div class="tablebox"><table id="planStageTable"><caption>私密流水线：阶段状态</caption></table></div>
+  <!--PRIVATE_PLAN_ONE_END-->
+  <div class="tablebox"><table id="qcGateTable"><caption>QC 门控</caption></table></div>
+  <div class="tablebox"><table id="diffAbundanceTable"><caption>细胞类型差异丰度</caption></table></div>
+  <div class="tablebox"><table id="priorityTable"><caption>证据整合靶点优先级</caption></table></div>
+  <div class="tablebox"><table id="validationTable"><caption>五维靶点验证评分</caption></table></div>
+  <div class="tablebox"><table id="decisionTable"><caption>最终靶点决策</caption></table></div>
+  <div class="tablebox"><table id="benchmarkTable"><caption>Benchmark 排序评估</caption></table></div>
+  <div class="tablebox"><table id="externalValidationTable"><caption>外部队列验证</caption></table></div>
+  <div class="tablebox"><table id="omicsQcTable"><caption>伪 bulk 组学 QC</caption></table></div>
+  <div class="tablebox"><table id="poseQcTable"><caption>PoseBusters 结构合理性</caption></table></div>
+  <div class="tablebox"><table id="structuralQualityTable"><caption>结构验证门控</caption></table></div>
+  <div class="tablebox"><table id="readinessTable"><caption>论文就绪度门控</caption></table></div>
+  <div class="tablebox"><table id="reproducibilityTable"><caption>可复现性清单</caption></table></div>
+  <div class="tablebox"><table id="evidenceCoverageTable"><caption>证据来源覆盖</caption></table></div>
+  <div class="tablebox"><table id="sourceAblationTable"><caption>来源消融稳定性</caption></table></div>
+  <div class="tablebox"><table id="keyTable"><caption>关键基因（兼容视图）</caption></table></div>
+  <div class="tablebox"><table id="koTable"><caption>启发式扰动评分 Top</caption></table></div>
+  <div class="tablebox"><table id="dockTable"><caption>虚拟筛选</caption></table></div>
+  <div class="tablebox"><table id="caddTable"><caption>CADD 下游（MD/ML/工具交接）</caption></table></div>
+  <div class="tablebox"><table id="networkTable"><caption>网络毒理学交集</caption></table></div>
+  <div class="tablebox"><table id="faersTable"><caption>FAERS 信号</caption></table></div>
+  <div class="tablebox"><table id="feedbackTable"><caption>细胞反馈靶点</caption></table></div>
+  <div class="tablebox"><table id="feedbackDegTable"><caption>细胞反馈差异表达</caption></table></div>
+  <div class="tablebox"><table id="feedbackGoTable"><caption>细胞反馈 GO 富集 Top5（通路-基因网络）</caption></table></div>
+  <div class="tablebox"><table id="feedbackKeggTable"><caption>细胞反馈 KEGG 富集 Top5（通路-基因网络）</caption></table></div>
+</div>
+</div>
+
+<script>
+function esc(value) {
+  return String(value == null ? '' : value).replace(/[&<>"']/g, c => ({'&':'&amp;','<':'&lt;','>':'&gt;','"':'&quot;',"'":'&#39;'}[c]));
+}
+let currentJob = null;
+let pollTimer = null;
+let jobAlerted = false;
+const FULL_JOB_KEY = 'liver_ui_full_job';
+const FULL_FORM_KEY = 'liver_ui_full_form';
+let pipelineSearchResults = [];
+let prefillDataType = '';
+
+function applyDatasetPrefill() {
+  try {
+    const params = new URLSearchParams(window.location.search);
+    const accession = params.get('accession');
+    const input = document.querySelector('input[name="accession"]');
+    if (!accession || !input) return;
+    input.value = accession.toUpperCase();
+    const title = params.get('dataset_title');
+    const species = params.get('species');
+    prefillDataType = (params.get('data_type') || '').toLowerCase();
+    const speciesSelect = document.querySelector('select[name="species"]');
+    if (speciesSelect && ['auto', 'hs', 'mm'].includes(species)) {
+      speciesSelect.value = species;
+    }
+    const note = document.getElementById('datasetPrefillNote');
+    if (note) {
+      const label = prefillDataType ? '（' + prefillDataType + '）' : '';
+      note.className = 'ok';
+      note.textContent = '已带入数据集：' + accession.toUpperCase() + label + (title ? ' · ' + title : '');
+    }
+    const url = new URL(window.location.href);
+    url.searchParams.delete('accession');
+    url.searchParams.delete('dataset_title');
+    url.searchParams.delete('data_type');
+    url.searchParams.delete('species');
+    window.history.replaceState(null, '', url.toString());
+  } catch (e) {}
+}
+
+async function searchPipelineDatasets() {
+  const form = document.getElementById('pipelineSearchForm');
+  const data = new URLSearchParams(new FormData(form));
+  const msg = document.getElementById('pipelineSearchMessage');
+  msg.className = '';
+  msg.textContent = '正在搜索...';
+  try {
+    const resp = await fetch('/datasets/search', {method: 'POST', body: data});
+    const result = await resp.json();
+    if (!resp.ok) throw new Error(result.error || '搜索失败');
+    pipelineSearchResults = result.results || [];
+    renderPipelineSearchResults();
+    msg.className = 'ok';
+    msg.textContent = '匹配数据集：' + result.count;
+  } catch (e) {
+    msg.className = 'error';
+    msg.textContent = String(e.message || e);
+    document.getElementById('pipelineSearchBody').innerHTML =
+      '<tr><td colspan="6" class="muted">暂无结果</td></tr>';
+  }
+}
+
+function renderPipelineSearchResults() {
+  const body = document.getElementById('pipelineSearchBody');
+  if (!pipelineSearchResults.length) {
+    body.innerHTML = '<tr><td colspan="6" class="muted">未找到匹配数据集</td></tr>';
+    return;
+  }
+  body.innerHTML = pipelineSearchResults.map((row, index) => {
+    const type = row.data_type || 'other';
+    const badge = '<span class="badge ' + esc(type) + '">' + esc(type) + '</span>';
+    const action = '<button class="secondary" type="button" onclick="choosePipelineDataset(' + index + ')">选择</button>';
+    return '<tr><td>' + (index + 1) + '</td>' +
+      '<td><a href="' + esc(row.url) + '" target="_blank" rel="noopener">' + esc(row.accession) + '</a></td>' +
+      '<td>' + esc(row.title) + '</td>' +
+      '<td>' + esc(row.organism) + '</td>' +
+      '<td>' + badge + '</td>' +
+      '<td>' + action + '</td></tr>';
+  }).join('');
+}
+
+function choosePipelineDataset(index) {
+  const row = pipelineSearchResults[index];
+  if (!row) return;
+  prefillDataType = (row.data_type || 'other').toLowerCase();
+  const input = document.querySelector('input[name="accession"]');
+  if (input) input.value = row.accession;
+  const speciesSelect = document.querySelector('select[name="species"]');
+  const organism = String(row.organism || '').toLowerCase();
+  if (speciesSelect) {
+    if (organism.includes('homo sapiens') || organism.includes('human')) {
+      speciesSelect.value = 'hs';
+    } else if (organism.includes('mus musculus') || organism.includes('mouse')) {
+      speciesSelect.value = 'mm';
+    } else {
+      speciesSelect.value = 'auto';
+    }
+  }
+  const note = document.getElementById('datasetPrefillNote');
+  if (note) {
+    note.className = 'ok';
+    note.textContent = '已带入数据集：' + row.accession + '（' + prefillDataType + ' · ' + (row.organism || '物种未知') + '） · ' + row.title;
+  }
+  msg('已填入数据集 ' + row.accession + '，启动全自动流水线时将自动下载。', 'ok');
+}
+
+function saveJobRecord() {
+  try { sessionStorage.setItem(FULL_JOB_KEY, currentJob); } catch (e) {}
+}
+
+function clearJobRecord() {
+  try { sessionStorage.removeItem(FULL_JOB_KEY); } catch (e) {}
+}
+
+function restoreJobRecord() {
+  let saved = null;
+  let target = null;
+  try { saved = sessionStorage.getItem(FULL_JOB_KEY); } catch (e) {}
+  try { target = new URLSearchParams(window.location.search).get('job'); } catch (e) {}
+  const job = target || saved;
+  if (!job) return;
+  currentJob = job;
+  saveJobRecord();
+  if (target) {
+    try {
+      const url = new URL(window.location.href);
+      url.searchParams.delete('job');
+      window.history.replaceState(null, '', url.toString());
+    } catch (e) {}
+  }
+  msg('已恢复正在运行的全自动流水线任务，日志继续刷新。', 'ok');
+  document.getElementById('pauseBtn').disabled = false;
+  document.getElementById('resumeBtn').disabled = true;
+  if (pollTimer) clearInterval(pollTimer);
+  pollTimer = setInterval(poll, 1500);
+}
+
+function showJobToast(kind, title, body) {
+  const toast = document.getElementById('jobToast');
+  if (!toast) return;
+  toast.className = 'job-toast ' + (kind || 'info');
+  document.getElementById('jobToastTitle').textContent = title;
+  document.getElementById('jobToastBody').textContent = body || '';
+  toast.hidden = false;
+  jobAlerted = true;
+}
+
+function closeJobToast() {
+  const toast = document.getElementById('jobToast');
+  if (toast) toast.hidden = true;
+}
+
+function collectFormState() {
+  const form = document.getElementById('form');
+  const state = {};
+  new FormData(form).forEach((value, key) => {
+    state[key] = value;
+  });
+  form.querySelectorAll('input[type="checkbox"]').forEach((box) => {
+    if (!box.checked) state[box.name] = '0';
+  });
+  return state;
+}
+
+function saveFormState() {
+  try {
+    sessionStorage.setItem(FULL_FORM_KEY, JSON.stringify(collectFormState()));
+    msg('设置已保存到当前浏览器标签页。', 'ok');
+  } catch (e) {
+    msg('保存设置失败：' + String(e.message || e), 'error');
+  }
+}
+
+function autoSaveFormState() {
+  try {
+    sessionStorage.setItem(FULL_FORM_KEY, JSON.stringify(collectFormState()));
+  } catch (e) {}
+}
+
+function restoreFormState() {
+  let saved = null;
+  try {
+    saved = JSON.parse(sessionStorage.getItem(FULL_FORM_KEY) || 'null');
+  } catch (e) {
+    return;
+  }
+  if (!saved) return;
+  const form = document.getElementById('form');
+  Object.entries(saved).forEach(([name, value]) => {
+    const el = form.querySelector('[name="' + name + '"]');
+    if (!el) return;
+    if (el.type === 'checkbox') {
+      el.checked = String(value) === '1';
+    } else {
+      el.value = value;
+    }
+  });
+}
+
+function resetForm() {
+  try {
+    sessionStorage.removeItem(FULL_FORM_KEY);
+  } catch (e) {}
+  document.getElementById('form').reset();
+  msg('已恢复默认设置。', 'ok');
+}
+
+function msg(text, cls) {
+  const el = document.getElementById('message');
+  el.className = cls || '';
+  el.textContent = text;
+}
+
+function renderTable(id, rows, columns) {
+  const table = document.getElementById(id);
+  if (!table) return;
+  table.innerHTML = '';
+  const cols = columns || (rows && rows.length ? Object.keys(rows[0]) : []);
+  if (!rows || !rows.length) {
+    table.innerHTML = '<tbody><tr><td class="muted">暂无数据</td></tr></tbody>';
+    return;
+  }
+  const thead = document.createElement('thead');
+  const trh = document.createElement('tr');
+  cols.forEach((c) => {
+    const th = document.createElement('th');
+    th.textContent = c;
+    trh.appendChild(th);
+  });
+  thead.appendChild(trh);
+  table.appendChild(thead);
+  const tbody = document.createElement('tbody');
+  rows.slice(0, 20).forEach((row) => {
+    const tr = document.createElement('tr');
+    cols.forEach((c) => {
+      const td = document.createElement('td');
+      td.textContent = row[c] === null || row[c] === undefined ? '' : String(row[c]);
+      tr.appendChild(td);
+    });
+    tbody.appendChild(tr);
+  });
+  table.appendChild(tbody);
+}
+
+async function startRun() {
+  const form = document.getElementById('form');
+  const data = new URLSearchParams(new FormData(form));
+  autoSaveFormState();
+  const accession = (data.get('accession') || '').trim().toUpperCase();
+    const btn = document.getElementById('startBtn');
+    btn.disabled = true;
+    jobAlerted = false;
+    closeJobToast();
+    msg('正在启动...');
+  try {
+    const resp = await fetch('/full/start', {method: 'POST', body: data});
+    const result = await resp.json();
+    if (!resp.ok) throw new Error(result.error || '启动失败');
+    currentJob = result.job;
+    saveJobRecord();
+    document.getElementById('log').textContent = '';
+    document.getElementById('pauseBtn').disabled = false;
+    document.getElementById('resumeBtn').disabled = false;
+    msg('任务已启动，日志实时刷新。', 'ok');
+    if (pollTimer) clearInterval(pollTimer);
+    pollTimer = setInterval(poll, 1500);
+  } catch (e) {
+    msg(String(e.message || e), 'error');
+  } finally {
+    btn.disabled = false;
+  }
+}
+
+async function poll() {
+  if (!currentJob) return;
+  try {
+    const logResp = await fetch('/full/log?job=' + currentJob);
+    const text = await logResp.text();
+    const box = document.getElementById('log');
+    box.textContent = text;
+    box.scrollTop = box.scrollHeight;
+    const statusResp = await fetch('/full/status?job=' + currentJob);
+    const status = await statusResp.json();
+    const pauseBtn = document.getElementById('pauseBtn');
+    const resumeBtn = document.getElementById('resumeBtn');
+    const planPauseBtn = document.getElementById('planPauseBtn');
+    const planResumeBtn = document.getElementById('planResumeBtn');
+    if (status.queued) {
+      pauseBtn.disabled = true;
+      resumeBtn.disabled = true;
+      if (planPauseBtn) planPauseBtn.disabled = true;
+      if (planResumeBtn) planResumeBtn.disabled = true;
+      msg('任务已进入队列，等待前面的任务完成...', 'ok');
+      return;
+    }
+    if (status.running) {
+      pauseBtn.disabled = false;
+      resumeBtn.disabled = true;
+      if (planPauseBtn) planPauseBtn.disabled = false;
+      if (planResumeBtn) planResumeBtn.disabled = true;
+    } else if (status.paused) {
+      pauseBtn.disabled = true;
+      resumeBtn.disabled = false;
+      if (planPauseBtn) planPauseBtn.disabled = true;
+      if (planResumeBtn) planResumeBtn.disabled = false;
+    } else {
+      pauseBtn.disabled = true;
+      resumeBtn.disabled = true;
+      if (planPauseBtn) planPauseBtn.disabled = true;
+      if (planResumeBtn) planResumeBtn.disabled = true;
+    }
+    if (!status.running) {
+      clearInterval(pollTimer);
+      pollTimer = null;
+      if (status.paused) {
+        msg('任务已暂停，可点击继续任务。', 'ok');
+        if (!jobAlerted) {
+          showJobToast('paused', '任务已暂停', '当前阶段：' + (status.stage || '未知'));
+        }
+      } else {
+        if (status.ok) {
+          msg('流水线已完成。', 'ok');
+          if (!jobAlerted) showJobToast('ok', '任务已完成', '全自动流水线任务已全部完成。');
+        } else {
+          msg('流水线运行失败，请查看日志。', 'error');
+          if (!jobAlerted) {
+            showJobToast('error', '任务中断', '运行到阶段：' + (status.stage || '未知') + '\n原因：' + (status.error || '请查看日志'));
+          }
+        }
+        if (status.ok) await loadResults(currentJob);
+        currentJob = null;
+        clearJobRecord();
+      }
+    }
+  } catch (e) {
+    // keep polling on transient errors
+  }
+}
+
+async function loadResults(job) {
+  try {
+    const resp = await fetch('/full/results?job=' + job);
+    const data = await resp.json();
+    renderResults(data);
+  } catch (e) {
+    document.getElementById('summaryRow').textContent = '结果加载失败：' + String(e.message || e);
+  }
+}
+
+async function loadByWorkdir() {
+  const workdir = document.getElementById('existingWorkdir').value.trim();
+  const box = document.getElementById('loadMessage');
+  if (!workdir) {
+    box.className = 'error';
+    box.textContent = '请输入工作目录';
+    return;
+  }
+  try {
+    const resp = await fetch('/full/results?workdir=' + encodeURIComponent(workdir));
+    const data = await resp.json();
+    if (!resp.ok) throw new Error(data.error || '加载失败');
+    renderResults(data);
+    if (!data.exists) {
+      box.className = 'error';
+      box.textContent = '该目录未找到结果：请填到 outputs 的上一层目录';
+      return;
+    }
+    box.className = 'ok';
+    box.textContent = '已加载：' + data.workdir;
+  } catch (e) {
+    box.className = 'error';
+    box.textContent = String(e.message || e);
+  }
+}
+
+function renderStats(data) {
+  const summary = data.summary || {};
+  const ko = summary.knockout || {};
+  const dock = summary.docking || {};
+  const cadd = summary.cadd_downstream || {};
+  const network = summary.network || {};
+  const faers = summary.faers || {};
+  const fb = summary.cell_feedback || {};
+  const priority = summary.target_priority || {};
+  const readiness = summary.publication_readiness || {};
+  const benchmark = priority.benchmark || data.benchmark || {};
+  const validation = summary.target_validation || {};
+  const externalValidation = summary.external_validation || data.external_validation || {};
+  const decisions = summary.target_decisions || {};
+  const omicsQc = data.omics_qc || {};
+  const poseQc = data.pose_qc || {};
+  const structuralQuality = data.structural_quality || {};
+  const structuralGates = structuralQuality.gates || {};
+  const qc = (data.qc_metrics || {}).qc_gate || summary.qc_gate || {};
+  const cards = [
+    {
+      label: '候选靶点宇宙',
+      value: summary.candidate_universe !== undefined ? summary.candidate_universe : 0,
+    },
+    {
+      label: '证据整合靶点',
+      value: priority.targets !== undefined ? priority.targets : (data.target_priority || []).length,
+    },
+    {
+      label: '证据覆盖靶点',
+      value: priority.evidence_covered !== undefined ? priority.evidence_covered : 0,
+    },
+    {
+      label: 'Benchmark AUROC',
+      value: benchmark.auroc !== undefined && benchmark.auroc !== null ? Number(benchmark.auroc).toFixed(3) : 'NA',
+    },
+    {
+      label: '五维验证 GO',
+      value: (validation.decisions || {}).GO || 0,
+    },
+    {
+      label: '外部队列 AUROC',
+      value: externalValidation.auroc !== undefined && externalValidation.auroc !== null ? Number(externalValidation.auroc).toFixed(3) : 'NA',
+      cls: externalValidation.status === 'completed' ? 'ok' : '',
+    },
+    {
+      label: '外部验证评分来源',
+      value: externalValidation.score_origin || 'NA',
+      cls: externalValidation.score_provenance_valid ? 'ok' : 'warn',
+    },
+    {
+      label: '外部验证目标匹配率',
+      value: externalValidation.target_match_rate !== undefined && externalValidation.target_match_rate !== null ? (Number(externalValidation.target_match_rate) * 100).toFixed(1) + '%' : 'NA',
+    },
+    {
+      label: '最终可推进靶点',
+      value: (decisions.actions || {}).PROCEED_VALIDATION || 0,
+    },
+    {
+      label: 'Omics QC',
+      value: omicsQc.status || 'skipped',
+      cls: omicsQc.gate_passed ? 'ok' : 'warn',
+    },
+    {
+      label: 'Batch 混杂',
+      value: omicsQc.has_batch_metadata ? (omicsQc.batch_condition_confounding ? '存在' : '未发现') : '无批次元数据',
+      cls: omicsQc.batch_condition_confounding ? 'warn' : (omicsQc.has_batch_metadata ? 'ok' : ''),
+    },
+    {
+      label: 'Pose QC',
+      value: poseQc.status || 'skipped',
+      cls: poseQc.gate_passed ? 'ok' : 'warn',
+    },
+    {
+      label: '结构门控通过',
+      value: Object.values(structuralGates).filter(Boolean).length + ' / ' + Object.keys(structuralGates).length,
+      cls: structuralQuality.all_publication_structural_gates ? 'ok' : 'warn',
+    },
+    {
+      label: '可追溯性',
+      value: data.reproducibility && data.reproducibility.git ? '已生成' : 'NA',
+      cls: data.reproducibility && data.reproducibility.git ? 'ok' : 'warn',
+    },
+    {
+      label: '论文就绪等级',
+      value: readiness.level || 'exploratory',
+      cls: readiness.level === 'paper_supporting' || readiness.level === 'publication_grade' ? 'ok' : 'warn',
+    },
+    {
+      label: '关键基因',
+      value: summary.key_genes !== undefined ? summary.key_genes : (data.key_genes || []).length,
+    },
+    {
+      label: '敲除评分基因',
+      value: ko.genes_scored !== undefined ? ko.genes_scored : 0,
+    },
+    {
+      label: '对接成功 / 失败',
+      value: (dock.ok || 0) + ' / ' + (dock.failed || 0),
+    },
+    {
+      label: 'MD 完成 / 准备 / 失败',
+      value: (cadd.md_completed || 0) + ' / ' + (cadd.md_prepared || 0) + ' / ' + (cadd.md_failed || 0),
+    },
+    {
+      label: '工具交接',
+      value: cadd.handoff_ok !== undefined ? cadd.handoff_ok : 0,
+    },
+    {
+      label: '网络交集基因',
+      value: network.overlap_genes !== undefined ? network.overlap_genes : 0,
+    },
+    {
+      label: 'Cytoscape 网络',
+      value: networkCytoscapeLabel(network.cytoscape || {}),
+      cls: (network.cytoscape || {}).status === 'live' ? 'ok' : '',
+    },
+    {
+      label: 'FAERS 信号',
+      value: faers.signals !== undefined ? faers.signals : 0,
+    },
+    {
+      label: '细胞反馈匹配',
+      value: fb.genes_matched !== undefined ? fb.genes_matched : 0,
+    },
+    {
+      label: '反馈差异基因',
+      value: fb.deg_genes !== undefined ? fb.deg_genes : (data.cell_feedback_deg || []).length,
+    },
+    {
+      label: 'QC 门控',
+      value: qc.status || 'skipped',
+      cls: qc.status === 'pass' ? 'ok' : (qc.status === 'fail' ? 'fail' : 'warn'),
+    },
+  ];
+  document.getElementById('resultStats').innerHTML = cards.map((card) => {
+    return '<div class="stat-card ' + (card.cls || '') + '">' +
+      '<div class="stat-label">' + esc(card.label) + '</div>' +
+      '<div class="stat-value">' + esc(card.value) + '</div></div>';
+  }).join('');
+}
+
+function renderPlanOneResults(data) {
+  const plan = data.plan_one || {};
+  const coverage = plan.coverage || {};
+  const status = plan.status || {};
+  const environmentRows = Object.entries(coverage.environment || {}).map(([tool, value]) => ({
+    tool,
+    version: value && typeof value === 'object' ? (value.version || '') : '',
+    expected: value && typeof value === 'object' ? (value.expected || '') : '',
+    available: value && typeof value === 'object'
+      ? (value.available !== undefined ? value.available : (value.match !== undefined ? value.match : ''))
+      : '',
+    path: value && typeof value === 'object' ? (value.path || '') : '',
+  }));
+  const stageRows = Object.entries(status.stages || {}).map(([stage, value]) => ({
+    stage,
+    status: value && typeof value === 'object' ? (value.status || '') : String(value || ''),
+    elapsed_seconds: value && typeof value === 'object' ? (value.elapsed_seconds || '') : '',
+  }));
+  resultStats.innerHTML = [
+    {
+      label: '代码实现覆盖',
+      value: coverage.implementation_completion_percent !== undefined ? Number(coverage.implementation_completion_percent).toFixed(1) + '%' : 'NA',
+      cls: coverage.above_90_implementation ? 'ok' : 'warn',
+    },
+    {
+      label: '当前结果覆盖',
+      value: coverage.current_result_completion_percent !== undefined ? Number(coverage.current_result_completion_percent).toFixed(1) + '%' : 'NA',
+      cls: coverage.current_90pct_ready ? 'ok' : 'warn',
+    },
+    {
+      label: '配置前提后预计覆盖',
+      value: coverage.projected_completion_percent_with_prerequisites !== undefined ? Number(coverage.projected_completion_percent_with_prerequisites).toFixed(1) + '%' : 'NA',
+      cls: coverage.above_90_projected_with_prerequisites ? 'ok' : 'warn',
+    },
+    {
+      label: '性能目标达标 Panel',
+      value: (coverage.performance_targets_met !== undefined ? coverage.performance_targets_met : 'NA') + ' / ' + (coverage.panels || 'NA'),
+    },
+  ].map((card) => (
+    '<div class="stat-card ' + (card.cls || '') + '">' +
+    '<div class="stat-label">' + esc(card.label) + '</div>' +
+    '<div class="stat-value">' + esc(card.value) + '</div></div>'
+  )).join('');
+  document.getElementById('summaryRow').innerHTML =
+    '<p class="muted">私密本地流水线：' + esc((coverage.panels || 0)) + ' 个 Panel；' +
+    '代码实现覆盖 ' + esc(coverage.implementation_completion_percent !== undefined ? Number(coverage.implementation_completion_percent).toFixed(2) + '%' : 'NA') +
+    '；当前执行结果覆盖 ' + esc(coverage.current_result_completion_percent !== undefined ? Number(coverage.current_result_completion_percent).toFixed(2) + '%' : 'NA') +
+    '；满足外部前提后的预计覆盖 ' + esc(coverage.projected_completion_percent_with_prerequisites !== undefined ? Number(coverage.projected_completion_percent_with_prerequisites).toFixed(2) + '%' : 'NA') + '</p>';
+  const links = document.getElementById('fileLinks');
+  links.innerHTML = '';
+  (data.files || []).forEach((name) => {
+    const a = document.createElement('a');
+    a.className = 'file-link';
+    a.href = '/full/file?job=' + (currentJob || '') + '&workdir=' + encodeURIComponent(data.workdir) + '&name=' + encodeURIComponent(name);
+    a.textContent = name.split('/').pop();
+    links.appendChild(a);
+  });
+  renderTable('planCoverageTable', coverage.missing_or_unmet_panels || [], ['figure', 'panel', 'label', 'current_status', 'audit_verdict', 'dependency', 'note']);
+  renderTable('planPerformanceTable', coverage.performance_targets_not_met || [], ['figure', 'panel', 'label', 'audit_verdict', 'note']);
+  renderTable('planEnvironmentTable', environmentRows, ['tool', 'version', 'expected', 'available', 'path']);
+  renderTable('planStageTable', stageRows, ['stage', 'status', 'elapsed_seconds']);
+  [
+    'qcGateTable', 'diffAbundanceTable', 'priorityTable', 'validationTable',
+    'decisionTable', 'benchmarkTable', 'externalValidationTable', 'omicsQcTable',
+    'poseQcTable', 'structuralQualityTable', 'readinessTable',
+    'reproducibilityTable', 'evidenceCoverageTable', 'sourceAblationTable',
+    'keyTable', 'koTable', 'dockTable', 'caddTable', 'networkTable',
+    'faersTable', 'feedbackTable', 'feedbackDegTable', 'feedbackGoTable',
+    'feedbackKeggTable',
+  ].forEach((id) => renderTable(id, [], []));
+}
+
+async function startPlanOneRun() {
+  const form = document.getElementById('planOneForm');
+  const data = new FormData(form);
+  const output = (data.get('plan_output_root') || '').trim();
+  const message = document.getElementById('planMessage');
+  if (!output) {
+    message.className = 'error';
+    message.textContent = '请填写私密流水线结果根目录。';
+    return;
+  }
+  const startButton = form.querySelector('button[data-primary]');
+  if (startButton) startButton.disabled = true;
+  jobAlerted = false;
+  closeJobToast();
+  message.className = '';
+  message.textContent = '正在启动私密流水线...';
+  try {
+    const resp = await fetch('/full/start', {method: 'POST', body: data});
+    const result = await resp.json();
+    if (!resp.ok) throw new Error(result.error || '启动失败');
+    currentJob = result.job;
+    saveJobRecord();
+    document.getElementById('log').textContent = '';
+    document.getElementById('pauseBtn').disabled = false;
+    document.getElementById('resumeBtn').disabled = false;
+    document.getElementById('planPauseBtn').disabled = false;
+    document.getElementById('planResumeBtn').disabled = false;
+    message.className = 'ok';
+    message.textContent = '私密流水线已启动。';
+    if (pollTimer) clearInterval(pollTimer);
+    pollTimer = setInterval(poll, 1500);
+  } catch (e) {
+    message.className = 'error';
+    message.textContent = String(e.message || e);
+  } finally {
+    if (startButton) startButton.disabled = false;
+  }
+}
+
+function renderResults(data) {
+  if (data.mode === 'experiment_plan_one') {
+    renderPlanOneResults(data);
+    return;
+  }
+  const summary = data.summary || {};
+  renderStats(data);
+  const priority = summary.target_priority || {};
+  const readiness = summary.publication_readiness || {};
+  const benchmark = data.benchmark || priority.benchmark || {};
+  const validation = summary.target_validation || {};
+  const externalValidation = data.external_validation || summary.external_validation || {};
+  const decisions = summary.target_decisions || {};
+  const omicsQc = data.omics_qc || {};
+  const poseQc = data.pose_qc || {};
+  const structuralQuality = data.structural_quality || {};
+  const ko = summary.knockout || {};
+  const dock = summary.docking || {};
+  const cadd = summary.cadd_downstream || {};
+  const network = summary.network || {};
+  const faers = summary.faers || {};
+  const fb = summary.cell_feedback || {};
+  const qc = data.qc_metrics || {};
+  const qcGate = qc.qc_gate || summary.qc_gate || {};
+  renderTable('planCoverageTable', [], []);
+  renderTable('planPerformanceTable', [], []);
+  renderTable('planEnvironmentTable', [], []);
+  renderTable('planStageTable', [], []);
+  document.getElementById('summaryRow').innerHTML =
+    '<p class="muted">单细胞：' + esc(summary.single_cell ? summary.single_cell.dataset || '' : '') +
+    '；候选靶点宇宙：' + esc(summary.candidate_universe !== undefined ? summary.candidate_universe : 0) +
+    '；证据整合靶点：' + esc(priority.targets !== undefined ? priority.targets : (data.target_priority || []).length) +
+    '；论文就绪：' + esc(readiness.level || 'exploratory') +
+    '；GO：' + esc((priority.decisions || {}).GO || 0) +
+    '；证据覆盖中位数：' + esc(priority.median_coverage_ratio !== null && priority.median_coverage_ratio !== undefined ? Number(priority.median_coverage_ratio).toFixed(3) : 'NA') +
+    '；Benchmark AUROC：' + esc(benchmark.auroc !== undefined && benchmark.auroc !== null ? Number(benchmark.auroc).toFixed(3) : 'NA') +
+    '；五维验证 GO：' + esc((validation.decisions || {}).GO || 0) +
+    '；外部队列 AUROC：' + esc(externalValidation.auroc !== undefined && externalValidation.auroc !== null ? Number(externalValidation.auroc).toFixed(3) : 'NA') +
+    '；最终可推进靶点：' + esc((decisions.actions || {}).PROCEED_VALIDATION || 0) +
+    '；关键基因：' + esc(summary.key_genes !== undefined ? summary.key_genes : data.key_genes.length) +
+    '；敲除评分基因数：' + esc(ko.genes_scored !== undefined ? ko.genes_scored : 0) +
+    '；对接成功：' + esc(dock.ok !== undefined ? dock.ok : 0) +
+    '；失败：' + esc(dock.failed !== undefined ? dock.failed : 0) +
+    '；MD 完成：' + esc(cadd.md_completed !== undefined ? cadd.md_completed : 0) +
+    '；准备：' + esc(cadd.md_prepared !== undefined ? cadd.md_prepared : 0) +
+    '；网络交集：' + esc(network.overlap_genes !== undefined ? network.overlap_genes : 0) +
+    '；Cytoscape：' + esc(networkCytoscapeLabel(network.cytoscape || {})) +
+    '；FAERS 信号：' + esc(faers.signals !== undefined ? faers.signals : 0) +
+    '；细胞反馈匹配基因：' + esc(fb.genes_matched !== undefined ? fb.genes_matched : 0) +
+    '；QC 门控：' + esc(qcGate.status || 'skipped') + '</p>';
+  const links = document.getElementById('fileLinks');
+  links.innerHTML = '';
+  (data.files || []).forEach((name) => {
+    const a = document.createElement('a');
+    a.className = 'file-link';
+    a.href = '/full/file?job=' + (currentJob || '') + '&workdir=' + encodeURIComponent(data.workdir) + '&name=' + encodeURIComponent(name);
+    a.textContent = name.split('/').pop();
+    links.appendChild(a);
+  });
+  const qcChecks = (qcGate.checks || []).map((c) => ({
+    name: c.name,
+    level: c.level,
+    ok: c.ok ? '通过' : '未通过',
+    message: c.message,
+  }));
+  const qcRows = qcChecks.length
+    ? qcChecks
+    : [{
+        name: 'QC 门控',
+        level: qcGate.status || 'skipped',
+        ok: qcGate.status === 'pass' ? '通过' : qcGate.status,
+        message: qcGate.summary || '',
+      }];
+  renderTable('qcGateTable', qcRows, ['name', 'level', 'ok', 'message']);
+  renderTable('diffAbundanceTable', data.differential_abundance, [
+    'celltype', 'n_cells', 'chi2', 'p_value', 'p_adjust', 'significant', 'direction'
+  ]);
+  renderTable('priorityTable', data.target_priority, ['priority_rank', 'gene', 'candidate_origin', 'decision', 'integrated_score', 'evidence_score', 'genetic_causal', 'clinical_precedent', 'safety_risk', 'coverage_ratio', 'knockout_score', 'evidence_status', 'missing_categories']);
+  renderTable('validationTable', data.target_validation, ['validation_rank', 'gene', 'decision', 'adjusted_score', 'evidence_completeness', 'disease_association', 'druggability', 'chemical_matter', 'clinical_precedent', 'structural_data', 'clinical_evidence_quality', 'clinical_evidence_cap_applied', 'safety_penalty']);
+  renderTable('decisionTable', data.target_decisions, ['gene', 'base_decision', 'target_decision', 'final_decision', 'target_action', 'platform_action', 'composite_action', 'adjusted_score', 'safety_risk', 'target_flags', 'platform_conflicts', 'conflict_flags']);
+  renderTable('benchmarkTable', Object.keys(benchmark).length ? [benchmark] : [], ['recall_at_n', 'precision_at_n', 'f1_at_n', 'auroc', 'auroc_ci_low', 'auroc_ci_high', 'auprc', 'auprc_ci_low', 'auprc_ci_high', 'enrichment_factor', 'permutation_p_value', 'n_missing_positive', 'n_missing_negative', 'benchmark_source', 'benchmark_version', 'benchmark_independent_verified', 'benchmark_evidence_mode', 'source_leakage', 'source_overlap', 'excluded_sources']);
+  renderTable('externalValidationTable', Object.keys(externalValidation).length ? [externalValidation] : [], ['status', 'score_origin', 'score_provenance_valid', 'target_match_count', 'target_match_rate', 'unmatched_targets', 'n_samples', 'n_positive', 'n_negative', 'threshold', 'auroc', 'auroc_ci_low', 'auroc_ci_high', 'auprc', 'precision', 'recall', 'f1', 'specificity']);
+  renderTable('omicsQcTable', Object.keys(omicsQc).length ? [omicsQc] : [], ['status', 'n_genes', 'n_samples', 'duplicate_genes', 'missing_fraction', 'zero_fraction', 'negative_values', 'sample_metadata_match', 'sample_outlier_count', 'sample_outlier_fraction', 'correlation_median', 'correlation_min', 'batch_silhouette_score', 'batch_condition_confounding', 'batch_condition_association_p', 'gate_passed']);
+  renderTable('poseQcTable', Object.keys(poseQc).length ? [poseQc] : [], ['status', 'reason', 'pose_format', 'sdf_files', 'poses', 'no_receptor', 'posebusters_errors', 'receptors_resolved', 'pb_valid', 'pb_valid_rate', 'gate_passed']);
+  renderTable('structuralQualityTable', Object.entries(structuralQuality.gates || {}).map(([gate, passed]) => ({gate, passed})), ['gate', 'passed']);
+  renderTable('readinessTable', Object.entries(readiness.checks || {}).map(([gate, passed]) => ({gate, passed})), ['gate', 'passed']);
+  const reproduction = data.reproducibility || {};
+  renderTable('reproducibilityTable', reproduction.git ? [{
+    commit: (reproduction.git || {}).short_commit || (reproduction.git || {}).commit || '',
+    branch: (reproduction.git || {}).branch || '',
+    dirty: (reproduction.git || {}).dirty,
+    python: reproduction.python || '',
+    inputs: Object.keys(reproduction.inputs || {}).length,
+    outputs: Object.keys(reproduction.outputs || {}).length,
+  }] : [], ['commit', 'branch', 'dirty', 'python', 'inputs', 'outputs']);
+  renderTable('evidenceCoverageTable', data.evidence_coverage, ['source', 'tier', 'evidence_type', 'relation', 'n_records', 'n_targets']);
+  renderTable('sourceAblationTable', data.source_ablation, ['target_symbol', 'ablation_rank_sd', 'max_rank_delta', 'rank_stability', 'ablation_runs']);
+  renderTable('keyTable', data.key_genes, ['rank', 'gene', 'direction', 'avg_log2fc', 'p_val_adj']);
+  renderTable('koTable', data.knockout, ['rank', 'gene', 'target_class', 'target_score', 'knockout_score', 'ppi_hub_score']);
+  renderTable('dockTable', data.docking, ['gene', 'status', 'pdb_id', 'ligand_count', 'hits', 'best_affinity']);
+  renderTable('caddTable', data.cadd_downstream, ['gene', 'md_status', 'md_mode', 'md_requested', 'md_completed', 'md_prepared', 'md_failed', 'handoff_status', 'ml_status', 'ml_scored', 'error']);
+  renderTable('networkTable', data.network, ['gene', 'n_sources', 'sources', 'ppi_degree', 'ppi_betweenness', 'ppi_clustering', 'ppi_hub_score']);
+  renderTable('faersTable', data.faers, ['drug', 'event', 'a', 'ror', 'ror_lower', 'prr', 'ic', 'ebgm', 'signal']);
+  renderTable('feedbackTable', data.cell_feedback, ['gene', 'source', 'feedback_score', 'knockout_score', 'docking_hits', 'cell_detection_rate', 'celltype_specificity', 'cell_support_score', 'top_celltype']);
+  renderTable('feedbackDegTable', data.cell_feedback_deg, ['gene', 'avg_log2FC', 'p_val_adj', 'direction', 'significant']);
+  renderTable('feedbackGoTable', data.cell_feedback_enrichment_go, ['ID', 'Description', 'p.adjust', 'Count', 'geneID']);
+  renderTable('feedbackKeggTable', data.cell_feedback_enrichment_kegg, ['ID', 'Description', 'p.adjust', 'Count', 'geneID']);
+}
+
+function networkCytoscapeLabel(cyto) {
+  if (!cyto || !cyto.status) return '未运行';
+  if (cyto.status === 'live') return '已推送';
+  if (cyto.status === 'xgmml_only') return 'XGMML';
+  if (cyto.status === 'off') return '已关闭';
+  return cyto.status;
+}
+
+async function pauseFullJob() {
+  if (!currentJob) return;
+  const body = new URLSearchParams({job: currentJob});
+  try {
+    const resp = await fetch('/full/pause', {method: 'POST', body});
+    const data = await resp.json();
+    if (!resp.ok) throw new Error(data.error || '暂停失败');
+    msg('暂停请求已发送。', 'ok');
+  } catch (e) {
+    msg(String(e.message || e), 'error');
+  }
+}
+
+async function resumeFullJob() {
+  if (!currentJob) return;
+  const body = new URLSearchParams({job: currentJob});
+  try {
+    const resp = await fetch('/full/resume', {method: 'POST', body});
+    const result = await resp.json();
+    if (!resp.ok) throw new Error(result.error || '恢复失败');
+    msg('任务已恢复。', 'ok');
+    jobAlerted = false;
+    closeJobToast();
+    document.getElementById('pauseBtn').disabled = false;
+    document.getElementById('resumeBtn').disabled = true;
+    if (pollTimer) clearInterval(pollTimer);
+    pollTimer = setInterval(poll, 1500);
+  } catch (e) {
+    msg(String(e.message || e), 'error');
+  }
+}
+
+applyDatasetPrefill();
+restoreJobRecord();
+restoreFormState();
+</script>
+<div id="jobToast" class="job-toast" hidden>
+  <div class="job-toast-title" id="jobToastTitle"></div>
+  <div class="job-toast-body" id="jobToastBody"></div>
+  <button type="button" class="job-toast-close" onclick="closeJobToast()">知道了</button>
+</div>
+</body>
+</html>

@@ -1,0 +1,105 @@
+# Python
+__pycache__/
+*.py[cod]
+*$py.class
+*.egg-info/
+.eggs/
+.venv/
+venv/
+.pytest_cache/
+.mypy_cache/
+.ruff_cache/
+
+# R
+.Rhistory
+.RData
+.Rproj.user/
+
+# OS / editors
+.DS_Store
+Thumbs.db
+.idea/
+.vscode/
+.ipynb_checkpoints/
+
+# Local environment and secrets
+.env
+.env.*
+!.env.example
+.git-credentials
+.netrc
+.npmrc
+.pypirc
+*.pem
+*.p12
+*.key
+*.crt
+*.cer
+*.der
+*.jks
+*.keystore
+*.kdbx
+*.sqlite
+*.sqlite-wal
+*.sqlite-shm
+
+# Local analysis workspace handoff
+/config/analysis_workspace.json
+
+# Web runtime files
+web/history.json
+web/dock_history.json
+web/molecular_docking_history.json
+web/analysis_history.json
+web/task_history.json
+web/install_log.txt
+web/validation_run.log
+web/*_smoke*.log
+web/*_smoke.pid
+web/templates/index.html
+
+# Single-cell pipeline data and outputs
+data/raw/*
+!data/raw/.gitkeep
+data_cache/
+results/*
+!results/README.md
+logs/*
+!logs/.gitkeep
+
+# Virtual screening workdir: generated data and binaries
+dock/evidence/
+dock/validation_real/
+dock/validation_real_random/
+dock/logs/
+dock/outputs/*
+!dock/outputs/.gitkeep
+dock/data/ligands/prepared/
+dock/data/ligands/*.smi
+dock/data/ligands/library.sdf
+dock/data/knockout/
+dock/data/receptors/*.pdb
+dock/data/receptors/*.pdbqt
+dock/config/docking_web_*.json
+dock/tools/
+dock/work/
+
+# Portable source packages
+portable/
+
+# Standalone molecular docking board
+/molecular_docking/
+
+# Validation artifacts
+*.log
+*.tmp
+validation_output/
+
+# Local analysis workspace settings written by `liverbio analysis-export`
+config/analysis_workspace.json
+
+# Scratch / helper files that must never be committed
+scripts/_test_h5ad_reader.R
+scripts/_test_*.R
+.tmp_*
+/$null

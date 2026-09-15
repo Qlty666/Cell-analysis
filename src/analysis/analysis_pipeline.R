@@ -1,0 +1,3556 @@
+#!/usr/bin/env Rscript
+
+suppressWarnings(suppressPackageStartupMessages({
+  library(Seurat)
+  library(Matrix)
+  library(data.table)
+  library(dplyr)
+  library(ggplot2)
+  library(patchwork)
+  library(jsonlite)
+  library(ggrepel)
+  library(pheatmap)
+  library(scDblFinder)
+  library(SingleCellExperiment)
+  library(BiocParallel)
+  library(clusterProfiler)
+  library(org.Hs.eg.db)
+  library(enrichplot)
+  library(DESeq2)
+}))
+
+options(timeout = 600)
+options(future.globals.maxSize = 10 * 1024^3)
+
+# Data-aware helpers used by bulk and pseudobulk stages. Raw count matrices
+# must use count-based models; normalised/microarray matrices must not be
+# rounded and passed to DESeq2.
+liver_is_count_matrix <- function(mat) {
+  values <- tryCatch(
+    if (inherits(mat, "sparseMatrix")) mat@x else as.numeric(mat),
+    error = function(e) numeric()
+  )
+  values <- values[is.finite(values)]
+  if (length(values) == 0 || min(values) < 0) return(FALSE)
+  all(abs(values - round(values)) < 1e-6)
+}
+
+liver_limma_de <- function(mat, meta, cond_levels, method = "limma") {
+  if (!requireNamespace("limma", quietly = TRUE)) {
+    stop("limma is required for normalised/microarray differential expression")
+  }
+  x <- as.matrix(mat)
+  x[!is.finite(x)] <- 0
+  meta$condition <- factor(
+    as.character(meta$condition),
+    levels = c(cond_levels[2], cond_levels[1])
+  )
+  if (identical(method, "limma-voom")) {
+    if (!requireNamespace("edgeR", quietly = TRUE)) {
+      stop("edgeR is required for limma-voom differential expression")
+    }
+    dge <- edgeR::DGEList(counts = round(x))
+    keep <- edgeR::filterByExpr(dge, group = meta$condition)
+    dge <- dge[keep, , keep.lib.sizes = FALSE]
+    dge <- edgeR::calcNormFactors(dge)
+    design <- model.matrix(~ condition, data = meta)
+    voom_fit <- limma::voom(dge, design, plot = FALSE)
+    fit <- limma::lmFit(voom_fit, design)
+  } else {
+    # Already-log2 arrays stay on their original scale. Raw intensity or
+    # positive non-count matrices are transformed before linear modelling.
+    if (min(x, na.rm = TRUE) >= 0 && max(x, na.rm = TRUE) > 50) {
+      x <- log2(x + 1)
+    }
+    if (requireNamespace("limma", quietly = TRUE)) {
+      x <- tryCatch(
+        limma::normalizeBetweenArrays(x),
+        error = function(e) x
+      )
+    }
+    design <- model.matrix(~ condition, data = meta)
+    fit <- limma::lmFit(x, design)
+  }
+  fit <- limma::eBayes(fit)
+  coef_name <- colnames(design)[ncol(design)]
+  top <- limma::topTable(
+    fit,
+    coef = coef_name,
+    number = Inf,
+    sort.by = "P"
+  )
+  top$gene <- rownames(top)
+  top$avg_log2FC <- top$logFC
+  top$p_val <- top$P.Value
+  top$p_val_adj <- top$adj.P.Val
+  top$baseMean <- NA_real_
+  top$pct.1 <- NA_real_
+  top$pct.2 <- NA_real_
+  top
+}
+
+# ---------------------------------------------------------------------------
+# Module loading. Top-level function definitions live in src/analysis/R/*.R.
+# The modules are located from, in order: LIVER_R_MODULES_DIR, the directory
+# that contains this script (<script_dir>/R), the snapshot layout
+# (<script_dir>/analysis/R), a repository root found by walking up from the
+# script (<repo>/src/analysis/R), and finally the current working directory
+# (<cwd>/src/analysis/R).
+# ---------------------------------------------------------------------------
+liver_script_path <- function() {
+  file_arg <- grep("^--file=", commandArgs(trailingOnly = FALSE), value = TRUE)
+  if (length(file_arg) > 0) {
+    return(normalizePath(sub("^--file=", "", file_arg[[1]]), mustWork = FALSE))
+  }
+  normalizePath(
+    file.path("src", "analysis", "analysis_pipeline.R"),
+    mustWork = FALSE
+  )
+}
+
+liver_repo_modules_dir <- function(script_path) {
+  dir <- dirname(script_path)
+  for (i in 1:8) {
+    candidate <- file.path(dir, "src", "analysis", "R")
+    if (dir.exists(candidate)) {
+      return(normalizePath(candidate, mustWork = TRUE))
+    }
+    parent <- dirname(dir)
+    if (identical(parent, dir)) break
+    dir <- parent
+  }
+  NULL
+}
+
+liver_resolve_modules_dir <- function() {
+  candidates <- character(0)
+  env_dir <- Sys.getenv("LIVER_R_MODULES_DIR", unset = "")
+  if (nzchar(env_dir)) {
+    candidates <- c(candidates, env_dir)
+  }
+  script_path <- liver_script_path()
+  script_dir <- dirname(script_path)
+  candidates <- c(
+    candidates,
+    file.path(script_dir, "R"),
+    file.path(script_dir, "analysis", "R")
+  )
+  repo_dir <- liver_repo_modules_dir(script_path)
+  if (!is.null(repo_dir)) {
+    candidates <- c(candidates, repo_dir)
+  }
+  candidates <- c(
+    candidates,
+    file.path(normalizePath(getwd(), mustWork = FALSE), "src", "analysis", "R")
+  )
+  for (candidate in candidates) {
+    if (dir.exists(candidate)) {
+      return(normalizePath(candidate, mustWork = TRUE))
+    }
+  }
+  stop(
+    "Could not locate the R analysis modules (src/analysis/R). ",
+    "Set LIVER_R_MODULES_DIR or run from the repository root. ",
+    "Paths tried:\n  - ", paste(candidates, collapse = "\n  - ")
+  )
+}
+
+liver_modules_dir <- liver_resolve_modules_dir()
+liver_module_files <- c(
+  "zz_utils.R",
+  "enrichment.R",
+  "qc.R",
+  "read_10x.R",
+  "read_h5ad.R",
+  "read_generic.R",
+  "metadata.R"
+)
+for (liver_module in liver_module_files) {
+  source(file.path(liver_modules_dir, liver_module), local = globalenv())
+}
+
+kegg_cache_dir <- file.path(getwd(), "data_cache", "kegg")
+dir.create(kegg_cache_dir, recursive = TRUE, showWarnings = FALSE)
+
+skip_figs <- strsplit(Sys.getenv("LIVER_SKIP_FIGURES", unset = ""), ",")[[1]]
+skip_figs <- trimws(skip_figs[nzchar(skip_figs)])
+
+figure_styles <- list()
+raw_styles <- Sys.getenv("LIVER_FIGURE_STYLES", unset = "")
+if (nzchar(raw_styles)) {
+  for (pair in strsplit(raw_styles, ",", fixed = TRUE)[[1]]) {
+    kv <- strsplit(pair, "=", fixed = TRUE)[[1]]
+    if (length(kv) == 2) {
+      figure_styles[[kv[1]]] <- kv[2]
+    }
+  }
+}
+
+qc_min_features <- param_num("LIVER_QC_MIN_FEATURES")
+qc_max_features <- param_num("LIVER_QC_MAX_FEATURES")
+qc_min_counts <- param_num("LIVER_QC_MIN_COUNTS")
+qc_max_counts <- param_num("LIVER_QC_MAX_COUNTS")
+qc_max_mt <- param_num("LIVER_QC_MAX_MT")
+qc_max_ribo <- param_num("LIVER_QC_MAX_RIBO")
+qc_max_hb <- param_num("LIVER_QC_MAX_HB")
+cluster_resolution <- param_num("LIVER_CLUSTER_RESOLUTION")
+cluster_algorithm <- param_num("LIVER_CLUSTER_ALGORITHM")
+# Accept both the legacy "LIVER_DE_LOGFc" spelling and the canonical
+# "LIVER_DE_LOGFC"; the legacy name keeps working as a fallback.
+de_logfc <- param_num("LIVER_DE_LOGFc")
+if (is.na(de_logfc)) de_logfc <- param_num("LIVER_DE_LOGFC")
+de_padj <- param_num("LIVER_DE_PADJ")
+de_min_base_mean <- param_num("LIVER_DE_MIN_BASEMEAN")
+de_max_logfc <- param_num("LIVER_DE_MAX_LOGFC")
+deg_violin_top_n <- param_num("LIVER_DE_VIOLIN_TOP_N")
+deg_violin_max_cells <- param_num("LIVER_DE_VIOLIN_MAX_CELLS")
+if (is.na(cluster_resolution)) cluster_resolution <- 0.6
+if (is.na(de_logfc)) de_logfc <- 0.25
+if (is.na(de_padj)) de_padj <- 0.05
+if (is.na(de_min_base_mean)) de_min_base_mean <- 0
+if (is.na(de_max_logfc)) de_max_logfc <- 20
+if (is.na(deg_violin_top_n)) deg_violin_top_n <- 12
+if (is.na(deg_violin_max_cells)) deg_violin_max_cells <- 1000
+
+run_cellcycle <- flag_on("LIVER_RUN_CELLCYCLE", "yes")
+run_cluster_markers <- flag_on("LIVER_RUN_CLUSTER_MARKERS", "yes")
+run_signatures <- flag_on("LIVER_RUN_SIGNATURES", "yes")
+run_cnv <- flag_on("LIVER_RUN_CNV", "yes")
+run_singler <- flag_on("LIVER_RUN_SINGLER", "yes")
+run_trajectory <- flag_on("LIVER_RUN_TRAJECTORY", "no")
+regress_cellcycle <- flag_on("LIVER_REGRESS_CELLCYCLE", "no")
+skip_gsea <- flag_on("LIVER_SKIP_GSEA", "no")
+gsea_max_genes_raw <- Sys.getenv("LIVER_GSEA_MAX_GENES", unset = "")
+gsea_max_genes <- if (nzchar(gsea_max_genes_raw)) {
+  val <- suppressWarnings(as.integer(gsea_max_genes_raw))
+  if (is.na(val) || val < 0) 0L else val
+} else {
+  0L
+}
+
+args <- commandArgs(trailingOnly = TRUE)
+root <- Sys.getenv("LIVER_ROOT", unset = NA)
+if (is.na(root) || !nzchar(root)) {
+  root <- getwd()
+}
+
+accession <- toupper(Sys.getenv("LIVER_ACCESSION", unset = "GSE125449"))
+species <- tolower(Sys.getenv("LIVER_SPECIES", unset = "hs"))
+raw_dir <- file.path(root, "data", "raw")
+if (accession != "GSE125449") {
+  raw_dir <- file.path(root, "data", "raw", accession)
+}
+res_dir <- file.path(root, "results")
+fig_dir <- file.path(res_dir, "figures")
+data_dir <- file.path(res_dir, "data")
+stage_dir <- file.path(res_dir, ".stages")
+ckpt_dir <- file.path(res_dir, "checkpoints")
+
+for (d in c(res_dir, fig_dir, data_dir, stage_dir, ckpt_dir)) {
+  dir.create(d, recursive = TRUE, showWarnings = FALSE)
+}
+
+# NOTE: the "--force" flag is handled by the Python orchestrator (it clears
+# stage markers); the R script always re-runs an enabled stage, so no local
+# force variable is needed.
+start_stage <- "01"
+for (arg in args) {
+  if (startsWith(arg, "--start-stage=")) {
+    start_stage <- sub("^--start-stage=", "", arg)
+  }
+}
+
+dataset_mode <- "single_cell"
+sample_level_data_type <- "unknown"
+dataset_mode_path <- ckpt_path("dataset_mode.txt")
+if (file.exists(dataset_mode_path)) {
+  dataset_mode <- trimws(readLines(dataset_mode_path, warn = FALSE)[1])
+}
+sample_level_data_type_path <- ckpt_path("sample_level_data_type.txt")
+if (file.exists(sample_level_data_type_path)) {
+  sample_level_data_type <- trimws(
+    readLines(sample_level_data_type_path, warn = FALSE)[1]
+  )
+}
+
+stage_allowed <- function(code) {
+  as.integer(code) >= as.integer(start_stage)
+}
+
+mt_pattern <- "^MT-|^mt-"
+
+run_stage <- function(name, expr) {
+  marker <- file.path(stage_dir, paste0(name, ".done"))
+  if (file.exists(marker)) unlink(marker)
+  log_msg("start stage: ", name)
+  force(expr)
+  writeLines(as.character(Sys.time()), marker)
+  log_msg("complete stage: ", name)
+}
+
+# Shared parser for GEO series-matrix "!Sample_*" rows. Defined once here and
+# used by both parse_series_matrix() and parse_series_generic(); the
+# data.table::fread route handles quoted fields that contain tabs.
+
+if (stage_allowed("01")) run_stage("01_load_data", {
+  if (accession == "GSE125449") {
+    s1 <- read_10x_set("1")
+    s2 <- read_10x_set("2")
+
+    common_genes <- intersect(rownames(s1$counts), rownames(s2$counts))
+    counts <- cbind(
+      s1$counts[common_genes, , drop = FALSE],
+      s2$counts[common_genes, , drop = FALSE]
+    )
+    meta <- rbind(s1$meta, s2$meta)
+
+    ann <- parse_series_matrix()
+    meta$cancer_type <- ann$cancer_type[match(meta$sample, ann$sample)]
+    meta$condition <- ifelse(
+      meta$cancer_type == "Hepatocellular carcinoma",
+      "HCC",
+      "iCCA"
+    )
+
+    if (any(is.na(meta$condition))) {
+      stop("Some cells could not be mapped to HCC or iCCA.")
+    }
+  } else {
+    manifest <- load_manifest()
+    dataset_mode <- if (identical(manifest$mode, "single_cell")) {
+      "single_cell"
+    } else {
+      "sample_level"
+    }
+    writeLines(dataset_mode, dataset_mode_path)
+    generic <- read_generic_dataset(manifest)
+    counts <- generic$counts
+    meta <- generic$meta
+    sample_level_data_type <- if (
+      identical(manifest$mode, "single_cell")
+    ) {
+      "single_cell_counts"
+    } else if (
+      identical(
+        as.character(
+          if (is.null(manifest$data_type)) "" else manifest$data_type
+        ),
+        "microarray_or_normalized"
+      )
+    ) {
+      "normalized_or_microarray"
+    } else if (liver_is_count_matrix(counts)) {
+      "counts"
+    } else {
+      "normalized_or_microarray"
+    }
+    writeLines(
+      sample_level_data_type,
+      ckpt_path("sample_level_data_type.txt")
+    )
+    log_msg("sample-level data type: ", sample_level_data_type)
+    ann <- generic$ann
+    if (is.null(ann)) {
+      ann <- data.frame(
+        sample = character(),
+        note = character(),
+        stringsAsFactors = FALSE
+      )
+    }
+  }
+
+  write.csv(ann, stage_data_file("sample_annotations.csv"), row.names = FALSE)
+
+  seurat_raw <- CreateSeuratObject(
+    counts = counts,
+    meta.data = meta,
+    min.cells = 0,
+    min.features = 0,
+    project = accession
+  )
+  seurat_raw$orig.ident <- accession
+  mt_genes <- mt_features(seurat_raw)
+  seurat_raw[["percent.mt"]] <- qc_percentage(
+    seurat_raw,
+    mt_genes,
+    label = "percent.mt"
+  )
+  seurat_raw[["percent.ribo"]] <- qc_percentage(
+    seurat_raw,
+    ribo_features(seurat_raw),
+    label = "percent.ribo"
+  )
+  seurat_raw[["percent.hb"]] <- qc_percentage(
+    seurat_raw,
+    hemoglobin_features(seurat_raw),
+    label = "percent.hb"
+  )
+  log_msg(
+    "QC contamination genes: ",
+    "mt=", length(mt_genes),
+    ", ribo=", length(ribo_features(seurat_raw)),
+    ", hemoglobin=", length(hemoglobin_features(seurat_raw))
+  )
+
+  log_msg("raw cells: ", ncol(seurat_raw))
+  log_msg("raw genes: ", nrow(seurat_raw))
+  log_msg(
+    "condition table: ",
+    paste(names(table(seurat_raw$condition)), table(seurat_raw$condition), sep = "=", collapse = ", ")
+  )
+  saveRDS(seurat_raw, ckpt_path("seurat_raw.rds"))
+})
+
+if (stage_allowed("02")) run_stage("02_qc_filter", {
+  if (!exists("seurat_raw")) {
+    seurat_raw <- readRDS(ckpt_path("seurat_raw.rds"))
+  }
+  if (!"percent.ribo" %in% colnames(seurat_raw[[]])) {
+    seurat_raw[["percent.ribo"]] <- qc_percentage(
+      seurat_raw,
+      ribo_features(seurat_raw),
+      label = "percent.ribo"
+    )
+  }
+  if (!"percent.hb" %in% colnames(seurat_raw[[]])) {
+    seurat_raw[["percent.hb"]] <- qc_percentage(
+      seurat_raw,
+      hemoglobin_features(seurat_raw),
+      label = "percent.hb"
+    )
+  }
+  qc_metric_cols <- c(
+    "nFeature_RNA",
+    "nCount_RNA",
+    "percent.mt",
+    "percent.ribo",
+    "percent.hb"
+  )
+  p_raw <- VlnPlot(
+    seurat_raw,
+    features = qc_plot_features(seurat_raw, qc_metric_cols),
+    group.by = "condition",
+    ncol = 3,
+    pt.size = 0
+  ) & NoLegend()
+  save_fig(
+    file.path(fig_dir, "fig_01_qc_raw_violin.png"),
+    p_raw,
+    width = 14,
+    height = 9,
+    dpi = 150
+  )
+
+  qc_data <- FetchData(
+    seurat_raw,
+    vars = qc_metric_cols
+  )
+  qc_data$sample <- seurat_raw$sample
+  qc_data$condition <- seurat_raw$condition
+  qc_relation_stats_raw <- umi_feature_correlation_stats(qc_data, "raw")
+
+  qc_pvalue_table <- function(qc_frame, stage) {
+    group_col <- as.character(qc_frame$condition)
+    metrics <- qc_metric_cols
+    groups <- sort(unique(group_col[!is.na(group_col) & nzchar(group_col)]))
+    if (length(groups) < 2) {
+      return(data.frame(
+        stage = character(),
+        metric = character(),
+        group1 = character(),
+        group2 = character(),
+        n1 = integer(),
+        n2 = integer(),
+        median1 = numeric(),
+        median2 = numeric(),
+        median_diff = numeric(),
+        statistic = numeric(),
+        pvalue = numeric(),
+        padj = numeric(),
+        neg_log10_pvalue = numeric(),
+        direction = character(),
+        stringsAsFactors = FALSE
+      ))
+    }
+    pairs <- combn(groups, 2, simplify = FALSE)
+    rows <- lapply(pairs, function(pair) {
+      lapply(metrics, function(metric) {
+        x <- as.numeric(qc_frame[[metric]][group_col == pair[1]])
+        y <- as.numeric(qc_frame[[metric]][group_col == pair[2]])
+        x <- x[is.finite(x)]
+        y <- y[is.finite(y)]
+        med1 <- median(x)
+        med2 <- median(y)
+        test <- tryCatch(
+          suppressWarnings(wilcox.test(x, y, exact = FALSE)),
+          error = function(e) NULL
+        )
+        data.frame(
+          stage = stage,
+          metric = metric,
+          group1 = pair[1],
+          group2 = pair[2],
+          n1 = length(x),
+          n2 = length(y),
+          median1 = med1,
+          median2 = med2,
+          median_diff = med2 - med1,
+          statistic = if (is.null(test)) NA_real_ else unname(test$statistic),
+          pvalue = if (is.null(test)) NA_real_ else test$p.value,
+          direction = ifelse(
+            is.na(med1) || is.na(med2) || med2 == med1,
+            "no difference",
+            ifelse(med2 > med1, paste0(pair[2], " higher"), paste0(pair[1], " higher"))
+          ),
+          stringsAsFactors = FALSE
+        )
+      })
+    })
+    out <- do.call(rbind, unlist(rows, recursive = FALSE))
+    out$padj <- p.adjust(out$pvalue, method = "BH")
+    out$neg_log10_pvalue <- ifelse(
+      is.na(out$pvalue),
+      NA_real_,
+      -log10(pmax(out$pvalue, .Machine$double.xmin))
+    )
+    out
+  }
+
+  qc_diff_raw <- qc_pvalue_table(qc_data, "raw")
+
+  # Metrics can be entirely NA (e.g. no MT features in an Ensembl-ID dataset),
+  # so quantiles must ignore missing values instead of erroring out.
+  qc_quantile_upper <- function(vals, cap) {
+    vals <- as.numeric(vals)
+    vals <- vals[is.finite(vals)]
+    if (length(vals) == 0) return(NA_real_)
+    min(cap, as.numeric(quantile(vals, 0.99)))
+  }
+  qc_metric_removed <- function(vals, lo, hi) {
+    vals <- as.numeric(vals)
+    sum(!(is.na(vals) | (vals >= lo & vals <= hi)))
+  }
+
+  if (dataset_mode == "sample_level") {
+    lo_feature <- 0
+    hi_feature <- max(qc_data$nFeature_RNA) + 1
+    lo_count <- 0
+    hi_count <- max(qc_data$nCount_RNA) + 1
+    hi_mt <- 100
+    hi_ribo <- 100
+    hi_hb <- 100
+  } else {
+    lo_feature <- if (!is.na(qc_min_features)) {
+      qc_min_features
+    } else {
+      max(200, as.numeric(quantile(qc_data$nFeature_RNA, 0.01)))
+    }
+    hi_feature <- if (!is.na(qc_max_features)) {
+      qc_max_features
+    } else {
+      min(20000, as.numeric(quantile(qc_data$nFeature_RNA, 0.99)))
+    }
+    lo_count <- if (!is.na(qc_min_counts)) {
+      qc_min_counts
+    } else {
+      max(300, as.numeric(quantile(qc_data$nCount_RNA, 0.01)))
+    }
+    hi_count <- if (!is.na(qc_max_counts)) {
+      qc_max_counts
+    } else {
+      min(500000, as.numeric(quantile(qc_data$nCount_RNA, 0.99)))
+    }
+    hi_mt <- if (!is.na(qc_max_mt)) {
+      qc_max_mt
+    } else {
+      qc_quantile_upper(qc_data$percent.mt, 30)
+    }
+    hi_ribo <- if (!is.na(qc_max_ribo)) {
+      qc_max_ribo
+    } else {
+      100
+    }
+    hi_hb <- if (!is.na(qc_max_hb)) {
+      qc_max_hb
+    } else {
+      qc_quantile_upper(qc_data$percent.hb, 25)
+    }
+  }
+
+  if (!is.finite(hi_mt)) {
+    log_msg(
+      "WARNING: percent.mt is unavailable for this dataset (no mitochondrial ",
+      "features); MT filtering is disabled"
+    )
+    hi_mt <- 100
+  }
+  if (!is.finite(hi_ribo)) {
+    log_msg(
+      "WARNING: percent.ribo is unavailable for this dataset; ribo filtering ",
+      "is disabled"
+    )
+    hi_ribo <- 100
+  }
+  if (!is.finite(hi_hb)) {
+    log_msg(
+      "WARNING: percent.hb is unavailable for this dataset (no hemoglobin ",
+      "features); HB filtering is disabled"
+    )
+    hi_hb <- 100
+  }
+
+  if (
+    lo_feature > hi_feature ||
+    lo_count > hi_count ||
+    !is.finite(hi_ribo) ||
+    hi_ribo < 0 ||
+    !is.finite(hi_hb) ||
+    hi_hb < 0
+  ) {
+    log_msg(
+      "QC bounds are incompatible for this dataset; ",
+      "relaxing thresholds to keep all samples"
+    )
+    lo_feature <- 0
+    hi_feature <- max(qc_data$nFeature_RNA) + 1
+    lo_count <- 0
+    hi_count <- max(qc_data$nCount_RNA) + 1
+    hi_mt <- 100
+    hi_ribo <- 100
+    hi_hb <- 100
+  }
+
+  log_msg(
+    "QC thresholds: nFeature ",
+    round(lo_feature, 1), "-", round(hi_feature, 1),
+    ", nCount ", round(lo_count, 1), "-", round(hi_count, 1),
+    ", percent.mt <= ", round(hi_mt, 1),
+    ", percent.ribo <= ", round(hi_ribo, 1),
+    ", percent.hb <= ", round(hi_hb, 1)
+  )
+
+  # NA metrics (unavailable features) always pass: an undefined percentage must
+  # not silently drop every cell.
+  seurat_qc <- subset(
+    seurat_raw,
+    subset = (is.na(nFeature_RNA) | (nFeature_RNA >= lo_feature & nFeature_RNA <= hi_feature)) &
+      (is.na(nCount_RNA) | (nCount_RNA >= lo_count & nCount_RNA <= hi_count)) &
+      (is.na(percent.mt) | percent.mt <= hi_mt) &
+      (is.na(percent.ribo) | percent.ribo <= hi_ribo) &
+      (is.na(percent.hb) | percent.hb <= hi_hb)
+  )
+
+  threshold_summary <- data.frame(
+    metric = c(
+      "nFeature_RNA", "nCount_RNA",
+      "percent.mt", "percent.ribo", "percent.hb"
+    ),
+    lower = c(lo_feature, lo_count, 0, 0, 0),
+    upper = c(hi_feature, hi_count, hi_mt, hi_ribo, hi_hb),
+    n_removed = c(
+      qc_metric_removed(qc_data$nFeature_RNA, lo_feature, hi_feature),
+      qc_metric_removed(qc_data$nCount_RNA, lo_count, hi_count),
+      qc_metric_removed(qc_data$percent.mt, 0, hi_mt),
+      qc_metric_removed(qc_data$percent.ribo, 0, hi_ribo),
+      qc_metric_removed(qc_data$percent.hb, 0, hi_hb)
+    ),
+    stringsAsFactors = FALSE
+  )
+  threshold_summary$pct_removed <- 100 * threshold_summary$n_removed /
+    max(1, nrow(qc_data))
+  write.csv(
+    threshold_summary,
+    stage_data_file("fig_01_qc_thresholds.csv"),
+    row.names = FALSE
+  )
+  log_msg(
+    "hemoglobin-filtered cells: ",
+    sum(qc_data$percent.hb > hi_hb, na.rm = TRUE),
+    "; ribosomal-filtered cells: ",
+    sum(qc_data$percent.ribo > hi_ribo, na.rm = TRUE)
+  )
+
+  # Undefined (all-NA) metrics always pass, matching the subset() above so the
+  # kept/removed status never becomes NA.
+  qc_data$qc_kept <- (
+    is.na(qc_data$nFeature_RNA) |
+      (qc_data$nFeature_RNA >= lo_feature & qc_data$nFeature_RNA <= hi_feature)
+  ) & (
+    is.na(qc_data$nCount_RNA) |
+      (qc_data$nCount_RNA >= lo_count & qc_data$nCount_RNA <= hi_count)
+  ) & (
+    is.na(qc_data$percent.mt) | qc_data$percent.mt <= hi_mt
+  ) & (
+    is.na(qc_data$percent.ribo) | qc_data$percent.ribo <= hi_ribo
+  ) & (
+    is.na(qc_data$percent.hb) | qc_data$percent.hb <= hi_hb
+  )
+  qc_data$qc_status <- ifelse(
+    qc_data$qc_kept,
+    "Kept after QC",
+    "Removed by QC"
+  )
+
+  qc_metrics <- FetchData(
+    seurat_qc,
+    vars = qc_metric_cols
+  )
+  qc_metrics$sample <- seurat_qc$sample
+  qc_metrics$condition <- seurat_qc$condition
+  write.csv(qc_metrics, stage_data_file("fig_01_qc_metrics.csv"))
+
+  qc_relation_stats_filtered <- umi_feature_correlation_stats(
+    qc_metrics,
+    "filtered"
+  )
+  qc_relation_stats <- rbind(
+    qc_relation_stats_raw,
+    qc_relation_stats_filtered
+  )
+  write.csv(
+    qc_relation_stats,
+    stage_data_file("fig_49_qc_umi_feature_correlation_stats.csv"),
+    row.names = FALSE
+  )
+
+  qc_diff_filtered <- qc_pvalue_table(qc_metrics, "filtered")
+  qc_diff <- rbind(qc_diff_raw, qc_diff_filtered)
+  write.csv(qc_diff, stage_data_file("fig_48_qc_pvalue_comparison.csv"), row.names = FALSE)
+
+  set.seed(42)
+  qc_relation_plot <- qc_data
+  if (nrow(qc_relation_plot) > 20000) {
+    qc_relation_plot <- qc_relation_plot[
+      sample.int(nrow(qc_relation_plot), 20000),
+      , drop = FALSE
+    ]
+  }
+  p_qc_corr <- ggplot(
+    qc_relation_plot,
+    aes(x = log1p(nFeature_RNA), y = log1p(nCount_RNA))
+  ) +
+    geom_point(aes(color = qc_status), alpha = 0.25, size = 0.35) +
+    geom_smooth(method = "lm", se = FALSE, color = "grey20", linewidth = 0.5) +
+    scale_color_manual(
+      values = c(
+        "Kept after QC" = "#4DBBD5",
+        "Removed by QC" = "#E64B35"
+      )
+    ) +
+    facet_wrap(~condition, scales = "free") +
+    theme_minimal() +
+    theme(legend.position = "bottom") +
+    labs(
+      x = "log1p(nFeature_RNA)",
+      y = "log1p(nCount_RNA)",
+      color = "QC status",
+      title = "UMI count vs gene count relationship",
+      subtitle = "Blue points pass QC; red points are removed by marginal thresholds"
+    )
+  save_fig(
+    file.path(fig_dir, "fig_49_qc_umi_feature_correlation.png"),
+    p_qc_corr,
+    width = 10,
+    height = 8,
+    dpi = 150
+  )
+
+  if (nrow(qc_diff) > 0) {
+    qc_diff$comparison <- paste(qc_diff$group1, qc_diff$group2, sep = " vs ")
+    qc_diff$stage <- factor(qc_diff$stage, levels = c("raw", "filtered"))
+    p_qc_diff <- ggplot(qc_diff, aes(x = metric, y = neg_log10_pvalue, fill = comparison)) +
+      geom_col(position = position_dodge2(preserve = "single"), width = 0.7) +
+      geom_hline(yintercept = -log10(0.05), linetype = "dashed", color = "#666666") +
+      geom_text(
+        aes(label = ifelse(
+          is.na(pvalue),
+          "NA",
+          paste0("P=", formatC(pvalue, digits = 2, format = "g"))
+        )),
+        position = position_dodge2(width = 0.7),
+        vjust = -0.4,
+        size = 3
+      ) +
+      facet_wrap(~ stage, ncol = 1, scales = "free_y") +
+      labs(
+        x = "QC metric",
+        y = "-log10(P value)",
+        title = "QC metric difference by condition",
+        subtitle = "Wilcoxon rank-sum test; dashed line indicates P = 0.05"
+      ) +
+      theme_minimal() +
+      theme(
+        axis.text.x = element_text(angle = 30, hjust = 1),
+        legend.position = "bottom"
+      )
+  } else {
+    p_qc_diff <- ggplot(data.frame(x = 0, y = 0), aes(x, y)) +
+      geom_text(label = "At least two conditions are required") +
+      theme_void()
+  }
+  save_fig(
+    file.path(fig_dir, "fig_48_qc_pvalue_comparison.png"),
+    p_qc_diff,
+    width = 10,
+    height = 8,
+    dpi = 150
+  )
+
+  p_qc <- VlnPlot(
+    seurat_qc,
+    features = qc_plot_features(seurat_qc, qc_metric_cols),
+    group.by = "condition",
+    ncol = 3,
+    pt.size = 0
+  ) & NoLegend()
+  save_fig(
+    file.path(fig_dir, "fig_01_qc_filtered_violin.png"),
+    p_qc,
+    width = 14,
+    height = 9,
+    dpi = 150
+  )
+
+  log_msg("cells after QC: ", ncol(seurat_qc))
+  saveRDS(seurat_qc, ckpt_path("seurat_qc.rds"))
+})
+
+if (stage_allowed("03")) run_stage("03_doublets", {
+  if (!exists("seurat_qc")) {
+    seurat_qc <- readRDS(ckpt_path("seurat_qc.rds"))
+  }
+  sce <- SingleCellExperiment(
+    assays = list(counts = GetAssayData(seurat_qc, layer = "counts"))
+  )
+  colData(sce)$sample <- seurat_qc$sample
+  colData(sce)$condition <- seurat_qc$condition
+
+  if (
+    dataset_mode == "single_cell" &&
+    flag_on("LIVER_DECONTX", "no") &&
+    requireNamespace("decontX", quietly = TRUE)
+  ) {
+    decontx_threshold <- param_num("LIVER_DECONTX_MAX_CONTAMINATION")
+    if (is.na(decontx_threshold)) decontx_threshold <- 0.5
+    set.seed(42)
+    sce <- tryCatch(
+      decontX::decontX(sce, batch = colData(sce)$sample),
+      error = function(e) {
+        log_msg("decontX failed: ", conditionMessage(e))
+        sce
+      }
+    )
+    if ("decontX_contamination" %in% colnames(colData(sce))) {
+      contamination <- as.numeric(sce$decontX_contamination)
+      contamination[!is.finite(contamination)] <- 0
+      contamination_table <- data.frame(
+        cell = colnames(sce),
+        sample = sce$sample,
+        condition = sce$condition,
+        contamination = contamination,
+        stringsAsFactors = FALSE
+      )
+      write.csv(
+        contamination_table,
+        stage_data_file("fig_69_decontx_contamination.csv"),
+        row.names = FALSE
+      )
+      keep_decontx <- contamination <= decontx_threshold
+      if (any(keep_decontx)) {
+        sce <- sce[, keep_decontx, drop = FALSE]
+        seurat_qc <- subset(
+          seurat_qc,
+          cells = colnames(sce)
+        )
+        log_msg(
+          "decontX retained ",
+          ncol(sce),
+          " cells with contamination <= ",
+          decontx_threshold
+        )
+      } else {
+        log_msg(
+          "decontX threshold removed every cell; retaining cells and ",
+          "marking contamination results for review"
+        )
+      }
+    } else {
+      log_msg("decontX did not return contamination scores; continuing")
+    }
+  } else if (
+    dataset_mode == "single_cell" &&
+    flag_on("LIVER_DECONTX", "no")
+  ) {
+    log_msg("decontX requested but package is not installed")
+  }
+
+  if (dataset_mode == "sample_level") {
+    log_msg("sample-level mode: skipping doublet detection")
+    sce$scDblFinder.score <- rep(0, ncol(sce))
+    sce$scDblFinder.class <- rep("singlet", ncol(sce))
+  } else if (
+    all(c("doublet_scores", "predicted_doublets") %in% colnames(seurat_qc[[]]))
+  ) {
+    log_msg("using doublet calls supplied in the h5ad obs metadata")
+    sce$scDblFinder.score <- as.numeric(seurat_qc$doublet_scores)
+    sce$scDblFinder.class <- ifelse(
+      as.logical(seurat_qc$predicted_doublets) %in% TRUE,
+      "doublet",
+      "singlet"
+    )
+  } else {
+    set.seed(42)
+    sce <- tryCatch(
+      scDblFinder(
+        sce,
+        samples = "sample",
+        BPPARAM = BiocParallel::SerialParam()
+      ),
+      error = function(e) {
+        msg <- paste0(
+          "scDblFinder failed: ", conditionMessage(e),
+          "; marking all cells as singlet (doublet results unusable)"
+        )
+        log_msg("ERROR: ", msg)
+        status_path <- stage_data_file("scDblFinder_status.txt")
+        writeLines(
+          c(
+            paste0("status: failed"),
+            paste0("time: ", Sys.time()),
+            msg
+          ),
+          status_path
+        )
+        sce$scDblFinder.score <- rep(0, ncol(sce))
+        sce$scDblFinder.class <- rep("singlet", ncol(sce))
+        sce
+      }
+    )
+  }
+
+  seurat_qc$doublet_score <- sce$scDblFinder.score
+  seurat_qc$doublet_call <- as.character(sce$scDblFinder.class)
+
+  doublet_tbl <- data.frame(
+    cell = colnames(seurat_qc),
+    sample = seurat_qc$sample,
+    condition = seurat_qc$condition,
+    doublet_score = seurat_qc$doublet_score,
+    doublet_call = seurat_qc$doublet_call,
+    stringsAsFactors = FALSE
+  )
+  write.csv(doublet_tbl, stage_data_file("fig_02_doublet_results.csv"), row.names = FALSE)
+
+  p_dbl <- ggplot(
+    doublet_tbl,
+    aes(x = doublet_call, y = doublet_score, fill = doublet_call)
+  ) +
+    geom_violin(trim = FALSE) +
+    geom_boxplot(width = 0.15, outlier.shape = NA) +
+    scale_fill_manual(values = c("singlet" = "#4DBBD5", "doublet" = "#E64B35")) +
+    labs(x = "Doublet call", y = "scDblFinder score", title = "Doublet score by call") +
+    theme_minimal()
+  save_fig(
+    file.path(fig_dir, "fig_02_doublet_scores.png"),
+    p_dbl,
+    width = 7,
+    height = 5,
+    dpi = 150
+  )
+
+  seurat <- subset(seurat_qc, subset = doublet_call == "singlet")
+  log_msg("cells after doublet removal: ", ncol(seurat))
+  saveRDS(seurat, ckpt_path("seurat_singlet.rds"))
+})
+
+if (stage_allowed("04")) run_stage("04_cluster", {
+  if (!exists("seurat")) {
+    seurat <- readRDS(ckpt_path("seurat_singlet.rds"))
+  }
+  seurat <- NormalizeData(seurat, verbose = FALSE)
+  has_author_embed <- dataset_mode == "single_cell" &&
+    all(c("UMAP_1", "UMAP_2", "sub_cluster", "major_cluster") %in%
+          colnames(seurat[[]]))
+  if (has_author_embed) {
+    log_msg("h5ad obs has UMAP/sub_cluster; reusing author annotations")
+    seurat$seurat_clusters <- as.character(seurat$sub_cluster)
+    emb_umap <- cbind(
+      UMAP_1 = as.numeric(as.character(seurat$UMAP_1)),
+      UMAP_2 = as.numeric(as.character(seurat$UMAP_2))
+    )
+    rownames(emb_umap) <- colnames(seurat)
+    seurat[["umap"]] <- CreateDimReducObject(
+      embeddings = emb_umap,
+      key = "umap_",
+      assay = "RNA"
+    )
+    umap_tbl <- as.data.frame(emb_umap)
+    umap_tbl$cell <- rownames(emb_umap)
+    umap_tbl$seurat_clusters <- as.character(seurat$seurat_clusters)
+    umap_tbl$condition <- seurat$condition
+    umap_tbl$sample <- seurat$sample
+    write.csv(
+      umap_tbl,
+      stage_data_file("fig_03_04_05_umap_coordinates.csv"),
+      row.names = FALSE
+    )
+    cluster_counts <- as.data.frame(table(
+      seurat_clusters = seurat$seurat_clusters,
+      condition = seurat$condition,
+      sample = seurat$sample
+    ))
+    write.csv(
+      cluster_counts,
+      stage_data_file("fig_18_19_30_cluster_composition.csv"),
+      row.names = FALSE
+    )
+    log_msg("number of clusters (author sub_cluster): ", length(unique(seurat$seurat_clusters)))
+  } else if (dataset_mode == "sample_level") {
+    log_msg("sample-level mode: assigning sample-level clusters and computing real PCA")
+    seurat$seurat_clusters <- as.character(seurat$sample)
+    npcs <- min(30, max(1, ncol(seurat) - 1))
+    pca_status <- "completed"
+    seurat <- tryCatch(
+      {
+        seurat <- FindVariableFeatures(
+          seurat,
+          selection.method = "vst",
+          nfeatures = min(2000, max(10, nrow(seurat) - 1)),
+          verbose = FALSE
+        )
+        seurat <- ScaleData(
+          seurat,
+          features = VariableFeatures(seurat),
+          verbose = FALSE
+        )
+        RunPCA(
+          seurat,
+          features = VariableFeatures(seurat),
+          npcs = npcs,
+          verbose = FALSE
+        )
+      },
+      error = function(e) {
+        pca_status <<- paste0("failed: ", conditionMessage(e))
+        log_msg("sample-level PCA failed: ", conditionMessage(e))
+        seurat
+      }
+    )
+    writeLines(
+      pca_status,
+      stage_data_file("sample_level_pca_status.txt")
+    )
+    if ("pca" %in% Reductions(seurat)) {
+      p_pca <- DimPlot(seurat, reduction = "pca", group.by = "condition") +
+        ggtitle("PCA by condition (sample-level)")
+      save_fig(file.path(fig_dir, "fig_14_pca.png"), p_pca, width = 8, height = 7)
+
+      p_elbow <- ElbowPlot(seurat, ndims = npcs, reduction = "pca") +
+        ggtitle("PCA standard deviation (sample-level)")
+      save_fig(file.path(fig_dir, "fig_15_elbow.png"), p_elbow, width = 8, height = 5)
+
+      pca_tbl <- as.data.frame(Embeddings(seurat, reduction = "pca"))
+      pca_tbl$cell <- rownames(pca_tbl)
+      pca_tbl$seurat_clusters <- as.character(seurat$seurat_clusters)
+      pca_tbl$condition <- seurat$condition
+      pca_tbl$sample <- seurat$sample
+      write.csv(
+        pca_tbl,
+        stage_data_file("fig_14_sample_level_pca.csv"),
+        row.names = FALSE
+      )
+    }
+
+    umap_status <- "skipped: fewer than 5 samples"
+    if (ncol(seurat) >= 5 && "pca" %in% Reductions(seurat)) {
+      umap_status <- "completed"
+      seurat <- tryCatch(
+        RunUMAP(
+          seurat,
+          reduction = "pca",
+          dims = seq_len(max(1, min(10, npcs))),
+          n.neighbors = min(15, ncol(seurat) - 1),
+          min.dist = 0.3,
+          seed.use = 42,
+          verbose = FALSE
+        ),
+        error = function(e) {
+          umap_status <<- paste0("failed: ", conditionMessage(e))
+          log_msg("sample-level UMAP failed: ", conditionMessage(e))
+          seurat
+        }
+      )
+    }
+    writeLines(
+      umap_status,
+      stage_data_file("sample_level_umap_status.txt")
+    )
+    if ("umap" %in% Reductions(seurat)) {
+      umap_tbl <- as.data.frame(Embeddings(seurat, reduction = "umap"))
+      umap_tbl$cell <- rownames(umap_tbl)
+      umap_tbl$seurat_clusters <- as.character(seurat$seurat_clusters)
+      umap_tbl$condition <- seurat$condition
+      umap_tbl$sample <- seurat$sample
+      write.csv(
+        umap_tbl,
+        stage_data_file("fig_03_04_05_umap_coordinates.csv"),
+        row.names = FALSE
+      )
+    }
+
+    cluster_counts <- as.data.frame(table(
+      seurat_clusters = seurat$seurat_clusters,
+      condition = seurat$condition,
+      sample = seurat$sample
+    ))
+    write.csv(
+      cluster_counts,
+      stage_data_file("fig_18_19_30_cluster_composition.csv"),
+      row.names = FALSE
+    )
+    log_msg("number of clusters: ", length(unique(seurat$seurat_clusters)))
+  } else {
+    seurat <- tryCatch(
+      FindVariableFeatures(
+        seurat,
+        selection.method = "vst",
+        nfeatures = min(2000, max(10, nrow(seurat) - 1)),
+        verbose = FALSE
+      ),
+      error = function(e) {
+        log_msg("variable feature selection failed; using all genes: ", conditionMessage(e))
+        VariableFeatures(seurat) <- rownames(seurat)
+        seurat
+      }
+    )
+    if (run_cellcycle) {
+      cc_genes <- tryCatch(Seurat::cc.genes, error = function(e) NULL)
+      if (is.null(cc_genes)) {
+        cc_genes <- tryCatch(Seurat::cc.genes.updated.2019, error = function(e) NULL)
+      }
+      s_genes <- intersect(cc_genes$s.genes, rownames(seurat))
+      g2m_genes <- intersect(cc_genes$g2m.genes, rownames(seurat))
+      if (length(s_genes) >= 5 && length(g2m_genes) >= 5) {
+        seurat <- CellCycleScoring(
+          seurat,
+          s.features = s_genes,
+          g2m.features = g2m_genes,
+          set.ident = FALSE
+        )
+        cc_tbl <- data.frame(
+          cell = colnames(seurat),
+          S.Score = seurat$S.Score,
+          G2M.Score = seurat$G2M.Score,
+          Phase = seurat$Phase,
+          condition = seurat$condition,
+          stringsAsFactors = FALSE
+        )
+        write.csv(cc_tbl, stage_data_file("fig_26_27_cell_cycle_scores.csv"), row.names = FALSE)
+        log_msg("cell cycle scoring applied")
+        if (regress_cellcycle) {
+          seurat <- ScaleData(
+            seurat,
+            features = VariableFeatures(seurat),
+            vars.to.regress = c("S.Score", "G2M.Score"),
+            verbose = FALSE
+          )
+        } else {
+          seurat <- ScaleData(seurat, features = VariableFeatures(seurat), verbose = FALSE)
+        }
+      } else {
+        log_msg("cell cycle markers insufficient; skipping cell cycle scoring")
+        seurat <- ScaleData(seurat, features = VariableFeatures(seurat), verbose = FALSE)
+      }
+    } else {
+      seurat <- ScaleData(seurat, features = VariableFeatures(seurat), verbose = FALSE)
+    }
+    npcs <- min(30, ncol(seurat) - 1)
+    dims_use <- seq_len(max(1, min(20, npcs)))
+    seurat <- tryCatch(
+      RunPCA(seurat, npcs = npcs, verbose = FALSE),
+      error = function(e) {
+        stop(paste0("PCA failed; refusing to create a placeholder reduction: ", conditionMessage(e)))
+      }
+    )
+    reduction <- "pca"
+    if (
+      requireNamespace("harmony", quietly = TRUE) &&
+      length(unique(seurat$sample)) > 1
+    ) {
+      tryCatch(
+        {
+          seurat <- harmony::RunHarmony(
+            seurat,
+            group.by.vars = "sample",
+            reduction.use = "pca",
+            dims.use = dims_use,
+            verbose = FALSE
+          )
+          reduction <- "harmony"
+          log_msg("Harmony batch correction applied")
+        },
+        error = function(e) {
+          log_msg("Harmony failed: ", conditionMessage(e))
+        }
+      )
+    }
+    seurat <- FindNeighbors(
+      seurat,
+      reduction = reduction,
+      dims = dims_use,
+      verbose = FALSE
+    )
+    seurat <- FindClusters(
+      seurat,
+      resolution = cluster_resolution,
+      algorithm = ifelse(
+        is.na(cluster_algorithm),
+        1,
+        as.integer(cluster_algorithm)
+      ),
+      verbose = FALSE
+    )
+    seurat <- tryCatch(
+      RunUMAP(
+        seurat,
+        reduction = reduction,
+        dims = dims_use,
+        n.neighbors = min(30, ncol(seurat) - 1),
+        seed.use = 42,
+        verbose = FALSE
+      ),
+      error = function(e) {
+        stop(paste0("UMAP failed; refusing to create a placeholder reduction: ", conditionMessage(e)))
+      }
+    )
+
+    p_pca <- DimPlot(seurat, reduction = "pca", group.by = "condition") +
+      ggtitle("PCA by condition")
+    save_fig(
+      file.path(fig_dir, "fig_14_pca.png"),
+      p_pca,
+      width = 8,
+      height = 7
+    )
+
+    p_elbow <- ElbowPlot(seurat, ndims = npcs) +
+      ggtitle("Principal component standard deviation")
+    save_fig(
+      file.path(fig_dir, "fig_15_elbow.png"),
+      p_elbow,
+      width = 8,
+      height = 5
+    )
+
+    umap_tbl <- as.data.frame(Embeddings(seurat, reduction = "umap"))
+    umap_tbl$cell <- rownames(umap_tbl)
+    umap_tbl$seurat_clusters <- as.character(seurat$seurat_clusters)
+    umap_tbl$condition <- seurat$condition
+    umap_tbl$sample <- seurat$sample
+    write.csv(umap_tbl, stage_data_file("fig_03_04_05_umap_coordinates.csv"), row.names = FALSE)
+
+    cluster_counts <- as.data.frame(table(
+      seurat_clusters = seurat$seurat_clusters,
+      condition = seurat$condition,
+      sample = seurat$sample
+    ))
+    write.csv(cluster_counts, stage_data_file("fig_18_19_30_cluster_composition.csv"), row.names = FALSE)
+
+    log_msg("number of clusters: ", length(unique(seurat$seurat_clusters)))
+  }
+  saveRDS(seurat, ckpt_path("seurat_clustered.rds"))
+})
+
+if (stage_allowed("05")) run_stage("05_annotation", {
+  if (!exists("seurat")) {
+    seurat <- readRDS(ckpt_path("seurat_clustered.rds"))
+  }
+  # Marker-based cell annotation is only valid when columns represent cells.
+  if (dataset_mode != "sample_level") {
+  marker_list <- list(
+    T_NK = c("CD3D", "CD3E", "CD8A", "NKG7", "GNLY", "CD4"),
+    B = c("CD79A", "MS4A1", "CD19", "IGHG1"),
+    Myeloid = c("LYZ", "CD68", "C1QA", "C1QB", "FCGR3A"),
+    Hepatocyte = c("ALB", "APOA1", "APOA2", "FGB", "SERPINA1"),
+    Cholangiocyte = c("KRT19", "KRT7", "EPCAM", "SOX9", "CFTR"),
+    Hepatic_stellate = c("COL1A1", "COL1A2", "ACTA2", "RGS5", "PDGFRB"),
+    Endothelial = c("PECAM1", "VWF", "CLDN5", "PLVAP"),
+    Fibroblast = c("COL1A1", "COL1A2", "DCN", "LUM", "PDGFRB"),
+    Malignant = c("EPCAM", "KRT8", "KRT18", "KRT19", "AFP", "GPC3"),
+    Mast = c("TPSAB1", "CPA3", "MS4A2")
+  )
+  marker_list <- lapply(marker_list, expand_genes)
+  marker_list <- lapply(marker_list, function(x) intersect(x, rownames(seurat)))
+  marker_list <- marker_list[lengths(marker_list) > 0]
+  marker_names <- names(marker_list)
+
+  if (length(marker_list) > 0) {
+    data_mat <- GetAssayData(seurat, layer = "data")
+    score_list <- lapply(marker_list, function(genes) {
+      genes <- intersect(genes, rownames(seurat))
+      if (length(genes) == 0) {
+        return(rep(0, ncol(seurat)))
+      }
+      as.numeric(Matrix::colMeans(data_mat[genes, , drop = FALSE]))
+    })
+    score_mat <- do.call(cbind, score_list)
+    colnames(score_mat) <- marker_names
+    rownames(score_mat) <- colnames(seurat)
+  } else {
+    marker_names <- "Unannotated"
+    score_mat <- matrix(
+      0,
+      nrow = ncol(seurat),
+      ncol = 1,
+      dimnames = list(colnames(seurat), "Unannotated")
+    )
+  }
+
+  seurat$celltype_annot_cell <- marker_names[
+    max.col(score_mat, ties.method = "first")
+  ]
+
+  seurat$celltype_annot <- seurat$celltype_annot_cell
+  if (
+    dataset_mode == "single_cell" &&
+    all(c("major_cluster", "sub_cluster") %in% colnames(seurat[[]]))
+  ) {
+    log_msg("using h5ad major_cluster as cell type annotation")
+    seurat$celltype_annot <- as.character(seurat$major_cluster)
+    seurat$celltype_annot_cell <- as.character(seurat$sub_cluster)
+  }
+
+  cluster_ids <- unique(as.character(seurat$seurat_clusters))
+  if (all(grepl("^[0-9]+$", cluster_ids))) {
+    cluster_ids <- as.character(sort(as.integer(cluster_ids)))
+  }
+  cluster_labels <- vapply(cluster_ids, function(cl) {
+    labs <- seurat$celltype_annot[
+      as.character(seurat$seurat_clusters) == cl
+    ]
+    names(sort(table(labs), decreasing = TRUE))[1]
+  }, character(1))
+  short_cluster_ids <- if (all(grepl("^[0-9]+$", cluster_ids))) {
+    cluster_ids
+  } else {
+    paste0("C", seq_along(cluster_ids))
+  }
+  cluster_id_map <- stats::setNames(short_cluster_ids, cluster_ids)
+  seurat$cluster_short <- unname(cluster_id_map[
+    as.character(seurat$seurat_clusters)
+  ])
+  seurat$celltype_short <- as.character(seurat$celltype_annot)
+  seurat$celltype_short <- ifelse(
+    nchar(seurat$celltype_short) > 24,
+    paste0("CellType", match(
+      seurat$celltype_short,
+      unique(seurat$celltype_short)
+    )),
+    seurat$celltype_short
+  )
+  seurat$cluster_label <- unname(cluster_labels[match(
+    as.character(seurat$seurat_clusters),
+    cluster_ids
+  )])
+
+  annotation_tbl <- data.frame(
+    cell = colnames(seurat),
+    seurat_clusters = as.character(seurat$seurat_clusters),
+    celltype_annot = seurat$celltype_annot,
+    celltype_annot_cell = seurat$celltype_annot_cell,
+    cluster_label = seurat$cluster_label,
+    published_type = seurat$published_type,
+    condition = seurat$condition,
+    sample = seurat$sample,
+    stringsAsFactors = FALSE
+  )
+  write.csv(annotation_tbl, stage_data_file("fig_05_16_17_cell_annotations.csv"), row.names = FALSE)
+
+  p_clusters <- DimPlot(seurat, group.by = "cluster_short", label = FALSE) +
+    ggtitle("Seurat clusters (marker-based names)")
+  p_clusters <- tryCatch(
+    {
+      cluster_legend_labels <- paste0(short_cluster_ids, " - ", cluster_labels)
+      p_clusters$data$seurat_clusters <- factor(
+        cluster_legend_labels[match(
+          as.character(p_clusters$data$cluster_short),
+          short_cluster_ids
+        )],
+        levels = unique(c(cluster_legend_labels, cluster_labels))
+      )
+      LabelClusters(
+        p_clusters,
+        id = "cluster_short",
+        clusters = cluster_legend_labels,
+        labels = cluster_labels,
+        size = 4
+      )
+    },
+    error = function(e) {
+      log_msg(
+        "custom cluster labels failed, using numeric labels: ",
+        conditionMessage(e)
+      )
+      DimPlot(seurat, group.by = "cluster_short", label = TRUE) +
+        ggtitle("Seurat clusters")
+    }
+  )
+  p_condition <- DimPlot(seurat, group.by = "condition") +
+    ggtitle(paste(sort(unique(as.character(seurat$condition))), collapse = " vs "))
+  p_annot <- DimPlot(seurat, group.by = "celltype_short", label = TRUE) +
+    ggtitle("Marker-based annotation")
+  p_pub <- DimPlot(
+    seurat,
+    group.by = if ("published_type" %in% colnames(seurat[[]])) {
+      "published_type"
+    } else {
+      "celltype_short"
+    },
+    label = TRUE
+  ) +
+    ggtitle("Published cell type")
+
+  save_fig(
+    file.path(fig_dir, "fig_03_umap_clusters.png"),
+    p_clusters,
+    width = 8,
+    height = 7,
+    dpi = 150
+  )
+  save_fig(
+    file.path(fig_dir, "fig_04_umap_condition.png"),
+    p_condition,
+    width = 8,
+    height = 7,
+    dpi = 150
+  )
+  tryCatch(
+    save_fig(
+      file.path(fig_dir, "fig_05_umap_annotation.png"),
+      p_annot + p_pub,
+      width = 15,
+      height = 7,
+      dpi = 150
+    ),
+    error = function(e) {
+      log_msg(
+        "combined annotation patchwork failed, saving panels separately: ",
+        conditionMessage(e)
+      )
+      save_fig(
+        file.path(fig_dir, "fig_05_umap_annotation.png"),
+        p_annot,
+        width = 8,
+        height = 7,
+        dpi = 150
+      )
+      save_fig(
+        file.path(fig_dir, "fig_05_umap_annotation_published.png"),
+        p_pub,
+        width = 8,
+        height = 7,
+        dpi = 150
+      )
+    }
+  )
+
+  dot_features <- expand_genes(c(
+    "CD3D", "CD8A", "NKG7", "GNLY", "CD79A", "MS4A1",
+    "LYZ", "CD68", "C1QA", "ALB", "APOA1", "PECAM1",
+    "VWF", "COL1A1", "DCN", "EPCAM", "KRT19", "KRT7", "SOX9",
+    "ACTA2", "AFP", "GPC3"
+  ))
+  dot_features <- intersect(dot_features, rownames(seurat))
+  if (length(dot_features) > 0) {
+    p_dot <- DotPlot(seurat, features = dot_features, group.by = "celltype_annot") +
+      RotatedAxis()
+    save_fig(
+      file.path(fig_dir, "fig_06_dotplot_markers.png"),
+      p_dot,
+      width = 11,
+      height = 7,
+      dpi = 150
+    )
+  } else {
+    log_msg("skip DotPlot: no marker genes present in dataset")
+  }
+
+  feature_genes <- expand_genes(c(
+    "CD3D", "NKG7", "CD79A", "LYZ", "ALB", "KRT19",
+    "PECAM1", "COL1A1", "ACTA2", "EPCAM"
+  ))
+  feature_genes <- intersect(feature_genes, rownames(seurat))
+  feature_genes <- head(feature_genes, 6)
+  if (length(feature_genes) > 0) {
+    p_feature <- FeaturePlot(
+      seurat,
+      features = feature_genes,
+      ncol = 3
+    )
+    save_fig(
+      file.path(fig_dir, "fig_16_featureplot_markers.png"),
+      p_feature,
+      width = 12,
+      height = 4 * ceiling(length(feature_genes) / 3)
+    )
+
+    p_marker_violin <- VlnPlot(
+      seurat,
+      features = feature_genes,
+      group.by = "celltype_annot",
+      ncol = 3,
+      pt.size = 0
+    )
+    save_fig(
+      file.path(fig_dir, "fig_17_marker_violin.png"),
+      p_marker_violin,
+      width = 12,
+      height = 4 * ceiling(length(feature_genes) / 3)
+    )
+    tryCatch(
+      {
+        p_marker_ridge <- RidgePlot(
+          seurat,
+          features = feature_genes,
+          group.by = "celltype_annot",
+          ncol = 3
+        )
+        save_fig(
+          file.path(fig_dir, "fig_50_marker_ridgeplot.png"),
+          p_marker_ridge,
+          width = 14,
+          height = 4 * ceiling(length(feature_genes) / 3),
+          dpi = 150
+        )
+      },
+      error = function(e) {
+        log_msg("marker ridge figure failed: ", conditionMessage(e))
+      }
+    )
+    tryCatch(
+      {
+        p_marker_stacked <- VlnPlot(
+          seurat,
+          features = feature_genes,
+          group.by = "celltype_annot",
+          pt.size = 0,
+          stack = TRUE,
+          flip = TRUE
+        ) & NoLegend()
+        save_fig(
+          file.path(fig_dir, "fig_51_marker_stacked_violin.png"),
+          p_marker_stacked,
+          width = 12,
+          height = 8,
+          dpi = 150
+        )
+      },
+      error = function(e) {
+        log_msg("stacked marker violin failed: ", conditionMessage(e))
+      }
+    )
+  }
+
+  prop_tbl <- as.data.frame(table(
+    CellType = seurat$celltype_annot,
+    Condition = seurat$condition
+  ))
+  prop_mat <- as.matrix(xtabs(Freq ~ CellType + Condition, data = prop_tbl))
+  cond_names <- colnames(prop_mat)
+  sample_condition <- unique(data.frame(
+    sample = as.character(seurat$sample),
+    condition = as.character(seurat$condition),
+    stringsAsFactors = FALSE
+  ))
+  sample_condition <- sample_condition[
+    !duplicated(sample_condition$sample),
+    ,
+    drop = FALSE
+  ]
+  rownames(sample_condition) <- sample_condition$sample
+  sample_celltype_counts <- table(
+    sample = as.character(seurat$sample),
+    celltype = as.character(seurat$celltype_annot)
+  )
+  sample_totals <- rowSums(sample_celltype_counts)
+  sample_props <- sweep(
+    as.matrix(sample_celltype_counts),
+    1,
+    pmax(sample_totals, 1),
+    "/"
+  )
+  prop_stats <- lapply(rownames(prop_mat), function(ct) {
+    row <- prop_mat[ct, , drop = TRUE]
+    total <- colSums(prop_mat)
+    tbl <- rbind(row, total - row)
+    ct_props <- if (ct %in% colnames(sample_props)) {
+      sample_props[, ct]
+    } else {
+      rep(0, nrow(sample_condition))
+    }
+    names(ct_props) <- rownames(sample_condition)
+    props_a <- ct_props[
+      sample_condition$condition == cond_names[1] &
+        !is.na(sample_condition$condition)
+    ]
+    props_b <- ct_props[
+      sample_condition$condition == cond_names[2] &
+        !is.na(sample_condition$condition)
+    ]
+    method <- "sample_level_wilcoxon"
+    pvalue <- NA_real_
+    odds_ratio <- NA_real_
+    if (
+      length(props_a) >= 2 &&
+      length(props_b) >= 2 &&
+      length(unique(c(props_a, props_b))) > 1
+    ) {
+      test <- tryCatch(
+        suppressWarnings(
+          wilcox.test(props_a, props_b, exact = FALSE)
+        ),
+        error = function(e) NULL
+      )
+      pvalue <- if (is.null(test)) NA_real_ else test$p.value
+      odds_ratio <- (
+        (mean(props_a, na.rm = TRUE) + 1e-6) /
+          (mean(props_b, na.rm = TRUE) + 1e-6)
+      )
+    } else {
+      method <- "cell_level_fisher_fallback"
+      ft <- tryCatch(fisher.test(tbl), error = function(e) NULL)
+      pvalue <- if (is.null(ft)) NA_real_ else ft$p.value
+      odds_ratio <- if (is.null(ft)) {
+        NA_real_
+      } else {
+        as.numeric(ft$estimate)
+      }
+    }
+    data.frame(
+      CellType = ct,
+      CountA = row[1],
+      CountB = row[2],
+      MeanProportionA = mean(props_a, na.rm = TRUE),
+      MeanProportionB = mean(props_b, na.rm = TRUE),
+      SamplesA = sum(!is.na(props_a)),
+      SamplesB = sum(!is.na(props_b)),
+      Pvalue = pvalue,
+      OddsRatio = odds_ratio,
+      Method = method,
+      stringsAsFactors = FALSE
+    )
+  })
+  prop_stats_df <- do.call(rbind, prop_stats)
+  prop_stats_df$Padj <- p.adjust(prop_stats_df$Pvalue, method = "BH")
+  if (any(prop_stats_df$Method == "cell_level_fisher_fallback", na.rm = TRUE)) {
+    log_msg(
+      "WARNING: some cell-type proportion tests used cell-level Fisher ",
+      "fallback because fewer than two samples or no variation were available"
+    )
+  }
+  write.csv(
+    prop_stats_df,
+    stage_data_file("fig_18_19_celltype_proportion_stats.csv"),
+    row.names = FALSE
+  )
+  p_cell_prop <- ggplot(prop_tbl, aes(x = CellType, y = Freq, fill = Condition)) +
+    geom_col(position = "fill") +
+    scale_y_continuous(labels = scales::percent) +
+    theme_minimal() +
+    theme(axis.text.x = element_text(angle = 45, hjust = 1)) +
+    labs(x = "Cell type", y = "Proportion", fill = "Condition",
+         title = "Cell type proportion by condition")
+  save_fig(
+    file.path(fig_dir, "fig_18_celltype_proportion.png"),
+    p_cell_prop,
+    width = 9,
+    height = 6
+  )
+
+  p_cond_prop <- ggplot(prop_tbl, aes(x = Condition, y = Freq, fill = CellType)) +
+    geom_col(position = "fill") +
+    scale_y_continuous(labels = scales::percent) +
+    coord_flip() +
+    theme_minimal() +
+    labs(x = "Condition", y = "Proportion", fill = "Cell type",
+         title = "Condition composition by cell type")
+  save_fig(
+    file.path(fig_dir, "fig_19_condition_proportion.png"),
+    p_cond_prop,
+    width = 8,
+    height = 6
+  )
+
+  conf <- table(seurat$celltype_annot, seurat$published_type)
+  write.csv(as.data.frame.matrix(conf), stage_data_file("fig_07_annotation_confusion.csv"))
+  if (!"fig_07_annotation_confusion_heatmap.png" %in% skip_figs) {
+    png(
+      stage_fig_file(file.path(fig_dir, "fig_07_annotation_confusion_heatmap.png")),
+      width = 1200,
+      height = 800,
+      res = 150
+    )
+    if (nrow(conf) > 1 && ncol(conf) > 1 && !all(is.na(conf))) {
+      pheatmap(
+        conf,
+        display_numbers = TRUE,
+        fontsize_number = 6,
+        cluster_rows = FALSE,
+        cluster_cols = FALSE,
+        main = "Marker annotation vs published cell type"
+      )
+    } else {
+      plot.new()
+      title("No published annotations for confusion matrix")
+      text(0.5, 0.5, "No published annotations", cex = 1.4)
+    }
+    dev.off()
+    log_msg("saved figure: fig_07_annotation_confusion_heatmap.png")
+  } else {
+    log_msg("skip figure: fig_07_annotation_confusion_heatmap.png")
+  }
+
+  }
+
+  if (dataset_mode == "sample_level") {
+    seurat$celltype_annot <- "Bulk"
+    seurat$celltype_annot_cell <- "Bulk"
+    seurat$cluster_label <- as.character(seurat$seurat_clusters)
+    annotation_tbl <- data.frame(
+      cell = colnames(seurat),
+      seurat_clusters = as.character(seurat$seurat_clusters),
+      celltype_annot = seurat$celltype_annot,
+      celltype_annot_cell = seurat$celltype_annot_cell,
+      cluster_label = seurat$cluster_label,
+      published_type = seurat$published_type,
+      condition = seurat$condition,
+      sample = seurat$sample,
+      stringsAsFactors = FALSE
+    )
+    write.csv(
+      annotation_tbl,
+      stage_data_file("fig_05_16_17_cell_annotations.csv"),
+      row.names = FALSE
+    )
+    log_msg("sample-level mode: sample-level annotation written")
+  }
+
+  log_msg("annotation cell types: ", paste(sort(unique(seurat$celltype_annot)), collapse = ", "))
+  saveRDS(seurat, ckpt_path("seurat_annotated.rds"))
+})
+
+if (stage_allowed("06")) run_stage("06_differential_expression", {
+  if (!exists("seurat")) {
+    seurat <- readRDS(ckpt_path("seurat_annotated.rds"))
+  }
+  cond_levels <- sort(unique(as.character(seurat$condition)))
+  if (length(cond_levels) != 2) {
+    stop("Differential expression requires exactly two condition groups.")
+  }
+  Idents(seurat) <- "condition"
+  sample_cond <- unique(data.frame(
+    sample = seurat$sample,
+    condition = as.character(seurat$condition),
+    stringsAsFactors = FALSE
+  ))
+  sample_counts <- table(sample_cond$condition)
+  deg <- NULL
+  # Sample-level datasets already contain one column per biological sample,
+  # so differential expression must be computed on the raw sample counts
+  # directly instead of aggregating them into a pseudobulk matrix.
+  if (dataset_mode == "sample_level" && nrow(sample_cond) >= 4 && all(sample_counts >= 2)) {
+    log_msg("sample-level dataset: using DESeq2 directly on sample counts")
+    warn_file <- file.path(data_dir, "pseudobulk_warning.txt")
+    if (file.exists(warn_file)) {
+      unlink(warn_file)
+    }
+    count_mat <- GetAssayData(seurat, layer = "counts")
+    count_mat <- as.matrix(count_mat)
+    sample_meta <- sample_cond
+    rownames(sample_meta) <- sample_meta$sample
+    sample_meta <- sample_meta[
+      intersect(rownames(sample_meta), colnames(count_mat)),
+      ,
+      drop = FALSE
+    ]
+    count_mat <- count_mat[, rownames(sample_meta), drop = FALSE]
+    sample_meta$condition <- factor(
+      sample_meta$condition,
+      levels = cond_levels
+    )
+    de_method <- tolower(
+      Sys.getenv("LIVER_BULK_DE_METHOD", unset = "auto")
+    )
+    if (!de_method %in% c("auto", "deseq2", "limma", "limma-voom")) {
+      de_method <- "auto"
+    }
+    if (de_method == "auto") {
+      de_method <- if (liver_is_count_matrix(count_mat)) {
+        "deseq2"
+      } else {
+        "limma"
+      }
+    }
+    if (de_method %in% c("limma", "limma-voom")) {
+      log_msg(
+        "sample-level dataset: using ",
+        de_method,
+        " differential expression"
+      )
+      deg <- liver_limma_de(count_mat, sample_meta, cond_levels, de_method)
+    } else {
+      dds <- tryCatch(
+        {
+          d <- DESeqDataSetFromMatrix(
+            countData = round(count_mat),
+            colData = sample_meta,
+            design = ~ condition
+          )
+          DESeq(d, quiet = TRUE)
+        },
+        error = function(e) {
+          log_msg("sample-level DESeq2 failed: ", conditionMessage(e))
+          NULL
+        }
+      )
+      if (!is.null(dds)) {
+        res <- results(
+          dds,
+          contrast = c("condition", cond_levels[1], cond_levels[2]),
+          alpha = de_padj,
+          independentFiltering = TRUE
+        )
+        deg <- as.data.frame(res)
+        deg$gene <- rownames(deg)
+        deg$avg_log2FC <- deg$log2FoldChange
+        deg$p_val <- deg$pvalue
+        deg$p_val_adj <- deg$padj
+        deg$pct.1 <- NA_real_
+        deg$pct.2 <- NA_real_
+      } else {
+        log_msg("sample-level DESeq2 failed; falling back to Seurat Wilcoxon")
+        writeLines(
+          "DESeq2 failed on sample-level counts; used Seurat Wilcoxon",
+          file.path(data_dir, "pseudobulk_warning.txt")
+        )
+        deg <- tryCatch(
+          FindMarkers(
+            seurat,
+            ident.1 = cond_levels[1],
+            ident.2 = cond_levels[2],
+            test.use = "wilcox",
+            max.cells.per.ident = 3000,
+            logfc.threshold = 0,
+            min.pct = 0,
+            only.pos = FALSE,
+            verbose = FALSE
+          ),
+          error = function(e) NULL
+        )
+      }
+    }
+  } else {
+    use_pseudobulk <- nrow(sample_cond) >= 4 && all(sample_counts >= 2)
+
+    if (use_pseudobulk) {
+      log_msg("using DESeq2 pseudobulk differential expression")
+      warn_file <- file.path(data_dir, "pseudobulk_warning.txt")
+      if (file.exists(warn_file)) {
+        unlink(warn_file)
+      }
+      bulk <- AggregateExpression(
+        seurat,
+        group.by = c("sample", "condition"),
+        assays = "RNA",
+        return.seurat = FALSE
+      )$RNA
+      bulk_meta <- data.frame(row.names = colnames(bulk), stringsAsFactors = FALSE)
+      # AggregateExpression names columns "<sample>_<condition>"; only strip the
+      # trailing condition suffix. Rewriting "-" to "_" mangles GEO sample names
+      # and silently drops every pseudobulk row via the match below.
+      bulk_meta$sample <- sub("_[^_]+$", "", colnames(bulk))
+      bulk_meta$condition <- sample_cond$condition[
+        match(bulk_meta$sample, sample_cond$sample)
+      ]
+      bulk_meta$condition <- factor(bulk_meta$condition, levels = cond_levels)
+      n_before_drop <- nrow(bulk_meta)
+      all_bulk_rows <- rownames(bulk_meta)
+      bulk_meta <- bulk_meta[!is.na(bulk_meta$condition), , drop = FALSE]
+      if (nrow(bulk_meta) < n_before_drop) {
+        dropped_samples <- setdiff(all_bulk_rows, rownames(bulk_meta))
+        log_msg(
+          "WARNING: dropped ", n_before_drop - nrow(bulk_meta),
+          " pseudobulk samples whose name did not match the sample metadata: ",
+          paste(head(dropped_samples, 20), collapse = ", ")
+        )
+        write(
+          paste0(
+            "pseudobulk_sample_match: dropped ",
+            n_before_drop - nrow(bulk_meta), " of ", n_before_drop,
+            " pseudobulk samples; unmatched columns: ",
+            paste(head(dropped_samples, 20), collapse = ", ")
+          ),
+          file = file.path(data_dir, "pseudobulk_sample_match_warning.txt"),
+          append = TRUE
+        )
+      }
+      bulk <- bulk[, rownames(bulk_meta), drop = FALSE]
+      if (sum(bulk) == 0 || nrow(bulk_meta) < 4) {
+        use_pseudobulk <- FALSE
+        log_msg("pseudobulk invalid; falling back to Seurat Wilcoxon")
+        writeLines(
+          "Sample count insufficient for pseudobulk; used Seurat Wilcoxon",
+          file.path(data_dir, "pseudobulk_warning.txt")
+        )
+      }
+    }
+
+    pseudobulk_de_method <- tolower(
+      Sys.getenv("LIVER_BULK_DE_METHOD", unset = "auto")
+    )
+    if (!pseudobulk_de_method %in% c("auto", "deseq2", "limma", "limma-voom")) {
+      pseudobulk_de_method <- "auto"
+    }
+    if (pseudobulk_de_method == "auto") {
+      pseudobulk_de_method <- if (liver_is_count_matrix(bulk)) {
+        "deseq2"
+      } else {
+        "limma"
+      }
+    }
+    if (
+      use_pseudobulk &&
+      pseudobulk_de_method %in% c("limma", "limma-voom")
+    ) {
+      log_msg(
+        "using ",
+        pseudobulk_de_method,
+        " pseudobulk differential expression"
+      )
+      deg <- liver_limma_de(
+        bulk,
+        bulk_meta,
+        cond_levels,
+        pseudobulk_de_method
+      )
+      use_pseudobulk <- FALSE
+    }
+
+    if (use_pseudobulk) {
+      dds <- DESeqDataSetFromMatrix(
+        countData = round(as.matrix(bulk)),
+        colData = bulk_meta,
+        design = ~ condition
+      )
+      dds <- tryCatch(
+        DESeq(dds, quiet = TRUE),
+        error = function(e) {
+          log_msg("pseudobulk DESeq2 failed: ", conditionMessage(e))
+          NULL
+        }
+      )
+      if (is.null(dds)) {
+        use_pseudobulk <- FALSE
+        writeLines(
+          "DESeq2 pseudobulk failed; used Seurat Wilcoxon",
+          file.path(data_dir, "pseudobulk_warning.txt")
+        )
+      }
+    }
+
+    if (use_pseudobulk) {
+      res <- results(
+        dds,
+        contrast = c("condition", cond_levels[1], cond_levels[2]),
+        alpha = de_padj,
+        independentFiltering = TRUE
+      )
+      deg <- as.data.frame(res)
+      deg$gene <- rownames(deg)
+      deg$avg_log2FC <- deg$log2FoldChange
+      deg$p_val <- deg$pvalue
+      deg$p_val_adj <- deg$padj
+      deg$pct.1 <- NA_real_
+      deg$pct.2 <- NA_real_
+    } else if (exists("deg") && !is.null(deg)) {
+      log_msg("pseudobulk differential expression already computed")
+    } else {
+      log_msg("using Seurat Wilcoxon with downsampling")
+      writeLines(
+        "Sample count insufficient for pseudobulk; used Seurat Wilcoxon",
+        file.path(data_dir, "pseudobulk_warning.txt")
+      )
+      deg <- tryCatch(
+        FindMarkers(
+          seurat,
+          ident.1 = cond_levels[1],
+          ident.2 = cond_levels[2],
+          test.use = "wilcox",
+          max.cells.per.ident = 3000,
+          logfc.threshold = de_logfc,
+          min.pct = 0.1,
+          only.pos = FALSE,
+          verbose = FALSE
+        ),
+        error = function(e) NULL
+      )
+      if (is.null(deg) || nrow(deg) == 0 || ncol(deg) == 0) {
+        log_msg(
+          "no DEGs passed default filters; ",
+          "rerunning without logFC/min.pct filters"
+        )
+        deg <- tryCatch(
+          FindMarkers(
+            seurat,
+            ident.1 = cond_levels[1],
+            ident.2 = cond_levels[2],
+            test.use = "wilcox",
+            max.cells.per.ident = 3000,
+            logfc.threshold = 0,
+            min.pct = 0,
+            only.pos = FALSE,
+            verbose = FALSE
+          ),
+          error = function(e) NULL
+        )
+      }
+    }
+  }
+  deg <- ensure_deg_columns(deg)
+  if (
+    !nzchar(Sys.getenv("LIVER_DE_MIN_BASEMEAN", unset = "")) &&
+    de_min_base_mean == 0
+  ) {
+    de_min_base_mean <- if (dataset_mode == "sample_level") 10 else 1
+  }
+  if (!"baseMean" %in% colnames(deg)) {
+    deg$baseMean <- NA_real_
+  }
+  deg$significant <-
+    !is.na(deg$p_val_adj) &
+    !is.na(deg$avg_log2FC) &
+    deg$p_val_adj < de_padj &
+    abs(deg$avg_log2FC) > de_logfc &
+    abs(deg$avg_log2FC) <= de_max_logfc &
+    (is.na(deg$baseMean) | deg$baseMean >= de_min_base_mean)
+  deg$direction <- ifelse(
+    deg$significant,
+    ifelse(deg$avg_log2FC > 0, "Up", "Down"),
+    "NS"
+  )
+  deg$neg_log10_padj <- -log10(pmax(deg$p_val_adj, 1e-300))
+  deg <- deg[order(
+    is.na(deg$p_val_adj),
+    deg$p_val_adj,
+    -abs(deg$avg_log2FC)
+  ), , drop = FALSE]
+
+  write.csv(deg, stage_data_file("fig_08_deg_all.csv"), row.names = FALSE)
+  write.csv(
+    deg[deg$significant, ],
+    stage_data_file("fig_09_deg_significant.csv"),
+    row.names = FALSE
+  )
+
+  label_genes <- deg$gene[seq_len(min(15, nrow(deg)))]
+  p_volcano <- ggplot(
+    deg,
+    aes(x = avg_log2FC, y = neg_log10_padj, color = direction)
+  ) +
+    geom_point(alpha = 0.6, size = 1.1) +
+    geom_hline(yintercept = -log10(0.05), linetype = "dashed", color = "grey40") +
+    geom_vline(xintercept = c(-0.25, 0.25), linetype = "dashed", color = "grey40") +
+    scale_color_manual(values = c("Up" = "#E64B35", "Down" = "#4DBBD5", "NS" = "grey75")) +
+    geom_text_repel(
+      data = deg[deg$gene %in% label_genes, ],
+      aes(label = gene),
+      max.overlaps = 20,
+      size = 3
+    ) +
+    labs(
+      x = paste0(
+        "Average log2 fold change (",
+        cond_levels[1], " vs ", cond_levels[2], ")"
+      ),
+      y = "-log10 adjusted p value",
+      title = paste0(
+        "Differential expression volcano plot (",
+        cond_levels[1], " vs ", cond_levels[2], ")"
+      )
+    ) +
+    theme_minimal() +
+    coord_cartesian(clip = "off")
+  if (fig_style("fig_08_volcano.png") == "maplot") {
+    expr_genes <- intersect(deg$gene, rownames(seurat))
+    expr_mat <- GetAssayData(seurat, layer = "data")[
+      expr_genes, , drop = FALSE
+    ]
+    means <- as.numeric(Matrix::rowSums(expr_mat) / ncol(expr_mat))
+    deg$mean_expr <- NA_real_
+    deg$mean_expr[match(expr_genes, deg$gene)] <- means
+    p_volcano <- ggplot(
+      deg,
+      aes(x = mean_expr, y = avg_log2FC, color = direction)
+    ) +
+      geom_point(alpha = 0.6, size = 1.1) +
+      geom_hline(yintercept = 0, linetype = "dashed", color = "grey40") +
+      scale_color_manual(values = c("Up" = "#E64B35", "Down" = "#4DBBD5", "NS" = "grey75")) +
+      labs(
+        x = "Mean normalized expression",
+        y = "Average log2 fold change",
+        title = paste0(
+          "MA plot (", cond_levels[1], " vs ", cond_levels[2], ")"
+        )
+      ) +
+      theme_minimal() +
+      coord_cartesian(clip = "off")
+  }
+  save_fig(
+    file.path(fig_dir, "fig_08_volcano.png"),
+    p_volcano,
+    width = 9,
+    height = 7,
+    dpi = 150,
+    plot_margin = ggplot2::margin(20, 60, 24, 20, "pt")
+  )
+
+  top_deg <- deg[deg$significant %in% TRUE, ]
+  if (nrow(top_deg) < 1) {
+    top_deg <- deg[is.finite(deg$p_val_adj), ]
+  }
+  top_deg <- head(top_deg, deg_violin_top_n)
+  top_genes <- intersect(top_deg$gene, rownames(seurat))
+  if (length(top_genes) >= 2) {
+    conds <- unique(as.character(seurat$condition))
+    if (length(conds) >= 2) {
+      keep_cells <- unlist(lapply(conds, function(cc) {
+        cells <- colnames(seurat)[seurat$condition == cc]
+        set.seed(20260812)
+        if (length(cells) > deg_violin_max_cells) {
+          cells <- sample(cells, deg_violin_max_cells)
+        }
+        cells
+      }))
+      expr_mat <- GetAssayData(seurat, layer = "data")[
+        top_genes,
+        keep_cells,
+        drop = FALSE
+      ]
+      expr_long <- data.frame(
+        cell = rep(colnames(expr_mat), each = nrow(expr_mat)),
+        gene = rep(rownames(expr_mat), times = ncol(expr_mat)),
+        expr = as.numeric(as.matrix(expr_mat)),
+        stringsAsFactors = FALSE
+      )
+      expr_long$condition <- seurat$condition[
+        match(expr_long$cell, colnames(seurat))
+      ]
+      expr_long <- expr_long[!is.na(expr_long$condition), , drop = FALSE]
+      expr_long$gene <- factor(expr_long$gene, levels = rev(top_genes))
+
+      deg_top <- top_deg[top_deg$gene %in% top_genes, , drop = FALSE]
+      deg_top$p_label <- ifelse(
+        deg_top$p_val_adj < 0.001,
+        formatC(pmax(deg_top$p_val_adj, 1e-300), format = "e", digits = 1),
+        sprintf("%.3f", deg_top$p_val_adj)
+      )
+      label_map <- setNames(
+        paste0(deg_top$gene, "\nP = ", deg_top$p_label),
+        deg_top$gene
+      )
+      cond_colors <- hcl.colors(length(conds), palette = "Set 2")
+      p_deg_violin <- ggplot(
+        expr_long,
+        aes(x = expr, y = gene, fill = condition)
+      ) +
+        geom_violin(
+          position = position_dodge(0.8),
+          scale = "width",
+          alpha = 0.75,
+          trim = TRUE
+        ) +
+        geom_boxplot(
+          width = 0.12,
+          position = position_dodge(0.8),
+          outlier.shape = NA,
+          alpha = 0.9
+        ) +
+        geom_point(
+          alpha = 0.18,
+          size = 0.4,
+          position = position_jitterdodge(
+            jitter.width = 0.08,
+            dodge.width = 0.8,
+            seed = 20260812
+          )
+        ) +
+        scale_y_discrete(labels = label_map) +
+        scale_fill_manual(values = cond_colors) +
+        labs(
+          x = "Normalized expression",
+          y = NULL,
+          fill = "Condition",
+          title = paste0(
+            "Top differential genes by adjusted p value (",
+            cond_levels[1], " vs ", cond_levels[2], ")"
+          )
+        ) +
+        theme_minimal(base_size = 13) +
+        theme(
+          axis.text.y = element_text(size = 8, face = "italic"),
+          legend.position = "top"
+        )
+      save_fig(
+        file.path(fig_dir, "fig_09_deg_horizontal_violin.png"),
+        p_deg_violin,
+        width = 11,
+        height = max(7, 0.55 * length(top_genes) + 2),
+        dpi = 150,
+        plot_margin = ggplot2::margin(20, 40, 26, 20, "pt")
+      )
+      write.csv(
+        deg_top[, intersect(
+          c(
+            "gene", "avg_log2FC", "p_val", "p_val_adj",
+            "pct.1", "pct.2", "significant", "direction"
+          ),
+          colnames(deg_top)
+        ), drop = FALSE],
+        stage_data_file("fig_09_deg_horizontal_violin.csv"),
+        row.names = FALSE
+      )
+      log_msg("saved DEG horizontal violin table: ", nrow(deg_top), " genes")
+    } else {
+      log_msg("skip DEG horizontal violin: need at least 2 conditions")
+    }
+  } else {
+    log_msg("skip DEG horizontal violin: too few genes in Seurat object")
+  }
+
+  top30 <- intersect(
+    deg$gene[seq_len(min(30, nrow(deg)))],
+    rownames(seurat)
+  )
+  if (length(top30) > 0) {
+    seurat <- ScaleData(seurat, features = top30, verbose = FALSE)
+    p_heat <- DoHeatmap(
+      seurat,
+      features = top30,
+      group.by = "condition",
+      angle = 45
+    ) +
+      scale_fill_viridis_c()
+    save_fig(
+      file.path(fig_dir, "fig_09_deg_heatmap.png"),
+      p_heat,
+      width = 10,
+      height = 8,
+      dpi = 150,
+      plot_margin = ggplot2::margin(32, 24, 24, 18, "pt")
+    )
+  } else {
+    log_msg("skip DEG heatmap: no DEGs to plot")
+  }
+
+  log_msg("significant DEGs: ", sum(deg$significant, na.rm = TRUE))
+})
+
+if (stage_allowed("07")) run_stage("07_enrichment", {
+  deg <- read.csv(stage_data_file("fig_08_deg_all.csv"), stringsAsFactors = FALSE)
+  deg_up <- deg[deg$significant & deg$avg_log2FC > 0, ]
+  deg_down <- deg[deg$significant & deg$avg_log2FC < 0, ]
+
+  if (nrow(deg_up) < 10) {
+    deg_up <- deg[deg$p_val_adj < 0.1 & deg$avg_log2FC > 0.1, ]
+  }
+  if (nrow(deg_down) < 10) {
+    deg_down <- deg[deg$p_val_adj < 0.1 & deg$avg_log2FC < -0.1, ]
+  }
+
+  gene_id_type <- function(ids) {
+    ids <- na.omit(ids)
+    ids <- normalize_ensembl_ids(ids)
+    if (length(ids) == 0) return("SYMBOL")
+    if (grepl("^ENSG\\d+", ids[1]) || grepl("^ENSMUSG\\d+", ids[1])) {
+      "ENSEMBL"
+    } else {
+      "SYMBOL"
+    }
+  }
+
+  org_db <- if (species == "mm") {
+    if (!requireNamespace("org.Mm.eg.db", quietly = TRUE)) {
+      stop("org.Mm.eg.db is required for mouse enrichment analysis.")
+    }
+    getExportedValue("org.Mm.eg.db", "org.Mm.eg.db")
+  } else {
+    org.Hs.eg.db
+  }
+  kegg_org <- ifelse(species == "mm", "mmu", "hsa")
+
+  run_enrichment <- function(deg_sub, name) {
+    if (nrow(deg_sub) < 3) {
+      log_msg("too few genes for ", name)
+      return(list(go = NULL, kegg = NULL))
+    }
+
+    id_type <- gene_id_type(deg_sub$gene)
+    query_ids <- unique(normalize_ensembl_ids(deg_sub$gene))
+    eg <- tryCatch(
+      bitr(
+        query_ids,
+        fromType = id_type,
+        toType = "ENTREZID",
+        OrgDb = org_db
+      ),
+      error = function(e) NULL
+    )
+    if (is.null(eg) || nrow(eg) == 0) {
+      log_msg("no Entrez mapping for ", name)
+      return(list(go = NULL, kegg = NULL))
+    }
+
+    go <- tryCatch(
+      enrichGO(
+        gene = eg$ENTREZID,
+        OrgDb = org_db,
+        keyType = "ENTREZID",
+        ont = "ALL",
+        pAdjustMethod = "BH",
+        pvalueCutoff = 0.1,
+        qvalueCutoff = 0.2,
+        readable = TRUE
+      ),
+      error = function(e) NULL
+    )
+
+    kegg <- kegg_call_retry(function() {
+      enrichKEGG(
+        gene = eg$ENTREZID,
+        organism = kegg_org,
+        pvalueCutoff = 0.1,
+        qvalueCutoff = 0.2
+      )
+    })
+    if (is.null(kegg)) {
+      log_msg("KEGG enrichment unavailable")
+    }
+
+    list(go = go, kegg = kegg)
+  }
+
+  up_res <- run_enrichment(deg_up, "up-regulated")
+  down_res <- run_enrichment(deg_down, "down-regulated")
+
+  write_res <- function(res, go_prefix, kegg_prefix) {
+    if (!is.null(res$go)) {
+      go_df <- as.data.frame(res$go)
+      write.csv(go_df, stage_data_file(paste0(go_prefix, "_go.csv")), row.names = FALSE)
+    } else {
+      write.csv(data.frame(note = "no significant GO terms"),
+                stage_data_file(paste0(go_prefix, "_go.csv")), row.names = FALSE)
+    }
+    if (!is.null(res$kegg)) {
+      kegg_df <- as.data.frame(res$kegg)
+      write.csv(kegg_df, stage_data_file(paste0(kegg_prefix, "_kegg.csv")), row.names = FALSE)
+    } else {
+      write.csv(data.frame(note = "no significant KEGG terms"),
+                stage_data_file(paste0(kegg_prefix, "_kegg.csv")), row.names = FALSE)
+    }
+  }
+  write_res(up_res, "fig_10_enrichment_up", "fig_12_enrichment_up")
+  write_res(down_res, "fig_11_enrichment_down", "fig_13_enrichment_down")
+
+  plot_res <- function(res, file, title) {
+    if (is.null(res) || nrow(as.data.frame(res)) == 0) {
+      p <- ggplot(data.frame(x = 0, y = 0), aes(x, y)) +
+        geom_text(label = "No significant enrichment terms") +
+        theme_void()
+    } else {
+      style <- fig_style(basename(file))
+      if (style == "dotplot") {
+        p <- dotplot(res, showCategory = 10, font.size = 8) + ggtitle(title)
+      } else if (style == "cnetplot") {
+        p <- cnetplot(res, showCategory = 10) +
+          ggtitle(title)
+      } else {
+        p <- barplot(res, showCategory = 10, font.size = 8) + ggtitle(title)
+      }
+    }
+    save_fig(file, p, width = 9, height = 7, dpi = 150)
+  }
+
+  plot_res(up_res$go, file.path(fig_dir, "fig_10_go_up.png"), "GO BP: up-regulated genes")
+  plot_res(down_res$go, file.path(fig_dir, "fig_11_go_down.png"), "GO BP: down-regulated genes")
+  plot_res(up_res$kegg, file.path(fig_dir, "fig_12_kegg_up.png"), "KEGG: up-regulated genes")
+  plot_res(down_res$kegg, file.path(fig_dir, "fig_13_kegg_down.png"), "KEGG: down-regulated genes")
+
+  rank_vec <- deg$avg_log2FC
+  names(rank_vec) <- normalize_ensembl_ids(deg$gene)
+  rank_vec <- sort(rank_vec[!is.na(rank_vec) & is.finite(rank_vec)], decreasing = TRUE)
+  id_type <- gene_id_type(names(rank_vec))
+  mapped_col <- if (id_type == "SYMBOL") "SYMBOL" else "ENSEMBL"
+  gsea_query <- unique(normalize_ensembl_ids(names(rank_vec)))
+  eg_all <- tryCatch(
+    bitr(
+      gsea_query,
+      fromType = id_type,
+      toType = "ENTREZID",
+      OrgDb = org_db
+    ),
+    error = function(e) data.frame()
+  )
+  if (skip_gsea) {
+    log_msg("GSEA skipped by LIVER_SKIP_GSEA")
+    gsea_go <- NULL
+    gsea_kegg <- NULL
+    gsea_kegg_status <- list(
+      status = "skipped",
+      reason = "LIVER_SKIP_GSEA"
+    )
+  } else if (nrow(eg_all) == 0) {
+    log_msg("no Entrez mapping for GSEA; skipping")
+    gsea_go <- NULL
+    gsea_kegg <- NULL
+    gsea_kegg_status <- list(
+      status = "unavailable",
+      reason = "no Entrez mapping for GSEA"
+    )
+  } else {
+    ranked <- rank_vec[eg_all[[mapped_col]]]
+    names(ranked) <- eg_all$ENTREZID
+    ranked <- sort(ranked, decreasing = TRUE)
+    if (gsea_max_genes > 0 && length(ranked) > gsea_max_genes) {
+      ranked <- ranked[seq_len(gsea_max_genes)]
+      log_msg(
+        "GSEA gene list capped to ",
+        length(ranked),
+        " genes (LIVER_GSEA_MAX_GENES=",
+        gsea_max_genes,
+        ")"
+      )
+    }
+
+    log_msg("starting GSEA GO with ", length(ranked), " genes")
+    gsea_go <- tryCatch(
+      gseGO(
+        geneList = ranked,
+        OrgDb = org_db,
+        keyType = "ENTREZID",
+        ont = "ALL",
+        minGSSize = 10,
+        maxGSSize = 500,
+        pvalueCutoff = 0.1,
+        verbose = FALSE
+      ),
+      error = function(e) NULL
+    )
+    log_msg("GSEA GO finished")
+    log_msg("starting GSEA KEGG with ", length(ranked), " genes")
+    gsea_kegg <- kegg_call_retry(function() {
+      gseKEGG(
+        geneList = ranked,
+        organism = kegg_org,
+        minGSSize = 10,
+        maxGSSize = 500,
+        pvalueCutoff = 0.1,
+        verbose = FALSE
+      )
+    })
+    if (is.null(gsea_kegg)) {
+      log_msg("GSEA KEGG unavailable")
+      gsea_kegg_status <- list(
+        status = "unavailable",
+        reason = "gseKEGG returned no result"
+      )
+    } else {
+      gsea_kegg_status <- list(
+        status = "ok",
+        terms = nrow(as.data.frame(gsea_kegg))
+      )
+    }
+    log_msg("GSEA KEGG finished")
+  }
+  jsonlite::write_json(
+    gsea_kegg_status,
+    stage_data_file("fig_21_gsea_kegg_status.json"),
+    auto_unbox = TRUE,
+    pretty = TRUE
+  )
+
+  plot_gsea <- function(res, file, title) {
+    if (is.null(res) || nrow(as.data.frame(res)) == 0) {
+      p <- ggplot(data.frame(x = 0, y = 0), aes(x, y)) +
+        geom_text(label = "No significant GSEA terms") +
+        theme_void()
+    } else {
+      style <- fig_style(basename(file))
+      if (style == "gseaplot2") {
+        n <- min(3, nrow(as.data.frame(res)))
+        p <- gseaplot2(res, geneSetID = seq_len(n), title = title)
+      } else {
+        p <- ridgeplot(res, showCategory = 10) + ggtitle(title)
+      }
+    }
+    save_fig(file, p, width = 9, height = 7)
+  }
+  plot_gsea(gsea_go, file.path(fig_dir, "fig_20_gsea_go.png"), "GSEA GO BP")
+  plot_gsea(gsea_kegg, file.path(fig_dir, "fig_21_gsea_kegg.png"), "GSEA KEGG")
+
+  top_enrichment <- function(res, n = 5, padj_cutoff = 0.05) {
+    if (is.null(res) || nrow(as.data.frame(res)) == 0) {
+      return(res)
+    }
+    df <- as.data.frame(res)
+    sig_idx <- which(!is.na(df$p.adjust) & df$p.adjust <= padj_cutoff)
+    filtered <- clusterProfiler::slice(res, sig_idx)
+    df <- as.data.frame(filtered)
+    if (nrow(df) == 0) {
+      return(filtered)
+    }
+    clusterProfiler::slice(filtered, seq_len(min(n, nrow(df))))
+  }
+
+  extend_enrichment <- function(res, core_n = 5, ext_n = 5, padj_cutoff = 0.05) {
+    top_enrichment(res, n = core_n + ext_n, padj_cutoff = padj_cutoff)
+  }
+
+  plot_cnet <- function(res, file, title) {
+    filtered <- extend_enrichment(res)
+    if (is.null(filtered) || nrow(as.data.frame(filtered)) == 0) {
+      p <- ggplot(data.frame(x = 0, y = 0), aes(x, y)) +
+        geom_text(label = "No significant pathway network") +
+        theme_void()
+    } else {
+      style <- fig_style(basename(file))
+      if (style == "emapplot") {
+        p <- emapplot(filtered, showCategory = 10) + ggtitle(title)
+      } else {
+        p <- cnetplot(filtered, showCategory = 10) +
+          ggtitle(title)
+      }
+      p <- tryCatch(
+        p + coord_cartesian(clip = "off"),
+        error = function(e) p
+      )
+    }
+    save_fig(
+      file,
+      p,
+      width = 10,
+      height = 8,
+      plot_margin = ggplot2::margin(30, 70, 40, 70, "pt")
+    )
+  }
+
+  plot_top5 <- function(res, file, title) {
+    filtered <- top_enrichment(res)
+    if (is.null(filtered) || nrow(as.data.frame(filtered)) == 0) {
+      p <- ggplot(data.frame(x = 0, y = 0), aes(x, y)) +
+        geom_text(label = "No significant pathway after filtering") +
+        theme_void()
+    } else {
+      style <- fig_style(basename(file))
+      if (style == "barplot") {
+        p <- barplot(filtered, showCategory = 5, font.size = 8) + ggtitle(title)
+      } else if (style == "cnetplot") {
+        p <- cnetplot(filtered, showCategory = 5) + ggtitle(title)
+      } else if (style == "emapplot") {
+        p <- emapplot(filtered, showCategory = 5) + ggtitle(title)
+      } else {
+        p <- dotplot(filtered, showCategory = 5, font.size = 8) + ggtitle(title)
+      }
+    }
+    save_fig(file, p, width = 10, height = 8)
+  }
+
+  plot_cnet(up_res$go, file.path(fig_dir, "fig_22_go_network.png"), "GO BP network (top 5 core + best 5 extended)")
+  plot_cnet(up_res$kegg, file.path(fig_dir, "fig_23_kegg_network.png"), "KEGG network (top 5 core + best 5 extended)")
+  plot_top5(up_res$go, file.path(fig_dir, "fig_46_go_top5.png"), "GO BP filtered top 5")
+  plot_top5(up_res$kegg, file.path(fig_dir, "fig_47_kegg_top5.png"), "KEGG filtered top 5")
+
+  log_msg("enrichment tables and plots generated")
+})
+
+if (stage_allowed("08")) run_stage("08_publication_analyses", {
+  if (!exists("seurat")) {
+    seurat <- readRDS(ckpt_path("seurat_annotated.rds"))
+  }
+  seurat <- NormalizeData(seurat, verbose = FALSE)
+  Idents(seurat) <- "condition"
+
+  if (dataset_mode == "sample_level") {
+    log_msg("sample-level mode: skipping cell-level publication analyses")
+  } else {
+  if (run_cellcycle) {
+    if (!"Phase" %in% colnames(seurat@meta.data)) {
+      cc_genes <- tryCatch(Seurat::cc.genes, error = function(e) NULL)
+      if (is.null(cc_genes)) {
+        cc_genes <- tryCatch(Seurat::cc.genes.updated.2019, error = function(e) NULL)
+      }
+      s_genes <- intersect(cc_genes$s.genes, rownames(seurat))
+      g2m_genes <- intersect(cc_genes$g2m.genes, rownames(seurat))
+      if (length(s_genes) >= 5 && length(g2m_genes) >= 5) {
+        seurat <- CellCycleScoring(
+          seurat,
+          s.features = s_genes,
+          g2m.features = g2m_genes,
+          set.ident = FALSE
+        )
+        cc_tbl <- data.frame(
+          cell = colnames(seurat),
+          S.Score = seurat$S.Score,
+          G2M.Score = seurat$G2M.Score,
+          Phase = seurat$Phase,
+          condition = seurat$condition,
+          stringsAsFactors = FALSE
+        )
+        write.csv(cc_tbl, stage_data_file("fig_26_27_cell_cycle_scores.csv"), row.names = FALSE)
+      }
+    }
+    if ("Phase" %in% colnames(seurat@meta.data)) {
+      p_cc_umap <- DimPlot(seurat, group.by = "Phase") +
+        ggtitle("Cell cycle phase")
+      save_fig(
+        file.path(fig_dir, "fig_26_cellcycle_umap.png"),
+        p_cc_umap,
+        width = 8,
+        height = 7,
+        dpi = 150
+      )
+      cc_prop <- as.data.frame(table(
+        Condition = seurat$condition,
+        Phase = seurat$Phase
+      ))
+      p_cc_prop <- ggplot(cc_prop, aes(x = Condition, y = Freq, fill = Phase)) +
+        geom_col(position = "fill") +
+        scale_y_continuous(labels = scales::percent) +
+        theme_minimal() +
+        labs(
+          x = "Condition",
+          y = "Proportion",
+          fill = "Phase",
+          title = "Cell cycle phase proportion"
+        )
+      save_fig(
+        file.path(fig_dir, "fig_27_cellcycle_proportion.png"),
+        p_cc_prop,
+        width = 7,
+        height = 5,
+        dpi = 150
+      )
+    }
+  }
+
+  if (length(unique(seurat$sample)) > 1) {
+    sample_levels <- unique(as.character(seurat$sample))
+    sample_labels <- sample_short_label(sample_levels)
+    seurat$sample_label <- unname(factor(
+      sample_labels[match(as.character(seurat$sample), sample_levels)],
+      levels = sample_labels
+    ))
+    p_sample <- DimPlot(
+      seurat,
+      group.by = "condition",
+      label = FALSE,
+      cols = c("#E64B35", "#4DBBD5")
+    ) +
+      labs(color = "Condition") +
+      ggtitle("UMAP by sample") +
+      guides(color = guide_legend(override.aes = list(size = 4))) +
+      theme(
+        legend.text = element_text(size = 10),
+        legend.title = element_text(size = 9, face = "bold"),
+        legend.key.size = grid::unit(0.55, "cm"),
+        legend.key.height = grid::unit(0.55, "cm"),
+        legend.spacing.y = grid::unit(0.05, "cm")
+      )
+    save_fig(
+      file.path(fig_dir, "fig_28_umap_sample.png"),
+      p_sample,
+      width = 8,
+      height = 7,
+      dpi = 150,
+      plot_margin = ggplot2::margin(16, 30, 22, 30, "pt")
+    )
+    seurat$sample_label <- NULL
+  } else {
+    log_msg("skip figure: fig_28_umap_sample.png (single sample)")
+  }
+
+  dbl_path <- stage_data_file("fig_02_doublet_results.csv")
+  if (file.exists(dbl_path)) {
+    dbl <- read.csv(dbl_path, stringsAsFactors = FALSE)
+    if (nrow(dbl) > 0 && "doublet_call" %in% colnames(dbl)) {
+      dbl_rate <- dbl %>%
+        dplyr::group_by(sample) %>%
+        dplyr::summarise(
+          n_cells = dplyr::n(),
+          n_doublets = sum(doublet_call == "doublet", na.rm = TRUE),
+          doublet_rate = n_doublets / n_cells,
+          .groups = "drop"
+        )
+      dbl_rate$condition <- dbl$condition[match(dbl_rate$sample, dbl$sample)]
+      dbl_rate$sample_short <- sample_short_label(dbl_rate$sample)
+      write.csv(
+        dbl_rate,
+        stage_data_file("fig_29_doublet_rate_by_sample.csv"),
+        row.names = FALSE
+      )
+      p_dbl_rate <- ggplot(
+        dbl_rate,
+        aes(x = sample_short, y = doublet_rate, fill = condition)
+      ) +
+        geom_col(width = 0.72) +
+        geom_text(
+          aes(label = sprintf("%.1f%%", 100 * doublet_rate)),
+          angle = 90,
+          hjust = -0.12,
+          vjust = 0.5,
+          size = 2.6
+        ) +
+        scale_y_continuous(
+          labels = scales::percent,
+          expand = ggplot2::expansion(mult = c(0, 0.15))
+        ) +
+        theme_minimal() +
+        theme(
+          axis.text.x = element_text(angle = 90, hjust = 1, vjust = 0.5, size = 8),
+          axis.text.y = element_text(size = 9),
+          legend.position = "top",
+          legend.title = element_text(size = 9, face = "bold")
+        ) +
+        labs(
+          x = "Sample",
+          y = "Doublet rate",
+          fill = "Condition",
+          title = "Doublet rate by sample"
+        )
+      save_fig(
+        file.path(fig_dir, "fig_29_doublet_rate_sample.png"),
+        p_dbl_rate,
+        width = 12,
+        height = 6.5,
+        dpi = 150
+      )
+    }
+  }
+
+  prop_sample <- as.data.frame(table(
+    CellType = seurat$celltype_annot,
+    Sample = sample_short_label(seurat$sample)
+  ))
+  p_prop_sample <- ggplot(
+    prop_sample,
+    aes(x = Sample, y = Freq, fill = CellType)
+  ) +
+    geom_col(position = "fill", width = 0.72) +
+    scale_y_continuous(labels = scales::percent) +
+    theme_minimal() +
+    theme(
+      axis.text.x = element_text(angle = 90, hjust = 1, vjust = 0.5, size = 8),
+      axis.text.y = element_text(size = 9),
+      legend.title = element_text(size = 9, face = "bold"),
+      legend.text = element_text(size = 8)
+    ) +
+    labs(
+      x = "Sample",
+      y = "Proportion",
+      fill = "Cell type",
+      title = "Cell type proportion by sample"
+    )
+  save_fig(
+    file.path(fig_dir, "fig_30_sample_proportion.png"),
+    p_prop_sample,
+    width = 12,
+    height = 6.5,
+    dpi = 150
+  )
+
+  if (run_cluster_markers) {
+    Idents(seurat) <- "seurat_clusters"
+    markers <- tryCatch(
+      FindAllMarkers(
+        seurat,
+        only.pos = TRUE,
+        min.pct = 0.25,
+        logfc.threshold = 0.5,
+        max.cells.per.ident = 2000,
+        verbose = FALSE
+      ),
+      error = function(e) NULL
+    )
+    if (!is.null(markers) && nrow(markers) > 0) {
+      if (!"gene" %in% colnames(markers)) {
+        markers$gene <- rownames(markers)
+      }
+      write.csv(
+        markers,
+        stage_data_file("fig_16_17_31_32_cluster_markers.csv"),
+        row.names = FALSE
+      )
+      cluster_col <- if ("cluster" %in% colnames(markers)) {
+        "cluster"
+      } else {
+        "seurat_clusters"
+      }
+      if (!"avg_log2FC" %in% colnames(markers) &&
+          "avg_logFC" %in% colnames(markers)) {
+        markers$avg_log2FC <- markers$avg_logFC
+      }
+      top_markers <- markers %>%
+        dplyr::group_by(dplyr::across(dplyr::all_of(cluster_col))) %>%
+        dplyr::slice_max(n = 3, order_by = avg_log2FC)
+      top_genes <- unique(top_markers$gene)
+      top_genes <- intersect(top_genes, rownames(seurat))
+      if (length(top_genes) > 0) {
+        tryCatch(
+          {
+            seurat <- ScaleData(seurat, features = top_genes, verbose = FALSE)
+            p_marker_heat <- DoHeatmap(
+              seurat,
+              features = top_genes,
+              group.by = "seurat_clusters",
+              angle = 45
+            ) + scale_fill_viridis_c()
+            save_fig(
+              file.path(fig_dir, "fig_31_cluster_marker_heatmap.png"),
+              p_marker_heat,
+              width = 12,
+              height = 9,
+              dpi = 150
+            )
+            p_marker_dot <- DotPlot(
+              seurat,
+              features = top_genes,
+              group.by = "seurat_clusters"
+            ) + RotatedAxis()
+            save_fig(
+              file.path(fig_dir, "fig_32_cluster_marker_dotplot.png"),
+              p_marker_dot,
+              width = 14,
+              height = 8,
+              dpi = 150
+            )
+          },
+          error = function(e) {
+            log_msg("cluster marker figures failed: ", conditionMessage(e))
+          }
+        )
+      }
+    } else {
+      log_msg("no cluster markers found")
+    }
+    Idents(seurat) <- "condition"
+  }
+
+  if (run_signatures) {
+    signatures <- list(
+      Proliferation = c(
+        "MKI67", "PCNA", "TOP2A", "MCM2", "MCM3", "MCM4", "MCM5",
+        "MCM6", "MCM7", "CDC20", "CCNB1", "CCNA2", "BIRC5", "AURKA",
+        "AURKB", "UBE2C", "CENPF", "CENPE", "KIF11", "KIF2C"
+      ),
+      EMT = c(
+        "VIM", "FN1", "CDH2", "SNAI1", "SNAI2", "TWIST1", "ZEB1",
+        "ZEB2", "MMP2", "MMP9", "COL1A1", "COL1A2", "LUM", "DCN",
+        "TGFB1", "ACTA2"
+      ),
+      Hypoxia = c(
+        "HIF1A", "VEGFA", "SLC2A1", "LDHA", "PGK1", "PDK1", "CA9",
+        "BNIP3", "BNIP3L", "NDRG1", "ADM", "ALDOA", "ENO1", "TPI1"
+      ),
+      ImmuneCheckpoint = c(
+        "PDCD1", "CTLA4", "LAG3", "HAVCR2", "TIGIT", "CD274",
+        "PDCD1LG2", "IDO1", "TNFRSF9", "CD27", "CD70", "LGALS9"
+      ),
+      TcellExhaustion = c(
+        "PDCD1", "CTLA4", "LAG3", "HAVCR2", "TIGIT", "TOX",
+        "ENTPD1", "CXCL13", "BATF", "MAF"
+      ),
+      Stemness = c(
+        "PROM1", "EPCAM", "ALDH1A1", "SOX2", "NANOG", "MYC", "CD44",
+        "KIT", "LGR5", "ABCG2", "AFP", "GPC3"
+      ),
+      Inflammation = c(
+        "IL6", "IL1B", "TNF", "CXCL8", "CCL2", "CCL5", "CXCL10",
+        "CXCL9", "ICAM1", "VCAM1", "NFKB1", "NFKBIA", "JUN", "FOS"
+      )
+    )
+    sig_features <- lapply(
+      signatures,
+      function(gs) intersect(expand_genes(gs), rownames(seurat))
+    )
+    sig_features <- sig_features[lengths(sig_features) >= 3]
+    if (length(sig_features) > 0) {
+      tryCatch(
+        {
+      set.seed(42)
+      seurat <- AddModuleScore(
+        seurat,
+        features = sig_features,
+        name = "Signature_",
+        ctrl = 50
+      )
+      sig_cols <- paste0("Signature_", seq_along(sig_features))
+      names(sig_cols) <- names(sig_features)
+      sig_df <- FetchData(
+        seurat,
+        c("condition", "celltype_annot", unname(sig_cols))
+      )
+      colnames(sig_df) <- c("condition", "celltype_annot", names(sig_features))
+      write.csv(
+        sig_df,
+        stage_data_file("fig_33_34_35_signature_scores.csv"),
+        row.names = FALSE
+      )
+
+      show_sigs <- intersect(
+        c("Proliferation", "EMT", "Hypoxia", "ImmuneCheckpoint"),
+        names(sig_cols)
+      )
+      if (length(show_sigs) > 0) {
+        p_sig_umap <- FeaturePlot(
+          seurat,
+          features = unname(sig_cols[show_sigs]),
+          ncol = 2,
+          cols = c("grey90", "#B31B1B")
+        )
+        save_fig(
+          file.path(fig_dir, "fig_33_signature_scores_umap.png"),
+          p_sig_umap,
+          width = 10,
+          height = 4 * ceiling(length(show_sigs) / 2),
+          dpi = 150
+        )
+      }
+
+      sig_long <- do.call(rbind, lapply(names(sig_cols), function(nm) {
+        data.frame(
+          condition = seurat$condition,
+          celltype = seurat$celltype_annot,
+          signature = nm,
+          score = seurat@meta.data[[sig_cols[[nm]]]],
+          stringsAsFactors = FALSE
+        )
+      }))
+      p_sig_box <- ggplot(
+        sig_long,
+        aes(x = condition, y = score, fill = condition)
+      ) +
+        geom_violin(trim = FALSE) +
+        geom_boxplot(width = 0.15, outlier.shape = NA) +
+        facet_wrap(~signature, scales = "free_y", ncol = 2) +
+        theme_minimal() +
+        theme(
+          axis.text.x = element_text(angle = 45, hjust = 1),
+          legend.position = "none"
+        ) +
+        labs(
+          x = "Condition",
+          y = "Signature score",
+          title = "Signature scores by condition"
+        )
+      save_fig(
+        file.path(fig_dir, "fig_34_signature_scores_boxplot.png"),
+        p_sig_box,
+        width = 10,
+        height = 8,
+        dpi = 150
+      )
+        },
+        error = function(e) {
+          log_msg("signature analysis failed: ", conditionMessage(e))
+        }
+      )
+    }
+  }
+
+  prop_stats_path <- stage_data_file("fig_18_19_celltype_proportion_stats.csv")
+  if (file.exists(prop_stats_path)) {
+    prop_stats <- read.csv(prop_stats_path, stringsAsFactors = FALSE)
+    prop_stats$log2OR <- log2(prop_stats$OddsRatio)
+    prop_stats$log2OR[!is.finite(prop_stats$log2OR)] <- NA_real_
+    prop_stats$neg_log10_padj <- -log10(pmax(prop_stats$Padj, 1e-300))
+    p_abundance <- ggplot(
+      prop_stats,
+      aes(x = log2OR, y = neg_log10_padj, color = CellType)
+    ) +
+      geom_point(size = 2.5) +
+      geom_text_repel(aes(label = CellType), size = 3, max.overlaps = 20) +
+      geom_vline(xintercept = 0, linetype = "dashed", color = "grey40") +
+      labs(
+        x = "log2 odds ratio",
+        y = "-log10 adjusted p value",
+        color = "Cell type",
+        title = "Cell type abundance shift"
+      ) +
+      theme_minimal() +
+      coord_cartesian(clip = "off")
+    save_fig(
+      file.path(fig_dir, "fig_35_celltype_abundance_effect.png"),
+      p_abundance,
+      width = 9,
+      height = 7,
+      dpi = 150
+    )
+  }
+
+  if (run_cnv) {
+    tryCatch(
+      {
+    org_db_cnv <- if (species == "mm") {
+      if (requireNamespace("org.Mm.eg.db", quietly = TRUE)) {
+        getExportedValue("org.Mm.eg.db", "org.Mm.eg.db")
+      } else {
+        NULL
+      }
+    } else {
+      org.Hs.eg.db
+    }
+    if (!is.null(org_db_cnv)) {
+      # Ensembl-ID datasets (e.g. "ENSG00000198888") cannot be mapped with
+      # keytype "SYMBOL"; fall back to "ENSEMBL" and use a stable key column.
+      cnv_keytype <- if (
+        any(grepl("^(ENSG|ENSMUSG)", rownames(seurat)))
+      ) {
+        "ENSEMBL"
+      } else {
+        "SYMBOL"
+      }
+      log_msg("CNV annotation keytype: ", cnv_keytype)
+      mapped <- tryCatch(
+        AnnotationDbi::select(
+          org_db_cnv,
+          keys = rownames(seurat),
+          columns = c("CHR", "CHRLOC"),
+          keytype = cnv_keytype
+        ),
+        error = function(e) {
+          log_msg("CNV annotation lookup failed: ", conditionMessage(e))
+          NULL
+        }
+      )
+      if (!is.null(mapped) && cnv_keytype %in% colnames(mapped)) {
+        colnames(mapped)[colnames(mapped) == cnv_keytype] <- "gene_key"
+      }
+      if (!is.null(mapped) && nrow(mapped) > 1000 && "gene_key" %in% colnames(mapped)) {
+        mapped <- mapped[
+          !is.na(mapped$gene_key) & !duplicated(mapped$gene_key),
+          , drop = FALSE
+        ]
+        mapped <- mapped[
+          !is.na(mapped$CHR) &
+            grepl("^([0-9]+|X|Y)$", as.character(mapped$CHR)),
+          , drop = FALSE
+        ]
+        mapped$chr_order <- factor(
+          as.character(mapped$CHR),
+          levels = c(as.character(1:22), "X", "Y")
+        )
+        if ("CHRLOC" %in% colnames(mapped) &&
+            sum(!is.na(mapped$CHRLOC)) > 500) {
+          mapped <- mapped[!is.na(mapped$CHRLOC), , drop = FALSE]
+          mapped <- mapped[order(mapped$chr_order, mapped$CHRLOC), , drop = FALSE]
+        } else {
+          mapped <- mapped[order(mapped$chr_order, mapped$gene_key), , drop = FALSE]
+        }
+        cnv_genes <- intersect(mapped$gene_key, rownames(seurat))
+        if (length(cnv_genes) >= 200) {
+          set.seed(42)
+          cell_idx <- unlist(lapply(unique(seurat$condition), function(cond) {
+            idx <- which(seurat$condition == cond)
+            sample(idx, min(length(idx), 750))
+          }))
+          cell_idx <- as.integer(cell_idx)
+          expr_sub <- as.matrix(
+            GetAssayData(seurat, layer = "data")[
+              cnv_genes, cell_idx, drop = FALSE
+            ]
+          )
+          expr_scaled <- t(scale(t(expr_sub)))
+          expr_scaled[!is.finite(expr_scaled)] <- 0
+          starts <- seq(1, length(cnv_genes) - 49, by = 25)
+          win_scores <- sapply(starts, function(s) {
+            e <- expr_scaled[s:min(s + 99, length(cnv_genes)), , drop = FALSE]
+            colMeans(e)
+          })
+          if (is.null(dim(win_scores))) {
+            win_scores <- matrix(win_scores, ncol = 1)
+          }
+          win_scores <- sweep(
+            win_scores,
+            2,
+            apply(win_scores, 2, median),
+            "-"
+          )
+          win_labels <- vapply(starts, function(s) {
+            mid <- floor((s + min(s + 99, length(cnv_genes))) / 2)
+            paste0(
+              "chr",
+              mapped$CHR[match(cnv_genes[mid], mapped$gene_key)]
+            )
+          }, character(1))
+          colnames(win_scores) <- paste0(
+            win_labels,
+            "_w",
+            seq_along(starts)
+          )
+          col_step <- max(1L, ceiling(ncol(win_scores) / 25L))
+          col_labels <- colnames(win_scores)
+          col_labels[(seq_along(col_labels) - 1L) %% col_step != 0L] <- ""
+          rownames(win_scores) <- colnames(expr_sub)
+          cnv_df <- data.frame(
+            cell = rownames(win_scores),
+            win_scores,
+            check.names = FALSE
+          )
+          write.csv(
+            cnv_df,
+            stage_data_file("fig_36_cnv_heatmap.csv"),
+            row.names = FALSE
+          )
+          ann_col <- data.frame(
+            row.names = rownames(win_scores),
+            Condition = seurat$condition[cell_idx],
+            CellType = seurat$celltype_annot[cell_idx]
+          )
+          cond_levels_cnv <- sort(unique(as.character(ann_col$Condition)))
+          ct_levels_cnv <- sort(unique(as.character(ann_col$CellType)))
+          ann_colors <- list(
+            Condition = setNames(
+              c("#E64B35", "#4DBBD5", "#00A087")[seq_along(cond_levels_cnv)],
+              cond_levels_cnv
+            ),
+            CellType = setNames(
+              rainbow(length(ct_levels_cnv)),
+              ct_levels_cnv
+            )
+          )
+          save_pheatmap(
+            file.path(fig_dir, "fig_36_cnv_heatmap.png"),
+            function() {
+              pheatmap(
+                win_scores,
+                annotation_col = ann_col,
+                annotation_colors = ann_colors,
+                show_rownames = FALSE,
+                show_colnames = TRUE,
+                labels_col = col_labels,
+                angle_col = 90,
+                cluster_rows = TRUE,
+                cluster_cols = FALSE,
+                color = colorRampPalette(
+                  c("#3B4CC0", "#FFFFFF", "#B40426")
+                )(100),
+                fontsize = 10,
+                fontsize_col = 8,
+                border_color = NA,
+                main = "Inferred CNV profile (sliding window)"
+              )
+            },
+            width = 2200,
+            height = 1100
+          )
+          log_msg("CNV heatmap generated")
+        }
+      } else {
+        log_msg("CNV skipped: insufficient chromosome annotation")
+      }
+    } else {
+      log_msg("CNV skipped: organism annotation package unavailable")
+    }
+      },
+      error = function(e) {
+        log_msg("CNV analysis failed: ", conditionMessage(e))
+      }
+    )
+  }
+
+  if (run_singler) {
+    singler_ok <- requireNamespace("SingleR", quietly = TRUE) &&
+      requireNamespace("celldex", quietly = TRUE)
+    if (singler_ok) {
+      ref <- tryCatch(
+        if (species == "mm") {
+          celldex::MouseRNAseqData()
+        } else {
+          celldex::HumanPrimaryCellAtlasData()
+        },
+        error = function(e) NULL
+      )
+      if (!is.null(ref)) {
+        set.seed(42)
+        all_cells <- colnames(seurat)
+        max_cells <- 20000
+        chosen <- if (length(all_cells) > max_cells) {
+          sample(all_cells, max_cells)
+        } else {
+          all_cells
+        }
+        pred <- tryCatch(
+          SingleR::SingleR(
+            test = GetAssayData(seurat, layer = "data")[
+              , chosen, drop = FALSE
+            ],
+            ref = ref,
+            labels = ref$label.main
+          ),
+          error = function(e) NULL
+        )
+        if (!is.null(pred)) {
+          seurat$singleR_label <- NA_character_
+          seurat$singleR_label[chosen] <- as.character(pred$labels)
+          for (cl in unique(seurat$seurat_clusters)) {
+            idx <- seurat$seurat_clusters == cl
+            labs <- seurat$singleR_label[idx]
+            if (sum(!is.na(labs)) > 0) {
+              seurat$singleR_label[idx] <- names(
+                sort(table(labs), decreasing = TRUE)
+              )[1]
+            }
+          }
+          write.csv(
+            data.frame(
+              cell = colnames(seurat),
+              seurat_clusters = as.character(seurat$seurat_clusters),
+              celltype_annot = seurat$celltype_annot,
+              singleR_label = seurat$singleR_label,
+              condition = seurat$condition,
+              stringsAsFactors = FALSE
+            ),
+            stage_data_file("fig_37_singleR_annotations.csv"),
+            row.names = FALSE
+          )
+          p_singler <- DimPlot(seurat, group.by = "singleR_label", label = TRUE) +
+            ggtitle("SingleR cell type annotation")
+          save_fig(
+            file.path(fig_dir, "fig_37_singler_umap.png"),
+            p_singler,
+            width = 9,
+            height = 7,
+            dpi = 150
+          )
+          conf_singler <- table(
+            seurat$celltype_annot,
+            seurat$singleR_label
+          )
+          write.csv(
+            as.data.frame.matrix(conf_singler),
+            stage_data_file("fig_38_singleR_confusion.csv")
+          )
+          if (nrow(conf_singler) > 0 && ncol(conf_singler) > 0) {
+            save_pheatmap(
+              file.path(fig_dir, "fig_38_singler_confusion_heatmap.png"),
+              function() {
+                pheatmap(
+                  conf_singler,
+                  display_numbers = TRUE,
+                  fontsize_number = 6,
+                  cluster_rows = FALSE,
+                  cluster_cols = FALSE,
+                  main = "Marker annotation vs SingleR"
+                )
+              },
+              width = 1100,
+              height = 800
+            )
+          }
+        }
+      }
+    }
+    if (!"singleR_label" %in% colnames(seurat@meta.data)) {
+      log_msg("SingleR skipped: reference data or prediction unavailable")
+    }
+  }
+
+  if (run_trajectory) {
+    if (requireNamespace("slingshot", quietly = TRUE)) {
+      tryCatch(
+        {
+          set.seed(42)
+          rd <- Embeddings(seurat, reduction = "umap")
+          sce_traj <- SingleCellExperiment(
+            assays = list(counts = GetAssayData(seurat, layer = "counts")),
+            reducedDims = list(UMAP = rd),
+            colData = DataFrame(
+              cluster = as.character(seurat$seurat_clusters)
+            )
+          )
+          sce_traj <- slingshot::slingshot(
+            sce_traj,
+            clusterLabels = "cluster",
+            reducedDim = "UMAP"
+          )
+          pt <- slingshot::slingPseudotime(sce_traj)
+          if (!is.null(dim(pt)) && ncol(pt) >= 1) {
+            seurat$pseudotime <- pt[, 1]
+            write.csv(
+              data.frame(
+                cell = colnames(seurat),
+                cluster = as.character(seurat$seurat_clusters),
+                pseudotime = seurat$pseudotime,
+                stringsAsFactors = FALSE
+              ),
+              stage_data_file("fig_39_trajectory_pseudotime.csv"),
+              row.names = FALSE
+            )
+            p_pt <- FeaturePlot(seurat, features = "pseudotime") +
+              scale_color_viridis_c() +
+              ggtitle("Slingshot pseudotime")
+            curves <- slingshot::slingCurves(sce_traj)
+            curve_df <- do.call(rbind, lapply(seq_along(curves), function(i) {
+              coords <- as.data.frame(curves[[i]]$s)
+              colnames(coords) <- c("UMAP_1", "UMAP_2")
+              coords$lineage <- as.character(i)
+              coords
+            }))
+            rd_df <- as.data.frame(rd)
+            colnames(rd_df) <- c("UMAP_1", "UMAP_2")
+            rd_df$cluster <- as.character(seurat$seurat_clusters)
+            p_line <- ggplot(
+              rd_df,
+              aes(x = UMAP_1, y = UMAP_2, color = cluster)
+            ) +
+              geom_point(size = 0.5, alpha = 0.7) +
+              geom_path(
+                data = curve_df,
+                aes(x = UMAP_1, y = UMAP_2, group = lineage),
+                inherit.aes = FALSE,
+                color = "black",
+                linewidth = 1
+              ) +
+              theme_minimal() +
+              labs(color = "Cluster", title = "Slingshot lineages on UMAP")
+            save_fig(
+              file.path(fig_dir, "fig_39_trajectory_umap.png"),
+              p_pt + p_line,
+              width = 14,
+              height = 7,
+              dpi = 150
+            )
+          }
+        },
+        error = function(e) {
+          log_msg("trajectory analysis failed: ", conditionMessage(e))
+        }
+      )
+    } else {
+      log_msg("trajectory skipped: slingshot not installed")
+    }
+  }
+
+  }
+
+  subcluster_types <- Sys.getenv(
+    "LIVER_SUBCLUSTER_CELLTYPES",
+    unset = ""
+  )
+  if (dataset_mode == "single_cell" && nzchar(trimws(subcluster_types))) {
+    requested_subclusters <- trimws(
+      strsplit(subcluster_types, ",", fixed = TRUE)[[1]]
+    )
+    requested_subclusters <- requested_subclusters[
+      nzchar(requested_subclusters)
+    ]
+    available_subclusters <- intersect(
+      requested_subclusters,
+      unique(as.character(seurat$celltype_annot))
+    )
+    subcluster_resolution <- param_num("LIVER_SUBCLUSTER_RESOLUTION")
+    if (is.na(subcluster_resolution)) subcluster_resolution <- 0.4
+    for (subcluster_type in available_subclusters) {
+      safe_subcluster <- gsub(
+        "[^A-Za-z0-9]+",
+        "_",
+        subcluster_type
+      )
+      subset_obj <- tryCatch(
+        subset(
+          seurat,
+          subset = celltype_annot == subcluster_type
+        ),
+        error = function(e) NULL
+      )
+      if (is.null(subset_obj) || ncol(subset_obj) < 50) {
+        log_msg(
+          "subcluster skipped for ",
+          subcluster_type,
+          ": fewer than 50 cells"
+        )
+        next
+      }
+      tryCatch(
+        {
+          subset_obj <- NormalizeData(subset_obj, verbose = FALSE)
+          subset_obj <- FindVariableFeatures(
+            subset_obj,
+            nfeatures = min(2000, max(10, nrow(subset_obj) - 1)),
+            verbose = FALSE
+          )
+          subset_obj <- ScaleData(
+            subset_obj,
+            features = VariableFeatures(subset_obj),
+            verbose = FALSE
+          )
+          subset_obj <- RunPCA(
+            subset_obj,
+            npcs = min(30, ncol(subset_obj) - 1),
+            verbose = FALSE
+          )
+          subcluster_dims <- seq_len(
+            max(1, min(20, ncol(subset_obj) - 1))
+          )
+          subset_obj <- FindNeighbors(
+            subset_obj,
+            dims = subcluster_dims,
+            verbose = FALSE
+          )
+          subset_obj <- FindClusters(
+            subset_obj,
+            resolution = subcluster_resolution,
+            verbose = FALSE
+          )
+          subset_obj <- RunUMAP(
+            subset_obj,
+            dims = subcluster_dims,
+            seed.use = 42,
+            verbose = FALSE
+          )
+          p_subcluster <- DimPlot(
+            subset_obj,
+            reduction = "umap",
+            group.by = "seurat_clusters",
+            label = TRUE
+          ) +
+            ggtitle(paste0(subcluster_type, " subclusters"))
+          save_fig(
+            file.path(
+              fig_dir,
+              paste0("fig_69_subcluster_", safe_subcluster, "_umap.png")
+            ),
+            p_subcluster,
+            width = 8,
+            height = 7,
+            dpi = 150
+          )
+          markers <- FindAllMarkers(
+            subset_obj,
+            only.pos = TRUE,
+            min.pct = 0.1,
+            logfc.threshold = 0.25,
+            verbose = FALSE
+          )
+          if (nrow(markers) > 0) {
+            write.csv(
+              markers,
+              stage_data_file(
+                paste0(
+                  "fig_69_subcluster_",
+                  safe_subcluster,
+                  "_markers.csv"
+                )
+              ),
+              row.names = FALSE
+            )
+          }
+          log_msg(
+            "subcluster analysis complete for ",
+            subcluster_type,
+            ": ",
+            length(unique(subset_obj$seurat_clusters)),
+            " clusters"
+          )
+        },
+        error = function(e) {
+          log_msg(
+            "subcluster analysis failed for ",
+            subcluster_type,
+            ": ",
+            conditionMessage(e)
+          )
+        }
+      )
+    }
+  }
+
+  saveRDS(seurat, ckpt_path("seurat_annotated.rds"))
+  saveRDS(seurat, ckpt_path("seurat_publication.rds"))
+  log_msg("publication analyses complete")
+})
+
+if (stage_allowed("09")) run_stage("09_summary_outputs", {
+  if (!exists("seurat")) {
+    pub_path <- ckpt_path("seurat_publication.rds")
+    if (file.exists(pub_path)) {
+      seurat <- readRDS(pub_path)
+    } else {
+      seurat <- readRDS(ckpt_path("seurat_annotated.rds"))
+    }
+  }
+  if (!exists("seurat_raw")) {
+    seurat_raw <- readRDS(ckpt_path("seurat_raw.rds"))
+  }
+  if (!exists("qc_metrics")) {
+    qc_metrics <- read.csv(stage_data_file("fig_01_qc_metrics.csv"))
+  }
+  saveRDS(seurat, file.path(data_dir, "liver_cancer_seurat.rds"))
+
+  deg <- read.csv(stage_data_file("fig_08_deg_all.csv"), stringsAsFactors = FALSE)
+  go_up <- tryCatch(
+    read.csv(stage_data_file("fig_10_enrichment_up_go.csv"), stringsAsFactors = FALSE),
+    error = function(e) data.frame()
+  )
+
+  summary_list <- list(
+    dataset = accession,
+    dataset_mode = dataset_mode,
+    n_samples = if (dataset_mode == "single_cell") {
+      length(unique(as.character(seurat$sample)))
+    } else {
+      ncol(seurat)
+    },
+    title = paste(
+      sort(unique(as.character(seurat$condition))),
+      collapse = " vs "
+    ),
+    finished_at = format(Sys.time(), "%Y-%m-%d %H:%M:%S"),
+    n_cells_raw = ncol(seurat_raw),
+    n_cells_after_qc = nrow(qc_metrics),
+    n_cells_after_doublet_removal = ncol(seurat),
+    n_genes = nrow(seurat),
+    n_clusters = length(unique(seurat$seurat_clusters)),
+    n_celltypes = length(unique(seurat$celltype_annot)),
+    condition_counts = as.list(table(seurat$condition)),
+    deg_total = sum(!is.na(deg$p_val_adj), na.rm = TRUE),
+    deg_up = sum(
+      deg$significant & deg$avg_log2FC > 0,
+      na.rm = TRUE
+    ),
+    deg_down = sum(
+      deg$significant & deg$avg_log2FC < 0,
+      na.rm = TRUE
+    ),
+    top_degs = {
+      sig <- deg[deg$significant %in% TRUE, , drop = FALSE]
+      head(
+        if (nrow(sig) > 0) sig else deg,
+        min(20, nrow(if (nrow(sig) > 0) sig else deg))
+      )[, c("gene", "avg_log2FC", "p_val_adj"), drop = FALSE]
+    },
+    go_up_top = if (
+      nrow(go_up) > 0 &&
+      all(c("ID", "Description", "pvalue", "p.adjust") %in% colnames(go_up))
+    ) {
+      head(go_up[, c("ID", "Description", "pvalue", "p.adjust")], 10)
+    } else {
+      data.frame()
+    }
+  )
+  write_json(summary_list, file.path(res_dir, "summary.json"), auto_unbox = TRUE, pretty = TRUE)
+
+  complete <- list(status = "complete", finished_at = format(Sys.time(), "%Y-%m-%d %H:%M:%S"))
+  write_json(complete, file.path(res_dir, "pipeline_complete.json"), auto_unbox = TRUE, pretty = TRUE)
+
+  log_msg("pipeline complete")
+})

@@ -1,0 +1,1155 @@
+<!DOCTYPE html>
+<html lang="zh-CN">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1">
+<script src="/static/nav.js" defer></script>
+<title>全自动流水线结果清单</title>
+<style>
+body {
+  font-family: "Segoe UI", Arial, sans-serif;
+  margin: 0;
+  color: #1f2933;
+  background: url('/static/background.png') no-repeat center center fixed;
+  background-size: cover;
+}
+.topnav {
+  position: sticky;
+  top: 0;
+  z-index: 100;
+  background: #0f172a;
+  padding: 12px 28px;
+  display: flex;
+  gap: 18px;
+  align-items: center;
+  flex-wrap: wrap;
+  box-shadow: 0 2px 8px rgba(15, 23, 42, 0.35);
+}
+.topnav a {
+  color: #ffffff;
+  text-decoration: none;
+  font-size: 15px;
+  font-weight: 600;
+  padding: 6px 10px;
+  border-radius: 6px;
+  background: rgba(255, 255, 255, 0.08);
+}
+.topnav a:hover, .topnav a.active { background: #1665c0; color: #fff; }
+.topnav .nav-right { margin-left: auto; }
+.wrap { max-width: 1200px; margin: 0 auto; padding: 28px; }
+h1 { font-size: 27px; margin: 0 0 6px; }
+h2 { font-size: 18px; margin: 0 0 10px; }
+h3 { font-size: 15px; margin: 18px 0 8px; }
+.sub { color: #52606d; font-size: 14px; margin-bottom: 18px; }
+.muted { color: #6b7280; font-size: 13px; }
+.card {
+  background: rgba(255, 255, 255, 0.96);
+  border: 1px solid #d7dde4;
+  border-radius: 8px;
+  padding: 20px;
+  margin-bottom: 18px;
+  box-shadow: 0 1px 4px rgba(15, 23, 42, 0.08);
+}
+.badge {
+  display: inline-block;
+  padding: 2px 8px;
+  border-radius: 10px;
+  font-size: 11px;
+  font-weight: 600;
+  white-space: nowrap;
+}
+.badge.fig { background: #dbeafe; color: #1e40af; }
+.badge.data { background: #dcfce7; color: #166534; }
+.badge.opt { background: #fef3c7; color: #92400e; }
+.result-toggle-cell { padding: 0; }
+.result-toggle {
+  display: flex;
+  align-items: center;
+  gap: 8px;
+  width: 100%;
+  border: 0;
+  background: transparent;
+  padding: 8px;
+  font: inherit;
+  color: inherit;
+  text-align: left;
+  cursor: pointer;
+}
+.result-toggle:hover { background: #f1f5f9; }
+.result-toggle:focus { outline: 2px solid #1665c0; outline-offset: -2px; }
+.result-chevron {
+  display: inline-block;
+  width: 14px;
+  color: #64748b;
+  transition: transform 0.15s ease;
+}
+tr.result-open .result-chevron { transform: rotate(90deg); }
+.result-detail-row { display: none; }
+tr.result-open + tr.result-detail-row { display: table-row; }
+.result-detail-row td { background: #f8fafc; }
+.result-detail {
+  display: grid;
+  grid-template-columns: 56px 1fr;
+  gap: 8px 12px;
+  padding: 10px 12px;
+}
+.result-detail .detail-label {
+  color: #52606d;
+  font-size: 12px;
+  font-weight: 600;
+}
+.result-detail .detail-value {
+  color: #1f2933;
+  font-size: 12px;
+  line-height: 1.65;
+}
+.path {
+  display: inline-block;
+  background: #f1f5f9;
+  border: 1px solid #e2e8f0;
+  border-radius: 6px;
+  padding: 2px 8px;
+  font-family: Consolas, "Courier New", monospace;
+  font-size: 12px;
+  word-break: break-all;
+}
+table {
+  width: 100%;
+  border-collapse: collapse;
+  background: #fff;
+  font-size: 12px;
+  margin-top: 8px;
+}
+th, td {
+  border: 1px solid #e5e7eb;
+  padding: 6px 8px;
+  text-align: left;
+  vertical-align: top;
+}
+th { background: #eef2f7; }
+tr:nth-child(even) { background: #fafbfc; }
+code {
+  font-family: Consolas, "Courier New", monospace;
+  font-size: 11px;
+  background: #f1f5f9;
+  border-radius: 4px;
+  padding: 1px 5px;
+  word-break: break-all;
+}
+.tree {
+  background: #0f172a;
+  color: #dbeafe;
+  border-radius: 8px;
+  padding: 16px 20px;
+  font-family: Consolas, "Courier New", monospace;
+  font-size: 12px;
+  line-height: 1.7;
+  overflow-x: auto;
+  white-space: pre;
+}
+.note {
+  background: #fffbeb;
+  border: 1px solid #fde68a;
+  border-radius: 8px;
+  padding: 10px 14px;
+  color: #78350f;
+  font-size: 13px;
+  margin-top: 10px;
+}
+.toolbar {
+  display: flex;
+  gap: 8px;
+  align-items: center;
+  flex-wrap: wrap;
+  margin: 0 0 12px;
+}
+.toolbar input[type="search"] {
+  flex: 1 1 280px;
+  min-width: 220px;
+  padding: 9px 12px;
+  border: 1px solid #cbd5e1;
+  border-radius: 8px;
+  font-size: 14px;
+  background: #fff;
+}
+.filter-group {
+  display: flex;
+  gap: 6px;
+  flex-wrap: wrap;
+  align-items: center;
+}
+.filter-group .filter-label {
+  color: #52606d;
+  font-size: 12px;
+  margin-right: 2px;
+}
+.chip {
+  border: 1px solid #cbd5e1;
+  background: #fff;
+  color: #334155;
+  border-radius: 999px;
+  padding: 5px 10px;
+  font-size: 12px;
+  cursor: pointer;
+  transition: background 0.15s ease, color 0.15s ease;
+}
+.chip:hover { background: #f1f5f9; }
+.chip.active { background: #1665c0; border-color: #1665c0; color: #fff; }
+.search-stats {
+  min-height: 20px;
+  margin: 8px 0 2px;
+}
+.guide-card summary {
+  cursor: pointer;
+  font-size: 15px;
+  padding: 4px 0;
+}
+.guide-card summary strong { color: #0f172a; }
+.guide-card summary .guide-count {
+  color: #64748b;
+  font-size: 12px;
+  margin-left: 8px;
+}
+.guide-section {
+  border-top: 1px solid #e2e8f0;
+  margin-top: 12px;
+  padding-top: 12px;
+}
+.guide-section h3 { margin: 0 0 8px; }
+.guide-section.guide-hit {
+  background: #f8fafc;
+  border-left: 4px solid #1665c0;
+  padding-left: 12px;
+}
+.guide-md {
+  color: #334155;
+  font-size: 13px;
+  line-height: 1.75;
+  overflow-x: auto;
+}
+.guide-md p { margin: 6px 0; }
+.guide-md ul, .guide-md ol { margin: 6px 0 10px; padding-left: 24px; }
+.guide-md li { margin: 3px 0; }
+.guide-md table {
+  width: 100%;
+  font-size: 11px;
+  margin: 8px 0 12px;
+}
+.guide-md th, .guide-md td {
+  border: 1px solid #e5e7eb;
+  padding: 5px 7px;
+  text-align: left;
+  vertical-align: top;
+}
+.guide-md th { background: #eef2f7; }
+.guide-md blockquote {
+  margin: 8px 0;
+  padding: 6px 12px;
+  border-left: 4px solid #cbd5e1;
+  color: #475569;
+  background: #f8fafc;
+}
+.guide-code {
+  background: #0f172a;
+  color: #dbeafe;
+  border-radius: 8px;
+  padding: 12px 14px;
+  font-size: 12px;
+  overflow-x: auto;
+  white-space: pre;
+}
+mark { background: #fde047; color: #1f2933; padding: 0 2px; border-radius: 3px; }
+.no-match {
+  display: none;
+  background: #fff1f2;
+  border: 1px solid #fecdd3;
+  color: #881337;
+  border-radius: 8px;
+  padding: 12px 16px;
+  margin-top: 10px;
+  font-size: 13px;
+}
+a { color: #1665c0; text-decoration: none; }
+footer { color: #64748b; font-size: 12px; margin: 30px 0 8px; }
+@media (max-width: 720px) {
+  .wrap { padding: 14px; }
+  .topnav { padding: 10px 14px; }
+  table { font-size: 11px; }
+  th, td { padding: 5px 6px; }
+  .tree { font-size: 11px; }
+  .toolbar input[type="search"] { min-width: 100%; }
+  .result-detail { grid-template-columns: 1fr; gap: 4px 0; }
+}
+</style>
+<link rel="stylesheet" href="/static/app.css">
+</head>
+<body>
+<div class="topnav">
+  <a href="/full">全自动流水线</a>
+  <a href="/">表达分析</a>
+  <a href="/datasets">数据集搜索</a>
+  <a href="/dock">虚拟筛选</a>
+  <a href="/molecular-docking">分子对接</a>
+  <a href="/results" class="active">结果清单</a>
+  <a href="/tasks" class="nav-right">任务进度</a>
+</div>
+<div class="wrap">
+<div class="page-head">
+  <div class="page-title">
+    <h1>全自动流水线结果清单</h1>
+    <p class="page-sub">仅列出各阶段可交付的结果图和结果数据；路径以默认参数 <code>--workdir dock</code>、<code>--output ../liver_cancer</code> 为例，<code>&lt;gene&gt;</code> 表示实际参与对接的基因名。报告、清单、断点、日志、配置、原始证据等过程文件不列入。</p>
+  </div>
+</div>
+
+<div class="toolbar">
+  <input type="search" id="resultFilter" aria-label="搜索" placeholder="搜索结果清单、解释文档或图名..." oninput="filterResults(this.value)">
+  <button type="button" class="secondary" onclick="clearResultFilter()">清空筛选</button>
+  <div class="filter-group" id="stageFilters">
+    <span class="filter-label">阶段</span>
+    <button type="button" class="chip active" data-stage-filter="all">全部</button>
+    <button type="button" class="chip" data-stage-filter="single">01 单细胞</button>
+    <button type="button" class="chip" data-stage-filter="qc">QC 门控</button>
+    <button type="button" class="chip" data-stage-filter="key">02 关键基因</button>
+    <button type="button" class="chip" data-stage-filter="evidence">03 证据</button>
+    <button type="button" class="chip" data-stage-filter="ko">05 敲除</button>
+    <button type="button" class="chip" data-stage-filter="dock">06 对接</button>
+    <button type="button" class="chip" data-stage-filter="feedback">07 反馈</button>
+    <button type="button" class="chip" data-stage-filter="report">08 报告</button>
+  </div>
+  <div class="filter-group" id="typeFilters">
+    <span class="filter-label">类型</span>
+    <button type="button" class="chip active" data-type-filter="all">图+数据</button>
+    <button type="button" class="chip" data-type-filter="fig">结果图</button>
+    <button type="button" class="chip" data-type-filter="data">结果数据</button>
+  </div>
+</div>
+<div class="search-stats muted" id="searchStats"></div>
+<div class="no-match" id="noMatch">没有匹配的结果清单条目或解释文档章节，请尝试其他关键词。</div>
+
+<div class="card guide-card" id="guideCard">
+  <details id="guideDetails">
+    <summary><strong>结果图说明与判断指南</strong><span class="guide-count" id="guideCount">加载中...</span></summary>
+    <p class="muted">本区内容来自 <code>docs/result_figure_guide.md</code>。搜索时同时匹配结果清单和本指南，命中的指南章节会自动展开，并联动显示章节中提到的结果文件。</p>
+    <div id="guideResult"></div>
+  </details>
+</div>
+
+<div class="card">
+  <h2>输出目录结构</h2>
+  <div class="tree">&lt;output&gt;/                        # 单细胞分析输出根目录
+└─ results/
+   ├─ figures/                  # 单细胞结果图（01_qc-09_cellchat）
+   ├─ data/                     # 单细胞结果数据（01_qc-09_cellchat + Seurat 对象）
+   ├─ advanced/                 # 多队列分析与靶点优先级
+   └─ mr_coloc/                 # MR 与共定位
+
+&lt;workdir&gt;/                       # 全自动流水线工作目录
+├─ data/knockout/               # 04 阶段敲除输入（不列入结果清单）
+├─ outputs/
+│  ├─ integration/              # 02/03/05/06/07 阶段结果数据、QC 门控与差异丰度
+│  │  ├─ key_genes.csv          # 02 关键基因
+│  │  ├─ gene_evidence.csv      # 03 基因证据
+│  │  ├─ knockout_summary.json  # 05 虚拟敲除汇总
+│  │  ├─ docking_targets.csv    # 06 虚拟筛选靶点与命中
+│  │  ├─ docking_summary.json   # 06 虚拟筛选汇总
+│  │  ├─ cell_feedback/         # 07 筛选结果回补表达分析
+│  │  │  ├─ figures/            # fig_54-62 反馈图（UMAP/火山/GO-KEGG 网络）
+│  │  │  └─ data/               # feedback_targets/feedback_deg/富集表
+│  │  └─ qc_metrics.json / differential_abundance.csv  # QC 门控与差异丰度
+│  └─ run_001/results/
+│     ├─ 01_analysis/           # 单靶点对接分析：figures + data
+│     ├─ 02_redock/             # 精修重对接：figures + data
+│     ├─ 03_ml/                 # ML 重打分：figures + data
+│     ├─ 04_knockout/           # 虚拟敲除：figures + data
+│     ├─ 05_validation/         # 验证候选：data
+│     └─ 06_md/                 # MD 模拟：每配体输入 + RMSD/RMSF
+└─ work/&lt;gene&gt;/outputs/run_001/
+   ├─ docked/                   # Vina 结果表（结果数据）
+   └─ results/
+      ├─ 01_analysis/           # 每靶点对接分析
+      ├─ 02_redock/             # 每靶点精修
+      ├─ 03_ml/                 # 每靶点 ML 重打分
+      └─ 06_md/                 # 每靶点 MD 模拟</div>
+  <p class="muted">不列入：config、data/receptors、data/ligands/prepared、evidence 原始响应、checkpoints、.stages、logs、manifest、summary、报告等过程或溯源文件。</p>
+</div>
+
+<div class="card">
+  <h2>01 单细胞分析输出</h2>
+  <p class="muted">位置：<span class="path">&lt;output&gt;/results/</span>；结果图在 <span class="path">figures/</span>，结果数据在 <span class="path">data/</span>。</p>
+
+  <h3>结果图</h3>
+  <table>
+    <thead><tr><th>文件</th><th>内容</th><th>类型</th><th>用途</th></tr></thead>
+    <tbody>
+      <tr><td><code>figures/01_qc/fig_01_qc_raw_violin.png</code></td><td>QC 指标原始分布</td><td><span class="badge fig">结果图</span></td><td>查看过滤前数据质量</td></tr>
+      <tr><td><code>figures/01_qc/fig_01_qc_filtered_violin.png</code></td><td>QC 指标过滤后分布</td><td><span class="badge fig">结果图</span></td><td>确认过滤后数据质量</td></tr>
+      <tr><td><code>figures/01_qc/fig_48_qc_pvalue_comparison.png</code></td><td>QC 质控差异度 P 值</td><td><span class="badge fig">结果图</span></td><td>比较过滤前后 QC 指标在条件间的差异程度</td></tr>
+      <tr><td><code>figures/01_qc/fig_49_qc_umi_feature_correlation.png</code></td><td>UMI 与基因数关系</td><td><span class="badge fig">结果图</span></td><td>识别偏离主流关系的异常细胞</td></tr>
+      <tr><td><code>figures/02_doublets/fig_02_doublet_scores.png</code></td><td>双细胞得分分布</td><td><span class="badge fig">结果图</span></td><td>判断双细胞判定效果</td></tr>
+      <tr><td><code>figures/03_cluster/fig_03_umap_clusters.png</code></td><td>UMAP 聚类图</td><td><span class="badge fig">结果图</span></td><td>展示聚类结构</td></tr>
+      <tr><td><code>figures/03_cluster/fig_04_umap_condition.png</code></td><td>UMAP 分组图</td><td><span class="badge fig">结果图</span></td><td>对比组间分布</td></tr>
+      <tr><td><code>figures/04_annotation/fig_05_umap_annotation.png</code></td><td>UMAP 细胞类型注释</td><td><span class="badge fig">结果图</span></td><td>展示细胞类型分布</td></tr>
+      <tr><td><code>figures/04_annotation/fig_06_dotplot_markers.png</code></td><td>细胞类型 marker DotPlot</td><td><span class="badge fig">结果图</span></td><td>验证注释 marker 表达</td></tr>
+      <tr><td><code>figures/04_annotation/fig_07_annotation_confusion_heatmap.png</code></td><td>注释混淆矩阵热图</td><td><span class="badge fig">结果图</span></td><td>对比 marker 注释与发布注释</td></tr>
+      <tr><td><code>figures/05_deg/fig_08_volcano.png</code></td><td>差异表达火山图</td><td><span class="badge fig">结果图</span></td><td>展示差异表达基因</td></tr>
+      <tr><td><code>figures/05_deg/fig_09_deg_heatmap.png</code></td><td>Top DEG 热图</td><td><span class="badge fig">结果图</span></td><td>展示显著基因表达模式</td></tr>
+      <tr><td><code>figures/05_deg/fig_09_deg_horizontal_violin.png</code></td><td>Top DEG 横向小提琴图（P 值）</td><td><span class="badge fig">结果图</span></td><td>按校正 P 值对比差异最显著基因</td></tr>
+      <tr><td><code>figures/06_enrichment/fig_10_go_up.png</code></td><td>上调基因 GO 富集</td><td><span class="badge fig">结果图</span></td><td>查看上调通路</td></tr>
+      <tr><td><code>figures/06_enrichment/fig_11_go_down.png</code></td><td>下调基因 GO 富集</td><td><span class="badge fig">结果图</span></td><td>查看下调通路</td></tr>
+      <tr><td><code>figures/06_enrichment/fig_12_kegg_up.png</code></td><td>上调基因 KEGG 富集</td><td><span class="badge fig">结果图</span></td><td>查看上调通路</td></tr>
+      <tr><td><code>figures/06_enrichment/fig_13_kegg_down.png</code></td><td>下调基因 KEGG 富集</td><td><span class="badge fig">结果图</span></td><td>查看下调通路</td></tr>
+      <tr><td><code>figures/03_cluster/fig_14_pca.png</code></td><td>PCA 分组图</td><td><span class="badge fig">结果图</span></td><td>查看主成分结构</td></tr>
+      <tr><td><code>figures/03_cluster/fig_15_elbow.png</code></td><td>主成分 Elbow 图</td><td><span class="badge fig">结果图</span></td><td>辅助选择主成分数</td></tr>
+      <tr><td><code>figures/04_annotation/fig_16_featureplot_markers.png</code></td><td>Marker FeaturePlot</td><td><span class="badge fig">结果图</span></td><td>查看 marker 空间分布 <span class="badge opt">需 marker 基因</span></td></tr>
+      <tr><td><code>figures/04_annotation/fig_17_marker_violin.png</code></td><td>Marker 小提琴图</td><td><span class="badge fig">结果图</span></td><td>查看 marker 表达水平 <span class="badge opt">需 marker 基因</span></td></tr>
+      <tr><td><code>figures/04_annotation/fig_50_marker_ridgeplot.png</code></td><td>Marker 峰峦图</td><td><span class="badge fig">结果图</span></td><td>横向比较 marker 表达分布 <span class="badge opt">需 marker 基因</span></td></tr>
+      <tr><td><code>figures/04_annotation/fig_51_marker_stacked_violin.png</code></td><td>Marker 堆叠小提琴图</td><td><span class="badge fig">结果图</span></td><td>快速核对 marker 表达模式 <span class="badge opt">需 marker 基因</span></td></tr>
+      <tr><td><code>figures/04_annotation/fig_18_celltype_proportion.png</code></td><td>细胞类型比例堆叠图</td><td><span class="badge fig">结果图</span></td><td>比较组间细胞类型构成</td></tr>
+      <tr><td><code>figures/04_annotation/fig_19_condition_proportion.png</code></td><td>分组构成比例图</td><td><span class="badge fig">结果图</span></td><td>查看各细胞类型分组构成</td></tr>
+      <tr><td><code>figures/06_enrichment/fig_20_gsea_go.png</code></td><td>GSEA GO 图</td><td><span class="badge fig">结果图</span></td><td>查看 GO 富集趋势</td></tr>
+      <tr><td><code>figures/06_enrichment/fig_21_gsea_kegg.png</code></td><td>GSEA KEGG 图</td><td><span class="badge fig">结果图</span></td><td>查看 KEGG 富集趋势</td></tr>
+      <tr><td><code>figures/06_enrichment/fig_22_go_network.png</code></td><td>GO 通路网络图（Top5 核心 + 5 延伸）</td><td><span class="badge fig">结果图</span></td><td>查看 GO 通路关系</td></tr>
+      <tr><td><code>figures/06_enrichment/fig_23_kegg_network.png</code></td><td>KEGG 通路网络图（Top5 核心 + 5 延伸）</td><td><span class="badge fig">结果图</span></td><td>查看 KEGG 通路关系</td></tr>
+      <tr><td><code>figures/06_enrichment/fig_46_go_top5.png</code></td><td>GO BP 筛选后 Top5 富集</td><td><span class="badge fig">结果图</span></td><td>查看筛选后 Top5 上调 GO 通路</td></tr>
+      <tr><td><code>figures/06_enrichment/fig_47_kegg_top5.png</code></td><td>KEGG 筛选后 Top5 富集</td><td><span class="badge fig">结果图</span></td><td>查看筛选后 Top5 上调 KEGG 通路</td></tr>
+      <tr><td><code>figures/07_ml/fig_24_ml_feature_importance.png</code></td><td>ML 特征重要性图</td><td><span class="badge fig">结果图</span></td><td>查看分类关键特征</td></tr>
+      <tr><td><code>figures/07_ml/fig_25_ml_shap.png</code></td><td>SHAP 可解释性图</td><td><span class="badge fig">结果图</span></td><td>查看特征对预测贡献</td></tr>
+      <tr><td><code>figures/08_publication/fig_26_cellcycle_umap.png</code></td><td>细胞周期 UMAP</td><td><span class="badge fig">结果图</span></td><td>查看细胞周期分布 <span class="badge opt">LIVER_RUN_CELLCYCLE=yes</span></td></tr>
+      <tr><td><code>figures/08_publication/fig_27_cellcycle_proportion.png</code></td><td>细胞周期比例图</td><td><span class="badge fig">结果图</span></td><td>比较组间周期构成 <span class="badge opt">LIVER_RUN_CELLCYCLE=yes</span></td></tr>
+      <tr><td><code>figures/08_publication/fig_28_umap_sample.png</code></td><td>UMAP 按样本</td><td><span class="badge fig">结果图</span></td><td>检查样本分布 <span class="badge opt">多样本</span></td></tr>
+      <tr><td><code>figures/08_publication/fig_29_doublet_rate_sample.png</code></td><td>样本双细胞率图</td><td><span class="badge fig">结果图</span></td><td>查看样本质量</td></tr>
+      <tr><td><code>figures/08_publication/fig_30_sample_proportion.png</code></td><td>样本细胞类型比例图</td><td><span class="badge fig">结果图</span></td><td>查看样本间构成</td></tr>
+      <tr><td><code>figures/08_publication/fig_31_cluster_marker_heatmap.png</code></td><td>聚类 marker 热图</td><td><span class="badge fig">结果图</span></td><td>查看聚类 marker 模式 <span class="badge opt">LIVER_RUN_CLUSTER_MARKERS=yes</span></td></tr>
+      <tr><td><code>figures/08_publication/fig_32_cluster_marker_dotplot.png</code></td><td>聚类 marker DotPlot</td><td><span class="badge fig">结果图</span></td><td>查看 marker 特异性 <span class="badge opt">LIVER_RUN_CLUSTER_MARKERS=yes</span></td></tr>
+      <tr><td><code>figures/08_publication/fig_33_signature_scores_umap.png</code></td><td>功能签名 UMAP</td><td><span class="badge fig">结果图</span></td><td>查看签名空间分布 <span class="badge opt">LIVER_RUN_SIGNATURES=yes</span></td></tr>
+      <tr><td><code>figures/08_publication/fig_34_signature_scores_boxplot.png</code></td><td>功能签名箱线图</td><td><span class="badge fig">结果图</span></td><td>比较签名评分 <span class="badge opt">LIVER_RUN_SIGNATURES=yes</span></td></tr>
+      <tr><td><code>figures/08_publication/fig_35_celltype_abundance_effect.png</code></td><td>细胞类型丰度变化图</td><td><span class="badge fig">结果图</span></td><td>查看细胞类型比例变化</td></tr>
+      <tr><td><code>figures/08_publication/fig_36_cnv_heatmap.png</code></td><td>推断 CNV 热图</td><td><span class="badge fig">结果图</span></td><td>查看染色体拷贝变化 <span class="badge opt">LIVER_RUN_CNV=yes</span></td></tr>
+      <tr><td><code>figures/08_publication/fig_37_singler_umap.png</code></td><td>SingleR 注释 UMAP</td><td><span class="badge fig">结果图</span></td><td>查看参考注释结果 <span class="badge opt">LIVER_RUN_SINGLER=yes</span></td></tr>
+      <tr><td><code>figures/08_publication/fig_38_singler_confusion_heatmap.png</code></td><td>SingleR 混淆矩阵热图</td><td><span class="badge fig">结果图</span></td><td>对比注释一致性 <span class="badge opt">LIVER_RUN_SINGLER=yes</span></td></tr>
+      <tr><td><code>figures/08_publication/fig_39_trajectory_umap.png</code></td><td>拟时序轨迹</td><td><span class="badge fig">结果图</span></td><td>查看分化轨迹 <span class="badge opt">LIVER_RUN_TRAJECTORY=yes</span></td></tr>
+      <tr><td><code>figures/09_cellchat/fig_40_cellchat_network.png</code></td><td>CellChat 通讯网络</td><td><span class="badge fig">结果图</span></td><td>查看细胞间通讯 <span class="badge opt">LIVER_RUN_CELLCHAT=yes</span></td></tr>
+      <tr><td><code>figures/09_cellchat/fig_41_cellchat_heatmap.png</code></td><td>CellChat 通讯热图</td><td><span class="badge fig">结果图</span></td><td>查看通讯强度 <span class="badge opt">LIVER_RUN_CELLCHAT=yes</span></td></tr>
+      <tr><td><code>figures/09_cellchat/fig_42_cellchat_bubble.png</code></td><td>CellChat 配体受体气泡图</td><td><span class="badge fig">结果图</span></td><td>查看配体受体关系 <span class="badge opt">LIVER_RUN_CELLCHAT=yes</span></td></tr>
+      <tr><td><code>figures/07_ml/fig_43_ml_confusion_matrix.png</code></td><td>ML 混淆矩阵</td><td><span class="badge fig">结果图</span></td><td>查看分类准确度</td></tr>
+      <tr><td><code>figures/07_ml/fig_44_ml_roc_pr.png</code></td><td>ML ROC / PR 曲线</td><td><span class="badge fig">结果图</span></td><td>查看分类性能</td></tr>
+      <tr><td><code>figures/07_ml/fig_45_ml_cv_scores.png</code></td><td>ML 交叉验证得分</td><td><span class="badge fig">结果图</span></td><td>查看模型稳定性</td></tr>
+      <tr><td><code>figures/07_ml/fig_45_ml_calibration_curve.png</code></td><td>ML 校准曲线</td><td><span class="badge fig">结果图</span></td><td>查看预测概率校准程度 <span class="badge opt">仅二分类</span></td></tr>
+      <tr><td><code>data/07_ml/fig_24_ml_selected_features.csv</code></td><td>ML 选定特征表</td><td><span class="badge data">结果数据</span></td><td>LASSO+SVM-RFE 选定特征 <span class="badge opt">仅 lasso_svm</span></td></tr>
+    </tbody>
+  </table>
+
+  <h3>结果数据</h3>
+  <table>
+    <thead><tr><th>文件</th><th>内容</th><th>类型</th><th>用途</th></tr></thead>
+    <tbody>
+      <tr><td><code>data/01_qc/fig_01_qc_metrics.csv</code></td><td>QC 指标表</td><td><span class="badge data">结果数据</span></td><td>复现质控结果</td></tr>
+      <tr><td><code>data/01_qc/fig_01_qc_thresholds.csv</code></td><td>QC 过滤规则表</td><td><span class="badge data">结果数据</span></td><td>查看各阈值移除的细胞数与比例</td></tr>
+      <tr><td><code>data/01_qc/fig_48_qc_pvalue_comparison.csv</code></td><td>QC 质控差异度 P 值数据</td><td><span class="badge data">结果数据</span></td><td>Wilcoxon 秩和检验与 BH FDR 结果</td></tr>
+      <tr><td><code>data/01_qc/fig_49_qc_umi_feature_correlation_stats.csv</code></td><td>UMI 与基因数关系统计</td><td><span class="badge data">结果数据</span></td><td>log-log 回归与复核统计</td></tr>
+      <tr><td><code>data/01_qc/sample_annotations.csv</code></td><td>样本分组注释</td><td><span class="badge data">结果数据</span></td><td>对应样本与分组</td></tr>
+      <tr><td><code>data/02_doublets/fig_02_doublet_results.csv</code></td><td>双细胞检测结果</td><td><span class="badge data">结果数据</span></td><td>每细胞双细胞得分和判定</td></tr>
+      <tr><td><code>data/03_cluster/fig_03_04_05_umap_coordinates.csv</code></td><td>UMAP 坐标</td><td><span class="badge data">结果数据</span></td><td>复现聚类和注释图</td></tr>
+      <tr><td><code>data/04_annotation/fig_18_19_30_cluster_composition.csv</code></td><td>聚类组成</td><td><span class="badge data">结果数据</span></td><td>聚类-分组-样本计数</td></tr>
+      <tr><td><code>data/04_annotation/fig_05_16_17_cell_annotations.csv</code></td><td>细胞类型注释</td><td><span class="badge data">结果数据</span></td><td>每细胞注释结果</td></tr>
+      <tr><td><code>data/04_annotation/fig_18_19_celltype_proportion_stats.csv</code></td><td>细胞类型比例统计</td><td><span class="badge data">结果数据</span></td><td>组间比例检验</td></tr>
+      <tr><td><code>data/04_annotation/fig_07_annotation_confusion.csv</code></td><td>注释混淆矩阵</td><td><span class="badge data">结果数据</span></td><td>注释一致性</td></tr>
+      <tr><td><code>data/05_deg/fig_08_deg_all.csv</code></td><td>全部差异表达基因</td><td><span class="badge data">结果数据</span></td><td>差异表达全表</td></tr>
+      <tr><td><code>data/05_deg/fig_09_deg_significant.csv</code></td><td>显著差异表达基因</td><td><span class="badge data">结果数据</span></td><td>下游筛选输入</td></tr>
+      <tr><td><code>data/05_deg/fig_09_deg_horizontal_violin.csv</code></td><td>Top DEG 横向小提琴图数据</td><td><span class="badge data">结果数据</span></td><td>图中基因与校正 P 值</td></tr>
+      <tr><td><code>data/06_enrichment/fig_10_enrichment_up_go.csv</code></td><td>上调基因 GO 富集表</td><td><span class="badge data">结果数据</span></td><td>通路结果表</td></tr>
+      <tr><td><code>data/06_enrichment/fig_11_enrichment_down_go.csv</code></td><td>下调基因 GO 富集表</td><td><span class="badge data">结果数据</span></td><td>通路结果表</td></tr>
+      <tr><td><code>data/06_enrichment/fig_12_enrichment_up_kegg.csv</code></td><td>上调基因 KEGG 富集表</td><td><span class="badge data">结果数据</span></td><td>通路结果表</td></tr>
+      <tr><td><code>data/06_enrichment/fig_13_enrichment_down_kegg.csv</code></td><td>下调基因 KEGG 富集表</td><td><span class="badge data">结果数据</span></td><td>通路结果表</td></tr>
+      <tr><td><code>data/06_enrichment/fig_21_gsea_kegg_status.json</code></td><td>KEGG GSEA 状态</td><td><span class="badge data">结果数据</span></td><td>完成、跳过或失败原因及条目数</td></tr>
+      <tr><td><code>data/04_annotation/fig_16_17_31_32_cluster_markers.csv</code></td><td>聚类 marker 基因</td><td><span class="badge data">结果数据</span></td><td>marker 列表 <span class="badge opt">LIVER_RUN_CLUSTER_MARKERS=yes</span></td></tr>
+      <tr><td><code>data/08_publication/fig_26_27_cell_cycle_scores.csv</code></td><td>细胞周期评分</td><td><span class="badge data">结果数据</span></td><td>每细胞周期评分 <span class="badge opt">LIVER_RUN_CELLCYCLE=yes</span></td></tr>
+      <tr><td><code>data/08_publication/fig_29_doublet_rate_by_sample.csv</code></td><td>样本双细胞率</td><td><span class="badge data">结果数据</span></td><td>样本质量统计</td></tr>
+      <tr><td><code>data/08_publication/fig_33_34_35_signature_scores.csv</code></td><td>功能签名评分</td><td><span class="badge data">结果数据</span></td><td>每细胞签名评分 <span class="badge opt">LIVER_RUN_SIGNATURES=yes</span></td></tr>
+      <tr><td><code>data/08_publication/fig_36_cnv_heatmap.csv</code></td><td>CNV 热图矩阵</td><td><span class="badge data">结果数据</span></td><td>推断 CNV 数据 <span class="badge opt">LIVER_RUN_CNV=yes</span></td></tr>
+      <tr><td><code>data/08_publication/fig_37_singleR_annotations.csv</code></td><td>SingleR 注释</td><td><span class="badge data">结果数据</span></td><td>参考注释结果 <span class="badge opt">LIVER_RUN_SINGLER=yes</span></td></tr>
+      <tr><td><code>data/08_publication/fig_38_singleR_confusion.csv</code></td><td>SingleR 混淆矩阵</td><td><span class="badge data">结果数据</span></td><td>注释一致性 <span class="badge opt">LIVER_RUN_SINGLER=yes</span></td></tr>
+      <tr><td><code>data/08_publication/fig_39_trajectory_pseudotime.csv</code></td><td>拟时序结果</td><td><span class="badge data">结果数据</span></td><td>每细胞伪时间 <span class="badge opt">LIVER_RUN_TRAJECTORY=yes</span></td></tr>
+      <tr><td><code>data/liver_cancer_seurat.rds</code></td><td>最终 Seurat 对象</td><td><span class="badge data">结果数据</span></td><td>完整单细胞对象</td></tr>
+      <tr><td><code>data/07_ml/fig_24_ml_feature_importance.csv</code></td><td>ML 特征重要性</td><td><span class="badge data">结果数据</span></td><td>特征排序</td></tr>
+      <tr><td><code>data/07_ml/fig_43_44_45_ml_classification_results.csv</code></td><td>ML 分类预测</td><td><span class="badge data">结果数据</span></td><td>每样本预测结果</td></tr>
+      <tr><td><code>data/07_ml/fig_43_44_45_ml_classification_report.csv</code></td><td>ML 分类报告表</td><td><span class="badge data">结果数据</span></td><td>分类指标</td></tr>
+      <tr><td><code>data/09_cellchat/fig_40_cellchat_communication.csv</code></td><td>CellChat 通讯计数</td><td><span class="badge data">结果数据</span></td><td>通讯对数 <span class="badge opt">LIVER_RUN_CELLCHAT=yes</span></td></tr>
+      <tr><td><code>data/09_cellchat/fig_40_cellchat_communication_weight.csv</code></td><td>CellChat 通讯权重</td><td><span class="badge data">结果数据</span></td><td>通讯强度 <span class="badge opt">LIVER_RUN_CELLCHAT=yes</span></td></tr>
+      <tr><td><code>data/09_cellchat/fig_42_cellchat_pathways.csv</code></td><td>CellChat 通路结果</td><td><span class="badge data">结果数据</span></td><td>通路通讯结果 <span class="badge opt">LIVER_RUN_CELLCHAT=yes</span></td></tr>
+      <tr><td><code>data/09_cellchat/cellchat_object.rds</code></td><td>CellChat 对象</td><td><span class="badge data">结果数据</span></td><td>完整通讯分析对象 <span class="badge opt">LIVER_RUN_CELLCHAT=yes</span></td></tr>
+    </tbody>
+  </table>
+</div>
+
+<div class="card">
+  <h2>QC 门控与细胞类型差异丰度</h2>
+  <p class="muted">位置：<span class="path">&lt;workdir&gt;/outputs/integration/</span></p>
+  <table>
+    <thead><tr><th>文件</th><th>内容</th><th>类型</th><th>用途</th></tr></thead>
+    <tbody>
+      <tr><td><code>differential_abundance.csv</code></td><td>条件间细胞类型组成差异检验（2×2 卡方 + BH FDR）</td><td><span class="badge data">结果数据</span></td><td>检查细胞比例偏移</td></tr>
+      <tr><td><code>qc_metrics.json</code></td><td>QC 汇总与门控结果（pass/warn/fail）</td><td><span class="badge data">结果数据</span></td><td>数据质量门控</td></tr>
+    </tbody>
+  </table>
+</div>
+
+<div class="card">
+  <h2>02 关键基因筛选</h2>
+  <p class="muted">位置：<span class="path">&lt;workdir&gt;/outputs/integration/</span></p>
+  <table>
+    <thead><tr><th>文件</th><th>内容</th><th>类型</th><th>用途</th></tr></thead>
+    <tbody>
+      <tr><td><code>key_genes.csv</code></td><td>按 Padj 与 log2FC 排序的关键基因/蛋白表</td><td><span class="badge data">结果数据</span></td><td>证据富集与对接候选</td></tr>
+    </tbody>
+  </table>
+</div>
+
+<div class="card">
+  <h2>03 证据富集</h2>
+  <p class="muted">位置：<span class="path">&lt;workdir&gt;/outputs/integration/</span></p>
+  <table>
+    <thead><tr><th>文件</th><th>内容</th><th>类型</th><th>用途</th></tr></thead>
+    <tbody>
+      <tr><td><code>gene_evidence.csv</code></td><td>每基因的 UniProt、PDB、ChEMBL、STRING、Reactome、PharmGKB、AlphaFold、Open Targets、KEGG、已知配体与脱靶信息</td><td><span class="badge data">结果数据</span></td><td>评估可成药性与对接可行性</td></tr>
+    </tbody>
+  </table>
+</div>
+
+<div class="card">
+  <h2>04 虚拟敲除输入</h2>
+  <p class="muted">位置：<span class="path">&lt;workdir&gt;/data/knockout/</span></p>
+  <p class="muted">无结果图/结果数据。本阶段仅生成敲除输入文件，不列入结果清单。</p>
+</div>
+
+<div class="card">
+  <h2>05 虚拟敲除与验证方案</h2>
+  <p class="muted">位置：<span class="path">&lt;workdir&gt;/outputs/run_001/results/</span></p>
+  <table>
+    <thead><tr><th>文件</th><th>内容</th><th>类型</th><th>用途</th></tr></thead>
+    <tbody>
+      <tr><td><code>04_knockout/figures/fig_52_knockout_top_candidates.png</code></td><td>Top 候选敲除得分图</td><td><span class="badge fig">结果图</span></td><td>查看高优先级候选</td></tr>
+      <tr><td><code>04_knockout/figures/fig_53_knockout_score_distribution.png</code></td><td>敲除得分分布图</td><td><span class="badge fig">结果图</span></td><td>查看评分整体分布</td></tr>
+      <tr><td><code>04_knockout/data/fig_52_53_ranked_knockout.csv</code></td><td>全部基因多维度敲除评分表</td><td><span class="badge data">结果数据</span></td><td>评分主表</td></tr>
+      <tr><td><code>04_knockout/data/fig_52_target_candidates.csv</code></td><td>Top N 靶点候选表</td><td><span class="badge data">结果数据</span></td><td>候选靶点筛选</td></tr>
+      <tr><td><code>05_validation/data/validation_candidates.csv</code></td><td>湿实验验证候选及分阶段实验方案</td><td><span class="badge data">结果数据</span></td><td>验证实验设计</td></tr>
+    </tbody>
+  </table>
+</div>
+
+<div class="card">
+  <h2>06 分子对接</h2>
+  <p class="muted">全局汇总：<span class="path">&lt;workdir&gt;/outputs/integration/</span>；每靶点：<span class="path">&lt;workdir&gt;/work/&lt;gene&gt;/outputs/run_001/</span></p>
+  <table>
+    <thead><tr><th>文件</th><th>内容</th><th>类型</th><th>用途</th></tr></thead>
+    <tbody>
+      <tr><td><code>outputs/integration/docking_targets.csv</code></td><td>每靶点状态、PDB、配体数、命中数与最佳亲和力</td><td><span class="badge data">结果数据</span></td><td>汇总各靶点对接结果</td></tr>
+      <tr><td><code>docked/results.csv</code></td><td>Vina 原始对接结果</td><td><span class="badge data">结果数据</span></td><td>每配体、重复与随机种子对应的亲和力</td></tr>
+      <tr><td><code>docked/positive_control_results.csv</code></td><td>阳性对照对接与阈值判定</td><td><span class="badge data">结果数据</span></td><td>检查对接收敛性 <span class="badge opt">需配置阳性对照</span></td></tr>
+      <tr><td><code>results/01_analysis/figures/fig_46_affinity_distribution.png</code></td><td>对接亲和力分布图</td><td><span class="badge fig">结果图</span></td><td>查看打分分布</td></tr>
+      <tr><td><code>results/01_analysis/figures/fig_47_top_hits.png</code></td><td>Top 命中图</td><td><span class="badge fig">结果图</span></td><td>查看最优命中</td></tr>
+      <tr><td><code>results/01_analysis/figures/fig_48_diverse_hits.png</code></td><td>多样性命中图</td><td><span class="badge fig">结果图</span></td><td>查看结构多样候选</td></tr>
+      <tr><td><code>results/01_analysis/data/fig_46_47_ranked_results.csv</code></td><td>按亲和力排序结果</td><td><span class="badge data">结果数据</span></td><td>含 strong/moderate/weak 分级</td></tr>
+      <tr><td><code>results/01_analysis/data/fig_47_top_hits.csv</code></td><td>命中配体表</td><td><span class="badge data">结果数据</span></td><td>低于阈值候选</td></tr>
+      <tr><td><code>results/01_analysis/data/fig_48_diverse_hits.csv</code></td><td>多样性命中表</td><td><span class="badge data">结果数据</span></td><td>Tanimoto 选择结果</td></tr>
+      <tr><td><code>results/01_analysis/data/docking_results.xlsx</code></td><td>多工作表 Excel</td><td><span class="badge data">结果数据</span></td><td>all / hits / top / diverse 表</td></tr>
+      <tr><td><code>results/02_redock/figures/fig_49_redock_comparison.png</code></td><td>精修前后对比图</td><td><span class="badge fig">结果图</span></td><td>查看重对接一致性 <span class="badge opt">重对接开启</span></td></tr>
+      <tr><td><code>results/02_redock/data/fig_49_redock_results.csv</code></td><td>精修重对接结果</td><td><span class="badge data">结果数据</span></td><td>Top 命中精修表</td></tr>
+      <tr><td><code>results/02_redock/data/fig_49_redock_comparison.csv</code></td><td>初对接与重对接对比数据</td><td><span class="badge data">结果数据</span></td><td>一致性对比 <span class="badge opt">重对接开启</span></td></tr>
+      <tr><td><code>results/03_ml/figures/fig_50_ml_feature_importance.png</code></td><td>ML 特征重要性图</td><td><span class="badge fig">结果图</span></td><td>查看重打分特征 <span class="badge opt">ml-train 且有重要性</span></td></tr>
+      <tr><td><code>results/03_ml/figures/fig_51_ml_roc.png</code></td><td>ML ROC 曲线</td><td><span class="badge fig">结果图</span></td><td>查看模型性能 <span class="badge opt">ml-train 且二分类</span></td></tr>
+      <tr><td><code>results/03_ml/data/fig_50_ml_feature_importance.csv</code></td><td>ML 特征重要性数据</td><td><span class="badge data">结果数据</span></td><td>特征排序 <span class="badge opt">ml-train 且有重要性</span></td></tr>
+      <tr><td><code>results/03_ml/data/fig_51_ml_roc.csv</code></td><td>ML ROC 数据</td><td><span class="badge data">结果数据</span></td><td>绘制 ROC 的数据 <span class="badge opt">ml-train 且二分类</span></td></tr>
+      <tr><td><code>results/03_ml/data/ml_ranked_results.csv</code></td><td>ML 重打分排序结果</td><td><span class="badge data">结果数据</span></td><td>融合亲和力与 ML 排名 <span class="badge opt">ml-train</span></td></tr>
+      <tr><td><code>results/06_md/&lt;ligand&gt;/md_rmsd_rmsf.png</code></td><td>MD 蛋白/配体 RMSD 与配体 RMSF</td><td><span class="badge fig">结果图</span></td><td>检查复合物稳定性和构象收敛 <span class="badge opt">md-simulation auto</span></td></tr>
+      <tr><td><code>results/06_md/&lt;ligand&gt;/md_stability_dynamics.png</code></td><td>MD Rg/SASA/氢键/残基 RMSF 动态图</td><td><span class="badge fig">结果图</span></td><td>结合口袋残基高亮 <span class="badge opt">md-simulation auto</span></td></tr>
+      <tr><td><code>results/06_md/&lt;ligand&gt;/pca_fel.csv</code></td><td>PC1/PC2 构象投影与 Gibbs 自由能面数据</td><td><span class="badge data">结果数据</span></td><td>查看主要构象状态和最低自由能区域 <span class="badge opt">MD 指标与 index 可用</span></td></tr>
+      <tr><td><code>results/06_md/&lt;ligand&gt;/mmpbsa.log</code></td><td>外部 MM/PBSA 命令日志</td><td><span class="badge data">结果数据</span></td><td>复核结合自由能与命令状态 <span class="badge opt">需配置 MM/PBSA 命令</span></td></tr>
+      <tr><td><code>results/06_md/md_simulation_results.csv</code></td><td>MD 每配体状态与动态均值指标</td><td><span class="badge data">结果数据</span></td><td>查看时长、RMSD、Rg、SASA、氢键、口袋 RMSF、PCA/FEL 与 MM/PBSA <span class="badge opt">md-simulation</span></td></tr>
+    </tbody>
+  </table>
+</div>
+
+<div class="card">
+  <h2>07 CADD 下游（MD / ML / 工具交接）</h2>
+  <p class="muted">位置：<span class="path">&lt;workdir&gt;/outputs/integration/</span>；每靶点：<span class="path">&lt;workdir&gt;/work/&lt;gene&gt;/outputs/</span></p>
+  <table>
+    <thead><tr><th>文件</th><th>内容</th><th>类型</th><th>用途</th></tr></thead>
+    <tbody>
+      <tr><td><code>outputs/integration/cadd_targets.csv</code></td><td>每靶点 MD、ML 重打分与工具交接状态</td><td><span class="badge data">结果数据</span></td><td>查看 CADD 下游逐靶点结果</td></tr>
+      <tr><td><code>outputs/run_001/results/06_md/md_simulation_results.csv</code></td><td>MD 每配体状态与动态指标</td><td><span class="badge data">结果数据</span></td><td>MD 准备/运行汇总 <span class="badge opt">md-simulation</span></td></tr>
+      <tr><td><code>outputs/md/README.md</code></td><td>Amber/GROMACS 交接说明</td><td><span class="badge data">结果数据</span></td><td>外部 MD 工具交接</td></tr>
+      <tr><td><code>outputs/run_001/external/</code></td><td>UniDock-Pro / HDOCK / HADDOCK 模板</td><td><span class="badge data">结果数据</span></td><td>外部对接工具交接</td></tr>
+    </tbody>
+  </table>
+</div>
+
+<div class="card">
+  <h2>08/09 网络毒理学与 FAERS 信号</h2>
+  <p class="muted">位置：<span class="path">&lt;workdir&gt;/outputs/run_001/</span>；已接入全自动流水线 08/09 阶段，提供输入时运行，缺输入时写 skipped 汇总。</p>
+  <table>
+    <thead><tr><th>文件</th><th>内容</th><th>类型</th><th>用途</th></tr></thead>
+    <tbody>
+      <tr><td><code>network_toxicology/data/compound_disease_overlap.csv</code></td><td>化合物靶点与疾病基因交集表</td><td><span class="badge data">结果数据</span></td><td>核心交集靶点及来源数</td></tr>
+      <tr><td><code>network_toxicology/data/ppi_hub_scores.csv</code></td><td>STRING PPI degree、betweenness、closeness、eigenvector、PageRank、MCC、clustering 与 consensus hub 评分</td><td><span class="badge data">结果数据</span></td><td>PPI hub 靶点评分 <span class="badge opt">需 --ppi-network-csv</span></td></tr>
+      <tr><td><code>network_toxicology/data/insilico_go_enrichment.csv</code></td><td>网络交集基因 GO 富集表</td><td><span class="badge data">结果数据</span></td><td>查看交集靶点 GO 通路 <span class="badge opt">需启用富集且交集基因≥3</span></td></tr>
+      <tr><td><code>network_toxicology/data/insilico_kegg_enrichment.csv</code></td><td>网络交集基因 KEGG 富集表</td><td><span class="badge data">结果数据</span></td><td>查看交集靶点 KEGG 通路 <span class="badge opt">需启用富集且 R 环境可用</span></td></tr>
+      <tr><td><code>network_toxicology/data/ctpd_nodes.csv</code></td><td>C-T-P-D 网络节点表</td><td><span class="badge data">结果数据</span></td><td>化合物、靶点、疾病节点</td></tr>
+      <tr><td><code>network_toxicology/data/ctpd_edges.csv</code></td><td>C-T-P-D 网络边表</td><td><span class="badge data">结果数据</span></td><td>化合物-靶点、靶点-疾病、PPI 边</td></tr>
+      <tr><td><code>network_toxicology/data/ctpd_network.html</code></td><td>C-T-P-D 网络可视化页</td><td><span class="badge data">结果数据</span></td><td>快速查看网络关系</td></tr>
+      <tr><td><code>network_toxicology/data/ctpd_network.xgmml</code></td><td>C-T-P-D Cytoscape XGMML 网络</td><td><span class="badge data">结果数据</span></td><td>Cytoscape 导入与复核 <span class="badge opt">Cytoscape 流程</span></td></tr>
+      <tr><td><code>network_toxicology/figures/ctpd_network_cytoscape.png</code></td><td>Cytoscape 样式化网络图</td><td><span class="badge fig">结果图</span></td><td>Cytoscape CyREST 自动布局导出 <span class="badge opt">需 Cytoscape 运行</span></td></tr>
+      <tr><td><code>network_toxicology/figures/compound_disease_venn.png</code></td><td>化合物-疾病交集 Venn 图</td><td><span class="badge fig">结果图</span></td><td>展示交集规模与来源分布</td></tr>
+      <tr><td><code>faers/data/faers_signals.csv</code></td><td>ROR/PRR/BCPNN/EBGM 信号表</td><td><span class="badge data">结果数据</span></td><td>药物-事件不相称性信号</td></tr>
+      <tr><td><code>faers/data/faers_signals.html</code></td><td>FAERS 信号结果页</td><td><span class="badge data">结果数据</span></td><td>Top 信号快速浏览</td></tr>
+      <tr><td><code>faers/faers_summary.json</code></td><td>FAERS 汇总统计</td><td><span class="badge data">结果数据</span></td><td>组合数、信号数、Top 药物</td></tr>
+      <tr><td><code>outputs/integration/network_summary.json</code></td><td>全流程网络毒理学阶段汇总</td><td><span class="badge data">结果数据</span></td><td>查看 08 阶段状态与路径</td></tr>
+      <tr><td><code>outputs/integration/faers_summary.json</code></td><td>全流程 FAERS 阶段汇总</td><td><span class="badge data">结果数据</span></td><td>查看 09 阶段状态与路径</td></tr>
+    </tbody>
+  </table>
+</div>
+
+<div class="card">
+  <h2>10 细胞反馈</h2>
+  <p class="muted">位置：<span class="path">&lt;workdir&gt;/outputs/integration/cell_feedback/</span></p>
+  <table>
+    <thead><tr><th>文件</th><th>内容</th><th>类型</th><th>用途</th></tr></thead>
+    <tbody>
+      <tr><td><code>figures/fig_54_feedback_module_umap.png</code></td><td>筛选靶点模块评分 UMAP</td><td><span class="badge fig">结果图</span></td><td>查看靶点模块在细胞图谱中的分布</td></tr>
+      <tr><td><code>figures/fig_55_feedback_target_expression_umap.png</code></td><td>Top 靶基因表达 UMAP</td><td><span class="badge fig">结果图</span></td><td>查看敲除/对接靶基因的细胞定位</td></tr>
+      <tr><td><code>figures/fig_56_feedback_celltype_dotplot.png</code></td><td>靶基因细胞类型 DotPlot</td><td><span class="badge fig">结果图</span></td><td>比较靶基因在各细胞类型的表达</td></tr>
+      <tr><td><code>figures/fig_57_feedback_celltype_boxplot.png</code></td><td>模块评分细胞类型箱线图</td><td><span class="badge fig">结果图</span></td><td>比较分组间模块评分</td></tr>
+      <tr><td><code>figures/fig_58_feedback_celltype_heatmap.png</code></td><td>靶基因细胞类型热图</td><td><span class="badge fig">结果图</span></td><td>查看细胞类型表达模式</td></tr>
+      <tr><td><code>figures/fig_59_feedback_targets_volcano.png</code></td><td>反馈靶基因差异表达火山图</td><td><span class="badge fig">结果图</span></td><td>查看反馈靶点显著上调/下调</td></tr>
+      <tr><td><code>figures/fig_60_feedback_condition_violin.png</code></td><td>反馈靶基因条件小提琴图</td><td><span class="badge fig">结果图</span></td><td>查看反馈靶点分组表达分布</td></tr>
+      <tr><td><code>figures/fig_61_feedback_go_network.png</code></td><td>反馈靶基因 GO Top5 通路-基因网络</td><td><span class="badge fig">结果图</span></td><td>查看 Top5 GO 通路关联基因</td></tr>
+      <tr><td><code>figures/fig_62_feedback_kegg_network.png</code></td><td>反馈靶基因 KEGG Top5 通路-基因网络</td><td><span class="badge fig">结果图</span></td><td>查看 Top5 KEGG 通路关联基因</td></tr>
+      <tr><td><code>data/feedback_targets.csv</code></td><td>细胞支持度重排序靶点</td><td><span class="badge data">结果数据</span></td><td>筛选结果返回单细胞后的精细化靶点</td></tr>
+      <tr><td><code>data/feedback_deg.csv</code></td><td>反馈靶基因差异表达表</td><td><span class="badge data">结果数据</span></td><td>反馈基因在条件间的 P 值、log2FC 和显著性</td></tr>
+      <tr><td><code>data/feedback_enrichment_go.csv</code></td><td>反馈靶基因 GO 富集表</td><td><span class="badge data">结果数据</span></td><td>GO Top5 与基因关联明细</td></tr>
+      <tr><td><code>data/feedback_enrichment_kegg.csv</code></td><td>反馈靶基因 KEGG 富集表</td><td><span class="badge data">结果数据</span></td><td>KEGG Top5 与基因关联明细</td></tr>
+      <tr><td><code>data/cell_scores.csv</code></td><td>每细胞靶基因表达与模块评分</td><td><span class="badge data">结果数据</span></td><td>细胞级反馈分析主表</td></tr>
+      <tr><td><code>data/celltype_summary.csv</code></td><td>细胞类型表达汇总</td><td><span class="badge data">结果数据</span></td><td>查看靶基因的细胞类型偏好</td></tr>
+      <tr><td><code>data/celltype_enrichment.csv</code></td><td>细胞类型模块富集检验</td><td><span class="badge data">结果数据</span></td><td>比较细胞类型间模块评分</td></tr>
+      <tr><td><code>data/condition_summary.csv</code></td><td>条件×细胞类型表达汇总</td><td><span class="badge data">结果数据</span></td><td>查看分组间细胞类型靶点活性</td></tr>
+    </tbody>
+  </table>
+</div>
+
+<div class="card">
+  <h2>11 集成报告与溯源</h2>
+  <p class="muted">位置：<span class="path">&lt;workdir&gt;/outputs/integration/</span></p>
+  <p class="muted">无结果图/结果数据。本阶段仅生成 HTML 报告、汇总与溯源文件，不列入本清单。</p>
+</div>
+
+<div class="card">
+  <h2>高级分析、MR 与工作区导出</h2>
+  <p class="muted">位置：独立高级分析任务的输出目录，以及全自动流水线下的 <span class="path">&lt;output&gt;/results/advanced/</span> 与 <span class="path">&lt;output&gt;/results/mr_coloc/</span>。</p>
+  <table>
+    <thead><tr><th>文件</th><th>内容</th><th>类型</th><th>用途</th></tr></thead>
+    <tbody>
+      <tr><td><code>advanced/integrated_priority.csv</code></td><td>多队列整合后的基因优先级表</td><td><span class="badge data">结果数据</span></td><td>查看综合评分、证据计数和主要表达指标</td></tr>
+      <tr><td><code>advanced/advanced_analysis_summary.json</code></td><td>多队列、R、ML、免疫和生存分析汇总</td><td><span class="badge data">结果数据</span></td><td>查看各分析模块状态与输出路径</td></tr>
+      <tr><td><code>advanced/ml_model_comparison.csv</code></td><td>基因级 ML 模型交叉验证比较</td><td><span class="badge data">结果数据</span></td><td>比较不同模型的排序性能</td></tr>
+      <tr><td><code>advanced/ml_external_validation.csv</code></td><td>验证队列上的模型表现</td><td><span class="badge data">结果数据</span></td><td>检查跨队列泛化和阈值稳定性</td></tr>
+      <tr><td><code>advanced/ml_feature_importance.csv</code></td><td>ML 特征重要性表</td><td><span class="badge data">结果数据</span></td><td>查看模型依赖的基因特征</td></tr>
+      <tr><td><code>advanced/ml_shap.png</code></td><td>SHAP 模型解释图</td><td><span class="badge fig">结果图</span></td><td>解释候选基因对模型输出的贡献</td></tr>
+      <tr><td><code>mr_coloc/harmonised_instruments.csv</code></td><td>暴露与结局协调后的工具变量表</td><td><span class="badge data">结果数据</span></td><td>检查 SNP、效应方向和 F 统计量</td></tr>
+      <tr><td><code>mr_coloc/mr_methods.csv</code></td><td>IVW、加权中位数和 MR-Egger 结果</td><td><span class="badge data">结果数据</span></td><td>比较不同 MR 方法的方向与显著性</td></tr>
+      <tr><td><code>mr_coloc/mr_leave_one_out.csv</code></td><td>留一法敏感性分析</td><td><span class="badge data">结果数据</span></td><td>判断结果是否由单个 SNP 驱动</td></tr>
+      <tr><td><code>mr_coloc/mr_summary.json</code></td><td>MR 汇总与 R 后端状态</td><td><span class="badge data">结果数据</span></td><td>查看主要估计、异质性和共定位状态</td></tr>
+      <tr><td><code>mr_coloc/coloc_posterior.csv</code></td><td>共定位后验概率表</td><td><span class="badge data">结果数据</span></td><td>查看 PP.H4 与共享因果变量证据 <span class="badge opt">需 R coloc</span></td></tr>
+      <tr><td><code>&lt;analysis-workspace&gt;/data/imported_results/</code></td><td>导出后的运行结果副本</td><td><span class="badge data">结果数据</span></td><td>供本地 Codex 分析工作区继续分析</td></tr>
+    </tbody>
+  </table>
+</div>
+
+<div class="card">
+  <h2>条件输出说明</h2>
+  <p class="muted">带“条件”标记的文件不是固定输出，只有对应开关、依赖或数据满足时才生成；下面对应每个标记给出具体条件。</p>
+  <ul class="muted">
+    <li><span class="badge opt">需 marker 基因</span>：数据集中存在固定 marker 列表中的基因（与表达矩阵的交集非空，最多 6 个）。</li>
+    <li><span class="badge opt">多样本</span>：样本数大于 1 时生成。</li>
+    <li><span class="badge opt">LIVER_RUN_CELLCYCLE=yes</span>：默认开启；同时需成功执行细胞周期打分（至少 5 个 S 期、5 个 G2M 期基因）或元数据已含 Phase。</li>
+    <li><span class="badge opt">LIVER_RUN_CLUSTER_MARKERS=yes</span>：默认开启；同时需 <code>FindAllMarkers</code> 返回非空 marker，且 Top 基因在表达矩阵中存在。</li>
+    <li><span class="badge opt">LIVER_RUN_SIGNATURES=yes</span>：默认开启；同时需签名基因与表达矩阵的交集非空。</li>
+    <li><span class="badge opt">LIVER_RUN_CNV=yes</span>：默认开启；同时需物种注释库可用且 CHRLOC 注释充足（非缺失 &gt; 500 且可映射基因 &ge; 200）。</li>
+    <li><span class="badge opt">LIVER_RUN_SINGLER=yes</span>：默认开启；同时需参考数据可用且 SingleR 预测成功。</li>
+    <li><span class="badge opt">LIVER_RUN_TRAJECTORY=yes</span>：默认关闭，需显式开启；同时需安装 <code>slingshot</code> 且谱系推断成功。</li>
+    <li><span class="badge opt">LIVER_RUN_CELLCHAT=yes</span>：默认关闭，需显式开启；同时需 R 环境可用、CellChat 已安装且有通讯结果。</li>
+    <li><span class="badge opt">仅二分类</span>：单细胞 ML 校准曲线仅在二分类模型且校准曲线计算成功时生成。</li>
+    <li><span class="badge opt">仅 lasso_svm</span>：ML 选定特征表仅在 <code>LIVER_ML_MODEL=lasso_svm</code> 时生成。</li>
+    <li><span class="badge opt">重对接开启</span>：重对接阶段启用（<code>redock.enabled</code>，默认 true）且存在可重对接的 Top 命中、初始与重对接亲和力可合并时生成。</li>
+    <li><span class="badge opt">ml-train</span>：仅 <code>ml-train</code> 阶段生成 ML 重打分结果。</li>
+    <li><span class="badge opt">ml-train 且有重要性</span>：需 <code>ml-train</code> 阶段且模型提供 <code>feature_importances_</code>/<code>coef_</code>；MLP/torch 无原生重要性时不生成。</li>
+    <li><span class="badge opt">ml-train 且二分类</span>：需 <code>ml-train</code> 阶段、分类任务且模型可输出概率；回归任务不生成。</li>
+    <li><span class="badge opt">需 --ppi-network-csv</span>：PPI hub 评分仅在提供 <code>--ppi-network-csv</code> 输入时生成。</li>
+  </ul>
+  <div class="note">本页只列结果图与结果数据；若后续代码修改输出文件名或目录，请同步更新本页。</div>
+</div>
+
+<footer>由 Codex 根据项目流水线代码生成 | 结果清单页</footer>
+</div>
+<script>
+(function () {
+  const state = { query: '', stage: 'all', type: 'all' };
+  let guideSections = [];
+  let resultDetails = {};
+
+  function escapeHtml(value) {
+    return String(value == null ? '' : value)
+      .replace(/&/g, '&amp;')
+      .replace(/</g, '&lt;')
+      .replace(/>/g, '&gt;')
+      .replace(/"/g, '&quot;');
+  }
+
+  function inlineMarkdown(value) {
+    return String(value)
+      .replace(/`([^`]+)`/g, '<code>$1</code>')
+      .replace(/\*\*([^*]+)\*\*/g, '<strong>$1</strong>');
+  }
+
+  function renderLegend(value) {
+    return escapeHtml(value).replace(/\n/g, '<br>');
+  }
+
+  function renderTable(lines) {
+    const rows = lines.map(line => {
+      return line.trim().replace(/^\|/, '').replace(/\|$/, '').split('|').map(cell => inlineMarkdown(escapeHtml(cell.trim())));
+    });
+    let html = '<table class="guide-table"><thead><tr>' + rows[0].map(cell => '<th>' + cell + '</th>').join('') + '</tr></thead><tbody>';
+    for (let i = 2; i < rows.length; i++) {
+      html += '<tr>' + rows[i].map(cell => '<td>' + cell + '</td>').join('') + '</tr>';
+    }
+    return '<div class="tablebox">' + html + '</tbody></table></div>';
+  }
+
+  function renderMarkdown(raw) {
+    const lines = String(raw || '').replace(/\r/g, '').split('\n');
+    let html = '';
+    let i = 0;
+    while (i < lines.length) {
+      const line = lines[i];
+      if (!line.trim()) { i++; continue; }
+      if (line.trim().startsWith('```')) {
+        const buf = [];
+        i++;
+        while (i < lines.length && !lines[i].trim().startsWith('```')) {
+          buf.push(lines[i]);
+          i++;
+        }
+        i++;
+        html += '<pre class="guide-code">' + escapeHtml(buf.join('\n')) + '</pre>';
+        continue;
+      }
+      const heading = line.match(/^(#{1,6})\s+(.*)$/);
+      if (heading) {
+        const level = Math.min(6, heading[1].length + 1);
+        html += '<h' + level + '>' + inlineMarkdown(escapeHtml(heading[2])) + '</h' + level + '>';
+        i++;
+        continue;
+      }
+      if (line.trim().startsWith('|')) {
+        const table = [];
+        while (i < lines.length && lines[i].trim().startsWith('|')) {
+          table.push(lines[i]);
+          i++;
+        }
+        if (table.length >= 2) html += renderTable(table);
+        continue;
+      }
+      if (/^\s*[-*]\s+/.test(line)) {
+        const items = [];
+        while (i < lines.length && /^\s*[-*]\s+/.test(lines[i])) {
+          items.push(inlineMarkdown(escapeHtml(lines[i].replace(/^\s*[-*]\s+/, ''))));
+          i++;
+        }
+        html += '<ul>' + items.map(item => '<li>' + item + '</li>').join('') + '</ul>';
+        continue;
+      }
+      if (/^\s*\d+\.\s+/.test(line)) {
+        const items = [];
+        while (i < lines.length && /^\s*\d+\.\s+/.test(lines[i])) {
+          items.push(inlineMarkdown(escapeHtml(lines[i].replace(/^\s*\d+\.\s+/, ''))));
+          i++;
+        }
+        html += '<ol>' + items.map(item => '<li>' + item + '</li>').join('') + '</ol>';
+        continue;
+      }
+      if (line.trim().startsWith('>')) {
+        const quote = [];
+        while (i < lines.length && lines[i].trim().startsWith('>')) {
+          quote.push(inlineMarkdown(escapeHtml(lines[i].trim().replace(/^>\s?/, ''))));
+          i++;
+        }
+        html += '<blockquote>' + quote.join(' ') + '</blockquote>';
+        continue;
+      }
+      const paragraph = [];
+      while (
+        i < lines.length &&
+        lines[i].trim() &&
+        !lines[i].trim().startsWith('```') &&
+        !/^(#{1,6})\s+/.test(lines[i]) &&
+        !lines[i].trim().startsWith('|') &&
+        !/^\s*[-*]\s+/.test(lines[i]) &&
+        !/^\s*\d+\.\s+/.test(lines[i]) &&
+        !lines[i].trim().startsWith('>')
+      ) {
+        paragraph.push(inlineMarkdown(escapeHtml(lines[i].trim())));
+        i++;
+      }
+      html += '<p>' + paragraph.join(' ') + '</p>';
+    }
+    return html;
+  }
+
+  function stageKey(title) {
+    if (title.includes('01 单细胞') || title.includes('单细胞分析输出')) return 'single';
+    if (title.includes('QC 门控')) return 'qc';
+    if (title.includes('02 关键')) return 'key';
+    if (title.includes('03 证据')) return 'evidence';
+    if (title.includes('04 虚拟敲除输入')) return 'ko-input';
+    if (title.includes('05 虚拟敲除')) return 'ko';
+    if (title.includes('06 分子对接')) return 'dock';
+    if (title.includes('07 CADD')) return 'cadd';
+    if (title.includes('08/09')) return 'safety';
+    if (title.includes('10 细胞反馈')) return 'feedback';
+    if (title.includes('11 集成')) return 'report';
+    if (title.includes('条件输出')) return 'conditions';
+    return 'other';
+  }
+
+  function normalizeSearch(value) {
+    return String(value || '').toLowerCase().replace(/[\s_.\-/\\]+/g, '');
+  }
+
+  function textMatches(rawText, query) {
+    const raw = String(rawText || '');
+    const q = String(query || '').trim().toLowerCase();
+    if (!q) return true;
+    const rawNorm = normalizeSearch(raw);
+    const qNorm = normalizeSearch(q);
+    if (rawNorm.includes(qNorm)) return true;
+    const qName = q.split(/[\\/]+/).filter(Boolean).pop() || q;
+    const qNameNorm = normalizeSearch(qName);
+    if (qNameNorm && rawNorm.includes(qNameNorm)) return true;
+    const tokens = q.split(/\s+/).filter(Boolean);
+    return tokens.length > 1 && tokens.every(token => raw.toLowerCase().includes(token));
+  }
+
+  function indexRows() {
+    document.querySelectorAll('.card').forEach(card => {
+      const h2 = card.querySelector('h2');
+      const stage = stageKey(h2 ? h2.textContent : '');
+      card.dataset.stage = stage;
+      card.querySelectorAll('table tbody tr:not(.result-detail-row)').forEach(tr => {
+        const fileCode = tr.querySelector('code');
+        const file = fileCode ? fileCode.textContent.trim() : '';
+        const badge = tr.querySelector('.badge');
+        const typeText = badge ? badge.textContent.trim() : '';
+        const type = typeText.includes('结果图') ? 'fig' : typeText.includes('结果数据') ? 'data' : 'other';
+        tr.dataset.file = file;
+        tr.dataset.stage = stage;
+        tr.dataset.type = type;
+        if (!tr.dataset.transformed) {
+          const searchText = (tr.textContent + ' ' + file + ' ' + type).toLowerCase();
+          tr.dataset.search = searchText;
+        }
+      });
+    });
+  }
+
+  function highlightText(text, query) {
+    const escaped = escapeHtml(text);
+    const needle = (query || '').trim();
+    if (!needle) return escaped;
+    const lowerEscaped = escaped.toLowerCase();
+    const lowerNeedle = needle.toLowerCase();
+    let out = '';
+    let from = 0;
+    let index = lowerEscaped.indexOf(lowerNeedle, from);
+    while (index >= 0) {
+      out += escaped.slice(from, index);
+      out += '<mark>' + escaped.slice(index, index + needle.length) + '</mark>';
+      from = index + needle.length;
+      index = lowerEscaped.indexOf(lowerNeedle, from);
+    }
+    out += escaped.slice(from);
+    return out;
+  }
+
+  function extractFiles(text) {
+    const re = /fig_[A-Za-z0-9_.-]+\.(?:png|csv|json|rds|txt)/g;
+    return Array.from(new Set(String(text || '').match(re) || []));
+  }
+
+  function resultDetailEntry(file) {
+    const name = String(file || '').split('/').pop().toLowerCase();
+    return resultDetails[name] || resultDetails[String(file || '').toLowerCase()] || null;
+  }
+
+  function transformResultRows() {
+    document.querySelectorAll('.card table tbody tr').forEach(tr => {
+      if (tr.classList.contains('result-detail-row') || tr.dataset.transformed) return;
+      const fileCode = tr.querySelector('code');
+      const file = fileCode ? fileCode.textContent.trim() : '';
+      const badge = tr.querySelector('.badge');
+      const badgeText = badge ? badge.textContent.trim() : '';
+      const badgeClass = badge ? badge.className : '';
+      const optional = tr.querySelector('.badge.opt');
+      const kind = badgeText.includes('结果图') ? 'fig' : badgeText.includes('结果数据') ? 'data' : 'other';
+      const entry = resultDetailEntry(file);
+      const originalLabel = tr.cells[1] ? tr.cells[1].textContent.trim() : '';
+      const originalUse = tr.cells[3] ? tr.cells[3].textContent.trim() : '';
+      const content = entry ? entry.content : (tr.cells[1] ? tr.cells[1].textContent.trim() : '');
+      const type = entry ? entry.type : (tr.cells[2] ? tr.cells[2].textContent.trim() : badgeText);
+      const use = entry ? entry.use : (tr.cells[3] ? tr.cells[3].textContent.trim() : '');
+      const legend = entry ? entry.legend : '';
+
+      const button = document.createElement('button');
+      button.type = 'button';
+      button.className = 'result-toggle';
+      button.setAttribute('aria-expanded', 'false');
+      button.title = '展开详情';
+      button.innerHTML =
+        '<span class="result-chevron" aria-hidden="true">▸</span>' +
+        '<code>' + escapeHtml(file) + '</code>' +
+        (badgeClass ? '<span class="' + badgeClass + '">' + escapeHtml(badgeText) + '</span>' : '') +
+        (optional ? '<span class="badge opt">' + escapeHtml(optional.textContent.trim()) + '</span>' : '');
+
+      const cell = document.createElement('td');
+      cell.className = 'result-toggle-cell';
+      cell.appendChild(button);
+      tr.innerHTML = '';
+      tr.appendChild(cell);
+      tr.classList.add('result-item');
+      tr.dataset.transformed = '1';
+      tr.dataset.file = file;
+      tr.dataset.type = kind;
+      const searchText = [
+        file,
+        file.split('/').pop(),
+        originalLabel,
+        originalUse,
+        content,
+        type,
+        use,
+        legend,
+      ].join(' ');
+      tr.dataset.search = searchText.toLowerCase();
+
+      const detailRow = document.createElement('tr');
+      detailRow.className = 'result-detail-row';
+      detailRow.innerHTML =
+        '<td colspan="4"><div class="result-detail">' +
+        '<span class="detail-label">内容</span><span class="detail-value">' + escapeHtml(content) + '</span>' +
+        '<span class="detail-label">类型</span><span class="detail-value">' + escapeHtml(type) + '</span>' +
+        '<span class="detail-label">用途</span><span class="detail-value">' + escapeHtml(use) + '</span>' +
+        (legend ? '<span class="detail-label">图解</span><span class="detail-value">' + renderLegend(legend) + '</span>' : '') +
+        '</div></td>';
+      tr.after(detailRow);
+
+      button.addEventListener('click', function () {
+        const open = tr.classList.toggle('result-open');
+        detailRow.style.display = open ? 'table-row' : 'none';
+        button.setAttribute('aria-expanded', String(open));
+      });
+    });
+  }
+
+  async function loadResultDetails() {
+    try {
+      const resp = await fetch('/result-details');
+      if (!resp.ok) throw new Error('HTTP ' + resp.status);
+      const data = await resp.json();
+      (data.entries || []).forEach(entry => {
+        const nameKey = String(entry.name || entry.file || '').toLowerCase();
+        const fileKey = String(entry.file || '').toLowerCase();
+        if (nameKey) resultDetails[nameKey] = entry;
+        if (fileKey) resultDetails[fileKey] = entry;
+      });
+    } catch (error) {
+      resultDetails = {};
+    }
+  }
+
+  function renderGuide(sections) {
+    const container = document.getElementById('guideResult');
+    container.innerHTML = '';
+    sections.forEach(section => {
+      section.files = section.files && section.files.length ? section.files : extractFiles(section.text);
+      const el = document.createElement('section');
+      el.className = 'guide-section';
+      el.dataset.guideId = section.id;
+      const title = document.createElement('h3');
+      title.innerHTML = highlightText(section.title, state.query);
+      const body = document.createElement('div');
+      body.className = 'guide-md';
+      body.innerHTML = renderMarkdown(section.text);
+      el.appendChild(title);
+      el.appendChild(body);
+      container.appendChild(el);
+      section.el = el;
+    });
+  }
+
+  async function loadGuide() {
+    const countEl = document.getElementById('guideCount');
+    const container = document.getElementById('guideResult');
+    try {
+      const resp = await fetch('/result-guide');
+      const data = await resp.json();
+      guideSections = data.sections || [];
+      if (!guideSections.length) {
+        container.innerHTML = '<p class="muted">解释文档暂不可用。</p>';
+      } else {
+        renderGuide(guideSections);
+      }
+      if (countEl) countEl.textContent = '（' + guideSections.length + ' 个章节）';
+    } catch (error) {
+      guideSections = [];
+      container.innerHTML = '<p class="muted">解释文档加载失败：' + escapeHtml(String(error)) + '</p>';
+      if (countEl) countEl.textContent = '（不可用）';
+    }
+    applyFilters();
+  }
+
+  function updateChips() {
+    document.querySelectorAll('[data-stage-filter]').forEach(btn => {
+      btn.classList.toggle('active', btn.dataset.stageFilter === state.stage);
+    });
+    document.querySelectorAll('[data-type-filter]').forEach(btn => {
+      btn.classList.toggle('active', btn.dataset.typeFilter === state.type);
+    });
+  }
+
+  function applyFilters() {
+    const q = state.query.trim().toLowerCase();
+    const matchedFiles = new Set();
+    let guideHits = 0;
+    const guideCard = document.getElementById('guideCard');
+    const guideDetails = document.getElementById('guideDetails');
+    if (q) {
+      guideSections.forEach(section => {
+        if (section.el) section.el.style.display = 'none';
+      });
+      if (guideCard) guideCard.style.display = 'none';
+      if (guideDetails) guideDetails.open = false;
+    } else {
+      if (guideCard) guideCard.style.display = '';
+      guideSections.forEach(section => {
+        if (!section.el) return;
+        const hay = (section.title + '\n' + section.text).toLowerCase();
+        const hit = textMatches(hay, q);
+        section.el.style.display = hit ? '' : 'none';
+        section.el.classList.toggle('guide-hit', Boolean(q) && hit);
+        const title = section.el.querySelector('h3');
+        if (title) title.innerHTML = highlightText(section.title, state.query);
+        if (hit) {
+          guideHits++;
+          (section.files || []).forEach(file => matchedFiles.add(file.toLowerCase()));
+        }
+      });
+    }
+
+    let rowHits = 0;
+    const rows = Array.from(document.querySelectorAll('.card table tbody tr:not(.result-detail-row)'));
+    rows.forEach(tr => {
+      const queryOk = textMatches(tr.dataset.search || '', q);
+      const rowNorm = normalizeSearch(tr.dataset.file || '');
+      const guideOk = q
+        ? false
+        : Array.from(matchedFiles).some(file => rowNorm.includes(normalizeSearch(file)));
+      const show =
+        (state.stage === 'all' || tr.dataset.stage === state.stage) &&
+        (state.type === 'all' || tr.dataset.type === state.type) &&
+        (queryOk || guideOk);
+      tr.style.display = show ? '' : 'none';
+      const detailRow = tr.nextElementSibling;
+      if (detailRow && detailRow.classList.contains('result-detail-row')) {
+        detailRow.style.display = show && tr.classList.contains('result-open') ? 'table-row' : 'none';
+      }
+      if (show && q) rowHits++;
+    });
+
+    const filterActive = Boolean(q) || state.stage !== 'all' || state.type !== 'all';
+    document.querySelectorAll('.card').forEach(card => {
+      if (card.id === 'guideCard') return;
+      const tableRows = card.querySelectorAll('table tbody tr:not(.result-detail-row)');
+      const hasVisible = Array.from(tableRows).some(tr => tr.style.display !== 'none');
+      card.style.display = !filterActive || hasVisible ? '' : 'none';
+    });
+
+    const figCount = rows.filter(tr => tr.dataset.type === 'fig').length;
+    const dataCount = rows.filter(tr => tr.dataset.type === 'data').length;
+    const condCount = rows.filter(tr => tr.querySelector('.badge.opt')).length;
+    const stats = document.getElementById('searchStats');
+    if (q) {
+      stats.textContent = '搜索“' + state.query + '”：结果清单命中 ' + rowHits + ' 条。';
+    } else {
+      stats.textContent = '结果清单共 ' + rows.length + ' 条：' + figCount + ' 张结果图，' + dataCount + ' 份结果数据，' + condCount + ' 个条件输出；指南共 ' + guideSections.length + ' 个章节。';
+    }
+
+    const noMatch = document.getElementById('noMatch');
+    noMatch.style.display = filterActive && rowHits === 0 && (q || guideHits === 0) ? 'block' : 'none';
+    updateChips();
+  }
+
+  function filterResults(query) {
+    state.query = String(query || '');
+    applyFilters();
+  }
+
+  function clearResultFilter() {
+    const input = document.getElementById('resultFilter');
+    if (input) input.value = '';
+    state.query = '';
+    state.stage = 'all';
+    state.type = 'all';
+    applyFilters();
+  }
+
+  function bindFilters() {
+    document.querySelectorAll('[data-stage-filter]').forEach(btn => {
+      btn.addEventListener('click', () => {
+        state.stage = btn.dataset.stageFilter;
+        applyFilters();
+      });
+    });
+    document.querySelectorAll('[data-type-filter]').forEach(btn => {
+      btn.addEventListener('click', () => {
+        state.type = btn.dataset.typeFilter;
+        applyFilters();
+      });
+    });
+  }
+
+  function wrapCardTables() {
+    document.querySelectorAll('.card').forEach(card => {
+      if (card.id === 'guideCard') return;
+      card.querySelectorAll(':scope > table').forEach(table => {
+        if (table.parentElement && table.parentElement.classList.contains('tablebox')) return;
+        const wrapper = document.createElement('div');
+        wrapper.className = 'tablebox';
+        table.replaceWith(wrapper);
+        wrapper.appendChild(table);
+      });
+    });
+  }
+
+  window.filterResults = filterResults;
+  window.clearResultFilter = clearResultFilter;
+  (async () => {
+    await loadResultDetails();
+    wrapCardTables();
+    transformResultRows();
+    indexRows();
+    bindFilters();
+    loadGuide();
+  })();
+})();
+</script>
+</body>
+</html>

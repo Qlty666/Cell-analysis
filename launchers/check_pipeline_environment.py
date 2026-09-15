@@ -1,0 +1,203 @@
+#!/usr/bin/env python3
+"""Check whether the current computer can run the single-cell pipeline."""
+
+import argparse
+import shutil
+import subprocess
+import sys
+import urllib.request
+import importlib
+from pathlib import Path
+
+ROOT = Path(__file__).resolve().parent.parent
+if str(ROOT / "src") not in sys.path:
+    sys.path.insert(0, str(ROOT / "src"))
+
+from common.env import find_rscript  # noqa: E402
+
+REQUIRED_PYTHON = (3, 10)
+REQUIRED_R = (4, 5, 0)
+
+PYTHON_PACKAGES = [
+    "numpy",
+    "pandas",
+    "matplotlib",
+    "yaml",
+    "openpyxl",
+    "h5py",
+    "scipy",
+    "sklearn",
+    "fpdf",
+]
+
+R_PACKAGES = [
+    "Seurat",
+    "Matrix",
+    "data.table",
+    "dplyr",
+    "ggplot2",
+    "patchwork",
+    "jsonlite",
+    "ggrepel",
+    "pheatmap",
+    "scDblFinder",
+    "SingleCellExperiment",
+    "BiocParallel",
+    "clusterProfiler",
+    "org.Hs.eg.db",
+    "org.Mm.eg.db",
+    "enrichplot",
+    "DESeq2",
+]
+
+
+def parse_version(text: str) -> tuple:
+    parts = []
+    for part in text.strip().split("."):
+        digits = "".join(ch for ch in part if ch.isdigit())
+        if digits:
+            parts.append(int(digits))
+        else:
+            break
+    return tuple(parts)
+
+
+def main(argv: list[str] | None = None) -> int:
+    parser = argparse.ArgumentParser(description=__doc__)
+    parser.add_argument(
+        "--offline",
+        action="store_true",
+        help="skip the NCBI GEO network probe (useful on air-gapped hosts)",
+    )
+    args = parser.parse_args(argv)
+
+    ok = True
+    checks = []
+
+    def report(name: str, passed: bool, detail: str) -> None:
+        nonlocal ok
+        checks.append((name, "OK " if passed else "FAIL", detail))
+        if not passed:
+            ok = False
+
+    def warn(name: str, detail: str) -> None:
+        # Warnings never change the exit code: an offline host must still be
+        # able to pass `check full`.
+        checks.append((name, "WARN", detail))
+
+    py = sys.version_info
+    report(
+        "Python",
+        py >= REQUIRED_PYTHON,
+        f"{py.major}.{py.minor}.{py.micro} (required >= "
+        f"{REQUIRED_PYTHON[0]}.{REQUIRED_PYTHON[1]})",
+    )
+
+    missing_packages = []
+    for module in PYTHON_PACKAGES:
+        try:
+            importlib.import_module(module)
+        except Exception:
+            missing_packages.append(module)
+    report(
+        "Python packages",
+        not missing_packages,
+        "all installed" if not missing_packages else
+        "missing: " + ", ".join(missing_packages),
+    )
+
+    rscript = find_rscript()
+    report("Rscript", rscript is not None, rscript or "Rscript not found in PATH")
+
+    r_version = ""
+    if rscript:
+        try:
+            result = subprocess.run(
+                [rscript, "-e", "cat(as.character(getRversion()))"],
+                capture_output=True,
+                text=True,
+                encoding="utf-8",
+                errors="replace",
+                timeout=60,
+            )
+            r_version = result.stdout.strip()
+            report(
+                "R version",
+                parse_version(r_version) >= REQUIRED_R,
+                f"{r_version} (required >= "
+                f"{'.'.join(str(x) for x in REQUIRED_R)})",
+            )
+        except Exception as exc:
+            report("R version", False, f"could not query R version: {exc}")
+
+    curl = shutil.which("curl") or shutil.which("curl.exe")
+    report("curl", curl is not None, curl or "curl not found in PATH")
+
+    if rscript:
+        pkg_script = (
+            "pkgs <- c("
+            + ",".join(f'"{p}"' for p in R_PACKAGES)
+            + "); ip <- installed.packages(); "
+            "for(p in pkgs) cat(p, '=', "
+            "ifelse(p %in% rownames(ip), ip[p,'Version'], 'MISSING'), '\\n')"
+        )
+        try:
+            result = subprocess.run(
+                [rscript, "-e", pkg_script],
+                capture_output=True,
+                text=True,
+                encoding="utf-8",
+                errors="replace",
+                timeout=180,
+            )
+            missing = []
+            for line in result.stdout.splitlines():
+                if "=" in line:
+                    name, version = line.split("=", 1)
+                    name = name.strip()
+                    version = version.strip()
+                    if version == "MISSING":
+                        missing.append(name)
+            report(
+                "R packages",
+                not missing,
+                "all installed" if not missing else "missing: " + ", ".join(missing),
+            )
+        except Exception as exc:
+            report("R packages", False, f"could not query packages: {exc}")
+    else:
+        report("R packages", False, "Rscript unavailable")
+
+    if args.offline:
+        warn("NCBI GEO access", "skipped (--offline)")
+    else:
+        try:
+            req = urllib.request.Request(
+                "https://ftp.ncbi.nlm.nih.gov/",
+                method="HEAD",
+                headers={"User-Agent": "Mozilla/5.0"},
+            )
+            with urllib.request.urlopen(req, timeout=15) as resp:
+                reachable = resp.status < 400
+            if reachable:
+                report("NCBI GEO access", True, "reachable")
+            else:
+                warn("NCBI GEO access", "unreachable (warning only)")
+        except Exception as exc:
+            warn("NCBI GEO access", f"{exc} (warning only)")
+
+    print()
+    print("Environment check result")
+    print("=" * 60)
+    for name, status, detail in checks:
+        print(f"[{status}] {name}: {detail}")
+    print("=" * 60)
+    print("Result:", "PASS" if ok else "FAIL")
+    if not ok:
+        print("Run install_pipeline_dependencies.py to install missing R packages.")
+    print("Note: WARN entries (network probe) do not affect the exit code.")
+    return 0 if ok else 1
+
+
+if __name__ == "__main__":
+    sys.exit(main())

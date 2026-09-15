@@ -1,0 +1,321 @@
+#!/usr/bin/env python3
+"""Tests for compound-disease network toxicology and PPI hub scoring."""
+
+from __future__ import annotations
+
+import logging
+import json
+import sys
+import tempfile
+import unittest
+import xml.etree.ElementTree as ET
+from pathlib import Path
+
+import pandas as pd
+
+APP_ROOT = Path(__file__).resolve().parent.parent
+if str(APP_ROOT / "src") not in sys.path:
+    sys.path.insert(0, str(APP_ROOT / "src"))
+
+from docking.config import load_config  # noqa: E402
+from docking.knockout import run_knockout  # noqa: E402
+from docking.network_toxicology import (  # noqa: E402
+    _select_ppi_edges,
+    overlap_analysis,
+    ppi_hub_scores,
+    read_target_table,
+    run_network_toxicology,
+    write_ctpd_network,
+)
+
+DEFAULT_CONFIG = APP_ROOT / "config" / "docking_config.json"
+LOG = logging.getLogger("test_network_toxicology")
+
+
+class TestNetworkToxicology(unittest.TestCase):
+    def _write_inputs(self, workdir: Path):
+        data_dir = workdir / "data" / "network"
+        data_dir.mkdir(parents=True)
+        pd.DataFrame(
+            {
+                "gene": ["ALB", "GPC3", "MMP9", "AKT1", "SRC"],
+                "source": ["CTD", "CTD", "ChEMBL", "STITCH", "CTD"],
+            }
+        ).to_csv(data_dir / "targets.csv", index=False)
+        pd.DataFrame(
+            {"gene": ["ALB", "GPC3", "MMP9", "EGFR", "TP53"]}
+        ).to_csv(data_dir / "disease.csv", index=False)
+        pd.DataFrame(
+            {
+                "protein1": ["ALB", "GPC3", "MMP9", "SRC"],
+                "protein2": ["GPC3", "MMP9", "AKT1", "EGFR"],
+            }
+        ).to_csv(data_dir / "ppi.tsv", sep="\t", index=False)
+        return data_dir
+
+    def test_overlap_and_full_run(self):
+        with tempfile.TemporaryDirectory() as tmp:
+            workdir = Path(tmp) / "work"
+            workdir.mkdir()
+            data_dir = self._write_inputs(workdir)
+            cfg = load_config(
+                DEFAULT_CONFIG,
+                {
+                    "workdir": str(workdir),
+                    "compound_name": "Bisphenol A",
+                    "disease_name": "Liver Cancer",
+                    "compound_targets_csv": str(data_dir / "targets.csv"),
+                    "disease_genes_csv": str(data_dir / "disease.csv"),
+                    "ppi_network_csv": str(data_dir / "ppi.tsv"),
+                    "network_output_dir": "outputs/network",
+                    "network_cytoscape": "off",
+                },
+            )
+            summary = run_network_toxicology(cfg, LOG)
+            out_dir = workdir / "outputs" / "network"
+            overlap = pd.read_csv(out_dir / "data" / "compound_disease_overlap.csv")
+            self.assertEqual(set(overlap["gene"]), {"ALB", "GPC3", "MMP9"})
+            self.assertTrue((out_dir / "figures" / "compound_disease_venn.png").exists())
+            self.assertTrue((out_dir / "data" / "ppi_hub_scores.csv").exists())
+            self.assertTrue((out_dir / "data" / "ctpd_nodes.csv").exists())
+            self.assertTrue((out_dir / "data" / "ctpd_edges.csv").exists())
+            self.assertTrue((out_dir / "data" / "ctpd_network.html").exists())
+            xgmml = out_dir / "data" / "ctpd_network.xgmml"
+            self.assertTrue(xgmml.exists())
+            root = ET.parse(xgmml).getroot()
+            local = lambda tag: tag.rsplit("}", 1)[-1]
+            self.assertGreaterEqual(
+                len([child for child in root if local(child.tag) == "node"]),
+                5,
+            )
+            self.assertGreaterEqual(
+                len([child for child in root if local(child.tag) == "edge"]),
+                7,
+            )
+            self.assertEqual(summary["overlap_genes"], 3)
+            self.assertTrue(summary["ppi_hub_scored"])
+
+    def test_overlap_analysis_counts_sources(self):
+        targets = {
+            "ctd": pd.DataFrame({"gene": ["ALB", "MMP9"]}),
+            "chembl": pd.DataFrame({"gene": ["ALB", "GPC3"]}),
+        }
+        overlap = overlap_analysis(targets, {"ALB", "MMP9", "GPC3"})
+        self.assertEqual(len(overlap), 3)
+        alb = overlap[overlap["gene"] == "ALB"].iloc[0]
+        self.assertEqual(alb["n_sources"], 2)
+
+    def test_compound_target_count_is_unique_union(self):
+        with tempfile.TemporaryDirectory() as tmp:
+            workdir = Path(tmp) / "work"
+            data_dir = workdir / "data" / "network"
+            data_dir.mkdir(parents=True)
+            pd.DataFrame({"gene": ["A", "B"]}).to_csv(
+                data_dir / "t1.csv",
+                index=False,
+            )
+            pd.DataFrame({"gene": ["A", "C"]}).to_csv(
+                data_dir / "t2.csv",
+                index=False,
+            )
+            pd.DataFrame({"gene": ["A", "B", "C"]}).to_csv(
+                data_dir / "disease.csv",
+                index=False,
+            )
+            config_path = workdir / "config.json"
+            config_path.write_text(
+                json.dumps(
+                    {
+                        "name": "network-test",
+                        "workdir": str(workdir),
+                        "output_dir": "outputs/run",
+                        "receptor": {
+                            "input": "receptor.pdb",
+                            "output": "receptor.pdbqt",
+                            "center": [0, 0, 0],
+                            "size": [20, 20, 20],
+                        },
+                        "ligand": {"input": "ligands.sdf"},
+                        "network_toxicology": {
+                            "compound_targets_csv": None,
+                            "target_sources": {
+                                "s1": str(data_dir / "t1.csv"),
+                                "s2": str(data_dir / "t2.csv"),
+                            },
+                            "disease_genes_csv": str(data_dir / "disease.csv"),
+                            "output_dir": "outputs/network",
+                            "cytoscape": "off",
+                        },
+                    }
+                ),
+                encoding="utf-8",
+            )
+            cfg = load_config(config_path)
+            summary = run_network_toxicology(cfg, LOG)
+            self.assertEqual(summary["compound_targets"], 3)
+
+    def test_ppi_hub_scores(self):
+        with tempfile.TemporaryDirectory() as tmp:
+            path = Path(tmp) / "edges.tsv"
+            pd.DataFrame(
+                {
+                    "protein1": ["A", "A", "B", "C"],
+                    "protein2": ["B", "C", "D", "D"],
+                }
+            ).to_csv(path, sep="\t", index=False)
+            frame = ppi_hub_scores(path, genes=["A", "B", "C", "D", "E"])
+            self.assertEqual(frame.loc[frame["gene"] == "A", "ppi_degree"].iloc[0], 2)
+            self.assertGreaterEqual(
+                frame.loc[frame["gene"] == "A", "ppi_hub_score"].iloc[0],
+                frame.loc[frame["gene"] == "E", "ppi_hub_score"].iloc[0],
+            )
+            self.assertIn("ppi_pagerank", frame.columns)
+            self.assertIn("ppi_mcc", frame.columns)
+
+    def test_ppi_consensus_metrics(self):
+        with tempfile.TemporaryDirectory() as tmp:
+            path = Path(tmp) / "edges.tsv"
+            pd.DataFrame(
+                {
+                    "protein1": ["A", "A", "B", "C"],
+                    "protein2": ["B", "C", "D", "D"],
+                }
+            ).to_csv(path, sep="\t", index=False)
+            frame = ppi_hub_scores(path, genes=["A", "B", "C", "D"])
+            expected = {
+                "ppi_degree",
+                "ppi_betweenness",
+                "ppi_closeness",
+                "ppi_eigenvector",
+                "ppi_pagerank",
+                "ppi_mcc",
+                "ppi_clustering",
+                "ppi_hub_score",
+            }
+            self.assertTrue(expected.issubset(frame.columns))
+
+    def test_json_target_table(self):
+        with tempfile.TemporaryDirectory() as tmp:
+            path = Path(tmp) / "targets.json"
+            path.write_text(
+                '[{"gene": "ALB", "source": "CTD"}]',
+                encoding="utf-8",
+            )
+            frame = read_target_table(path)
+            self.assertEqual(frame.iloc[0]["gene"], "ALB")
+            self.assertEqual(frame.iloc[0]["source"], "CTD")
+
+    def test_gene_column_prefers_gene_names_over_source(self):
+        with tempfile.TemporaryDirectory() as tmp:
+            path = Path(tmp) / "targets.csv"
+            pd.DataFrame(
+                {
+                    "source": ["CTD", "ChEMBL"],
+                    "target": ["ALB", "GPC3"],
+                    "action": ["inhibitor", "activator"],
+                }
+            ).to_csv(path, index=False)
+            frame = read_target_table(path)
+            self.assertEqual(sorted(frame["gene"]), ["ALB", "GPC3"])
+
+    def test_ppi_hub_scores_find_edge_columns_out_of_order(self):
+        with tempfile.TemporaryDirectory() as tmp:
+            path = Path(tmp) / "edges.csv"
+            pd.DataFrame(
+                {
+                    "score": [0.9, 0.8, 0.7],
+                    "protein1": ["A", "A", "B"],
+                    "protein2": ["B", "C", "C"],
+                }
+            ).to_csv(path, index=False)
+            frame = ppi_hub_scores(path, genes=["A", "B", "C"])
+            self.assertEqual(
+                frame.loc[frame["gene"] == "A", "ppi_degree"].iloc[0],
+                2,
+            )
+
+    def test_select_ppi_edges_caps_and_dedupes_by_score(self):
+        edges = pd.DataFrame(
+            {
+                "protein1": ["A", "A", "A", "B", "B", "C"],
+                "protein2": ["B", "B", "C", "D", "C", "D"],
+                "combined_score": [0.1, 0.99, 0.9, 0.2, 0.8, 0.3],
+            }
+        )
+        selected, score_col = _select_ppi_edges(
+            edges,
+            {"A", "B", "C", "D"},
+            max_ppi_edges=3,
+        )
+        self.assertEqual(score_col, "combined_score")
+        self.assertEqual(len(selected), 3)
+        self.assertEqual(
+            list(selected["combined_score"]),
+            [0.99, 0.9, 0.8],
+        )
+
+    def test_ctpd_export_without_overlap_still_writes_xgmml(self):
+        with tempfile.TemporaryDirectory() as tmp:
+            out_dir = Path(tmp) / "ctpd"
+            paths = write_ctpd_network(
+                pd.DataFrame(columns=["gene"]),
+                {"ctd": pd.DataFrame({"gene": ["A", "B"]})},
+                None,
+                "Compound X",
+                "Disease Y",
+                out_dir,
+            )
+            self.assertTrue(paths["nodes"].exists())
+            self.assertTrue(paths["edges"].exists())
+            self.assertTrue(paths["xgmml"].exists())
+
+    def test_knockout_includes_ppi_hub(self):
+        with tempfile.TemporaryDirectory() as tmp:
+            workdir = Path(tmp) / "work"
+            workdir.mkdir()
+            data_dir = workdir / "data" / "knockout"
+            data_dir.mkdir(parents=True)
+            genes = ["ALB", "GPC3", "MMP9", "AKT1", "TP53", "EGFR", "SRC", "CDK1"]
+            pd.DataFrame(
+                {
+                    "gene": genes,
+                    **{
+                        sample: [1.0 + (i % 3) * 0.3 for i in range(len(genes))]
+                        for sample in ["T1", "T2", "N1", "N2"]
+                    },
+                }
+            ).to_csv(data_dir / "expression.csv", index=False)
+            pd.DataFrame(
+                {
+                    "sample": ["T1", "T2", "N1", "N2"],
+                    "condition": ["Tumor", "Tumor", "Normal", "Normal"],
+                }
+            ).to_csv(data_dir / "metadata.csv", index=False)
+            pd.DataFrame(
+                {
+                    "protein1": ["ALB", "GPC3", "MMP9", "AKT1"],
+                    "protein2": ["GPC3", "MMP9", "AKT1", "TP53"],
+                }
+            ).to_csv(data_dir / "ppi.tsv", sep="\t", index=False)
+            cfg = load_config(
+                DEFAULT_CONFIG,
+                {
+                    "workdir": str(workdir),
+                    "expression_csv": "data/knockout/expression.csv",
+                    "metadata_csv": "data/knockout/metadata.csv",
+                    "ppi_network_csv": "data/knockout/ppi.tsv",
+                    "case_label": "Tumor",
+                    "normal_label": "Normal",
+                },
+            )
+            summary = run_knockout(cfg, LOG)
+            self.assertTrue(summary["ppi_hub_included"])
+            frame = pd.read_csv(
+                cfg.knockout_dir() / "data" / "fig_52_53_ranked_knockout.csv"
+            )
+            self.assertIn("ppi_hub_score", frame.columns)
+            self.assertIn("ppi_degree", frame.columns)
+
+
+if __name__ == "__main__":
+    unittest.main()

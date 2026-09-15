@@ -1,0 +1,62 @@
+<!DOCTYPE html>
+<html lang="zh-CN">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1">
+<link rel="stylesheet" href="/static/app.css">
+<script src="/static/nav.js" defer></script>
+<title>真实数据验证</title>
+</head>
+<body>
+<div class="topnav"></div>
+<div class="wrap">
+  <div class="page-head">
+    <div class="page-title">
+      <h1>随机真实 GSE 验证报告</h1>
+      <p class="page-sub">用随机真实 GEO 数据集验证全流程，查看最近一次验证摘要或重新运行验证。</p>
+    </div>
+    <div class="page-actions">
+      <a class="link-button" href="/full">全自动流水线</a>
+      <a class="link-button" href="/results">结果清单</a>
+    </div>
+  </div>
+
+  <div class="card">
+    <form id="validationForm">
+      <div class="grid wide">
+        <label>验证类型
+          <select name="mode">
+            <option value="random" selected>随机真实 GSE 全流程验证</option>
+            <option value="features">多队列靶点功能验证</option>
+            <option value="evidence">真实 PDB 证据验证</option>
+            <option value="random-evidence">随机真实证据与对接盒验证</option>
+          </select>
+        </label>
+        <label>数据集数量 / 队列上限
+          <input name="count" type="number" min="1" max="30" value="10">
+        </label>
+        <label>随机种子
+          <input name="seed" type="number" value="20260813">
+        </label>
+        <label class="toggle"><input type="checkbox" name="skip_gse" value="1"> 跳过 GSE165816</label>
+        <label class="toggle"><input type="checkbox" name="skip_build" value="1"> 复用已构建数据集</label>
+      </div>
+      <div class="actions" style="margin-top:10px;">
+        <button type="button" onclick="loadValidationReport()">查看对应报告</button>
+        <button type="button" class="secondary" onclick="runValidationJob(this)">运行验证</button>
+      </div>
+    </form>
+    <pre id="validationReport">点击“查看验证报告”加载结果。</pre>
+    <div id="validationStatus">正在读取验证任务状态...</div>
+  </div>
+</div>
+
+<script src="/static/dock_app.js"></script>
+<script>initValidationPage();</script>
+<div id="jobToast" class="job-toast" hidden>
+  <div class="job-toast-title" id="jobToastTitle"></div>
+  <div class="job-toast-body" id="jobToastBody"></div>
+  <button type="button" class="job-toast-close" onclick="closeJobToast()">知道了</button>
+</div>
+</body>
+</html>

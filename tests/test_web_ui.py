@@ -1,0 +1,2168 @@
+#!/usr/bin/env python3
+"""Tests for web UI status handling."""
+
+from __future__ import annotations
+
+import socket
+import json
+import os
+import sys
+import tempfile
+import time
+import unittest
+from unittest import mock
+from pathlib import Path
+
+import pandas as pd
+
+APP_ROOT = Path(__file__).resolve().parent.parent
+if str(APP_ROOT / "web") not in sys.path:
+    sys.path.insert(0, str(APP_ROOT / "web"))
+
+import web_ui as web_ui_module  # noqa: E402
+
+from web_ui import (  # noqa: E402
+    ANALYSIS_JOBS,
+    DOCK_JOBS,
+    FINISHED_NOTIFICATIONS,
+    FULL_JOBS,
+    HEARTBEAT_CLIENTS,
+    HEARTBEAT_LOCK,
+    JOBS,
+    NOTIFY_LOCK,
+    _analysis_file_path,
+    _advanced_analysis_file_path,
+    _analysis_status,
+    _dock_file_path,
+    _fetch_site_allowed,
+    _full_file_path,
+    _full_workdir_for_query,
+    _full_status,
+    _has_active_jobs,
+    _single_status,
+    _cleanup_stale_web_ui,
+    _heartbeat_client_ids,
+    _inject_heartbeat_script,
+    _origin_allowed,
+    _port_is_listening,
+    _purge_stale_heartbeats,
+    dock_results,
+    full_results,
+    register_heartbeat,
+    running_task_counts,
+    start_analysis_job,
+    run_faers_request,
+    run_knockout_request,
+    run_network_request,
+    start_dock_job,
+    start_full_job,
+    start_validation_job,
+    unregister_heartbeat,
+)
+
+
+class _FakeProc:
+    def __init__(self, returncode: int) -> None:
+        self.returncode = returncode
+
+    def poll(self) -> int:
+        return self.returncode
+
+
+class TestPortCleanup(unittest.TestCase):
+    def test_port_listening_detection(self):
+        with socket.socket(socket.AF_INET, socket.SOCK_STREAM) as sock:
+            sock.bind(("127.0.0.1", 0))
+            sock.listen()
+            port = sock.getsockname()[1]
+            self.assertTrue(_port_is_listening("127.0.0.1", port))
+        self.assertFalse(_port_is_listening("127.0.0.1", 0))
+
+    def test_cleanup_skips_when_port_free(self):
+        with (
+            mock.patch("web_ui._port_is_listening", return_value=False),
+            mock.patch("web_ui._stop_stale_web_ui") as stop,
+        ):
+            self.assertTrue(_cleanup_stale_web_ui("127.0.0.1", 8000))
+            stop.assert_not_called()
+
+    def test_cleanup_stops_when_port_busy(self):
+        with (
+            mock.patch("web_ui._port_is_listening", return_value=True),
+            mock.patch("web_ui._stop_stale_web_ui", return_value=True) as stop,
+        ):
+            self.assertTrue(_cleanup_stale_web_ui("127.0.0.1", 8000))
+            stop.assert_called_once_with("127.0.0.1", 8000)
+
+
+class TestSingleCellFigureList(unittest.TestCase):
+    def test_top5_enrichment_figures_wired_into_web_ui(self):
+        for name in ("fig_46_go_top5.png", "fig_47_kegg_top5.png"):
+            self.assertIn(name, web_ui_module.FIGURE_NAMES)
+        page = web_ui_module.render_page()
+        self.assertIn("fig_46_go_top5.png", page)
+        self.assertIn("GO BP 筛选后 Top5", page)
+        self.assertIn("fig_47_kegg_top5.png", page)
+        self.assertIn("KEGG 筛选后 Top5", page)
+
+    def test_top5_enrichment_figures_expose_expected_styles(self):
+        by_name = {item["file"]: item for item in web_ui_module.FIGURES}
+        for name in ("fig_46_go_top5.png", "fig_47_kegg_top5.png"):
+            self.assertIn("dotplot", by_name[name]["styles"])
+            self.assertIn("barplot", by_name[name]["styles"])
+
+
+class TestJobRecordPersistence(unittest.TestCase):
+    def test_web_pages_do_not_clear_job_records_on_reload(self):
+        web_ui_source = (APP_ROOT / "web" / "web_ui.py").read_text(
+            encoding="utf-8"
+        )
+        self.assertNotIn("clearJobRecordsOnReload", web_ui_source)
+        self.assertNotIn("nav.type === 'reload'", web_ui_source)
+
+        for name in (
+            "full_page_template.html",
+            "web_page_template.html",
+            "dock_page_template.html",
+            "tasks_template.html",
+            "results_manifest_optimized.html",
+        ):
+            template = (APP_ROOT / "web" / "templates" / name).read_text(
+                encoding="utf-8"
+            )
+            self.assertNotIn("clearJobRecordsOnReload", template)
+            self.assertNotIn("nav.type === 'reload'", template)
+
+
+class TestNetworkAndFaersWeb(unittest.TestCase):
+    def test_validation_run_passes_count_and_seed(self):
+        with (
+            mock.patch("web_ui.subprocess.Popen") as popen,
+        ):
+            try:
+                start_validation_job({"count": ["3"], "seed": ["20260820"]})
+            finally:
+                web_ui_module.VALIDATION_JOB.clear()
+            cmd = popen.call_args.args[0]
+            self.assertIn("--count", cmd)
+            self.assertEqual(cmd[cmd.index("--count") + 1], "3")
+            self.assertIn("--seed", cmd)
+            self.assertEqual(cmd[cmd.index("--seed") + 1], "20260820")
+
+    def test_validation_feature_mode_passes_build_and_gse_switches(self):
+        with mock.patch("web_ui.subprocess.Popen") as popen:
+            try:
+                start_validation_job(
+                    {
+                        "mode": ["features"],
+                        "count": ["4"],
+                        "skip_gse": ["1"],
+                        "skip_build": ["1"],
+                    }
+                )
+            finally:
+                web_ui_module.VALIDATION_JOB.clear()
+            cmd = popen.call_args.args[0]
+            self.assertIn("validate_new_features.py", cmd[1])
+            self.assertEqual(cmd[cmd.index("--max-studies") + 1], "4")
+            self.assertIn("--skip-gse", cmd)
+            self.assertIn("--skip-build", cmd)
+
+    def test_network_request_runs_and_lists_files(self):
+        with tempfile.TemporaryDirectory() as tmp:
+            workdir = Path(tmp) / "work"
+            workdir.mkdir()
+            data_dir = workdir / "data" / "network"
+            data_dir.mkdir(parents=True)
+            (data_dir / "targets.csv").write_text(
+                "gene,source\nALB,CTD\nGPC3,ChEMBL\nMMP9,CTD\n",
+                encoding="utf-8",
+            )
+            (data_dir / "disease.csv").write_text(
+                "gene\nALB\nGPC3\nEGFR\n",
+                encoding="utf-8",
+            )
+            (data_dir / "ppi.tsv").write_text(
+                "protein1\tprotein2\nALB\tGPC3\n",
+                encoding="utf-8",
+            )
+            result = run_network_request(
+                {
+                    "net_workdir": [str(workdir)],
+                    "net_compound_name": ["Test"],
+                    "net_disease_name": ["Liver"],
+                    "net_compound_targets": ["data/network/targets.csv"],
+                    "net_disease_genes": ["data/network/disease.csv"],
+                    "net_ppi": ["data/network/ppi.tsv"],
+                }
+            )
+            self.assertEqual(result["summary"]["overlap_genes"], 2)
+            self.assertTrue(result["summary"]["ppi_hub_scored"])
+            self.assertTrue(
+                any("compound_disease_overlap.csv" in f for f in result["files"])
+            )
+            out = Path(result["output_dir"])
+            self.assertTrue((out / "figures" / "compound_disease_venn.png").exists())
+
+    def test_network_request_passes_source_directory_and_enrichment(self):
+        with tempfile.TemporaryDirectory() as tmp:
+            workdir = Path(tmp) / "work"
+            workdir.mkdir()
+            with mock.patch(
+                "docking.network_toxicology.run_network_toxicology",
+                return_value={},
+            ) as run:
+                run_network_request(
+                    {
+                        "net_workdir": [str(workdir)],
+                        "net_target_sources_dir": ["data/network/targets"],
+                        "net_disease_genes": ["data/network/disease.csv"],
+                        "net_run_enrichment": ["1"],
+                        "net_enrichment_timeout": ["1500"],
+                    }
+                )
+            cfg = run.call_args.args[0]
+            self.assertEqual(
+                cfg.data["network_toxicology"]["target_sources_dir"],
+                "data/network/targets",
+            )
+            self.assertTrue(
+                cfg.data["network_toxicology"]["run_enrichment"]
+            )
+            self.assertEqual(
+                cfg.data["network_toxicology"]["enrichment_timeout"],
+                1500,
+            )
+
+    def test_faers_request_runs_and_lists_files(self):
+        with tempfile.TemporaryDirectory() as tmp:
+            workdir = Path(tmp) / "work"
+            workdir.mkdir()
+            data_dir = workdir / "data" / "faers"
+            data_dir.mkdir(parents=True)
+            (data_dir / "events.csv").write_text(
+                "drug,event,count\nA,X,10\nA,Y,2\nB,X,2\nB,Y,20\n",
+                encoding="utf-8",
+            )
+            result = run_faers_request(
+                {
+                    "faers_workdir": [str(workdir)],
+                    "faers_input": ["data/faers/events.csv"],
+                    "faers_min_count": ["3"],
+                }
+            )
+            self.assertGreaterEqual(result["summary"]["signals"], 1)
+            self.assertTrue(
+                any("faers_signals.csv" in f for f in result["files"])
+            )
+
+    def test_analysis_file_path_rejects_escape(self):
+        with tempfile.TemporaryDirectory() as tmp:
+            workdir = Path(tmp) / "work"
+            workdir.mkdir()
+            out_dir = workdir / "outputs" / "run_001" / "network_toxicology" / "data"
+            out_dir.mkdir(parents=True)
+            target = out_dir / "compound_disease_overlap.csv"
+            target.write_text("gene,n_sources,sources\nALB,1,CTD\n", encoding="utf-8")
+            self.assertEqual(
+                _analysis_file_path(
+                    str(workdir),
+                    "data/compound_disease_overlap.csv",
+                    "network",
+                ),
+                target.resolve(),
+            )
+            self.assertIsNone(
+                _analysis_file_path(str(workdir), "../escape.csv", "network")
+            )
+
+    def test_web_templates_expose_new_sections(self):
+        dock = (APP_ROOT / "web" / "templates" / "dock_page_template.html").read_text(
+            encoding="utf-8"
+        )
+        knockout = (
+            APP_ROOT / "web" / "templates" / "knockout_page_template.html"
+        ).read_text(encoding="utf-8")
+        network = (
+            APP_ROOT / "web" / "templates" / "network_page_template.html"
+        ).read_text(encoding="utf-8")
+        full = (APP_ROOT / "web" / "templates" / "full_page_template.html").read_text(
+            encoding="utf-8"
+        )
+        web_guide = (
+            APP_ROOT / "web" / "templates" / "guide_page_template.html"
+        ).read_text(encoding="utf-8")
+        faers = (
+            APP_ROOT / "web" / "templates" / "faers_page_template.html"
+        ).read_text(encoding="utf-8")
+        results = (
+            APP_ROOT / "web" / "templates" / "results_manifest_optimized.html"
+        ).read_text(encoding="utf-8")
+        guide = (APP_ROOT / "docs" / "result_figure_guide.md").read_text(
+            encoding="utf-8"
+        )
+        self.assertNotIn("网络毒理学分析", dock)
+        self.assertNotIn("FAERS 不相称性信号检测", dock)
+        self.assertIn("虚拟敲除与靶点评分", knockout)
+        self.assertIn("网络毒理学分析", network)
+        self.assertIn('name="net_cytoscape"', network)
+        self.assertIn('name="net_cytoscape_url"', network)
+        self.assertIn('name="network_cytoscape"', full)
+        self.assertIn("ctpd_network.xgmml", web_guide)
+        self.assertIn("FAERS 不相称性信号检测", faers)
+        self.assertIn("网络毒理学与 FAERS 信号", results)
+        self.assertIn("ctpd_network.xgmml", results)
+        self.assertIn("### 6.3 网络毒理学与 FAERS 信号", guide)
+
+
+class TestWebRealWorkdirAndKnockout(unittest.TestCase):
+    def test_full_workdir_resolution_prefers_explicit_workdir(self):
+        with tempfile.TemporaryDirectory() as tmp:
+            job_dir = Path(tmp) / "job"
+            real_dir = Path(tmp) / "real"
+            job_dir.mkdir()
+            real_dir.mkdir()
+            with mock.patch.dict(
+                web_ui_module.FULL_JOBS,
+                {"j1": {"workdir": job_dir}},
+            ):
+                self.assertEqual(
+                    _full_workdir_for_query("j1", str(real_dir)),
+                    str(real_dir),
+                )
+                self.assertEqual(
+                    _full_workdir_for_query("j1", ""),
+                    str(job_dir),
+                )
+                self.assertEqual(
+                    _full_workdir_for_query("missing", str(real_dir)),
+                    str(real_dir),
+                )
+                self.assertEqual(
+                    _full_workdir_for_query("missing", ""),
+                    "",
+                )
+
+    def test_run_knockout_request_enables_insilico_when_gene_is_set(self):
+        with tempfile.TemporaryDirectory() as tmp:
+            workdir = Path(tmp) / "work"
+            workdir.mkdir()
+            with mock.patch("docking.knockout.run_knockout") as run:
+                result = run_knockout_request(
+                    {
+                        "ko_workdir": [str(workdir)],
+                        "ko_expression": ["data/expression.csv"],
+                        "ko_insilico_gene": ["JUNB"],
+                    }
+                )
+            run.assert_called_once()
+            cfg = run.call_args.args[0]
+            self.assertTrue(cfg.data["insilico_knockout"]["enabled"])
+            self.assertEqual(
+                cfg.data["insilico_knockout"]["ko_gene"],
+                "JUNB",
+            )
+            self.assertEqual(result["workdir"], str(workdir.resolve()))
+
+    def test_run_knockout_request_leaves_insilico_disabled_without_gene(self):
+        with tempfile.TemporaryDirectory() as tmp:
+            workdir = Path(tmp) / "work"
+            workdir.mkdir()
+            with mock.patch("docking.knockout.run_knockout") as run:
+                run_knockout_request(
+                    {
+                        "ko_workdir": [str(workdir)],
+                        "ko_expression": ["data/expression.csv"],
+                    }
+                )
+            cfg = run.call_args.args[0]
+            self.assertFalse(cfg.data["insilico_knockout"]["enabled"])
+
+    def test_full_results_caps_knockout_rows(self):
+        with tempfile.TemporaryDirectory() as tmp:
+            workdir = Path(tmp) / "work"
+            integration = workdir / "outputs" / "integration"
+            integration.mkdir(parents=True)
+            ranked = (
+                workdir
+                / "outputs"
+                / "run_001"
+                / "results"
+                / "04_knockout"
+                / "data"
+                / "fig_52_53_ranked_knockout.csv"
+            )
+            ranked.parent.mkdir(parents=True)
+            lines = ["rank,gene,target_score"]
+            lines.extend(
+                f"{i},GENE{i},0.5"
+                for i in range(1, 301)
+            )
+            ranked.write_text("\n".join(lines), encoding="utf-8")
+            pd.DataFrame(
+                {
+                    "priority_rank": [1],
+                    "gene": ["GENE1"],
+                    "decision": ["CONDITIONAL_GO"],
+                }
+            ).to_csv(
+                integration / "integrated_target_priority.csv",
+                index=False,
+            )
+            evidence_hub = integration / "evidence_hub"
+            evidence_hub.mkdir()
+            pd.DataFrame(
+                {
+                    "source": ["Local"],
+                    "tier": ["CURATED"],
+                    "n_records": [1],
+                    "n_targets": [1],
+                }
+            ).to_csv(evidence_hub / "evidence_coverage.csv", index=False)
+            pd.DataFrame(
+                {
+                    "validation_rank": [1],
+                    "gene": ["GENE1"],
+                    "decision": ["CONDITIONAL_GO"],
+                    "adjusted_score": [64.0],
+                }
+            ).to_csv(integration / "target_validation_scores.csv", index=False)
+            pd.DataFrame(
+                {
+                    "gene": ["GENE1"],
+                    "base_decision": ["CONDITIONAL_GO"],
+                    "target_decision": ["CONDITIONAL_GO"],
+                    "final_decision": ["CONDITIONAL_GO"],
+                    "target_action": ["CONDITIONAL_PROCEED"],
+                    "platform_action": ["PLATFORM_READY"],
+                    "composite_action": ["CONDITIONAL_PROCEED"],
+                    "action": ["CONDITIONAL_PROCEED"],
+                }
+            ).to_csv(integration / "target_decision_report.csv", index=False)
+            for name, payload in {
+                "external_validation_summary.json": {
+                    "status": "completed",
+                    "auroc": 0.81,
+                    "score_origin": "pipeline",
+                    "score_provenance_valid": True,
+                    "target_match_rate": 0.95,
+                },
+                "omics_qc_summary.json": {
+                    "status": "completed",
+                    "gate_passed": True,
+                    "has_batch_metadata": True,
+                    "batch_condition_confounding": False,
+                    "sample_outlier_count": 0,
+                },
+                "pose_qc_summary.json": {
+                    "status": "unavailable",
+                    "pose_format": "pdbqt_converted",
+                    "no_receptor": 0,
+                    "gate_passed": False,
+                },
+                "structural_quality_summary.json": {
+                    "gates": {"positive_control": True}
+                },
+                "reproducibility_manifest.json": {
+                    "git": {"commit": "abc123"}
+                },
+            }.items():
+                (integration / name).write_text(
+                    json.dumps(payload),
+                    encoding="utf-8",
+                )
+            data = full_results(workdir)
+            self.assertEqual(len(data["knockout"]), 200)
+            self.assertEqual(data["target_priority"][0]["gene"], "GENE1")
+            self.assertEqual(data["evidence_coverage"][0]["source"], "Local")
+            self.assertEqual(
+                data["target_decisions"][0]["action"],
+                "CONDITIONAL_PROCEED",
+            )
+            self.assertEqual(data["external_validation"]["auroc"], 0.81)
+            self.assertEqual(
+                data["external_validation"]["score_origin"],
+                "pipeline",
+            )
+            self.assertTrue(
+                data["external_validation"]["score_provenance_valid"]
+            )
+            self.assertTrue(data["omics_qc"]["gate_passed"])
+            self.assertFalse(
+                data["omics_qc"]["batch_condition_confounding"]
+            )
+            self.assertEqual(data["pose_qc"]["status"], "unavailable")
+            self.assertEqual(data["pose_qc"]["pose_format"], "pdbqt_converted")
+            self.assertEqual(
+                data["reproducibility"]["git"]["commit"],
+                "abc123",
+            )
+
+
+class TestResultDetails(unittest.TestCase):
+    def test_result_details_cover_manifest_rows(self):
+        template = (
+            APP_ROOT / "web" / "templates" / "results_manifest_optimized.html"
+        ).read_text(encoding="utf-8")
+        data = web_ui_module.result_details_data()
+        self.assertTrue(data["available"])
+        self.assertGreaterEqual(len(data["entries"]), 100)
+        for entry in data["entries"]:
+            for field in ("name", "kind", "content", "type", "use"):
+                self.assertTrue(
+                    str(entry.get(field, "")).strip(),
+                    f"{entry.get('name')} missing {field}",
+                )
+        names = {entry["name"] for entry in data["entries"]}
+        for name in (
+            "fig_01_qc_raw_violin.png",
+            "fig_45_ml_calibration_curve.png",
+            "compound_disease_venn.png",
+            "liver_cancer_seurat.rds",
+            "fig_21_gsea_kegg_status.json",
+            "positive_control_results.csv",
+            "pca_fel.csv",
+            "mmpbsa.log",
+        ):
+            self.assertIn(name, names)
+        self.assertIn("result-toggle", template)
+        self.assertIn("result-detail-row", template)
+        self.assertIn("/result-details", template)
+
+
+class TestRecentWebIntegration(unittest.TestCase):
+    def test_dock_job_passes_ml_model_options(self):
+        with tempfile.TemporaryDirectory() as tmp:
+            workdir = Path(tmp) / "work"
+            workdir.mkdir()
+            with mock.patch("web_ui._drain_dock_queue"):
+                result = start_dock_job(
+                    {
+                        "workdir": [str(workdir)],
+                        "stage": ["ml-train"],
+                        "model": ["lasso_svm"],
+                        "training_csv": ["data/ml/training.csv"],
+                        "label_column": ["active"],
+                        "moderate_cutoff": ["-5.5"],
+                    }
+                )
+            job_id = result["job"]
+            try:
+                info = DOCK_JOBS[job_id]
+                cfg_path = workdir / "config" / f"docking_web_{job_id}.json"
+                cfg = json.loads(cfg_path.read_text(encoding="utf-8"))
+                self.assertEqual(cfg["ml"]["model"], "lasso_svm")
+                self.assertEqual(
+                    cfg["ml"]["training_csv"],
+                    "data/ml/training.csv",
+                )
+                self.assertEqual(cfg["ml"]["label_column"], "active")
+                self.assertEqual(cfg["analysis"]["moderate_cutoff"], -5.5)
+                self.assertEqual(info["stage"], "ml-train")
+            finally:
+                DOCK_JOBS.pop(job_id, None)
+
+    def test_dock_job_passes_replicates_controls_and_md_mmpbsa(self):
+        with tempfile.TemporaryDirectory() as tmp:
+            workdir = Path(tmp) / "work"
+            workdir.mkdir()
+            with mock.patch("web_ui._drain_dock_queue"):
+                result = start_dock_job(
+                    {
+                        "workdir": [str(workdir)],
+                        "stage": ["dock"],
+                        "docking_seed": ["42"],
+                        "docking_seeds": ["42 43 44"],
+                        "docking_replicates": ["3"],
+                        "docking_positive_control": [
+                            "data/ligands/control.pdbqt"
+                        ],
+                        "docking_positive_control_id": ["known"],
+                        "docking_positive_control_max_affinity": ["-7.0"],
+                        "md_gen_seed": ["77"],
+                        "md_mmpbsa_command": ["gmx_MMPBSA -O"],
+                        "md_mmpbsa_timeout": ["1800"],
+                    }
+                )
+            job_id = result["job"]
+            try:
+                cfg_path = workdir / "config" / f"docking_web_{job_id}.json"
+                cfg = json.loads(cfg_path.read_text(encoding="utf-8"))
+                self.assertEqual(cfg["docking"]["seed"], 42)
+                self.assertEqual(cfg["docking"]["seeds"], [42, 43, 44])
+                self.assertEqual(cfg["docking"]["replicates"], 3)
+                self.assertEqual(
+                    cfg["docking"]["positive_control_pdbqt"],
+                    "data/ligands/control.pdbqt",
+                )
+                self.assertEqual(cfg["docking"]["positive_control_id"], "known")
+                self.assertEqual(
+                    cfg["docking"]["positive_control_max_affinity"],
+                    -7.0,
+                )
+                self.assertEqual(cfg["md_simulation"]["gen_seed"], 77)
+                self.assertEqual(
+                    cfg["md_simulation"]["mmpbsa_command"],
+                    "gmx_MMPBSA -O",
+                )
+                self.assertEqual(
+                    cfg["md_simulation"]["mmpbsa_timeout_seconds"],
+                    1800,
+                )
+            finally:
+                DOCK_JOBS.pop(job_id, None)
+
+    def test_templates_expose_recent_controls(self):
+        single = (APP_ROOT / "web" / "templates" / "web_page_template.html").read_text(
+            encoding="utf-8"
+        )
+        full = (APP_ROOT / "web" / "templates" / "full_page_template.html").read_text(
+            encoding="utf-8"
+        )
+        dock = (APP_ROOT / "web" / "templates" / "dock_page_template.html").read_text(
+            encoding="utf-8"
+        )
+        knockout = (
+            APP_ROOT / "web" / "templates" / "knockout_page_template.html"
+        ).read_text(encoding="utf-8")
+        network = (
+            APP_ROOT / "web" / "templates" / "network_page_template.html"
+        ).read_text(encoding="utf-8")
+        faers = (
+            APP_ROOT / "web" / "templates" / "faers_page_template.html"
+        ).read_text(encoding="utf-8")
+        validation = (
+            APP_ROOT / "web" / "templates" / "validation_page_template.html"
+        ).read_text(encoding="utf-8")
+        self.assertIn('name="LIVER_ML_MODEL"', single)
+        self.assertIn('name="ml_model"', full)
+        self.assertIn('name="ppi_network_csv"', full)
+        self.assertIn('name="depmap_csv"', full)
+        self.assertIn('name="advanced_priority_csv"', full)
+        self.assertIn('name="candidate_expansion_max_targets"', full)
+        self.assertIn('name="benchmark_positive_targets"', full)
+        self.assertIn('name="benchmark_source"', full)
+        self.assertIn('name="benchmark_version"', full)
+        self.assertIn('name="benchmark_exclude_sources"', full)
+        self.assertIn('name="benchmark_independent"', full)
+        self.assertIn('name="external_validation_path"', full)
+        self.assertIn('name="external_validation_bootstrap"', full)
+        self.assertIn(
+            'name="external_validation_allow_external_score"',
+            full,
+        )
+        self.assertIn('name="allow_review_docking"', full)
+        for table_id in (
+            "priorityTable",
+            "validationTable",
+            "decisionTable",
+            "benchmarkTable",
+            "externalValidationTable",
+            "omicsQcTable",
+            "poseQcTable",
+            "structuralQualityTable",
+            "readinessTable",
+            "reproducibilityTable",
+        ):
+            self.assertIn(f'id="{table_id}"', full)
+        for rendered_field in (
+            "score_provenance_valid",
+            "target_match_rate",
+            "unmatched_targets",
+            "sample_outlier_count",
+            "batch_condition_confounding",
+            "pose_format",
+            "no_receptor",
+            "target_action",
+            "platform_action",
+            "composite_action",
+            "benchmark_source",
+            "benchmark_evidence_mode",
+            "source_overlap",
+        ):
+            self.assertIn(rendered_field, full)
+        self.assertIn('name="network_target_sources_dir"', full)
+        self.assertIn('name="network_run_enrichment"', full)
+        self.assertIn('name="model"', dock)
+        self.assertIn('name="training_csv"', dock)
+        self.assertIn('name="moderate_cutoff"', dock)
+        self.assertIn('name="docking_seeds"', dock)
+        self.assertIn('name="docking_replicates"', dock)
+        self.assertIn('name="docking_positive_control"', dock)
+        self.assertIn("saveModuleForm('form', 'liver_ui_dock_form'", dock)
+        md = (
+            APP_ROOT
+            / "web"
+            / "templates"
+            / "md_simulation_page_template.html"
+        ).read_text(encoding="utf-8")
+        self.assertIn('name="md_gen_seed"', md)
+        self.assertIn('name="md_mmpbsa_command"', md)
+        self.assertIn('name="md_mmpbsa_timeout"', md)
+        self.assertIn('name="ko_ppi"', knockout)
+        self.assertIn('name="ko_insilico_engine"', knockout)
+        self.assertIn('name="ko_insilico_raw_count_input"', knockout)
+        self.assertIn('name="ko_validation_top_n"', knockout)
+        self.assertIn('name="ko_insilico_max_genes"', knockout)
+        self.assertIn("saveModuleForm('koForm'", knockout)
+        self.assertIn('name="net_disease_gene_column"', network)
+        self.assertIn('name="net_venn"', network)
+        self.assertIn('name="net_target_sources_dir"', network)
+        self.assertIn('name="net_run_enrichment"', network)
+        self.assertIn("saveModuleForm('netForm'", network)
+        self.assertIn("saveModuleForm('faersForm'", faers)
+        self.assertIn('id="validationStatus"', validation)
+        self.assertIn('name="mode"', validation)
+        self.assertIn('name="skip_gse"', validation)
+        self.assertIn('name="skip_build"', validation)
+        molecular = (
+            APP_ROOT
+            / "web"
+            / "templates"
+            / "molecular_docking_template.html"
+        ).read_text(encoding="utf-8")
+        self.assertIn('name="moderate_cutoff"', molecular)
+
+    def test_private_plan_one_web_gate(self):
+        default_full = web_ui_module.render_full_page()
+        self.assertNotIn('id="experiment-plan-one"', default_full)
+        self.assertNotIn("6PPD-Q", default_full)
+        self.assertNotIn("NAFLD", default_full)
+        self.assertNotIn("实验方案一", default_full)
+        default_guide = web_ui_module.render_guide_page()
+        self.assertNotIn("6PPD-Q", default_guide)
+        self.assertNotIn("NAFLD", default_guide)
+        self.assertNotIn("实验方案一", default_guide)
+        self.assertIn('id="private"', default_guide)
+        self.assertIn("LIVER_ENABLE_PRIVATE_PLAN_ONE", default_guide)
+        self.assertIn('id="privacy"', default_guide)
+        default_environment = web_ui_module.render_environment_page()
+        self.assertNotIn("6PPD-Q", default_environment)
+        self.assertNotIn("NAFLD", default_environment)
+        self.assertNotIn("实验方案一", default_environment)
+        default_names = {
+            entry["name"]
+            for entry in web_ui_module.result_details_data()["entries"]
+        }
+        self.assertNotIn("plan_coverage.json", default_names)
+        default_guide_titles = {
+            section["title"]
+            for section in web_ui_module.result_guide_data()["sections"]
+        }
+        self.assertFalse(
+            any("6PPD-Q" in title or "NAFLD" in title for title in default_guide_titles)
+        )
+        with mock.patch.dict(
+            os.environ,
+            {"LIVER_ENABLE_PRIVATE_PLAN_ONE": "1"},
+        ):
+            private_full = web_ui_module.render_full_page()
+            private_guide = web_ui_module.render_guide_page()
+            private_names = {
+                entry["name"]
+                for entry in web_ui_module.result_details_data()["entries"]
+            }
+        self.assertIn('id="experiment-plan-one"', private_full)
+        self.assertIn('name="plan_output_root"', private_full)
+        self.assertIn("私密本地研究流水线", private_full)
+        self.assertIn("私密本地研究流水线", private_guide)
+        self.assertIn("plan_coverage.json", private_names)
+
+    def test_figures_and_manifest_include_calibration(self):
+        self.assertIn(
+            "fig_45_ml_calibration_curve.png",
+            web_ui_module.FIGURE_NAMES,
+        )
+        page = web_ui_module.render_page()
+        self.assertIn("fig_45_ml_calibration_curve.png", page)
+        results = (
+            APP_ROOT / "web" / "templates" / "results_manifest_optimized.html"
+        ).read_text(encoding="utf-8")
+        self.assertIn("fig_45_ml_calibration_curve.png", results)
+        self.assertIn("fig_24_ml_selected_features.csv", results)
+
+    def test_file_path_labels_include_supported_types(self):
+        cases = {
+            "analysis_tools_page_template.html": (
+                "配置文件（JSON）",
+                "发现队列表达矩阵（CSV / TSV / TXT）",
+                "清单脚本（PowerShell .ps1）",
+            ),
+            "dock_page_template.html": (
+                "受体文件（PDB / PDBQT",
+                "配体库文件（SDF / SMI / CSV",
+                "阳性对照 PDBQT（PDBQT",
+            ),
+            "full_page_template.html": (
+                "高级分析优先级表（CSV",
+                "多队列分析配置（JSON",
+                "网络毒理学：多来源靶点目录（目录",
+            ),
+            "knockout_page_template.html": (
+                "表达矩阵（CSV",
+                "UMAP 坐标（CSV",
+                "DrugReflector checkpoint 目录（目录",
+            ),
+            "network_page_template.html": (
+                "化合物靶点表（CSV / TSV / JSON / JSONL",
+                "疾病基因表（CSV / TSV / TXT",
+                "PPI 边表（CSV / TSV / TXT",
+            ),
+            "md_simulation_page_template.html": (
+                "受体 PDB（PDB",
+                "配体拓扑目录（目录",
+            ),
+            "molecular_docking_template.html": (
+                "配体库文件（SDF / SMI / CSV",
+                "Vina 路径（EXE / PY",
+            ),
+            "datasets_template.html": (
+                "ML/DL 模型路径（.joblib）",
+                "下载根目录（目录）",
+            ),
+            "faers_page_template.html": (
+                "工作目录（目录）",
+                "事件表（CSV",
+            ),
+            "web_page_template.html": (
+                "结果保存路径（目录）",
+                "安装地址（目录）",
+            ),
+            "environment_page_template.html": (
+                "安装地址（目录，可选）",
+            ),
+        }
+        for filename, labels in cases.items():
+            template = (
+                APP_ROOT / "web" / "templates" / filename
+            ).read_text(encoding="utf-8")
+            for label in labels:
+                with self.subTest(template=filename, label=label):
+                    self.assertIn(label, template)
+
+
+class TestHeartbeatAutoShutdown(unittest.TestCase):
+    def setUp(self) -> None:
+        with HEARTBEAT_LOCK:
+            HEARTBEAT_CLIENTS.clear()
+            web_ui_module.HEARTBEAT_LAST_SEEN_AT = None
+
+    def tearDown(self) -> None:
+        with HEARTBEAT_LOCK:
+            HEARTBEAT_CLIENTS.clear()
+            web_ui_module.HEARTBEAT_LAST_SEEN_AT = None
+
+    def test_heartbeat_script_injected_into_html(self):
+        html = b"<html><body>test</body></html>"
+        out = _inject_heartbeat_script(html)
+        self.assertIn(b"navigator.sendBeacon", out)
+        self.assertEqual(out.count(b"</body>"), 1)
+        self.assertTrue(out.startswith(b"<html><body>test"))
+
+    def test_heartbeat_script_not_injected_into_json(self):
+        body = b'{"ok": true}'
+        self.assertEqual(_inject_heartbeat_script(body), body)
+
+    def test_register_and_unregister_clients(self):
+        register_heartbeat("tab-a", now=100.0)
+        register_heartbeat("tab-b", now=100.0)
+        self.assertEqual(_heartbeat_client_ids(), {"tab-a", "tab-b"})
+        unregister_heartbeat("tab-a")
+        self.assertEqual(_heartbeat_client_ids(), {"tab-b"})
+
+    def test_heartbeat_records_last_seen(self):
+        self.assertIsNone(web_ui_module.HEARTBEAT_LAST_SEEN_AT)
+        register_heartbeat("tab", now=100.0)
+        self.assertEqual(web_ui_module.HEARTBEAT_LAST_SEEN_AT, 100.0)
+        unregister_heartbeat("tab")
+        self.assertEqual(web_ui_module.HEARTBEAT_LAST_SEEN_AT, 100.0)
+
+    def test_stale_heartbeats_are_purged(self):
+        register_heartbeat("old", now=10.0)
+        register_heartbeat("new", now=100.0)
+        _purge_stale_heartbeats(now=100.0, timeout=15.0)
+        self.assertEqual(_heartbeat_client_ids(), {"new"})
+
+
+class TestRequestGuardrails(unittest.TestCase):
+    def test_origin_allowed_local_only(self):
+        self.assertTrue(_origin_allowed("http://127.0.0.1:8000"))
+        self.assertTrue(_origin_allowed("http://localhost:8000"))
+        self.assertTrue(_origin_allowed(""))
+        self.assertFalse(_origin_allowed("http://evil.example"))
+        self.assertFalse(_origin_allowed("https://evil.example"))
+        self.assertFalse(_origin_allowed("file:///tmp/x"))
+
+    def test_fetch_site_blocks_cross_site(self):
+        self.assertTrue(_fetch_site_allowed("same-origin"))
+        self.assertTrue(_fetch_site_allowed("same-site"))
+        self.assertTrue(_fetch_site_allowed("none"))
+        self.assertTrue(_fetch_site_allowed(""))
+        self.assertFalse(_fetch_site_allowed("cross-site"))
+
+    def test_active_jobs_keep_ui_alive(self):
+        class _FakeProc:
+            def __init__(self, running: bool = True, returncode: int = 0) -> None:
+                self._running = running
+                self._returncode = returncode
+
+            def poll(self):
+                return None if self._running else self._returncode
+
+        try:
+            web_ui_module.JOBS["queued"] = {
+                "queued": True,
+                "paused": False,
+                "proc": None,
+            }
+            self.assertTrue(_has_active_jobs())
+            web_ui_module.JOBS.clear()
+
+            DOCK_JOBS["running"] = {
+                "queued": False,
+                "paused": False,
+                "proc": _FakeProc(True),
+            }
+            self.assertTrue(_has_active_jobs())
+            DOCK_JOBS.clear()
+
+            FULL_JOBS["paused"] = {
+                "queued": False,
+                "paused": True,
+                "proc": _FakeProc(False),
+            }
+            self.assertTrue(_has_active_jobs())
+            FULL_JOBS.clear()
+
+            FULL_JOBS["exit_paused"] = {
+                "queued": False,
+                "paused": False,
+                "proc": _FakeProc(False, returncode=98),
+            }
+            self.assertTrue(_has_active_jobs())
+        finally:
+            web_ui_module.JOBS.clear()
+            DOCK_JOBS.clear()
+            FULL_JOBS.clear()
+            web_ui_module.DATASET_DOWNLOAD_JOBS.clear()
+
+
+def _make_info(tmp: Path, returncode: int) -> dict:
+    workdir = tmp / "work"
+    log_path = workdir / "logs" / "web_full_test.log"
+    log_path.parent.mkdir(parents=True)
+    log_path.write_text(
+        "[INFO] === stage 01 single_cell ===\n"
+        "[INFO] full pipeline complete\n",
+        encoding="utf-8",
+    )
+    marker_dir = workdir / "outputs" / "integration" / ".stages"
+    marker_dir.mkdir(parents=True)
+    for code, name in [
+        ("01", "single_cell"),
+        ("02", "key_targets"),
+        ("03", "evidence"),
+        ("04", "knockout_inputs"),
+        ("05", "knockout"),
+        ("06", "docking"),
+        ("07", "cadd_downstream"),
+        ("08", "network"),
+        ("09", "faers"),
+        ("10", "cell_feedback"),
+        ("11", "report"),
+    ]:
+        (marker_dir / f"{code}_{name}.done").write_text(
+            "done",
+            encoding="utf-8",
+        )
+    return {
+        "job_id": "test-job",
+        "proc": _FakeProc(returncode),
+        "workdir": workdir,
+        "log": log_path,
+        "output": str(tmp / "single_cell"),
+        "accession": "GSE999999",
+        "notified": True,
+        "paused": False,
+        "started": time.time(),
+    }
+
+
+class TestFullStatus(unittest.TestCase):
+    def test_start_full_job_requires_output(self):
+        with self.assertRaises(ValueError):
+            start_full_job({"workdir": "somewhere", "output": ""})
+
+    def test_start_full_job_requires_workdir(self):
+        with self.assertRaises(ValueError):
+            start_full_job({"workdir": "", "output": "somewhere"})
+
+    def test_start_full_job_passes_workdir_to_pipeline(self):
+        with tempfile.TemporaryDirectory() as tmp:
+            base = Path(tmp)
+            output = base / "out"
+            workdir = base / "work"
+            with mock.patch("web_ui._drain_full_queue"):
+                result = start_full_job(
+                    {
+                        "output": [str(output)],
+                        "workdir": [str(workdir)],
+                    }
+                )
+            job_id = result["job"]
+            try:
+                cmd = FULL_JOBS[job_id]["cmd"]
+                self.assertIn("--workdir", cmd)
+                self.assertEqual(
+                    cmd[cmd.index("--workdir") + 1],
+                    str(workdir.resolve()),
+                )
+            finally:
+                FULL_JOBS.pop(job_id, None)
+
+    def test_start_full_job_passes_new_optimization_flags(self):
+        with tempfile.TemporaryDirectory() as tmp:
+            base = Path(tmp)
+            output = base / "out"
+            workdir = base / "work"
+            with mock.patch("web_ui._drain_full_queue"):
+                result = start_full_job(
+                    {
+                        "output": [str(output)],
+                        "workdir": [str(workdir)],
+                        "skip_qc_gate": ["1"],
+                        "skip_differential_abundance": ["1"],
+                        "dry_run": ["1"],
+                        "ml_model": ["lasso_svm"],
+                        "ppi_network_csv": ["data/network/string_edges.tsv"],
+                        "depmap_csv": ["data/knockout/depmap.csv"],
+                    }
+                )
+            job_id = result["job"]
+            try:
+                cmd = FULL_JOBS[job_id]["cmd"]
+                self.assertIn("--skip-qc-gate", cmd)
+                self.assertIn("--skip-differential-abundance", cmd)
+                self.assertIn("--dry-run", cmd)
+                self.assertIn("--ml-model", cmd)
+                self.assertEqual(
+                    cmd[cmd.index("--ml-model") + 1],
+                    "lasso_svm",
+                )
+                self.assertIn("--ppi-network-csv", cmd)
+                self.assertIn("--depmap-csv", cmd)
+            finally:
+                FULL_JOBS.pop(job_id, None)
+
+    def test_start_full_job_passes_advanced_and_mr_configs(self):
+        with tempfile.TemporaryDirectory() as tmp:
+            base = Path(tmp)
+            output = base / "out"
+            workdir = base / "work"
+            advanced = base / "advanced.json"
+            mr = base / "mr.json"
+            advanced.write_text("{}", encoding="utf-8")
+            mr.write_text("{}", encoding="utf-8")
+            with mock.patch("web_ui._drain_full_queue"):
+                result = start_full_job(
+                    {
+                        "output": [str(output)],
+                        "workdir": [str(workdir)],
+                        "advanced_config": [str(advanced)],
+                        "mr_config": [str(mr)],
+                    }
+                )
+            job_id = result["job"]
+            try:
+                env = FULL_JOBS[job_id]["env"]
+                self.assertTrue(
+                    os.path.samefile(env["LIVER_ADVANCED_CONFIG"], advanced)
+                )
+                self.assertTrue(os.path.samefile(env["LIVER_MR_CONFIG"], mr))
+            finally:
+                FULL_JOBS.pop(job_id, None)
+
+    def test_start_plan_one_job_builds_config_and_command(self):
+        with tempfile.TemporaryDirectory() as tmp:
+            base = Path(tmp)
+            output = base / "plan-one"
+            target_prediction = base / "targets.csv"
+            target_prediction.write_text("gene,score\nEGFR,0.9\n", encoding="utf-8")
+            with self.assertRaises(ValueError):
+                start_full_job(
+                    {
+                        "run_mode": ["experiment_plan_one"],
+                        "plan_output_root": [str(output)],
+                    }
+                )
+            with (
+                mock.patch("web_ui._drain_full_queue"),
+                mock.patch.dict(
+                    os.environ,
+                    {"LIVER_ENABLE_PRIVATE_PLAN_ONE": "1"},
+                ),
+            ):
+                result = start_full_job(
+                    {
+                        "run_mode": ["experiment_plan_one"],
+                        "plan_output_root": [str(output)],
+                        "plan_compound_name": ["6PPD-Q"],
+                        "plan_pubchem_cid": ["154926030"],
+                        "plan_disease_name": ["NAFLD"],
+                        "plan_target_prediction_file": [str(target_prediction)],
+                        "plan_use_open_evidence": ["1"],
+                        "plan_docking_targets": ["3"],
+                        "plan_docking_exhaustiveness": ["8"],
+                        "plan_cellchat_permutations": ["20"],
+                        "plan_md_run": ["1"],
+                        "plan_md_gpu": ["1"],
+                    }
+                )
+            job_id = result["job"]
+            try:
+                info = FULL_JOBS[job_id]
+                self.assertEqual(info["mode"], "experiment_plan_one")
+                self.assertIn("run_experiment_plan_one.py", " ".join(info["cmd"]))
+                config_path = output / "web_experiment_plan_one_config.json"
+                self.assertTrue(config_path.exists())
+                config = json.loads(config_path.read_text(encoding="utf-8"))
+                self.assertEqual(config["docking"]["targets"], 3)
+                self.assertEqual(
+                    config["single_cell"]["mouse"]["cellchat_permutations"],
+                    20,
+                )
+                self.assertTrue(config["md"]["run"])
+            finally:
+                FULL_JOBS.pop(job_id, None)
+
+    def test_plan_one_results_reads_coverage_and_files(self):
+        with tempfile.TemporaryDirectory() as tmp:
+            root = Path(tmp)
+            coverage_dir = root / "10_reports" / "plan_coverage"
+            coverage_dir.mkdir(parents=True)
+            (coverage_dir / "plan_coverage.json").write_text(
+                json.dumps(
+                    {
+                        "panels": 42,
+                        "implementation_completion_percent": 96.0,
+                        "current_result_completion_percent": 70.0,
+                    }
+                ),
+                encoding="utf-8",
+            )
+            (root / "RESULTS_SUMMARY.md").write_text(
+                "# Summary\n",
+                encoding="utf-8",
+            )
+            disabled = full_results(root)
+            self.assertEqual(disabled["mode"], "private_disabled")
+            with mock.patch.dict(
+                os.environ,
+                {"LIVER_ENABLE_PRIVATE_PLAN_ONE": "1"},
+            ):
+                result = full_results(root)
+                self.assertIsNotNone(
+                    _full_file_path(
+                        root,
+                        "10_reports/plan_coverage/plan_coverage.json",
+                    )
+                )
+            self.assertEqual(result["mode"], "experiment_plan_one")
+            self.assertEqual(
+                result["plan_one"]["coverage"]["panels"],
+                42,
+            )
+            self.assertIn("RESULTS_SUMMARY.md", result["files"])
+
+    def test_start_full_job_passes_advanced_priority_and_network_options(self):
+        with tempfile.TemporaryDirectory() as tmp:
+            base = Path(tmp)
+            output = base / "out"
+            workdir = base / "work"
+            priority = base / "integrated_priority.csv"
+            with mock.patch("web_ui._drain_full_queue"):
+                result = start_full_job(
+                    {
+                        "output": [str(output)],
+                        "workdir": [str(workdir)],
+                        "advanced_priority_csv": [str(priority)],
+                        "network_target_sources_dir": [
+                            "data/network/targets"
+                        ],
+                        "network_run_enrichment": ["1"],
+                        "network_enrichment_timeout": ["1200"],
+                    }
+                )
+            job_id = result["job"]
+            try:
+                cmd = FULL_JOBS[job_id]["cmd"]
+                self.assertIn("--advanced-priority-csv", cmd)
+                self.assertEqual(
+                    cmd[cmd.index("--advanced-priority-csv") + 1],
+                    str(priority.resolve()),
+                )
+                self.assertIn("--network-target-sources-dir", cmd)
+                self.assertIn("--network-run-enrichment", cmd)
+                self.assertEqual(
+                    cmd[cmd.index("--network-enrichment-timeout") + 1],
+                    "1200",
+                )
+            finally:
+                FULL_JOBS.pop(job_id, None)
+
+    def test_start_full_job_passes_candidate_and_evidence_hub_options(self):
+        with tempfile.TemporaryDirectory() as tmp:
+            base = Path(tmp)
+            output = base / "out"
+            workdir = base / "work"
+            hub_config = base / "evidence.json"
+            hub_config.write_text("{}", encoding="utf-8")
+            validation_csv = base / "validation.csv"
+            validation_csv.write_text(
+                "gene,score,label\nGENE1,0.9,1\nGENE2,0.1,0\n",
+                encoding="utf-8",
+            )
+            with mock.patch("web_ui._drain_full_queue"):
+                result = start_full_job(
+                    {
+                        "output": [str(output)],
+                        "workdir": [str(workdir)],
+                        "candidate_universe_size": ["750"],
+                        "evidence_hub_config": [str(hub_config)],
+                        "evidence_disease": ["hepatocellular carcinoma"],
+                        "evidence_max_targets": ["250"],
+                        "evidence_legacy_pool_size": ["80"],
+                        "candidate_expansion_max_targets": ["400"],
+                        "benchmark_positive_targets": ["GPC3,TP53"],
+                        "benchmark_negative_targets": ["ALB"],
+                        "benchmark_top_n": ["30"],
+                        "benchmark_source": ["OncoKB"],
+                        "benchmark_version": ["2026-01"],
+                        "benchmark_exclude_sources": ["opentargets"],
+                        "benchmark_independent": ["1"],
+                        "external_validation_path": [str(validation_csv)],
+                        "external_validation_threshold": ["0.6"],
+                        "external_validation_bootstrap": ["250"],
+                        "external_validation_allow_external_score": ["1"],
+                        "evidence_hub_offline": ["1"],
+                        "evidence_hub_strict": ["1"],
+                        "allow_review_docking": ["1"],
+                    }
+                )
+            job_id = result["job"]
+            try:
+                cmd = FULL_JOBS[job_id]["cmd"]
+                self.assertEqual(
+                    cmd[cmd.index("--candidate-universe-size") + 1],
+                    "750",
+                )
+                self.assertEqual(
+                    cmd[cmd.index("--evidence-hub-config") + 1],
+                    str(hub_config.resolve()),
+                )
+                self.assertEqual(
+                    cmd[cmd.index("--evidence-disease") + 1],
+                    "hepatocellular carcinoma",
+                )
+                self.assertEqual(
+                    cmd[cmd.index("--evidence-max-targets") + 1],
+                    "250",
+                )
+                self.assertEqual(
+                    cmd[cmd.index("--evidence-legacy-pool-size") + 1],
+                    "80",
+                )
+                self.assertEqual(
+                    cmd[
+                        cmd.index("--candidate-expansion-max-targets") + 1
+                    ],
+                    "400",
+                )
+                self.assertEqual(
+                    cmd[cmd.index("--benchmark-positive") + 1],
+                    "GPC3,TP53",
+                )
+                self.assertEqual(
+                    cmd[cmd.index("--benchmark-negative") + 1],
+                    "ALB",
+                )
+                self.assertEqual(
+                    cmd[cmd.index("--benchmark-top-n") + 1],
+                    "30",
+                )
+                self.assertEqual(
+                    cmd[cmd.index("--benchmark-source") + 1],
+                    "OncoKB",
+                )
+                self.assertEqual(
+                    cmd[cmd.index("--benchmark-version") + 1],
+                    "2026-01",
+                )
+                self.assertEqual(
+                    cmd[cmd.index("--benchmark-exclude-sources") + 1],
+                    "opentargets",
+                )
+                self.assertIn("--benchmark-independent", cmd)
+                self.assertEqual(
+                    cmd[cmd.index("--external-validation-path") + 1],
+                    str(validation_csv),
+                )
+                self.assertEqual(
+                    cmd[cmd.index("--external-validation-threshold") + 1],
+                    "0.6",
+                )
+                self.assertEqual(
+                    cmd[cmd.index("--external-validation-bootstrap") + 1],
+                    "250",
+                )
+                self.assertIn("--evidence-hub-offline", cmd)
+                self.assertIn("--evidence-hub-strict", cmd)
+                self.assertIn("--allow-review-docking", cmd)
+                self.assertIn("--allow-external-validation-score", cmd)
+            finally:
+                FULL_JOBS.pop(job_id, None)
+
+    def test_completed_full_pipeline_uses_full_flow_label(self):
+        with tempfile.TemporaryDirectory() as tmp:
+            status = _full_status(_make_info(Path(tmp), 0))
+            self.assertTrue(status["ok"])
+            self.assertFalse(status["paused"])
+            self.assertEqual(status["stage"], "\u5168\u6d41\u7a0b\u5b8c\u6210")
+
+    def test_pause_exit_code_is_reported_as_paused(self):
+        with tempfile.TemporaryDirectory() as tmp:
+            status = _full_status(_make_info(Path(tmp), 98))
+            self.assertFalse(status["ok"])
+            self.assertTrue(status["paused"])
+
+    def test_paused_notification_uses_readable_chinese_label(self):
+        with tempfile.TemporaryDirectory() as tmp:
+            info = _make_info(Path(tmp), 98)
+            info["notified"] = False
+            with NOTIFY_LOCK:
+                FINISHED_NOTIFICATIONS.clear()
+            with mock.patch("web_ui._append_task_history"):
+                status = _full_status(info)
+            self.assertTrue(status["paused"])
+            with NOTIFY_LOCK:
+                items = list(FINISHED_NOTIFICATIONS)
+                FINISHED_NOTIFICATIONS.clear()
+            self.assertTrue(items)
+            item = items[-1]
+            self.assertEqual(item["page_label"], "全自动流水线")
+            self.assertNotIn("鍏", item["title"])
+
+    def test_paused_full_job_reports_single_cell_stage_from_r_log(self):
+        with tempfile.TemporaryDirectory() as tmp:
+            base = Path(tmp)
+            info = _make_info(base, 98)
+            sc = base / "single_cell"
+            log_dir = sc / "logs"
+            log_dir.mkdir(parents=True, exist_ok=True)
+            (log_dir / "pipeline_r.log").write_text(
+                "[2026-08-17 16:52:47] start stage: 07_enrichment\n",
+                encoding="utf-8",
+            )
+            marker_dir = (
+                info["workdir"] / "outputs" / "integration" / ".stages"
+            )
+            for marker in marker_dir.glob("*.done"):
+                marker.unlink()
+            with (
+                mock.patch("web_ui._append_task_history"),
+                mock.patch("web_ui._drain_full_queue"),
+            ):
+                status = _full_status(info)
+            self.assertTrue(status["paused"])
+            self.assertEqual(status["stage"], "表达分析")
+
+    def test_failed_full_job_reports_in_progress_stage_not_last_done(self):
+        with tempfile.TemporaryDirectory() as tmp:
+            info = _make_info(Path(tmp), 1)
+            marker_dir = (
+                info["workdir"] / "outputs" / "integration" / ".stages"
+            )
+            for code in ("07", "08"):
+                for marker in marker_dir.glob(f"{code}_*.done"):
+                    marker.unlink()
+            info["log"].write_text(
+                "[INFO] === stage 06 docking ===\n"
+                "[INFO] === stage 10 cell_feedback ===\n"
+                "RuntimeError: cell feedback R analysis failed\n"
+                "Error in order(...) : argument 1 is not a vector\n",
+                encoding="utf-8",
+            )
+            with mock.patch("web_ui._drain_full_queue"):
+                status = _full_status(info)
+            self.assertFalse(status["ok"])
+            self.assertEqual(status["stage"], "细胞反馈")
+
+
+class TestSingleCellStatus(unittest.TestCase):
+    def test_paused_single_job_is_not_recorded_as_failure(self):
+        with tempfile.TemporaryDirectory() as tmp:
+            out = Path(tmp)
+            log_path = out / "logs" / "web_test.log"
+            log_path.parent.mkdir(parents=True)
+            log_path.write_text("", encoding="utf-8")
+            info = {
+                "job_id": "single-test",
+                "proc": _FakeProc(98),
+                "out": out,
+                "log": log_path,
+                "accession": "GSE123456",
+                "species": "hs",
+                "started": time.time(),
+                "recorded": False,
+                "notified": True,
+            }
+            with mock.patch("web_ui.record_job") as record:
+                status = _single_status(info)
+            self.assertTrue(status["paused"])
+            self.assertFalse(status["ok"])
+            record.assert_not_called()
+
+
+class TestResultDirectoryQueries(unittest.TestCase):
+    def _make_full_workdir(self, tmp: Path) -> Path:
+        workdir = tmp / "work"
+        integration = workdir / "outputs" / "integration"
+        integration.mkdir(parents=True)
+        (integration / "key_genes.csv").write_text(
+            "rank,gene\n1,EGFR\n", encoding="utf-8"
+        )
+        (integration / "gene_evidence.csv").write_text(
+            "gene,uniprot\nEGFR,P00533\n", encoding="utf-8"
+        )
+        (integration / "docking_targets.csv").write_text(
+            "gene,status\nEGFR,ok\n", encoding="utf-8"
+        )
+        (integration / "integration_summary.json").write_text(
+            "{}", encoding="utf-8"
+        )
+        (integration / "integration_report.html").write_text(
+            "<html></html>", encoding="utf-8"
+        )
+        (integration / "qc_metrics.json").write_text(
+            '{"qc_gate": {"status": "fail", "checks": []}}',
+            encoding="utf-8",
+        )
+        (integration / "differential_abundance.csv").write_text(
+            "celltype,n_cells,chi2,p_value,p_adjust,significant,direction\n"
+            "T_cell,50,9.0,0.002,0.002,true,enriched_in_Tumor\n",
+            encoding="utf-8",
+        )
+        feedback_data = integration / "cell_feedback" / "data"
+        feedback_data.mkdir(parents=True)
+        (feedback_data / "feedback_targets.csv").write_text(
+            "gene,source,feedback_score,cell_support_score,top_celltype\n"
+            "EGFR,knockout|docking,0.9,0.92,Hepatocyte\n",
+            encoding="utf-8",
+        )
+        (feedback_data / "feedback_deg.csv").write_text(
+            "gene,avg_log2FC,p_val_adj,direction,significant\n"
+            "EGFR,1.2,0.001,Up,true\n",
+            encoding="utf-8",
+        )
+        (feedback_data / "feedback_enrichment_go.csv").write_text(
+            "ID,Description,p.adjust,Count,geneID\n"
+            "GO:0000001,mitochondrion inheritance,0.01,1,EGFR\n",
+            encoding="utf-8",
+        )
+        (feedback_data / "feedback_enrichment_kegg.csv").write_text(
+            "ID,Description,p.adjust,Count,geneID\n"
+            "hsa05200,Pathways in cancer,0.01,1,EGFR\n",
+            encoding="utf-8",
+        )
+
+        ko_data = (
+            workdir
+            / "outputs"
+            / "run_001"
+            / "results"
+            / "04_knockout"
+            / "data"
+        )
+        ko_data.mkdir(parents=True)
+        (ko_data / "fig_52_53_ranked_knockout.csv").write_text(
+            "rank,gene\n1,EGFR\n", encoding="utf-8"
+        )
+        (ko_data / "fig_52_target_candidates.csv").write_text(
+            "rank,gene\n1,EGFR\n", encoding="utf-8"
+        )
+        (ko_data / "knockout_report.md").write_text("# report", encoding="utf-8")
+
+        val_data = (
+            workdir
+            / "outputs"
+            / "run_001"
+            / "results"
+            / "05_validation"
+            / "data"
+        )
+        val_data.mkdir(parents=True)
+        (val_data / "validation_candidates.csv").write_text(
+            "rank,gene\n1,EGFR\n", encoding="utf-8"
+        )
+        (val_data / "validation_plan.md").write_text(
+            "# plan", encoding="utf-8"
+        )
+
+        gene_run = workdir / "work" / "EGFR" / "outputs" / "run_001"
+        docked = gene_run / "docked"
+        docked.mkdir(parents=True)
+        (docked / "results.csv").write_text(
+            "id,affinity\nL1,-8.0\n", encoding="utf-8"
+        )
+        figures = gene_run / "results" / "01_analysis" / "figures"
+        figures.mkdir(parents=True)
+        (figures / "fig_46_affinity_distribution.png").write_bytes(b"png")
+        analysis_data = gene_run / "results" / "01_analysis" / "data"
+        analysis_data.mkdir(parents=True)
+        (analysis_data / "fig_46_47_ranked_results.csv").write_text(
+            "rank,id,affinity\n1,L1,-8.0\n", encoding="utf-8"
+        )
+        (gene_run / "results" / "01_analysis" / "summary.json").write_text(
+            "{}", encoding="utf-8"
+        )
+        return workdir
+
+    def test_full_results_only_returns_result_figures_and_data(self):
+        with tempfile.TemporaryDirectory() as tmp:
+            workdir = self._make_full_workdir(Path(tmp))
+            data = full_results(workdir)
+            files = data["files"]
+            self.assertIn("key_genes.csv", files)
+            self.assertIn(
+                "outputs/run_001/results/04_knockout/data/"
+                "fig_52_53_ranked_knockout.csv",
+                files,
+            )
+            self.assertIn(
+                "outputs/run_001/results/05_validation/data/"
+                "validation_candidates.csv",
+                files,
+            )
+            self.assertIn("cell_feedback/data/feedback_targets.csv", files)
+            self.assertEqual(data["cell_feedback"][0]["gene"], "EGFR")
+            self.assertIn(
+                "work/EGFR/outputs/run_001/docked/results.csv",
+                files,
+            )
+            self.assertIn(
+                "work/EGFR/outputs/run_001/results/01_analysis/figures/"
+                "fig_46_affinity_distribution.png",
+                files,
+            )
+            for excluded in [
+                "integration_summary.json",
+                "integration_report.html",
+                "validation_plan.md",
+                "summary.json",
+                "knockout_report.md",
+            ]:
+                self.assertFalse(
+                    any(name.endswith(excluded) for name in files),
+                    excluded,
+                )
+
+    def test_full_results_includes_feedback_deg_and_enrichment(self):
+        with tempfile.TemporaryDirectory() as tmp:
+            workdir = self._make_full_workdir(Path(tmp))
+            data = full_results(workdir)
+            self.assertEqual(data["cell_feedback_deg"][0]["gene"], "EGFR")
+            self.assertEqual(
+                data["cell_feedback_enrichment_go"][0]["ID"],
+                "GO:0000001",
+            )
+            self.assertEqual(
+                data["cell_feedback_enrichment_kegg"][0]["ID"],
+                "hsa05200",
+            )
+
+    def test_full_file_path_allows_result_files_only(self):
+        with tempfile.TemporaryDirectory() as tmp:
+            workdir = self._make_full_workdir(Path(tmp))
+            result = _full_file_path(
+                workdir,
+                "outputs/run_001/results/04_knockout/data/"
+                "fig_52_53_ranked_knockout.csv",
+            )
+            self.assertIsNotNone(result)
+            self.assertTrue(result.is_file())
+            self.assertIsNotNone(
+                _full_file_path(
+                    workdir,
+                    "work/EGFR/outputs/run_001/docked/results.csv",
+                )
+            )
+            self.assertIsNotNone(
+                _full_file_path(
+                    workdir,
+                    "cell_feedback/data/feedback_targets.csv",
+                )
+            )
+            self.assertIsNone(
+                _full_file_path(
+                    workdir,
+                    "outputs/run_001/results/05_validation/data/"
+                    "validation_plan.md",
+                )
+            )
+            self.assertIsNone(
+                _full_file_path(
+                    workdir,
+                    "outputs/integration/integration_summary.json",
+                )
+            )
+
+    def test_full_results_includes_single_cell_result_files(self):
+        with tempfile.TemporaryDirectory() as tmp:
+            base = Path(tmp)
+            workdir = self._make_full_workdir(base)
+            single_cell = base / "single_cell"
+            fig_dir = single_cell / "results" / "figures" / "01_qc"
+            data_dir = single_cell / "results" / "data" / "01_qc"
+            fig_dir.mkdir(parents=True)
+            data_dir.mkdir(parents=True)
+            (fig_dir / "fig_01_qc_raw_violin.png").write_bytes(b"png")
+            (data_dir / "fig_01_qc_metrics.csv").write_text(
+                "cell,nFeature_RNA\nC1,1000\n", encoding="utf-8"
+            )
+            (single_cell / "results" / "summary.json").write_text(
+                "{}", encoding="utf-8"
+            )
+            context_dir = workdir / "outputs" / "integration" / ".stages"
+            context_dir.mkdir(parents=True, exist_ok=True)
+            (context_dir / "run_context.json").write_text(
+                '{"single_cell_root": "%s"}'
+                % str(single_cell).replace("\\", "\\\\"),
+                encoding="utf-8",
+            )
+
+            data = full_results(workdir)
+            files = data["files"]
+            self.assertIn(
+                "single_cell/results/figures/01_qc/fig_01_qc_raw_violin.png",
+                files,
+            )
+            self.assertIn(
+                "single_cell/results/data/01_qc/fig_01_qc_metrics.csv",
+                files,
+            )
+            self.assertFalse(
+                any(name.endswith("summary.json") for name in files)
+            )
+            self.assertIsNotNone(
+                _full_file_path(
+                    workdir,
+                    "single_cell/results/figures/01_qc/fig_01_qc_raw_violin.png",
+                )
+            )
+            self.assertIsNone(
+                _full_file_path(
+                    workdir,
+                    "single_cell/results/summary.json",
+                )
+            )
+
+    def test_full_results_includes_qc_and_differential_abundance(self):
+        with tempfile.TemporaryDirectory() as tmp:
+            workdir = self._make_full_workdir(Path(tmp))
+            data = full_results(workdir)
+            self.assertEqual(
+                data["qc_metrics"]["qc_gate"]["status"],
+                "fail",
+            )
+            self.assertEqual(
+                data["differential_abundance"][0]["celltype"],
+                "T_cell",
+            )
+            self.assertIn(
+                "differential_abundance.csv",
+                data["files"],
+            )
+
+    def test_dock_results_only_returns_result_figures_and_data(self):
+        with tempfile.TemporaryDirectory() as tmp:
+            out = Path(tmp) / "out"
+            reports = out / "results"
+            reports.mkdir(parents=True)
+            analysis = reports / "01_analysis"
+            (analysis / "data").mkdir(parents=True)
+            (analysis / "figures").mkdir(parents=True)
+            (analysis / "data" / "fig_46_47_ranked_results.csv").write_text(
+                "rank,id,affinity\n1,L1,-8.0\n", encoding="utf-8"
+            )
+            (analysis / "figures" / "fig_46_affinity_distribution.png").write_bytes(
+                b"png"
+            )
+            (analysis / "summary.json").write_text("{}", encoding="utf-8")
+            (reports / "docking_report.html").write_text(
+                "<html></html>", encoding="utf-8"
+            )
+            ml = reports / "03_ml" / "data"
+            ml.mkdir(parents=True)
+            (ml / "ml_model_info.json").write_text("{}", encoding="utf-8")
+            (ml / "ml_model.joblib").write_bytes(b"model")
+            docked = out / "docked"
+            docked.mkdir(parents=True)
+            (docked / "results.csv").write_text(
+                "id,affinity\nL1,-8.0\n", encoding="utf-8"
+            )
+
+            info = {"output_dir": out}
+            data = dock_results(info)
+            files = data["files"]
+            self.assertIn(
+                "01_analysis/data/fig_46_47_ranked_results.csv",
+                files,
+            )
+            self.assertIn(
+                "01_analysis/figures/fig_46_affinity_distribution.png",
+                files,
+            )
+            self.assertIn("docked/results.csv", files)
+            for excluded in [
+                "summary.json",
+                "docking_report.html",
+                "ml_model_info.json",
+                "ml_model.joblib",
+            ]:
+                self.assertFalse(
+                    any(name.endswith(excluded) for name in files),
+                    excluded,
+                )
+            self.assertIsNotNone(
+                _dock_file_path(
+                    info,
+                    "01_analysis/data/fig_46_47_ranked_results.csv",
+                )
+            )
+            self.assertIsNotNone(
+                _dock_file_path(info, "docked/results.csv")
+            )
+            self.assertIsNone(
+                _dock_file_path(info, "01_analysis/summary.json")
+            )
+            self.assertIsNone(
+                _dock_file_path(info, "03_ml/data/ml_model.joblib")
+            )
+
+
+class TestTemplatePolish(unittest.TestCase):
+    def _read(self, name: str) -> str:
+        path = APP_ROOT / "web" / "templates" / name
+        return path.read_text(encoding="utf-8", errors="replace")
+
+    def test_shared_css_exists(self):
+        css = (APP_ROOT / "web" / "static" / "app.css").read_text(
+            encoding="utf-8"
+        )
+        self.assertIn(".form-section", css)
+        self.assertIn(".stat-card", css)
+
+    def test_all_pages_load_shared_nav_status_script(self):
+        for name in (
+            "web_page_template.html",
+            "full_page_template.html",
+            "dock_page_template.html",
+            "results_manifest_optimized.html",
+            "tasks_template.html",
+            "datasets_template.html",
+            "md_simulation_page_template.html",
+            "knockout_page_template.html",
+            "network_page_template.html",
+            "faers_page_template.html",
+            "validation_page_template.html",
+            "guide_page_template.html",
+            "environment_page_template.html",
+            "analysis_tools_page_template.html",
+        ):
+            html = self._read(name)
+            self.assertIn(
+                '<script src="/static/nav.js" defer></script>',
+                html,
+            )
+        js = (
+            APP_ROOT / "web" / "static" / "nav.js"
+        ).read_text(encoding="utf-8")
+        self.assertIn("/tasks/count", js)
+        self.assertIn("nav-count", js)
+        self.assertIn("bindNavigation", js)
+        self.assertIn("nav-group-trigger", js)
+        self.assertIn("nav-toggle", js)
+        self.assertIn("aria-expanded", js)
+        css = (
+            APP_ROOT / "web" / "static" / "app.css"
+        ).read_text(encoding="utf-8")
+        self.assertIn(".topnav a .nav-count", css)
+        self.assertIn(".topnav a .nav-count[hidden]", css)
+        self.assertIn(".nav-menu", css)
+        self.assertIn(".nav-group-menu", css)
+        self.assertIn(".nav-toggle", css)
+        self.assertIn(".nav-group.open > .nav-group-menu", css)
+        self.assertIn('data-nav', web_ui_module.NAV_HTML)
+        self.assertIn('id="primary-navigation"', web_ui_module.NAV_HTML)
+        self.assertIn('id="nav-tools-menu"', web_ui_module.NAV_HTML)
+        self.assertIn('id="nav-resources-menu"', web_ui_module.NAV_HTML)
+        rendered = web_ui_module.render_dock_page()
+        self.assertIn('data-nav', rendered)
+        self.assertIn('id="primary-navigation"', rendered)
+
+    def test_guide_and_environment_pages_render(self):
+        self.assertIn("/guide", web_ui_module.NAV_HTML)
+        self.assertIn("/environment", web_ui_module.NAV_HTML)
+        guide = web_ui_module.render_guide_page()
+        self.assertIn("网页版使用教程", guide)
+        self.assertIn("/full", guide)
+        self.assertIn("/environment", guide)
+        self.assertIn('id="private"', guide)
+        self.assertIn("LIVER_ENABLE_PRIVATE_PLAN_ONE", guide)
+        self.assertIn("127.0.0.1", guide)
+        env = web_ui_module.render_environment_page()
+        self.assertIn("环境补全中心", env)
+        self.assertIn("py4cytoscape", env)
+        self.assertIn("Cytoscape 桌面版", env)
+        self.assertIn("/environment/check", env)
+        self.assertIn('data-module="expression"', env)
+        self.assertIn('data-module="full"', env)
+        self.assertNotIn('data-module="private-pipeline"', env)
+        self.assertNotIn("6PPD-Q", env)
+        self.assertNotIn("NAFLD", env)
+        self.assertIn("一键补全", env)
+        with mock.patch.dict(
+            os.environ,
+            {"LIVER_ENABLE_PRIVATE_PLAN_ONE": "1"},
+        ):
+            private_env = web_ui_module.render_environment_page()
+        self.assertIn('data-module="private-pipeline"', private_env)
+        self.assertIn("私密流水线额外要求", private_env)
+        self.assertIn("gmx_MMPBSA", private_env)
+
+    def test_environment_board_matches_installer_modules(self):
+        if str(APP_ROOT / "launchers") not in sys.path:
+            sys.path.insert(0, str(APP_ROOT / "launchers"))
+        import install_environment
+
+        installable = {
+            name: meta
+            for name, meta in web_ui_module.ENV_MODULES.items()
+            if meta.get("install_bat")
+        }
+        self.assertTrue(
+            set(installable).issubset(set(install_environment.MODULES))
+        )
+        for name, meta in installable.items():
+            with self.subTest(module=name):
+                self.assertTrue(
+                    (APP_ROOT / meta["install_bat"]).is_file(),
+                    f"{meta['install_bat']} should exist",
+                )
+
+    def test_plan_one_environment_check_and_versions(self):
+        disabled = web_ui_module.run_environment_check("private-pipeline")
+        self.assertFalse(disabled["ok"])
+        self.assertNotIn(
+            "Plan One Vina",
+            {item["name"] for item in web_ui_module.get_versions()},
+        )
+        with mock.patch.dict(
+            os.environ,
+            {"LIVER_ENABLE_PRIVATE_PLAN_ONE": "1"},
+        ):
+            check = web_ui_module.run_environment_check(
+                "private-pipeline"
+            )
+            versions = web_ui_module.get_versions()
+        self.assertEqual(check["module"], "private-pipeline")
+        self.assertIn("Vina", check["output"])
+        self.assertIn("GROMACS", check["output"])
+        names = {item["name"] for item in versions}
+        self.assertIn("Plan One Vina", names)
+        self.assertIn("Plan One GROMACS", names)
+        self.assertIn("gmx_MMPBSA", names)
+
+    def test_split_tool_pages_render_independently(self):
+        for path, marker in (
+            ("/md-simulation", "分子动力学模拟"),
+            ("/knockout", "虚拟敲除与靶点评分"),
+            ("/network", "网络毒理学分析"),
+            ("/faers", "FAERS 不相称性信号检测"),
+            ("/validation", "随机真实 GSE 验证报告"),
+            ("/analysis", "高级分析与导出"),
+        ):
+            self.assertIn(path, web_ui_module.NAV_HTML)
+        dock_html = web_ui_module.render_dock_page()
+        self.assertNotIn('id="koForm"', dock_html)
+        self.assertNotIn('id="netForm"', dock_html)
+        self.assertNotIn('id="faersForm"', dock_html)
+        self.assertNotIn('id="mdForm"', dock_html)
+        self.assertIn("虚拟敲除与靶点评分", web_ui_module.render_knockout_page())
+        self.assertIn("网络毒理学分析", web_ui_module.render_network_page())
+        self.assertIn("FAERS 不相称性信号检测", web_ui_module.render_faers_page())
+        self.assertIn(
+            "随机真实 GSE 验证报告",
+            web_ui_module.render_validation_page(),
+        )
+        self.assertIn(
+            "高级分析与导出",
+            web_ui_module.render_analysis_page(),
+        )
+
+    def test_analysis_tools_page_and_environment_module(self):
+        page = web_ui_module.render_analysis_page()
+        self.assertIn('id="advancedForm"', page)
+        self.assertIn('id="mrForm"', page)
+        self.assertIn('id="exportForm"', page)
+        self.assertIn("/analysis/start", page)
+        self.assertIn('data-module="analysis"', web_ui_module.render_environment_page())
+
+    def test_start_analysis_job_builds_advanced_command(self):
+        with tempfile.TemporaryDirectory() as tmp:
+            base = Path(tmp)
+            output = base / "advanced"
+            config = base / "advanced.json"
+            expression = base / "expression.csv"
+            metadata = base / "metadata.csv"
+            for path in (config, expression, metadata):
+                payload = "{}\n" if path.suffix == ".json" else "x\n"
+                path.write_text(payload, encoding="utf-8")
+            with mock.patch(
+                "web_analysis._drain_analysis_queue",
+            ):
+                result = start_analysis_job(
+                    {
+                        "kind": ["advanced"],
+                        "output": [str(output)],
+                        "config": [str(config)],
+                        "expression": [str(expression)],
+                        "metadata": [str(metadata)],
+                        "cv_folds": ["4"],
+                        "skip_wgcna": ["1"],
+                    }
+                )
+            try:
+                info = ANALYSIS_JOBS[result["job"]]
+                self.assertEqual(info["kind"], "advanced")
+                self.assertIn("run_advanced_analysis.py", info["cmd"][1])
+                self.assertIn("--config", info["cmd"])
+                self.assertIn("--expression", info["cmd"])
+                self.assertIn("--cv-folds", info["cmd"])
+                self.assertIn("--skip-wgcna", info["cmd"])
+            finally:
+                ANALYSIS_JOBS.pop(result["job"], None)
+
+    def test_start_analysis_job_requires_export_destination(self):
+        with self.assertRaises(ValueError):
+            start_analysis_job(
+                {
+                    "kind": ["export"],
+                    "run": ["GSE125449"],
+                    "analysis_root": [""],
+                }
+            )
+
+    def test_start_analysis_job_does_not_create_output_before_validation(self):
+        with tempfile.TemporaryDirectory() as tmp:
+            output = Path(tmp) / "advanced"
+            with self.assertRaises(ValueError):
+                start_analysis_job(
+                    {
+                        "kind": ["advanced"],
+                        "output": [str(output)],
+                    }
+                )
+            self.assertFalse(output.exists())
+
+    def test_start_analysis_job_rolls_back_when_queue_drain_fails(self):
+        with tempfile.TemporaryDirectory() as tmp:
+            output = Path(tmp) / "mr"
+            config_path = Path(tmp) / "mr.json"
+            config_path.write_text("{}", encoding="utf-8")
+            with mock.patch(
+                "web_analysis._drain_analysis_queue",
+                side_effect=OSError("spawn failed"),
+            ):
+                with self.assertRaises(OSError):
+                    start_analysis_job(
+                        {
+                            "kind": ["mr"],
+                            "output": [str(output)],
+                            "config": [str(config_path)],
+                        }
+                    )
+            self.assertFalse(
+                any(
+                    info.get("output") == output.resolve()
+                    for info in web_ui_module.ANALYSIS_QUEUE
+                )
+            )
+            self.assertFalse(
+                any(
+                    info.get("output") == output.resolve()
+                    for info in web_ui_module.ANALYSIS_JOBS.values()
+                )
+            )
+
+    def test_advanced_analysis_file_path_blocks_traversal(self):
+        with tempfile.TemporaryDirectory() as tmp:
+            output = Path(tmp)
+            (output / "result.csv").write_text("x\n1\n", encoding="utf-8")
+            info = {"output": output}
+            self.assertIsNotNone(
+                _advanced_analysis_file_path(info, "result.csv")
+            )
+            self.assertIsNone(
+                _advanced_analysis_file_path(info, "../outside.csv")
+            )
+
+    def test_advanced_analysis_file_path_uses_export_result_root(self):
+        with tempfile.TemporaryDirectory() as tmp:
+            workspace = Path(tmp)
+            imported = (
+                workspace / "data" / "imported_results" / "GSE125449"
+            )
+            imported.mkdir(parents=True)
+            target = imported / "_source.json"
+            target.write_text("{}", encoding="utf-8")
+            info = {"kind": "export", "output": workspace}
+            self.assertEqual(
+                _advanced_analysis_file_path(
+                    info,
+                    "GSE125449/_source.json",
+                ),
+                target.resolve(),
+            )
+
+    def test_analysis_results_uses_exported_root(self):
+        with tempfile.TemporaryDirectory() as tmp:
+            workspace = Path(tmp)
+            imported = (
+                workspace / "data" / "imported_results" / "GSE125449"
+            )
+            imported.mkdir(parents=True)
+            (imported / "_source.json").write_text("{}", encoding="utf-8")
+            result = web_ui_module.analysis_results(
+                {"kind": "export", "output": str(workspace)}
+            )
+            self.assertEqual(
+                result["output"],
+                str((workspace / "data" / "imported_results").resolve()),
+            )
+            self.assertIn("GSE125449/_source.json", result["files"])
+
+    def test_running_task_counts_empty_stores(self):
+        with (
+            mock.patch.dict(JOBS, {}),
+            mock.patch.dict(DOCK_JOBS, {}),
+            mock.patch.dict(FULL_JOBS, {}),
+            mock.patch.dict(ANALYSIS_JOBS, {}),
+        ):
+            self.assertEqual(
+                running_task_counts(),
+                {"count": 0, "running": 0, "queued": 0, "paused": 0},
+            )
+
+    def test_full_page_has_layout_and_form_helpers(self):
+        html = self._read("full_page_template.html")
+        for token in [
+            "page-head",
+            "form-section",
+            "saveFormState",
+            "restoreFormState",
+            "resultStats",
+            "skip_differential_abundance",
+            "prefillDataType",
+            "bulk",
+        ]:
+            self.assertIn(token, html)
+
+    def test_full_page_dataset_search_has_filters_and_species(self):
+        html = self._read("full_page_template.html")
+        for token in [
+            'name="organism"',
+            'name="keyword"',
+            'name="data_type"',
+            'name="min_samples"',
+            'name="max_samples"',
+            'name="start_date"',
+            'name="end_date"',
+            'name="platform"',
+            'name="dataset_type"',
+            'name="model"',
+            "choosePipelineDataset",
+            "speciesSelect",
+        ]:
+            self.assertIn(token, html)
+
+    def test_single_cell_page_has_collapsible_sections(self):
+        html = self._read("web_page_template.html")
+        for token in [
+            "form-section",
+            "SINGLE_FORM_KEY",
+            "saveFormState",
+            "autoSaveFormState",
+        ]:
+            self.assertIn(token, html)
+
+    def test_dataset_page_groups_search_options(self):
+        html = self._read("datasets_template.html")
+        self.assertIn("form-section", html)
+        self.assertIn("过滤与下载选项", html)
+        self.assertIn("filterDataType", html)
+        self.assertIn("applyFilters", html)
+        self.assertIn("filterMinSamples", html)
+        self.assertIn("filterMaxSamples", html)
+        self.assertIn("filterStartDate", html)
+        self.assertIn("filterEndDate", html)
+        self.assertIn("filterPlatform", html)
+        self.assertIn("filterType", html)
+
+    def test_pages_mention_multi_modal_h5_support(self):
+        for name in (
+            "web_page_template.html",
+            "full_page_template.html",
+            "datasets_template.html",
+        ):
+            html = self._read(name)
+            self.assertIn("自动选用 Gene Expression 矩阵", html)
+        self.assertIn("非单细胞数据按样本级分析运行", html)
+
+    def test_tasks_page_has_stat_cards(self):
+        html = self._read("tasks_template.html")
+        for token in ["statTotal", "statRunning", "statQueued", "statPaused"]:
+            self.assertIn(token, html)
+
+    def test_results_page_has_filter_toolbar(self):
+        html = self._read("results_manifest_optimized.html")
+        self.assertIn("resultFilter", html)
+        self.assertIn("filterResults", html)
+        self.assertIn("normalizeSearch", html)
+        self.assertIn("textMatches", html)
+
+    def test_results_search_matches_figure_from_full_path(self):
+        html = self._read("results_manifest_optimized.html")
+        self.assertIn("q.split(/[\\\\/]+/)", html)
+        self.assertIn("qNameNorm", html)
+
+    def test_results_search_hides_guide_panel(self):
+        html = self._read("results_manifest_optimized.html")
+        self.assertIn("guideCard.style.display = 'none'", html)
+        self.assertIn("guideOk = q", html)
+
+    def test_results_manifest_includes_latest_figures(self):
+        html = self._read("results_manifest_optimized.html")
+        for token in [
+            "figures/01_qc/fig_48_qc_pvalue_comparison.png",
+            "data/01_qc/fig_48_qc_pvalue_comparison.csv",
+            "figures/06_enrichment/fig_22_go_network.png",
+            "figures/06_enrichment/fig_23_kegg_network.png",
+            "figures/06_enrichment/fig_46_go_top5.png",
+            "figures/06_enrichment/fig_47_kegg_top5.png",
+        ]:
+            self.assertIn(token, html)
+
+
+if __name__ == "__main__":
+    unittest.main()

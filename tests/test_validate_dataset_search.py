@@ -1,0 +1,174 @@
+#!/usr/bin/env python3
+"""Tests for the random GEO dataset search validation script."""
+
+from __future__ import annotations
+
+import sys
+import tempfile
+import unittest
+from pathlib import Path
+from unittest.mock import patch
+
+APP_ROOT = Path(__file__).resolve().parent.parent
+if str(APP_ROOT) not in sys.path:
+    sys.path.insert(0, str(APP_ROOT))
+SCRIPTS_DIR = APP_ROOT / "scripts"
+if str(SCRIPTS_DIR) not in sys.path:
+    sys.path.insert(0, str(SCRIPTS_DIR))
+
+import validate_dataset_search  # noqa: E402
+
+
+def _row(accession: str, title: str, summary: str) -> dict:
+    return {
+        "accession": accession,
+        "disease": "",
+        "research_direction": "",
+        "title": title,
+        "summary": summary,
+        "organism": "Homo sapiens",
+        "samples": "4",
+        "platform": "GPL1",
+        "date": "",
+        "type": "",
+        "url": "",
+    }
+
+
+class TestValidateDatasetSearch(unittest.TestCase):
+    def test_is_relevant(self):
+        row = _row(
+            "GSE1",
+            "HCC single cell RNA-seq",
+            "hepatocellular carcinoma",
+        )
+        self.assertTrue(
+            validate_dataset_search.is_relevant(
+                row,
+                "liver cancer",
+                "single cell RNA-seq",
+            )
+        )
+        row = _row("GSE2", "Mouse kidney", "mouse tissue")
+        self.assertFalse(
+            validate_dataset_search.is_relevant(
+                row,
+                "liver cancer",
+                "single cell RNA-seq",
+            )
+        )
+
+    def test_run_round_found_without_expansion(self):
+        rows = [
+            _row(
+                "GSE1",
+                "HCC single cell RNA-seq",
+                "hepatocellular carcinoma",
+            )
+        ]
+        with patch.object(
+            validate_dataset_search.search_datasets,
+            "search_datasets",
+            return_value=rows,
+        ):
+            record = validate_dataset_search.run_round(
+                "liver cancer",
+                "single cell RNA-seq",
+                max_results=5,
+                expand=True,
+            )
+        self.assertTrue(record["found"])
+        self.assertFalse(record["expanded"])
+        self.assertEqual(record["first_accession"], "GSE1")
+
+    def test_run_round_expands_when_combined_misses(self):
+        irrelevant = [_row("GSE1", "Mouse kidney", "mouse tissue")]
+        relevant = [
+            _row(
+                "GSE2",
+                "Liver cancer scRNA-seq",
+                "hepatocellular carcinoma",
+            )
+        ]
+        calls = {"count": 0}
+
+        def fake_search(
+            query,
+            max_results,
+            disease,
+            research_direction,
+            databases=None,
+        ):
+            calls["count"] += 1
+            if calls["count"] == 1:
+                return irrelevant
+            return relevant
+
+        with patch.object(
+            validate_dataset_search.search_datasets,
+            "search_datasets",
+            side_effect=fake_search,
+        ):
+            record = validate_dataset_search.run_round(
+                "liver cancer",
+                "single cell RNA-seq",
+                max_results=5,
+                expand=True,
+            )
+        self.assertTrue(record["found"])
+        self.assertTrue(record["expanded"])
+        self.assertEqual(record["first_accession"], "GSE2")
+
+    def test_manual_label_overrides_heuristic(self):
+        row = _row("GSE1", "Mouse kidney", "mouse tissue")
+        manual = {("GSE1", "liver cancer", "single cell rna-seq"): 1}
+        samples = validate_dataset_search._labeled_samples(
+            [row],
+            "liver cancer",
+            "single cell RNA-seq",
+            manual,
+        )
+        self.assertEqual(samples[0]["label"], 1)
+        self.assertEqual(samples[0]["label_source"], "manual")
+
+    def test_run_round_found_uses_manual_label(self):
+        rows = [_row("GSE1", "Mouse kidney", "mouse tissue")]
+        manual = {("GSE1", "liver cancer", "single cell rna-seq"): 1}
+        with patch.object(
+            validate_dataset_search.search_datasets,
+            "search_datasets",
+            return_value=rows,
+        ):
+            record = validate_dataset_search.run_round(
+                "liver cancer",
+                "single cell RNA-seq",
+                max_results=5,
+                expand=True,
+                manual_labels=manual,
+            )
+        self.assertTrue(record["found"])
+        self.assertEqual(record["found_source"], "manual")
+
+    def test_main_fails_when_nothing_found(self):
+        with tempfile.TemporaryDirectory() as tmp:
+            with patch.object(
+                validate_dataset_search.search_datasets,
+                "search_datasets",
+                return_value=[],
+            ):
+                self.assertEqual(
+                    validate_dataset_search.main(
+                        ["--rounds", "2", "--output-dir", tmp]
+                    ),
+                    1,
+                )
+                self.assertEqual(
+                    validate_dataset_search.main(
+                        ["--rounds", "2", "--output-dir", tmp, "--allow-empty"]
+                    ),
+                    0,
+                )
+
+
+if __name__ == "__main__":
+    unittest.main()
