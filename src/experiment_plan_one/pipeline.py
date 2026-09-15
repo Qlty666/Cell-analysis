@@ -312,6 +312,10 @@ def default_config() -> dict[str, Any]:
             "top_n": 50,
             "benchmark_positive": [],
             "benchmark_negative": [],
+            "benchmark_source": "",
+            "benchmark_version": "",
+            "benchmark_independent": False,
+            "benchmark_exclude_sources": [],
         },
         "single_cell": {
             "mouse": {"max_cells": 5000},
@@ -677,6 +681,10 @@ class ExperimentPlanOne:
                 "top_n",
                 "benchmark_positive",
                 "benchmark_negative",
+                "benchmark_source",
+                "benchmark_version",
+                "benchmark_independent",
+                "benchmark_exclude_sources",
             }
         }
         evidence_config = merge_config(evidence_config, overrides)
@@ -781,6 +789,18 @@ class ExperimentPlanOne:
                 benchmark_positives=config_section.get("benchmark_positive") or [],
                 benchmark_negatives=config_section.get("benchmark_negative") or [],
                 benchmark_top_n=int(config_section.get("top_n", 50)),
+                benchmark_source=str(
+                    config_section.get("benchmark_source") or ""
+                ),
+                benchmark_version=str(
+                    config_section.get("benchmark_version") or ""
+                ),
+                benchmark_independent=bool(
+                    config_section.get("benchmark_independent", False)
+                ),
+                benchmark_exclude_sources=(
+                    config_section.get("benchmark_exclude_sources") or []
+                ),
             )
             paths = hub.export(
                 out_dir,

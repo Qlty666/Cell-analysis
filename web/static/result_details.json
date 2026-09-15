@@ -1578,12 +1578,30 @@
       "optional": false
     },
     {
+      "file": "target_validation_summary.json",
+      "name": "target_validation_summary.json",
+      "kind": "data",
+      "content": "五维靶点验证决策分布、各轴可用性和中位完整度",
+      "type": "JSON 汇总文件",
+      "use": "快速判断哪些证据轴缺证据，以及 GO/CONDITIONAL_GO/REVIEW/NO_GO 的数量。",
+      "optional": false
+    },
+    {
       "file": "external_validation_summary.json",
       "name": "external_validation_summary.json",
       "kind": "data",
       "content": "独立验证队列的 AUROC、AUPRC、置信区间、评分来源和目标匹配率",
       "type": "JSON 汇总文件",
-      "use": "判断靶点排序是否能在独立数据上复现，并确认评分确实来自流水线而非外部输入。",
+      "use": "判断靶点排序是否能在独立数据上复现，并核对 score_origin、score_provenance_valid、target_match_rate 和未匹配靶点。",
+      "optional": false
+    },
+    {
+      "file": "external_validation_predictions.csv",
+      "name": "external_validation_predictions.csv",
+      "kind": "data",
+      "content": "外部验证逐靶点评分、标签和阈值预测",
+      "type": "CSV 数据表",
+      "use": "复核目标匹配、评分来源、假阳性和假阴性靶点。",
       "optional": false
     },
     {
@@ -1623,6 +1641,15 @@
       "optional": false
     },
     {
+      "file": "pose_qc_results.csv",
+      "name": "pose_qc_results.csv",
+      "kind": "data",
+      "content": "逐 pose 的 PoseBusters 通过状态、来源格式和受体文件",
+      "type": "CSV 数据表",
+      "use": "定位 no_receptor、转换失败或具体物理合理性不合格的 pose。",
+      "optional": false
+    },
+    {
       "file": "structural_quality_summary.json",
       "name": "structural_quality_summary.json",
       "kind": "data",
@@ -1632,12 +1659,30 @@
       "optional": false
     },
     {
+      "file": "structural_quality_targets.csv",
+      "name": "structural_quality_targets.csv",
+      "kind": "data",
+      "content": "逐靶点对接、MD RMSD 稳定性、MM-PBSA 和 PoseBusters 门控",
+      "type": "CSV 数据表",
+      "use": "定位具体靶点是蛋白 RMSD、配体 RMSD、MD 完成度还是 MM-PBSA 未达标。",
+      "optional": false
+    },
+    {
       "file": "target_decision_report.csv",
       "name": "target_decision_report.csv",
       "kind": "data",
       "content": "靶点层与平台层分离的冲突感知行动建议",
       "type": "CSV 数据表",
       "use": "查看 target_action、platform_action、composite_action 以及 PROCEED_VALIDATION、CONDITIONAL_PROCEED、REVIEW_CONFLICT、REVIEW 和 NO_GO。",
+      "optional": false
+    },
+    {
+      "file": "target_decision_report.json",
+      "name": "target_decision_report.json",
+      "kind": "data",
+      "content": "平台冲突、目标行动、复合行动和最终决策汇总",
+      "type": "JSON 汇总文件",
+      "use": "机器读取靶点层和平台层冲突统计。",
       "optional": false
     },
     {

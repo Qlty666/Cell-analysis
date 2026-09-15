@@ -108,6 +108,8 @@ class TestPoseQc(unittest.TestCase):
             self.assertEqual(summary["status"], "completed")
             self.assertTrue(summary["gate_passed"])
             self.assertEqual(summary["pose_format"], "pdbqt_converted")
+            self.assertEqual(summary["no_receptor"], 0)
+            self.assertEqual(summary["receptors_resolved"], 1)
             self.assertEqual(len(calls), 1)
             self.assertEqual(Path(calls[0][1]), receptor)
 

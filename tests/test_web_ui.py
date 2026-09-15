@@ -431,7 +431,11 @@ class TestWebRealWorkdirAndKnockout(unittest.TestCase):
                 {
                     "gene": ["GENE1"],
                     "base_decision": ["CONDITIONAL_GO"],
+                    "target_decision": ["CONDITIONAL_GO"],
                     "final_decision": ["CONDITIONAL_GO"],
+                    "target_action": ["CONDITIONAL_PROCEED"],
+                    "platform_action": ["PLATFORM_READY"],
+                    "composite_action": ["CONDITIONAL_PROCEED"],
                     "action": ["CONDITIONAL_PROCEED"],
                 }
             ).to_csv(integration / "target_decision_report.csv", index=False)
@@ -439,13 +443,21 @@ class TestWebRealWorkdirAndKnockout(unittest.TestCase):
                 "external_validation_summary.json": {
                     "status": "completed",
                     "auroc": 0.81,
+                    "score_origin": "pipeline",
+                    "score_provenance_valid": True,
+                    "target_match_rate": 0.95,
                 },
                 "omics_qc_summary.json": {
                     "status": "completed",
                     "gate_passed": True,
+                    "has_batch_metadata": True,
+                    "batch_condition_confounding": False,
+                    "sample_outlier_count": 0,
                 },
                 "pose_qc_summary.json": {
                     "status": "unavailable",
+                    "pose_format": "pdbqt_converted",
+                    "no_receptor": 0,
                     "gate_passed": False,
                 },
                 "structural_quality_summary.json": {
@@ -468,8 +480,19 @@ class TestWebRealWorkdirAndKnockout(unittest.TestCase):
                 "CONDITIONAL_PROCEED",
             )
             self.assertEqual(data["external_validation"]["auroc"], 0.81)
+            self.assertEqual(
+                data["external_validation"]["score_origin"],
+                "pipeline",
+            )
+            self.assertTrue(
+                data["external_validation"]["score_provenance_valid"]
+            )
             self.assertTrue(data["omics_qc"]["gate_passed"])
+            self.assertFalse(
+                data["omics_qc"]["batch_condition_confounding"]
+            )
             self.assertEqual(data["pose_qc"]["status"], "unavailable")
+            self.assertEqual(data["pose_qc"]["pose_format"], "pdbqt_converted")
             self.assertEqual(
                 data["reproducibility"]["git"]["commit"],
                 "abc123",
@@ -642,6 +665,22 @@ class TestRecentWebIntegration(unittest.TestCase):
             "reproducibilityTable",
         ):
             self.assertIn(f'id="{table_id}"', full)
+        for rendered_field in (
+            "score_provenance_valid",
+            "target_match_rate",
+            "unmatched_targets",
+            "sample_outlier_count",
+            "batch_condition_confounding",
+            "pose_format",
+            "no_receptor",
+            "target_action",
+            "platform_action",
+            "composite_action",
+            "benchmark_source",
+            "benchmark_evidence_mode",
+            "source_overlap",
+        ):
+            self.assertIn(rendered_field, full)
         self.assertIn('name="network_target_sources_dir"', full)
         self.assertIn('name="network_run_enrichment"', full)
         self.assertIn('name="model"', dock)

@@ -65,6 +65,10 @@
     "top_n": 50,
     "benchmark_positive": [],
     "benchmark_negative": [],
+    "benchmark_source": "",
+    "benchmark_version": "",
+    "benchmark_independent": false,
+    "benchmark_exclude_sources": [],
     "allow_network": true
   },
   "single_cell": {

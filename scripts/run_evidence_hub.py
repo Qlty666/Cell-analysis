@@ -64,6 +64,10 @@ def parse_args(argv: list[str] | None = None) -> argparse.Namespace:
     parser.add_argument("--benchmark-positive", default="")
     parser.add_argument("--benchmark-negative", default="")
     parser.add_argument("--benchmark-top-n", type=int, default=20)
+    parser.add_argument("--benchmark-source", default="")
+    parser.add_argument("--benchmark-version", default="")
+    parser.add_argument("--benchmark-independent", action="store_true")
+    parser.add_argument("--benchmark-exclude-sources", default="")
     parser.add_argument("--export-only", action="store_true")
     parser.add_argument("--verbose", action="store_true")
     return parser.parse_args(argv)
@@ -142,6 +146,12 @@ def main(argv: list[str] | None = None) -> int:
                 benchmark_positives=_comma_values(args.benchmark_positive),
                 benchmark_negatives=_comma_values(args.benchmark_negative),
                 benchmark_top_n=args.benchmark_top_n,
+                benchmark_source=args.benchmark_source,
+                benchmark_version=args.benchmark_version,
+                benchmark_independent=args.benchmark_independent,
+                benchmark_exclude_sources=_comma_values(
+                    args.benchmark_exclude_sources
+                ),
             )
             paths = hub.export(
                 output,

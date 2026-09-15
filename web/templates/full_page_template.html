@@ -335,6 +335,7 @@ a.file-link { color: #1665c0; text-decoration: none; margin-right: 12px; }
           <input name="external_validation_bootstrap" type="number" min="1" value="1000">
         </label>
         <label class="toggle"><input type="checkbox" name="external_validation_allow_external_score" value="1"> 允许外部验证使用非流水线评分</label>
+        <span class="field-hint">仅用于排错；启用后 score_provenance_valid=false，不计入论文级门控。</span>
         <label>对接靶点数
           <input name="docking_targets" type="number" min="0" value="3">
         </label>
@@ -956,6 +957,15 @@ function renderStats(data) {
       cls: externalValidation.status === 'completed' ? 'ok' : '',
     },
     {
+      label: '外部验证评分来源',
+      value: externalValidation.score_origin || 'NA',
+      cls: externalValidation.score_provenance_valid ? 'ok' : 'warn',
+    },
+    {
+      label: '外部验证目标匹配率',
+      value: externalValidation.target_match_rate !== undefined && externalValidation.target_match_rate !== null ? (Number(externalValidation.target_match_rate) * 100).toFixed(1) + '%' : 'NA',
+    },
+    {
       label: '最终可推进靶点',
       value: (decisions.actions || {}).PROCEED_VALIDATION || 0,
     },
@@ -963,6 +973,11 @@ function renderStats(data) {
       label: 'Omics QC',
       value: omicsQc.status || 'skipped',
       cls: omicsQc.gate_passed ? 'ok' : 'warn',
+    },
+    {
+      label: 'Batch 混杂',
+      value: omicsQc.has_batch_metadata ? (omicsQc.batch_condition_confounding ? '存在' : '未发现') : '无批次元数据',
+      cls: omicsQc.batch_condition_confounding ? 'warn' : (omicsQc.has_batch_metadata ? 'ok' : ''),
     },
     {
       label: 'Pose QC',
@@ -1110,10 +1125,10 @@ function renderResults(data) {
   renderTable('priorityTable', data.target_priority, ['priority_rank', 'gene', 'candidate_origin', 'decision', 'integrated_score', 'evidence_score', 'genetic_causal', 'clinical_precedent', 'safety_risk', 'coverage_ratio', 'knockout_score', 'evidence_status', 'missing_categories']);
   renderTable('validationTable', data.target_validation, ['validation_rank', 'gene', 'decision', 'adjusted_score', 'evidence_completeness', 'disease_association', 'druggability', 'chemical_matter', 'clinical_precedent', 'structural_data', 'clinical_evidence_quality', 'clinical_evidence_cap_applied', 'safety_penalty']);
   renderTable('decisionTable', data.target_decisions, ['gene', 'base_decision', 'target_decision', 'final_decision', 'target_action', 'platform_action', 'composite_action', 'adjusted_score', 'safety_risk', 'target_flags', 'platform_conflicts', 'conflict_flags']);
-  renderTable('benchmarkTable', Object.keys(benchmark).length ? [benchmark] : [], ['recall_at_n', 'precision_at_n', 'f1_at_n', 'auroc', 'auroc_ci_low', 'auroc_ci_high', 'auprc', 'auprc_ci_low', 'auprc_ci_high', 'enrichment_factor', 'permutation_p_value', 'benchmark_source', 'benchmark_version', 'benchmark_independent_verified', 'benchmark_evidence_mode', 'source_leakage']);
-  renderTable('externalValidationTable', Object.keys(externalValidation).length ? [externalValidation] : [], ['status', 'n_samples', 'n_positive', 'n_negative', 'threshold', 'auroc', 'auroc_ci_low', 'auroc_ci_high', 'auprc', 'precision', 'recall']);
-  renderTable('omicsQcTable', Object.keys(omicsQc).length ? [omicsQc] : [], ['status', 'n_genes', 'n_samples', 'duplicate_genes', 'missing_fraction', 'zero_fraction', 'negative_values', 'sample_metadata_match', 'group_counts', 'gate_passed']);
-  renderTable('poseQcTable', Object.keys(poseQc).length ? [poseQc] : [], ['status', 'reason', 'sdf_files', 'poses', 'pb_valid', 'pb_valid_rate', 'gate_passed']);
+  renderTable('benchmarkTable', Object.keys(benchmark).length ? [benchmark] : [], ['recall_at_n', 'precision_at_n', 'f1_at_n', 'auroc', 'auroc_ci_low', 'auroc_ci_high', 'auprc', 'auprc_ci_low', 'auprc_ci_high', 'enrichment_factor', 'permutation_p_value', 'n_missing_positive', 'n_missing_negative', 'benchmark_source', 'benchmark_version', 'benchmark_independent_verified', 'benchmark_evidence_mode', 'source_leakage', 'source_overlap', 'excluded_sources']);
+  renderTable('externalValidationTable', Object.keys(externalValidation).length ? [externalValidation] : [], ['status', 'score_origin', 'score_provenance_valid', 'target_match_count', 'target_match_rate', 'unmatched_targets', 'n_samples', 'n_positive', 'n_negative', 'threshold', 'auroc', 'auroc_ci_low', 'auroc_ci_high', 'auprc', 'precision', 'recall', 'f1', 'specificity']);
+  renderTable('omicsQcTable', Object.keys(omicsQc).length ? [omicsQc] : [], ['status', 'n_genes', 'n_samples', 'duplicate_genes', 'missing_fraction', 'zero_fraction', 'negative_values', 'sample_metadata_match', 'sample_outlier_count', 'sample_outlier_fraction', 'correlation_median', 'correlation_min', 'batch_silhouette_score', 'batch_condition_confounding', 'batch_condition_association_p', 'gate_passed']);
+  renderTable('poseQcTable', Object.keys(poseQc).length ? [poseQc] : [], ['status', 'reason', 'pose_format', 'sdf_files', 'poses', 'no_receptor', 'posebusters_errors', 'receptors_resolved', 'pb_valid', 'pb_valid_rate', 'gate_passed']);
   renderTable('structuralQualityTable', Object.entries(structuralQuality.gates || {}).map(([gate, passed]) => ({gate, passed})), ['gate', 'passed']);
   renderTable('readinessTable', Object.entries(readiness.checks || {}).map(([gate, passed]) => ({gate, passed})), ['gate', 'passed']);
   const reproduction = data.reproducibility || {};

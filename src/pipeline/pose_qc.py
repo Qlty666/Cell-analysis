@@ -225,6 +225,11 @@ def run_pose_qc(workdir: Path, out_dir: Path) -> dict:
     valid_count = int(result["pb_valid"].sum()) if "pb_valid" in result else 0
     total = int(len(result))
     rate = valid_count / total if total else 0.0
+    source_values = (
+        result["source"].fillna("").astype(str)
+        if "source" in result.columns
+        else pd.Series(dtype=str)
+    )
     summary = {
         "status": "completed",
         "reason": "",
@@ -237,6 +242,13 @@ def run_pose_qc(workdir: Path, out_dir: Path) -> dict:
         "poses": total,
         "pb_valid": valid_count,
         "pb_valid_rate": rate,
+        "no_receptor": int((source_values == "no_receptor").sum()),
+        "posebusters_errors": int(
+            source_values.str.startswith("error:").sum()
+        ),
+        "receptors_resolved": int(
+            (source_values == "posebusters").sum()
+        ),
         "gate_passed": bool(total > 0 and rate >= 0.50),
     }
     write_json(out_dir / "pose_qc_summary.json", summary)

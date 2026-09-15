@@ -490,6 +490,13 @@ class TestEvidenceHub(unittest.TestCase):
                     str(output),
                     "--targets",
                     "EGFR",
+                    "--benchmark-positive",
+                    "EGFR",
+                    "--benchmark-source",
+                    "Local",
+                    "--benchmark-version",
+                    "v1",
+                    "--benchmark-independent",
                     "--offline",
                 ],
                 capture_output=True,
@@ -499,6 +506,10 @@ class TestEvidenceHub(unittest.TestCase):
                 check=False,
             )
             self.assertEqual(result.returncode, 0, result.stderr)
+            benchmark = json.loads(result.stdout)["benchmark"]
+            self.assertEqual(benchmark["benchmark_source"], "Local")
+            self.assertEqual(benchmark["benchmark_version"], "v1")
+            self.assertTrue(benchmark["benchmark_independent"])
             self.assertTrue((output / "target_priority.csv").exists())
             self.assertTrue((output / "evidence.sqlite").exists())
 
