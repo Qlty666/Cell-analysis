@@ -118,6 +118,8 @@
     <a href="#scenes">按场景使用</a>
     <a href="#tasks">任务管理</a>
     <a href="#results">结果查看</a>
+    <a href="#private">私密本地流水线</a>
+    <a href="#privacy">数据与隐私</a>
   </div>
 
   <section class="card guide-card" id="start">
@@ -175,6 +177,7 @@ launchers\run_web_ui.bat</pre>
       </div>
     </div>
     <span class="guide-tip">说明：表达分析会检查 R；全自动集成流水线的“一键补全”覆盖表达分析、虚拟筛选与 Codex Skills，安装时间会更长。</span>
+    <span class="guide-tip">私密本地流水线默认不显示，也不会自动安装 GROMACS、gmx_MMPBSA 或 R CellChat；需要时按下方“私密本地研究流水线”章节单独启用和检查。</span>
   </section>
 
   <section class="card guide-card" id="workflow">
@@ -291,6 +294,28 @@ launchers\run_web_ui.bat</pre>
       <li>私密流水线额外输出 <code>plan_coverage.json</code>、<code>plan_coverage.md</code> 和 <code>environment_audit.json</code>，用于审计 42 Panel 完成度和外部工具版本。</li>
       <!--PRIVATE_PLAN_ONE_END-->
     </ul>
+  </section>
+
+  <section class="card guide-card" id="private">
+    <h2>私密本地研究流水线</h2>
+    <p class="muted">
+      涉及未公开课题、授权数据或受试者相关标识的专用流水线默认不会出现在网页。
+      不要把它当作普通公开页面的组成部分。
+    </p>
+    <ol class="guide-flow">
+      <li>仅在需要时于启动网页的终端中设置私密流水线开关。</li>
+      <li>网页必须绑定 <code>127.0.0.1</code>、<code>localhost</code> 或 <code>::1</code>；监听其他地址时服务会拒绝启动。</li>
+      <li>启用后，“全自动流水线”页才会出现通用私密表单；表单中的化合物、疾病、授权文件和输出目录全部由本地输入，不预填研究对象。</li>
+      <li>结果清单、版本信息和环境检查仅在开关启用时显示私密流水线相关条目。</li>
+      <li>使用结束后关闭该终端会话；不要在共享服务器、公网主机、会议投屏或包含未授权用户的电脑上启用。</li>
+    </ol>
+    <pre># PowerShell 示例：仅在本机启动
+$env:LIVER_ENABLE_PRIVATE_PLAN_ONE="1"
+python web\web_ui.py --host 127.0.0.1 --port 8000 --no-browser</pre>
+    <span class="guide-tip">
+      私密模式不是访问控制替代方案。需要真正隔离时，还应使用独立系统账户、
+      加密磁盘、受控网络和最小权限数据目录。
+    </span>
   </section>
 
   <section class="card guide-card" id="privacy">
