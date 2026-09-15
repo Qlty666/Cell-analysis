@@ -17,6 +17,7 @@ import anndata as ad
 from experiment_plan_one.common import bh_fdr, split_gene_symbol
 from experiment_plan_one.classify import classify_experiment_plan_results
 from experiment_plan_one.coverage import audit_plan_coverage
+from experiment_plan_one.figure_audit import _dynamic_result_reviews
 from experiment_plan_one.md_figures import generate_plan_md_figures
 from experiment_plan_one.ml import _nested_cv_evaluation, _pipeline, _model_zoo
 from experiment_plan_one.pipeline import (
@@ -350,6 +351,54 @@ class TestExperimentPlanOne(unittest.TestCase):
             )
             self.assertIn("current_result_completion_percent", summary)
             self.assertIn("environment", summary)
+
+    def test_ml_figure_reviews_follow_current_metrics(self):
+        with tempfile.TemporaryDirectory(ignore_cleanup_errors=True) as tmp:
+            root = Path(tmp)
+            ml_dir = root / "05_machine_learning"
+            ml_dir.mkdir(parents=True)
+            (ml_dir / "ml_summary.json").write_text(
+                json.dumps(
+                    {
+                        "external_validation": [
+                            {
+                                "dataset": "GSE49541_fibrosis",
+                                "auc": 0.309,
+                                "target_auc": 0.8,
+                                "target_met": False,
+                            },
+                            {
+                                "dataset": "GSE164441_tumor",
+                                "auc": 0.86,
+                                "target_auc": 0.8,
+                                "target_met": True,
+                            },
+                            {
+                                "dataset": "GSE135251_NAFLD",
+                                "auc": 0.909,
+                                "target_auc": 0.8,
+                                "target_met": True,
+                            },
+                        ],
+                        "calibration": {
+                            "hosmer_lemeshow_p": 0.1398,
+                            "brier": 0.0806,
+                            "calibration_slope": 1.5871,
+                            "calibration_intercept": -0.3084,
+                            "target_met": True,
+                        },
+                    }
+                ),
+                encoding="utf-8",
+            )
+            reviews = _dynamic_result_reviews(root)
+            figure = "Figure3_机器学习模型构建与SHAP核心特征"
+            self.assertEqual(reviews[(figure, "c")].verdict, "结果未达标")
+            self.assertIn("0.309", reviews[(figure, "c")].notes)
+            self.assertEqual(reviews[(figure, "d")].verdict, "可用")
+            self.assertIn("0.909", reviews[(figure, "d")].notes)
+            self.assertEqual(reviews[(figure, "e")].verdict, "可用")
+            self.assertIn("0.140", reviews[(figure, "e")].notes)
 
 
 if __name__ == "__main__":

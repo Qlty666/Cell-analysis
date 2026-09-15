@@ -138,19 +138,19 @@ REVIEWS: dict[tuple[str, str], FigureReview] = {
         "部分合理",
         "良好",
         "结果未达标",
-        "GSE49541检测的是纤维化分期，不是同一健康/NAFLD终点，AUC 0.459未达方案目标。",
+        "GSE49541检测的是纤维化分期，不是同一健康/NAFLD终点；应按实际外部验证指标解释。",
     ),
     ("Figure3_机器学习模型构建与SHAP核心特征", "d"): FigureReview(
         "部分合理",
         "良好",
         "结果未全达标",
-        "GSE164441达到0.880；补充NAFLD队列GSE135251仅0.742，外部NAFLD泛化性不足。",
+        "外部队列的终点不同，应分别报告AUC并按实际验证结果判断泛化性。",
     ),
     ("Figure3_机器学习模型构建与SHAP核心特征", "e"): FigureReview(
         "不合理",
         "中等",
         "结果未达标",
-        "Hosmer-Lemeshow p=4.14e-11，校准明显失败，不能作为合格临床预测模型图。",
+        "应根据嵌套交叉验证输出的校准斜率、截距、Brier和Hosmer-Lemeshow检验判断。",
     ),
     ("Figure3_机器学习模型构建与SHAP核心特征", "f"): FigureReview(
         "合理",
@@ -335,6 +335,95 @@ LABEL_OVERLAP_ALIAS_REVIEWS: dict[tuple[str, str, str], tuple[str, str]] = {
 }
 
 
+def _number(value: Any) -> float | None:
+    try:
+        result = float(value)
+    except (TypeError, ValueError):
+        return None
+    return result if math.isfinite(result) else None
+
+
+def _format_number(value: Any, digits: int = 3) -> str:
+    number = _number(value)
+    return f"{number:.{digits}f}" if number is not None else "NA"
+
+
+def _dynamic_result_reviews(
+    output_root: Path,
+) -> dict[tuple[str, str], FigureReview]:
+    """Use fresh result metrics for panels whose interpretation is data-dependent."""
+    summary = read_json(
+        output_root / "05_machine_learning" / "ml_summary.json",
+        {},
+    )
+    external = {
+        str(row.get("dataset")): row
+        for row in (summary.get("external_validation") or [])
+        if isinstance(row, dict)
+    }
+    calibration = (
+        summary.get("calibration")
+        if isinstance(summary.get("calibration"), dict)
+        else {}
+    )
+    figure = "Figure3_机器学习模型构建与SHAP核心特征"
+    reviews: dict[tuple[str, str], FigureReview] = {}
+
+    fibrosis = external.get("GSE49541_fibrosis")
+    if fibrosis:
+        met = bool(fibrosis.get("target_met"))
+        reviews[(figure, "c")] = FigureReview(
+            "合理" if met else "部分合理",
+            "良好",
+            "可用" if met else "结果未达标",
+            (
+                "GSE49541检测的是纤维化分期，不是同一健康/NAFLD终点；"
+                f"AUC {_format_number(fibrosis.get('auc'))}，"
+                f"目标 {_format_number(fibrosis.get('target_auc'))}，"
+                f"{'已达到' if met else '未达到'}方案阈值。"
+            ),
+        )
+
+    external_validation = [
+        row
+        for key in ("GSE164441_tumor", "GSE135251_NAFLD")
+        if (row := external.get(key))
+    ]
+    if external_validation:
+        all_met = all(bool(row.get("target_met")) for row in external_validation)
+        details = [
+            f"{row.get('dataset')} AUC {_format_number(row.get('auc'))}"
+            f" (target {_format_number(row.get('target_auc'))})"
+            for row in external_validation
+        ]
+        reviews[(figure, "d")] = FigureReview(
+            "合理" if all_met else "部分合理",
+            "良好",
+            "可用" if all_met else "结果未全达标",
+            (
+                "; ".join(details)
+                + "。GSE164441为HCC肿瘤与癌旁终点，GSE135251为补充NAFLD终点。"
+            ),
+        )
+
+    if calibration:
+        met = bool(calibration.get("target_met"))
+        reviews[(figure, "e")] = FigureReview(
+            "合理" if met else "不合理",
+            "良好" if met else "中等",
+            "可用" if met else "结果未达标",
+            (
+                "嵌套交叉验证校准："
+                f"Hosmer-Lemeshow p={_format_number(calibration.get('hosmer_lemeshow_p'), 3)}, "
+                f"Brier={_format_number(calibration.get('brier'))}, "
+                f"slope={_format_number(calibration.get('calibration_slope'))}, "
+                f"intercept={_format_number(calibration.get('calibration_intercept'))}; "
+                f"{'已达到' if met else '未达到'}方案的校准目标。"
+            ),
+        )
+    return reviews
+
+
 def audit_figures(
     output_root: Path,
     *,
@@ -367,12 +456,19 @@ def audit_figures(
         / "02_disease_targets"
         / "fig1e_disease_target_venn.png"
     ).exists()
+    dynamic_reviews = _dynamic_result_reviews(output_root)
 
     rows: list[dict[str, Any]] = []
     for figure, aliases in aliases_by_figure.items():
         for alias in aliases:
             source = (output_root / alias.source).resolve()
-            review = REVIEWS.get((figure, alias.panel), FigureReview("不确定", "不确定", "人工复核", ""))
+            review = dynamic_reviews.get(
+                (figure, alias.panel),
+                REVIEWS.get(
+                    (figure, alias.panel),
+                    FigureReview("不确定", "不确定", "人工复核", ""),
+                ),
+            )
             if (
                 figure == "Figure5_分子对接与分子动力学模拟"
                 and alias.panel in md_panel_status
