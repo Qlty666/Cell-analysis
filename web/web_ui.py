@@ -248,8 +248,10 @@ def environment_module_cards() -> str:
             if badges
             else ""
         )
-        install_cmd = meta["install_bat"].replace("/", "\\")
-        if meta["check_bat"]:
+        install_bat = meta.get("install_bat")
+        check_bat = meta.get("check_bat")
+        if install_bat and check_bat:
+            install_cmd = install_bat.replace("/", "\\")
             check_cmd = meta["check_bat"].replace("/", "\\")
             launcher_html = (
                 '<div class="env-cmd">一键补全：<code>'
@@ -258,12 +260,25 @@ def environment_module_cards() -> str:
                 + check_cmd
                 + "</code></div>"
             )
-        else:
+        elif install_bat:
+            install_cmd = install_bat.replace("/", "\\")
             launcher_html = (
                 '<div class="env-cmd">一键补全：<code>'
                 + install_cmd
                 + "</code>　检查：统一命令</div>"
             )
+        else:
+            launcher_html = (
+                '<div class="env-cmd">此模块不自动安装外部软件，'
+                "请在环境检查结果和版本文档中确认。</div>"
+            )
+        install_button = (
+            '<button type="button" class="secondary" data-action="install" data-name="'
+            + name
+            + '">一键补全</button>'
+            if install_bat
+            else ""
+        )
         cards.append(
             '<section class="card env-module" data-module="'
             + name
@@ -285,9 +300,7 @@ def environment_module_cards() -> str:
             + '<button type="button" data-action="check" data-name="'
             + name
             + '">检查环境</button>'
-            + '<button type="button" class="secondary" data-action="install" data-name="'
-            + name
-            + '">一键补全</button>'
+            + install_button
             + "</div>"
             + '<pre id="envLog-'
             + name
@@ -634,6 +647,77 @@ def get_versions() -> list[dict]:
             "install": "",
         },
     )
+    try:
+        from experiment_plan_one.coverage import audit_plan_environment
+
+        environment = audit_plan_environment()
+        vina = environment.get("vina") or {}
+        gromacs = environment.get("gromacs") or {}
+        mmpbsa = environment.get("gmx_mmpbsa") or {}
+        cellchat = environment.get("cellchat") or {}
+        packages = environment.get("python_packages") or {}
+        out.extend(
+            [
+                {
+                    "name": "Plan One Vina",
+                    "version": vina.get("version") or "not installed",
+                    "kind": "software",
+                    "url": "https://github.com/ccsb-scripps/AutoDock-Vina",
+                    "install": f"expected {vina.get('expected', '1.2.3')}",
+                },
+                {
+                    "name": "Plan One GROMACS",
+                    "version": gromacs.get("version") or "not installed",
+                    "kind": "software",
+                    "url": "https://www.gromacs.org/",
+                    "install": f"expected {gromacs.get('expected', '2022')}",
+                },
+                {
+                    "name": "gmx_MMPBSA",
+                    "version": (
+                        mmpbsa.get("version") or "not installed"
+                        if mmpbsa.get("available")
+                        else "not installed"
+                    ),
+                    "kind": "software",
+                    "url": "https://valdes-tresanco-ms.github.io/gmx_MMPBSA/",
+                    "install": "required for Figure 5h",
+                },
+                {
+                    "name": "R CellChat",
+                    "version": (
+                        "available"
+                        if cellchat.get("available")
+                        else "not installed"
+                    ),
+                    "kind": "package",
+                    "url": "https://github.com/jinworks/CellChat",
+                    "install": "install.packages('CellChat')",
+                },
+                {
+                    "name": "PoseBusters",
+                    "version": (
+                        "available"
+                        if packages.get("posebusters")
+                        else "not installed"
+                    ),
+                    "kind": "package",
+                    "url": "https://github.com/maabuu/posebusters",
+                    "install": "pip install posebusters",
+                },
+                {
+                    "name": "Meeko",
+                    "version": (
+                        "available" if packages.get("meeko") else "not installed"
+                    ),
+                    "kind": "package",
+                    "url": "https://github.com/forlilab/Meeko",
+                    "install": "pip install meeko",
+                },
+            ]
+        )
+    except Exception as exc:
+        log.debug("plan one environment versions unavailable: %s", exc)
     return out
 
 
@@ -1255,6 +1339,56 @@ def render_analysis_page() -> str:
 
 
 def run_environment_check(module: str, with_ml: bool = False) -> dict:
+    if module == "experiment-plan-one":
+        try:
+            from experiment_plan_one.coverage import audit_plan_environment
+
+            environment = audit_plan_environment()
+            packages = environment.get("python_packages") or {}
+            vina = environment.get("vina") or {}
+            gromacs = environment.get("gromacs") or {}
+            mmpbsa = environment.get("gmx_mmpbsa") or {}
+            cellchat = environment.get("cellchat") or {}
+            required_ok = bool(
+                vina.get("path")
+                and gromacs.get("path")
+                and packages.get("rdkit")
+                and packages.get("scanpy")
+                and packages.get("shap")
+            )
+            lines = [
+                "实验方案一环境检查",
+                f"Vina: {vina.get('version') or 'not found'} "
+                f"(expected {vina.get('expected', '1.2.3')})",
+                f"GROMACS: {gromacs.get('version') or 'not found'} "
+                f"(expected {gromacs.get('expected', '2022')})",
+                "gmx_MMPBSA: "
+                + ("available" if mmpbsa.get("available") else "not installed"),
+                "R CellChat: "
+                + ("available" if cellchat.get("available") else "not installed"),
+                "Python packages: "
+                + ", ".join(
+                    f"{name}={'yes' if available else 'no'}"
+                    for name, available in packages.items()
+                ),
+            ]
+            return {
+                "module": module,
+                "ok": required_ok,
+                "output": "\n".join(lines),
+                "optional": {
+                    "gmx_MMPBSA": bool(mmpbsa.get("available")),
+                    "cellchat": bool(cellchat.get("available")),
+                    "vina_version_match": bool(vina.get("match")),
+                    "gromacs_version_match": bool(gromacs.get("match")),
+                },
+            }
+        except Exception as exc:  # noqa: BLE001
+            return {
+                "module": module,
+                "ok": False,
+                "output": f"实验方案一环境检查失败：{exc}",
+            }
     cmd = [
         sys.executable,
         str(APP_ROOT / "launchers" / "install_environment.py"),

@@ -1775,6 +1775,9 @@ class TestTemplatePolish(unittest.TestCase):
         self.assertIn("/environment/check", env)
         self.assertIn('data-module="expression"', env)
         self.assertIn('data-module="full"', env)
+        self.assertIn('data-module="experiment-plan-one"', env)
+        self.assertIn("数据与隐私", env)
+        self.assertIn("gmx_MMPBSA", env)
         self.assertIn("一键补全", env)
 
     def test_environment_board_matches_installer_modules(self):
@@ -1782,16 +1785,33 @@ class TestTemplatePolish(unittest.TestCase):
             sys.path.insert(0, str(APP_ROOT / "launchers"))
         import install_environment
 
-        self.assertEqual(
-            set(web_ui_module.ENV_MODULES),
-            set(install_environment.MODULES),
+        installable = {
+            name: meta
+            for name, meta in web_ui_module.ENV_MODULES.items()
+            if meta.get("install_bat")
+        }
+        self.assertTrue(
+            set(installable).issubset(set(install_environment.MODULES))
         )
-        for name, meta in web_ui_module.ENV_MODULES.items():
+        for name, meta in installable.items():
             with self.subTest(module=name):
                 self.assertTrue(
                     (APP_ROOT / meta["install_bat"]).is_file(),
                     f"{meta['install_bat']} should exist",
                 )
+
+    def test_plan_one_environment_check_and_versions(self):
+        check = web_ui_module.run_environment_check(
+            "experiment-plan-one"
+        )
+        self.assertEqual(check["module"], "experiment-plan-one")
+        self.assertIn("Vina", check["output"])
+        self.assertIn("GROMACS", check["output"])
+        versions = web_ui_module.get_versions()
+        names = {item["name"] for item in versions}
+        self.assertIn("Plan One Vina", names)
+        self.assertIn("Plan One GROMACS", names)
+        self.assertIn("gmx_MMPBSA", names)
 
     def test_split_tool_pages_render_independently(self):
         for path, marker in (

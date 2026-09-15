@@ -140,6 +140,22 @@ ENV_MODULES = {
         "check_bat": "launchers/check_full_environment.bat",
         "note": "安装耗时较长；也可以先按单个板块补齐。",
     },
+    "experiment-plan-one": {
+        "title": "实验方案一（6PPD-Q / NAFLD）",
+        "summary": (
+            "专用流水线依赖 RDKit、Scanpy、SHAP、AutoDock Vina、GROMACS；"
+            "gmx_MMPBSA、R CellChat 和 PoseBusters 按方案要求可选但需明确标注。"
+        ),
+        "r_deps": False,
+        "dock_tools": True,
+        "skills": False,
+        "install_bat": None,
+        "check_bat": None,
+        "note": (
+            "版本检查会记录 Vina、GROMACS、gmx_MMPBSA、CellChat 和 Python "
+            "科学包；方案要求 Vina 1.2.3 和 GROMACS 2022，版本不一致时必须写入论文方法。"
+        ),
+    },
     "web": {
         "title": "网页版",
         "summary": "检查 Python 版本与网页入口；网页本身不自动下载 R 或大型对接工具。",

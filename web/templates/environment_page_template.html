@@ -169,6 +169,30 @@
     <pre id="envActiveLog" class="env-log">环境任务日志会显示在这里。</pre>
   </section>
 
+  <section class="card">
+    <h2 style="margin-top:0;">实验方案一额外要求</h2>
+    <p class="env-help">
+      6PPD-Q / NAFLD 方案需要 Vina、GROMACS、gmx_MMPBSA 和单细胞/ML 依赖。
+      本机当前版本会显示在首页“版本信息”和环境检查结果中。
+    </p>
+    <table>
+      <thead><tr><th>组件</th><th>方案要求</th><th>说明</th></tr></thead>
+      <tbody>
+        <tr><td>AutoDock Vina</td><td>1.2.3</td><td>当前环境可能是 1.2.7；版本不同必须在论文方法中记录。</td></tr>
+        <tr><td>GROMACS</td><td>2022</td><td>当前环境可能是 2020.6-MODIFIED；100 ns MD 需明确版本和力场参数。</td></tr>
+        <tr><td>gmx_MMPBSA</td><td>必需或等效工具</td><td>未安装时 Figure 5h 只能标记 unavailable，不能伪造自由能分解。</td></tr>
+        <tr><td>R CellChat</td><td>方案文字要求</td><td>未安装时网页使用带置换检验的 CellChat-like 近似，必须明确标注。</td></tr>
+        <tr><td>PoseBusters</td><td>结构合理性复核</td><td>未安装时结构门控标记 unavailable，不影响其他流水线阶段。</td></tr>
+      </tbody>
+    </table>
+    <p class="env-note">
+      运行真实未公开课题前，请先阅读项目隐私说明；联网数据库会收到疾病名、基因、
+      化合物标识和研究数据集编号等查询元数据。详见
+      <a href="/guide#privacy">数据与隐私</a> 和
+      <code>docs/privacy_audit.md</code>。
+    </p>
+  </section>
+
   <div id="envModuleGrid" class="env-grid">
 <!--ENV_MODULE_CARDS-->
   </div>

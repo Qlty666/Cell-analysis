@@ -1704,6 +1704,24 @@
       "optional": false
     },
     {
+      "file": "environment_audit.json",
+      "name": "environment_audit.json",
+      "kind": "data",
+      "content": "实验方案一外部工具和 Python/R 包版本检查",
+      "type": "JSON 汇总文件",
+      "use": "核对 Vina、GROMACS、gmx_MMPBSA、CellChat、PoseBusters 等版本是否与方案一致。",
+      "optional": false
+    },
+    {
+      "file": "RESULTS_SUMMARY.md",
+      "name": "RESULTS_SUMMARY.md",
+      "kind": "report",
+      "content": "实验方案一主要结果、外部验证、单细胞、对接、MD 和覆盖度摘要",
+      "type": "Markdown 报告",
+      "use": "作为结果总览，不能替代原始表格和统计检验。",
+      "optional": false
+    },
+    {
       "file": "reproducibility_manifest.json",
       "name": "reproducibility_manifest.json",
       "kind": "data",

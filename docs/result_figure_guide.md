@@ -988,6 +988,14 @@ Cytoscape 集成采用自动降级策略：`network_toxicology.cytoscape` 为 `a
 - PPI hub 评分用于把 STRING 拓扑信息纳入候选靶点排序，配合虚拟敲除可形成“网络毒理学 → 靶点优先级”的闭环。
 - FAERS 信号表用于从药物不良反应报告中发现风险信号，不能单独证明因果关系，需要结合机制和临床证据复核。
 
+### 7.5 实验方案一（6PPD-Q / NAFLD）
+
+- `plan_coverage.json/md` 用于查看 42 个 Panel 的代码实现覆盖、当前结果覆盖、外部依赖条件和性能目标未达标项。代码覆盖高不等于结果已经完成。
+- `environment_audit.json` 记录 Vina、GROMACS、gmx_MMPBSA、R CellChat、PoseBusters、Meeko 等版本。方案指定 Vina 1.2.3 和 GROMACS 2022，实际版本不同必须在论文方法中记录。
+- 疾病靶点 Panel 只有在至少两个可审计来源存在时才生成真实交集；GeneCards、OMIM、TTD 缺失时使用开放来源必须改名说明，不能写成原三库 Venn。
+- CellChat-like 网络必须显示置换次数、p 值或 FDR 和限制说明；不能把近似结果写成 R CellChat 原实现。
+- Figure 5d-h 只能来自真实 GROMACS/MMPBSA 轨迹和输出；没有运行或没有解析到结果时应显示 unavailable/not run。
+
 ## 8. 建议验收清单
 
 正式使用或交付结果前，建议逐项确认：
@@ -1012,3 +1020,11 @@ Cytoscape 集成采用自动降级策略：`network_toxicology.cytoscape` 为 `a
 - 把只有 1 个样本/1 个条件的图写成条件差异证据。
 - 把敲除优先级分数解释为真实敲除表型或湿实验验证结果。
 - 使用参数或输入已经改变后的旧结果图，而未核对运行标记和 manifest。
+
+## 10. 隐私和数据外发
+
+- 联网分析会向公开数据库发送疾病名称、基因符号、UniProt/Ensembl 标识、化合物 CID/SMILES 和数据集编号等查询元数据。
+- 默认不上传原始表达矩阵或单细胞矩阵；本地文件内容和结果报告不会因为打开网页而自动发送到第三方。
+- 设置 `NCBI_EMAIL` 或 `LIVER_CONTACT_EMAIL` 后，邮箱会作为请求标识发送给对应外部服务。
+- `.env`、私钥、证书、数据库、日志、任务历史和本地输出不应进入公开仓库。
+- 对外分享 HTML、图片、CSV 或日志前，应检查并移除本机绝对路径、样本编号和未公开研究结论。
