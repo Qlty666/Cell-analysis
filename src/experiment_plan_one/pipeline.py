@@ -431,12 +431,15 @@ class ExperimentPlanOne:
             previous_stages = list(STAGES[: STAGES.index(stage)])
             signature = self.context.stage_signature(stage, previous_stages)
             missing_outputs = self._missing_stage_outputs(stage)
+            successful_statuses = (
+                {"completed", "prepared"} if stage == "md" else {"completed"}
+            )
             if state_path.exists() and not self.context.force:
                 state = read_json(state_path, {})
                 same_signature = state.get("signature") == signature
                 output_ready = not missing_outputs
                 if (
-                    state.get("status") == "completed"
+                    state.get("status") in successful_statuses
                     and same_signature
                     and output_ready
                 ):
@@ -474,7 +477,7 @@ class ExperimentPlanOne:
             }
             write_json(state_path, state)
             self.results[stage] = state
-            if result_status != "completed":
+            if result_status not in successful_statuses:
                 reason = (
                     f"missing outputs: {missing_outputs}"
                     if missing_outputs
@@ -483,7 +486,18 @@ class ExperimentPlanOne:
                     else "stage returned failed"
                 )
                 raise RuntimeError(f"stage {stage} failed: {reason}")
-            LOG.info("completed stage %s in %.1f s", stage, state["elapsed_seconds"])
+            if result_status == "prepared":
+                LOG.info(
+                    "stage %s prepared successfully in %.1f s",
+                    stage,
+                    state["elapsed_seconds"],
+                )
+            else:
+                LOG.info(
+                    "completed stage %s in %.1f s",
+                    stage,
+                    state["elapsed_seconds"],
+                )
         self._write_manifest()
         return self.results
 

@@ -113,6 +113,25 @@ class TestExperimentPlanOne(unittest.TestCase):
                 runner._missing_stage_outputs("evidence"),
             )
 
+    def test_prepared_md_stage_is_a_successful_terminal_state(self):
+        with tempfile.TemporaryDirectory(ignore_cleanup_errors=True) as tmp:
+            root = Path(tmp)
+            md_dir = root / "09_md_mmpbsa"
+            md_dir.mkdir(parents=True)
+            (md_dir / "md_stage_summary.json").write_text("{}", encoding="utf-8")
+            (md_dir / "md_plan_figures.json").write_text("{}", encoding="utf-8")
+            runner = ExperimentPlanOne(root, default_config())
+            with mock.patch.object(
+                ExperimentPlanOne,
+                "stage_md",
+                return_value={"status": "prepared", "mode": "prepare"},
+            ):
+                results = runner.run(["md"])
+            self.assertEqual(results["md"]["status"], "prepared")
+            state_path = root / "12_reports" / ".stages" / "md.json"
+            state = json.loads(state_path.read_text(encoding="utf-8"))
+            self.assertEqual(state["status"], "prepared")
+
     def test_evidence_stage_uses_local_connector(self):
         with tempfile.TemporaryDirectory(ignore_cleanup_errors=True) as tmp:
             root = Path(tmp)
