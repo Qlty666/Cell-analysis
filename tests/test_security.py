@@ -60,5 +60,25 @@ class TestSafeArchiveExtraction(unittest.TestCase):
             self.assertFalse((base / "escape.txt").exists())
 
 
+class TestPrivacyHygiene(unittest.TestCase):
+    def test_web_template_does_not_ship_local_absolute_paths(self):
+        template = (
+            APP_ROOT / "web" / "templates" / "full_page_template.html"
+        ).read_text(encoding="utf-8")
+        for value in ("C:\\Users", "D:\\AAA Liver cancer", "BaiduNetdisk"):
+            self.assertNotIn(value, template)
+
+    def test_env_example_contains_no_values(self):
+        example = (APP_ROOT / ".env.example").read_text(encoding="utf-8")
+        for line in example.splitlines():
+            stripped = line.strip()
+            if not stripped or stripped.startswith("#"):
+                continue
+            name, separator, value = stripped.partition("=")
+            self.assertTrue(separator)
+            self.assertTrue(name)
+            self.assertEqual(value, "")
+
+
 if __name__ == "__main__":
     unittest.main()
