@@ -6,6 +6,8 @@
 
 支持单细胞、bulk RNA-seq、microarray 等表达数据，结果写入 `run_manifest.json`，记录配置、输入哈希、软件版本和运行参数。
 
+![网页端全自动流水线界面](docs/images/web_ui.png)
+
 ## 功能
 
 | 模块 | 主要内容 |
