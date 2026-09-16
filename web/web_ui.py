@@ -477,45 +477,19 @@ def _request_authorized(handler) -> bool:
     return secrets.compare_digest(_request_token(handler), AUTH_TOKEN)
 
 
-def _origin_allowed(origin: str, request_host: str = "") -> bool:
+def _origin_allowed(origin: str) -> bool:
     origin = (origin or "").strip()
     if not origin:
         return True
     try:
         parts = urlparse(origin)
-        origin_host = (parts.hostname or "").lower()
-        origin_port = parts.port
-    except (TypeError, ValueError):
+    except Exception:
         return False
     if parts.scheme.lower() not in ("http", "https"):
         return False
-
-    # Trusted reverse proxies such as GitHub Codespaces forward the public
-    # Host header. Accept only an Origin that is exactly this request's host.
-    request_host = (request_host or "").strip()
-    if request_host:
-        try:
-            request_parts = urlparse(f"//{request_host}")
-            request_hostname = (request_parts.hostname or "").lower()
-            request_port = request_parts.port
-        except ValueError:
-            return False
-        if origin_host and origin_host == request_hostname:
-            if (
-                origin_port is not None
-                and request_port is not None
-                and origin_port != request_port
-            ):
-                return False
-            return True
-
-    if origin_host not in LOCAL_ORIGIN_HOSTS:
+    if (parts.hostname or "").lower() not in LOCAL_ORIGIN_HOSTS:
         return False
-    if (
-        SERVER_PORT is not None
-        and origin_port is not None
-        and origin_port != SERVER_PORT
-    ):
+    if SERVER_PORT is not None and parts.port is not None and parts.port != SERVER_PORT:
         return False
     return True
 
@@ -4109,11 +4083,6 @@ def main() -> int:
         help="start the server without opening a browser window",
     )
     parser.add_argument(
-        "--keep-alive",
-        action="store_true",
-        help="disable the idle shutdown monitor for hosted sessions",
-    )
-    parser.add_argument(
         "--allow-path",
         action="append",
         default=[],
@@ -4166,15 +4135,12 @@ def main() -> int:
             "WARNING: Web UI exposes pipeline command and file endpoints "
             "on a non-loopback host; only use this on a trusted network."
         )
-    if not args.keep_alive:
-        threading.Thread(
-            target=_run_idle_shutdown_monitor,
-            args=(server, time.monotonic()),
-            daemon=True,
-            name="web-ui-idle-shutdown",
-        ).start()
-    else:
-        print("Web UI keep-alive enabled; idle shutdown is disabled.")
+    threading.Thread(
+        target=_run_idle_shutdown_monitor,
+        args=(server, time.monotonic()),
+        daemon=True,
+        name="web-ui-idle-shutdown",
+    ).start()
     if args.page == "dock":
         open_url = url + "/dock"
     elif args.page == "md-simulation":

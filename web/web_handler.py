@@ -736,10 +736,7 @@ class Handler(BaseHTTPRequestHandler):
         if not _ui._fetch_site_allowed(self.headers.get("Sec-Fetch-Site", "")):
             self._send(403, b"cross-site request blocked", "text/plain; charset=utf-8")
             return
-        if not _ui._origin_allowed(
-            self.headers.get("Origin", ""),
-            self.headers.get("Host", ""),
-        ):
+        if not _ui._origin_allowed(self.headers.get("Origin", "")):
             self._send(403, b"cross-origin request blocked", "text/plain; charset=utf-8")
             return
         try:
