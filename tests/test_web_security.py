@@ -136,6 +136,26 @@ class TestOriginPortCheck(unittest.TestCase):
         finally:
             web_ui.SERVER_PORT = original_port
 
+    def test_codespaces_same_host_origin_is_allowed(self):
+        host = "example-8000.app.github.dev"
+        self.assertTrue(
+            web_ui._origin_allowed(f"https://{host}", host)
+        )
+        self.assertFalse(
+            web_ui._origin_allowed("https://evil.example", host)
+        )
+        self.assertFalse(
+            web_ui._origin_allowed(
+                "https://example-9000.app.github.dev",
+                host,
+            )
+        )
+
+    def test_public_origin_is_rejected_without_matching_request_host(self):
+        self.assertFalse(
+            web_ui._origin_allowed("https://example-8000.app.github.dev")
+        )
+
 
 class TestJobStorePruning(unittest.TestCase):
     def test_prune_keeps_running_jobs(self):
