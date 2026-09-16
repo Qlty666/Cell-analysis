@@ -26,11 +26,34 @@ matplotlib.use("Agg")
 import matplotlib.pyplot as plt
 import numpy as np
 import pandas as pd
+from PIL import Image
 
 LOG = logging.getLogger("experiment_plan_one")
 
 USER_AGENT = "liver-cancer-bioinformatics/1.6 experiment-plan-one"
 GEO_RAW_BASE = "https://ftp.ncbi.nlm.nih.gov/geo"
+
+# Okabe-Ito subset with at least 3:1 contrast on white. The palette is used
+# only as a starting point; every figure still needs direct labels or another
+# redundant cue because color alone is not an accessible encoding.
+FIGURE_PALETTE = (
+    "#0072B2",
+    "#D55E00",
+    "#009E73",
+    "#CC79A7",
+    "#000000",
+)
+STATUS_COLORS = {
+    "completed": "#009E73",
+    "cached": "#0072B2",
+    "empty": "#D55E00",
+    "no_results": "#D55E00",
+    "unavailable": "#7A7A7A",
+    "disabled": "#7A7A7A",
+    "failed": "#B22222",
+    "timeout": "#B22222",
+    "not_configured": "#7A7A7A",
+}
 
 
 def configure_logging(log_path: Path | None = None, verbose: bool = False) -> None:
@@ -461,17 +484,21 @@ def figure_style() -> None:
             "savefig.facecolor": "white",
             "font.family": "sans-serif",
             "font.sans-serif": ["Arial", "Helvetica", "DejaVu Sans"],
-            "font.size": 7,
-            "axes.titlesize": 7,
-            "axes.labelsize": 7,
-            "xtick.labelsize": 6,
-            "ytick.labelsize": 6,
-            "legend.fontsize": 6,
-            "axes.linewidth": 0.6,
-            "lines.linewidth": 1.0,
+            "font.size": 8,
+            "axes.titlesize": 8.5,
+            "axes.labelsize": 8,
+            "xtick.labelsize": 7,
+            "ytick.labelsize": 7,
+            "legend.fontsize": 7,
+            "axes.linewidth": 0.7,
+            "lines.linewidth": 1.1,
+            "lines.markersize": 4,
+            "patch.linewidth": 0.7,
+            "savefig.pad_inches": 0.035,
             "axes.spines.top": False,
             "axes.spines.right": False,
             "axes.axisbelow": True,
+            "axes.unicode_minus": False,
             "pdf.fonttype": 42,
             "ps.fonttype": 42,
             "svg.fonttype": "none",
@@ -494,6 +521,17 @@ def save_figure(fig: plt.Figure, path: Path, *, tight: bool = True) -> Path:
     }
     fig.savefig(path, **save_kwargs)
     if path.suffix.lower() == ".png":
+        with Image.open(path) as image:
+            if image.mode == "RGBA":
+                alpha = image.getchannel("A")
+                flattened = Image.new("RGB", image.size, "white")
+                flattened.paste(image.convert("RGB"), mask=alpha)
+                flattened.save(
+                    path,
+                    format="PNG",
+                    dpi=(600, 600),
+                    optimize=True,
+                )
         for suffix in (".pdf", ".svg"):
             fig.savefig(
                 path.with_suffix(suffix),

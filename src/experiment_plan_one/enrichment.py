@@ -4,6 +4,7 @@ from __future__ import annotations
 
 import shutil
 import subprocess
+import textwrap
 from pathlib import Path
 from typing import Any
 
@@ -102,14 +103,48 @@ def _plot_enrichment(frame: pd.DataFrame, output: Path, title: str) -> None:
         np.arange(len(values)),
         s=size,
         c=negative_log10,
-        cmap="YlOrRd",
-        edgecolors="white",
-        linewidths=0.6,
+        cmap="cividis",
+        edgecolors="#25313d",
+        linewidths=0.35,
     )
     ax.set_yticks(np.arange(len(values)))
-    ax.set_yticklabels(values["Description"].astype(str), fontsize=5.8)
+    ax.set_yticklabels(
+        [
+            textwrap.fill(str(value), width=48)
+            for value in values["Description"].astype(str)
+        ],
+        fontsize=6.8,
+    )
     ax.invert_yaxis()
     ax.set_xlabel("-log10(adjusted P)")
+    ax.grid(axis="x", color="#dfe5ea", linewidth=0.6, alpha=0.8)
+    unique_counts = sorted({int(value) for value in count if pd.notna(value)})
+    legend_counts = unique_counts[:4]
+    if len(unique_counts) > 4:
+        legend_counts.append(unique_counts[-1])
+    handles = [
+        ax.scatter(
+            [],
+            [],
+            s=30 + 14 * value,
+            facecolors="none",
+            edgecolors="#53606c",
+            linewidths=0.8,
+            label=str(value),
+        )
+        for value in legend_counts
+    ]
+    if handles:
+        ax.legend(
+            handles=handles,
+            title="Gene count",
+            loc="lower right",
+            frameon=False,
+            fontsize=6.5,
+            title_fontsize=7,
+            labelspacing=0.8,
+            borderpad=0.2,
+        )
     ax.set_title(title, fontweight="bold")
     fig.colorbar(scatter, ax=ax, label="-log10(FDR)", shrink=0.7)
     save_figure(fig, output)

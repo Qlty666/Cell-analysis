@@ -524,6 +524,19 @@ python scripts\run_experiment_plan_one.py --stage report --skip-stage md
   不同；gmx_MMPBSA 与 R CellChat 当前未安装，论文中必须记录这些偏差或
   更换到方案指定版本。
 
+已有结果可在不重跑模型、MPBSA 或原始数据处理的情况下重新排版：
+
+```powershell
+python scripts\optimize_experiment_plan_figures.py `
+  --result-root <RESULT_ROOT> `
+  --output-dir <RESULT_ROOT>\10_reports\optimized_figures
+```
+
+该命令只读取原始 CSV/JSON/PDB/ROC 数据，把能够从源数据重建的 Panel
+用统一字体、配色、标签避让、诚实面积/缺失值表达和横向色条重绘；无法重建
+的 Panel 原样复制。原始结果和原始图片不被覆盖，优化结果写入独立目录，并
+生成 `figure_optimization_manifest.json`。
+
 ### 4.2 虚拟筛选命令行
 
 先初始化工作目录：

@@ -464,12 +464,20 @@ def candidate_heatmap(
     image = ax.imshow(selected.to_numpy(), aspect="auto", cmap="RdBu_r", vmin=-2, vmax=2)
     ax.set_xticks(np.arange(selected.shape[1]))
     if selected.shape[1] <= 32:
-        ax.set_xticklabels(selected.columns, rotation=90, fontsize=5.5)
+        if selected.shape[1] <= 20:
+            ax.set_xticklabels(
+                selected.columns,
+                rotation=90,
+                fontsize=6.2,
+            )
+        else:
+            ax.set_xticklabels([])
+            ax.set_xlabel("Samples ordered within condition")
     else:
         ax.set_xticklabels([])
         ax.set_xlabel("Samples ordered within condition")
     ax.set_yticks(np.arange(selected.shape[0]))
-    ax.set_yticklabels(selected.index, fontsize=6)
+    ax.set_yticklabels(selected.index, fontsize=7)
     boundaries = []
     last = None
     for index, group in enumerate(metadata[condition_column].astype(str)):
@@ -490,7 +498,7 @@ def candidate_heatmap(
         loc="upper left",
         bbox_to_anchor=(1.01, 1),
         frameon=False,
-        fontsize=5.5,
+        fontsize=6.5,
     )
     ax.set_title("Candidate-gene expression in GSE89632")
     fig.colorbar(image, ax=ax, shrink=0.4, label="Row z-score")
@@ -529,12 +537,21 @@ def validation_boxplots(
             raise ValueError(f"expected two conditions, got {conditions}")
         comparisons = (conditions[0], conditions[1])
     labels = [comparisons[0], comparisons[1]]
+    display_labels = [
+        {
+            "mild_fibrosis": "Mild\nfibrosis",
+            "advanced_fibrosis": "Advanced\nfibrosis",
+            "adjacent_normal": "Adjacent\nnormal",
+            "tumor": "Tumor",
+        }.get(str(label), str(label).replace("_", " "))
+        for label in labels
+    ]
     n_cols = min(3, len(wanted))
     n_rows = math.ceil(len(wanted) / n_cols)
     fig, axes = plt.subplots(
         n_rows,
         n_cols,
-        figsize=(7.2, 2.9 * n_rows),
+        figsize=(7.2, 3.15 * n_rows),
         squeeze=False,
     )
     rows: list[dict[str, Any]] = []
@@ -557,13 +574,14 @@ def validation_boxplots(
                 )
         ax.boxplot(
             [values.to_numpy() for values in values_by_group],
-            labels=labels,
+            labels=display_labels,
             showfliers=False,
             widths=0.55,
             patch_artist=True,
             boxprops={"facecolor": "#eef2f7", "edgecolor": "#52606d"},
             medianprops={"color": "#1f2933"},
         )
+        ax.grid(axis="y", color="#dfe5ea", linewidth=0.6, alpha=0.8)
         if len(values_by_group[0]) >= 2 and len(values_by_group[1]) >= 2:
             stat, p_value = stats.mannwhitneyu(
                 values_by_group[0],
@@ -583,10 +601,10 @@ def validation_boxplots(
                 "p_value": p_value,
             }
         )
-        ax.set_title(gene, fontsize=7, fontweight="bold")
-        ax.set_ylabel("Expression", fontsize=6)
-        ax.tick_params(axis="x", rotation=25, labelsize=5.5)
-        ax.tick_params(axis="y", labelsize=5.5)
+        ax.set_title(gene, fontsize=8.2, fontweight="bold")
+        ax.set_ylabel("Expression", fontsize=7)
+        ax.set_xticklabels(display_labels, rotation=0, fontsize=7)
+        ax.tick_params(axis="y", labelsize=6.5)
         p_text = "NA" if not np.isfinite(p_value) else f"p={p_value:.3g}"
         ax.text(
             0.98,
@@ -595,7 +613,7 @@ def validation_boxplots(
             transform=ax.transAxes,
             ha="right",
             va="top",
-            fontsize=5.5,
+            fontsize=6.5,
         )
     for index in range(len(wanted), n_rows * n_cols):
         axes.flat[index].axis("off")

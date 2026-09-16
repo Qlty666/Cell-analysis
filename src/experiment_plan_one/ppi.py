@@ -14,9 +14,8 @@ import matplotlib.patheffects as path_effects
 import networkx as nx
 import numpy as np
 import pandas as pd
-from matplotlib import cm
 
-from .common import LOG, ensure_dir, save_figure, write_json
+from .common import FIGURE_PALETTE, LOG, ensure_dir, save_figure, write_json
 from .targets import make_venn_figure
 
 STRING_NETWORK_URL = "https://string-db.org/api/tsv/network"
@@ -271,6 +270,11 @@ def _draw_network(
     position = nx.spring_layout(graph, seed=42, weight="weight", k=1.2 / np.sqrt(max(graph.number_of_nodes(), 1)))
     degree = dict(graph.degree())
     focus_genes = set(focus_genes or ())
+    label_genes = focus_genes
+    if "degree" in metrics.columns:
+        label_genes = focus_genes & set(
+            metrics.nlargest(min(8, len(metrics)), "degree")["gene"].astype(str)
+        )
     sizes = [180 + 42 * degree.get(node, 0) for node in graph.nodes()]
     if node_color is None:
         module_column = (
@@ -286,9 +290,8 @@ def _draw_network(
             for module, count in pd.Series(module_values).value_counts().items()
             if module == "Other" or count >= 3
         ][:10]
-        palette = cm.get_cmap("tab20", max(len(modules), 1))
         color_map = {
-            module: palette(index)
+            module: FIGURE_PALETTE[index % len(FIGURE_PALETTE)]
             for index, module in enumerate(modules)
         }
         colors = [
@@ -320,7 +323,7 @@ def _draw_network(
         position,
         ax=ax,
         width=widths,
-        alpha=0.42,
+        alpha=0.28,
         edge_color="#66737f",
     )
     node_order = list(graph.nodes())
@@ -335,6 +338,7 @@ def _draw_network(
                 nodelist=background,
                 node_size=[sizes[node_order.index(node)] for node in background],
                 node_color="#aebac3",
+                alpha=0.42,
                 linewidths=0.5,
                 edgecolors="white",
             )
@@ -378,13 +382,13 @@ def _draw_network(
             linewidths=0.6,
             edgecolors="white",
         )
-    if focus_genes:
+    if label_genes:
         focus_texts = nx.draw_networkx_labels(
             graph,
             position,
             ax=ax,
-            labels={node: node for node in graph.nodes() if node in focus_genes},
-            font_size=6.8,
+            labels={node: node for node in graph.nodes() if node in label_genes},
+            font_size=7.5,
             font_family="Arial",
             font_weight="bold",
             font_color="#102b3d",
@@ -399,9 +403,9 @@ def _draw_network(
             loc="lower left",
             bbox_to_anchor=(0.0, -0.03),
             frameon=False,
-            fontsize=6,
+            fontsize=7,
         )
-    ax.set_title(title, fontsize=8, fontweight="bold")
+    ax.set_title(title, fontsize=9, fontweight="bold")
     ax.axis("off")
     save_figure(fig, output)
 
@@ -414,10 +418,41 @@ def _bar_rank(
     top_n: int,
 ) -> None:
     values = metrics.nlargest(top_n, column).sort_values(column, ascending=True)
-    fig, ax = plt.subplots(figsize=(7, max(4, len(values) * 0.3)))
-    colors = ["#c05640" if index < 5 else "#627d98" for index in range(len(values) - 1, -1, -1)]
-    ax.barh(values["gene"], values[column], color=colors)
+    top_genes = set(metrics.nlargest(min(5, len(metrics)), column)["gene"])
+    colors = [
+        "#D55E00" if gene in top_genes else "#627d98"
+        for gene in values["gene"]
+    ]
+    fig, ax = plt.subplots(figsize=(7, max(4, len(values) * 0.32)))
+    bars = ax.barh(
+        values["gene"],
+        values[column],
+        color=colors,
+        edgecolor="white",
+        linewidth=0.5,
+    )
+    maximum = float(values[column].max()) if len(values) else 0.0
+    for bar in bars:
+        ax.text(
+            float(bar.get_width()) + maximum * 0.015,
+            bar.get_y() + bar.get_height() / 2,
+            f"{float(bar.get_width()):.3g}",
+            ha="left",
+            va="center",
+            fontsize=6.5,
+        )
+    ax.set_xlim(0, maximum * 1.18 if maximum > 0 else 1.0)
     ax.set_xlabel(title)
     ax.set_ylabel("")
+    ax.grid(axis="x", color="#dfe5ea", linewidth=0.6, alpha=0.8)
+    ax.legend(
+        handles=[
+            plt.Line2D([0], [0], color="#D55E00", lw=6, label="Top 5"),
+            plt.Line2D([0], [0], color="#627d98", lw=6, label="Remaining"),
+        ],
+        frameon=False,
+        loc="lower right",
+        fontsize=6.5,
+    )
     ax.set_title(f"{title}: Top {min(top_n, len(values))}", fontweight="bold")
     save_figure(fig, output)

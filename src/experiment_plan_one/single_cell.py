@@ -513,7 +513,22 @@ def _plot_marker_dotplot(
         figsize=(7.2, max(4.2, frame["cell_type"].nunique() * 0.42))
     )
     cell_order = sorted(frame["cell_type"].unique())
-    gene_order = list(dict.fromkeys(frame["gene"]))
+    gene_order: list[str] = []
+    for marker_group in marker_sets:
+        marker_group_genes = [
+            gene
+            for gene in frame["gene"].drop_duplicates().astype(str)
+            if gene in {
+                str(value)
+                for value in _resolve_genes(data.var_names, marker_sets[marker_group])
+            }
+        ]
+        for gene in marker_group_genes[:3]:
+            if gene not in gene_order:
+                gene_order.append(gene)
+    frame = frame[frame["gene"].isin(gene_order)].copy()
+    if frame.empty:
+        return
     x = {gene: index for index, gene in enumerate(gene_order)}
     y = {cell: index for index, cell in enumerate(cell_order)}
     ax.scatter(
@@ -521,14 +536,14 @@ def _plot_marker_dotplot(
         [y[cell] for cell in frame["cell_type"]],
         s=np.clip(frame["pct_expression"] * 1.5, 4, 150),
         c=frame["mean_expression"],
-        cmap="YlOrRd",
-        edgecolors="white",
+        cmap="cividis",
+        edgecolors="#2f3a45",
         linewidths=0.3,
     )
     ax.set_xticks(range(len(gene_order)))
-    ax.set_xticklabels(gene_order, rotation=90, fontsize=6.2)
+    ax.set_xticklabels(gene_order, rotation=50, ha="right", fontsize=6.5)
     ax.set_yticks(range(len(cell_order)))
-    ax.set_yticklabels(cell_order, fontsize=6)
+    ax.set_yticklabels(cell_order, fontsize=6.5)
     ax.set_xlabel("Canonical marker gene")
     ax.set_ylabel("Cell type")
     ax.set_title("Canonical marker expression", fontweight="bold")
@@ -545,6 +560,7 @@ def _plot_core_violin(gene_expression: pd.DataFrame, output: Path) -> None:
         len(genes),
         figsize=(7.2, 3.6),
         squeeze=False,
+        sharey=True,
     )
     for index, gene in enumerate(genes):
         ax = axes.flat[index]
@@ -580,10 +596,11 @@ def _plot_feature_grid(data: ad.AnnData, genes: list[str], output: Path) -> None
     for ax, gene in zip(axes.flat, genes):
         values = _expression_vector(data, gene)
         points = ax.scatter(coords[:, 0], coords[:, 1], c=values, s=4, cmap="viridis", linewidths=0)
-        ax.set_title(gene)
+        ax.set_title(gene, fontsize=8.2, fontweight="bold")
         ax.set_xlabel("UMAP1")
         ax.set_ylabel("UMAP2")
-        fig.colorbar(points, ax=ax, shrink=0.7)
+        colorbar = fig.colorbar(points, ax=ax, shrink=0.72, pad=0.02)
+        colorbar.ax.tick_params(labelsize=6)
     save_figure(fig, output)
 
 
@@ -611,7 +628,7 @@ def _plot_composition(composition: pd.DataFrame, output: Path) -> None:
         loc="upper center",
         ncol=2,
         frameon=False,
-        fontsize=6,
+        fontsize=7,
     )
     save_figure(fig, output)
 
@@ -844,7 +861,7 @@ def _plot_cell_communication(
     selected = frame.drop_duplicates(
         subset=["pathway", "source", "target"],
         keep="first",
-    ).head(16)
+    ).head(10)
     graph = nx.DiGraph()
     for row in selected.itertuples(index=False):
         source = str(row.source)
@@ -903,7 +920,7 @@ def _plot_cell_communication(
                 "arrowstyle": "-|>",
                 "color": data["color"],
                 "linewidth": data["width"],
-                "alpha": 0.55,
+                "alpha": 0.38,
                 "connectionstyle": "arc3,rad=0.08",
             },
         )
@@ -911,10 +928,16 @@ def _plot_cell_communication(
         graph,
         position,
         labels={
-            node: node.replace("P:", "")[:28]
+            node: node.replace("P:", "")[:24]
             for node in graph.nodes
+            if not node.startswith("P:")
+            or node.replace("P:", "")
+            in set(
+                str(value).replace("P:", "")
+                for value in pathway_nodes[:5]
+            )
         },
-        font_size=6.2,
+        font_size=6.8,
         font_family="Arial",
         font_color="#1f2933",
         ax=ax,
@@ -927,7 +950,7 @@ def _plot_cell_communication(
         plt.Line2D([0], [0], color="#c05b4d", lw=3, label="HFD > NCD"),
         plt.Line2D([0], [0], color="#4f7fa8", lw=3, label="HFD < NCD"),
     ]
-    ax.legend(handles=handles, loc="upper right", frameon=False)
+    ax.legend(handles=handles, loc="upper right", frameon=False, fontsize=7)
     ax.set_title(
         "Ligand-receptor communication network (CellChat-like scoring)",
         fontweight="bold",
@@ -1242,7 +1265,13 @@ def _plot_human_core_genes(expression: pd.DataFrame, output: Path) -> None:
         "Core-gene expression shifts across human MASLD stages",
         fontweight="bold",
     )
-    colorbar = fig.colorbar(image, ax=ax, shrink=0.72, pad=0.02)
+    colorbar = fig.colorbar(
+        image,
+        ax=ax,
+        location="bottom",
+        shrink=0.82,
+        pad=0.13,
+    )
     colorbar.set_label("Median expression difference vs Healthy")
     ax.text(
         1.0,

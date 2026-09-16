@@ -582,9 +582,18 @@ def _write_interaction_figure(target_dir: Path, output: Path, gene: str) -> None
     if contacts.empty:
         ax.text(0.5, 0.42, "No contact within 4.5 A", ha="center", transform=ax.transAxes)
     else:
-        top = contacts.sort_values(
-            ["interaction_type", "distance_angstrom"]
-        ).head(18)
+        top = (
+            contacts.sort_values("distance_angstrom")
+            .groupby("interaction_type", group_keys=False)
+            .head(5)
+            .sort_values(
+                [
+                    "interaction_type",
+                    "distance_angstrom",
+                ]
+            )
+            .head(18)
+        )
         type_colors = {
             "hydrogen_bond": "#2f6bb3",
             "hydrophobic": "#d29b32",
@@ -603,17 +612,18 @@ def _write_interaction_figure(target_dir: Path, output: Path, gene: str) -> None
                 xytext=(x, y),
                 ha="center",
                 va="center",
-                fontsize=6.8,
+                fontsize=7.3,
                 arrowprops={
                     "arrowstyle": "-",
                     "color": type_colors.get(interaction, "#7b8794"),
-                    "lw": 1.0,
+                    "lw": 1.35,
                 },
                 bbox={
                     "boxstyle": "round,pad=0.3",
                     "facecolor": "white",
                     "edgecolor": type_colors.get(interaction, "#a7b1bb"),
                 },
+                zorder=6,
                 xycoords=ax.transAxes,
                 textcoords=ax.transAxes,
             )
@@ -633,7 +643,7 @@ def _write_interaction_figure(target_dir: Path, output: Path, gene: str) -> None
                 handles=handles,
                 loc="lower left",
                 frameon=False,
-                fontsize=7,
+                fontsize=7.2,
             )
     ax.text(
         0.5,
@@ -642,7 +652,7 @@ def _write_interaction_figure(target_dir: Path, output: Path, gene: str) -> None
         "can be used for orthogonal review.",
         ha="center",
         va="bottom",
-        fontsize=7.5,
+        fontsize=7.8,
         color="#5d6670",
         transform=ax.transAxes,
     )
@@ -686,7 +696,7 @@ def _write_docking_pose_figure(target_dir: Path, output: Path, gene: str) -> Non
                 ]
             except ValueError:
                 continue
-            if np.linalg.norm(np.asarray(coordinate) - ligand.mean(axis=0)) <= 18.0:
+            if np.linalg.norm(np.asarray(coordinate) - ligand.mean(axis=0)) <= 12.0:
                 protein_atoms.append(
                     {
                         "coordinate": np.asarray(coordinate),
@@ -701,7 +711,7 @@ def _write_docking_pose_figure(target_dir: Path, output: Path, gene: str) -> Non
                     }
                 )
     protein = np.asarray([atom["coordinate"] for atom in protein_atoms])
-    fig = plt.figure(figsize=(6.4, 5.8))
+    fig = plt.figure(figsize=(6.6, 5.6))
     ax = fig.add_subplot(111, projection="3d")
     if protein.size:
         ax.scatter(
@@ -765,7 +775,7 @@ def _write_docking_pose_figure(target_dir: Path, output: Path, gene: str) -> Non
     pocket = _receptor_contacts(receptor, ligand, cutoff=4.5)
     if not pocket.empty:
         labels = []
-        for row in pocket.head(8).itertuples(index=False):
+        for row in pocket.head(3).itertuples(index=False):
             labels.append(f"{row.residue}{row.residue_number}")
             match = next(
                 (
@@ -783,14 +793,14 @@ def _write_docking_pose_figure(target_dir: Path, output: Path, gene: str) -> Non
                     coordinate[1],
                     coordinate[2],
                     f"{row.residue}{row.residue_number}",
-                    fontsize=6.5,
+        fontsize=7,
                     color="#39424c",
                 )
         fig.text(
             0.02,
             0.02,
             "Pocket residues: " + ", ".join(labels),
-            fontsize=7,
+            fontsize=7.5,
             color="#5d6670",
         )
     ligand_handle = plt.Line2D(
@@ -809,11 +819,27 @@ def _write_docking_pose_figure(target_dir: Path, output: Path, gene: str) -> Non
         linewidth=1.4,
         label="Protein backbone trace",
     )
-    ax.set_xlabel("x (Angstrom)")
-    ax.set_ylabel("y (Angstrom)")
-    ax.set_zlabel("z (Angstrom)")
-    ax.set_title(f"{gene}-6PPD-Q best docking pose", fontweight="bold")
-    ax.legend(handles=[protein_handle, ligand_handle], loc="upper right")
+    ax.set_xlabel("x (Angstrom)", labelpad=2)
+    ax.set_ylabel("y (Angstrom)", labelpad=2)
+    ax.set_zlabel("z (Angstrom)", labelpad=2)
+    ax.set_title(f"{gene}-6PPD-Q best docking pose", fontweight="bold", pad=8)
+    ax.set_box_aspect((1.0, 1.0, 0.82))
+    ax.grid(False)
+    if ligand.size:
+        center = ligand.mean(axis=0)
+        radius = max(4.5, float(np.ptp(ligand, axis=0).max()) * 0.9)
+        if protein.size:
+            distances = np.linalg.norm(protein - center, axis=1)
+            radius = max(radius, float(np.percentile(distances, 92)) + 1.5)
+        ax.set_xlim(center[0] - radius, center[0] + radius)
+        ax.set_ylim(center[1] - radius, center[1] + radius)
+        ax.set_zlim(center[2] - radius, center[2] + radius)
+    ax.legend(
+        handles=[protein_handle, ligand_handle],
+        loc="upper right",
+        frameon=False,
+        fontsize=7,
+    )
     ax.view_init(elev=18, azim=42)
     save_figure(fig, output)
 

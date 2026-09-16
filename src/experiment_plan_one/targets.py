@@ -226,35 +226,54 @@ def write_compound_figures(
     fig, axes = plt.subplots(
         1,
         2,
-        figsize=(7.2, 4.4),
-        gridspec_kw={"width_ratios": [1.12, 0.88]},
+        figsize=(7.4, 5.2),
+        gridspec_kw={"width_ratios": [1.08, 0.92]},
     )
     with Image.open(path_3d) as image:
         axes[0].imshow(image)
     axes[0].axis("off")
     axes[0].set_title("6PPD-Q 3D conformer", fontsize=10, fontweight="bold")
     axes[1].axis("off")
-    y = 0.96
-    for label, value, unit in values:
-        shown = "NA" if value is None else f"{float(value):.3g}"
-        axes[1].text(0.0, y, label, ha="left", va="top", fontsize=8.5)
-        axes[1].text(
-            1.0,
-            y,
-            f"{shown} {unit}".strip(),
-            ha="right",
-            va="top",
-            fontsize=8.5,
-            fontweight="bold",
-        )
-        y -= 0.115
+    table_rows = [
+        [
+            str(label),
+            (
+                "NA"
+                if value is None
+                else f"{float(value):.3g} {unit}".strip()
+            ),
+        ]
+        for label, value, unit in values
+    ]
+    property_table = axes[1].table(
+        cellText=table_rows,
+        colLabels=["Physicochemical property", "Value"],
+        cellLoc="left",
+        colLoc="left",
+        colWidths=[0.68, 0.32],
+        bbox=[0.0, 0.03, 0.98, 0.93],
+    )
+    property_table.auto_set_font_size(False)
+    property_table.set_fontsize(8.8)
+    for (row, column), cell in property_table.get_celld().items():
+        cell.set_edgecolor("#d8dee4")
+        cell.set_linewidth(0.45)
+        if row == 0:
+            cell.set_facecolor("#edf2f6")
+            cell.get_text().set_fontweight("bold")
+        elif row % 2 == 0:
+            cell.set_facecolor("#f8fafb")
+        if column == 1:
+            cell.get_text().set_ha("right")
+            if row > 0:
+                cell.get_text().set_fontweight("bold")
     axes[1].text(
         0.0,
-        0.02,
+        -0.01,
         "Local RDKit descriptors",
         ha="left",
         va="bottom",
-        fontsize=7,
+        fontsize=7.5,
         color="#5d6670",
     )
     fig.tight_layout()
@@ -1459,7 +1478,7 @@ def make_venn_figure(
     title: str,
 ) -> Path:
     """Draw a publication-readable 2- or 3-set Venn-like diagram."""
-    from matplotlib.patches import Circle
+    from matplotlib.patches import Ellipse
 
     labels = list(sets)[:3]
     values = [sets[label] for label in labels]
@@ -1469,9 +1488,12 @@ def make_venn_figure(
     ax.set_aspect("equal")
     ax.axis("off")
     colors = ["#2f6bb3", "#e07a3f", "#4d9b6a"]
+    sizes = np.asarray([len(value) for value in values], dtype=float)
+    normalized = np.sqrt(sizes / max(float(sizes.max()), 1.0))
+    widths = 1.35 + 1.15 * normalized
+    heights = widths
     if len(values) == 2:
         centers = [(-0.55, 0.0), (0.55, 0.0)]
-        radius = 1.1
         regions = {
             ("A",): len(values[0] - values[1]),
             ("B",): len(values[1] - values[0]),
@@ -1488,7 +1510,6 @@ def make_venn_figure(
             (-0.95, -0.55),
             (0.95, -0.55),
         ]
-        radius = 1.28
         regions = _venn_counts(values)
         positions = {
             "A": (-1.55, 1.2),
@@ -1499,16 +1520,54 @@ def make_venn_figure(
             "BC": (0.0, -1.1),
             "ABC": (0.0, 0.1),
         }
-    for center, color in zip(centers, colors):
+    for center, color, width, height in zip(
+        centers,
+        colors,
+        widths,
+        heights,
+    ):
         ax.add_patch(
-            Circle(center, radius, facecolor=color, edgecolor=color, alpha=0.15, linewidth=2)
+            Ellipse(
+                center,
+                width=float(width),
+                height=float(height),
+                facecolor=color,
+                edgecolor=color,
+                alpha=0.18,
+                linewidth=1.8,
+            )
         )
     for key, count in regions.items():
         x, y = positions.get(key, (0, 0))
-        ax.text(x, y, str(count), ha="center", va="center", fontsize=12, fontweight="bold")
-    for (x, y), label in zip(centers, labels):
-        ax.text(x, y + radius + 0.12, label, ha="center", va="bottom", fontsize=10)
+        ax.text(
+            x,
+            y,
+            str(count),
+            ha="center",
+            va="center",
+            fontsize=11,
+            fontweight="bold",
+        )
+    for (x, y), label, height in zip(centers, labels, heights):
+        ax.text(
+            x,
+            y + float(height) / 2 + 0.12,
+            label,
+            ha="center",
+            va="bottom",
+            fontsize=9.5,
+            fontweight="bold",
+        )
     ax.set_title(title, fontsize=12, fontweight="bold")
+    ax.text(
+        0.0,
+        -2.15,
+        "Region counts are exact; ellipse areas are illustrative.",
+        ha="center",
+        va="bottom",
+        fontsize=8,
+        color="#4a5560",
+    )
     ax.set_xlim(-2.3, 2.3)
     ax.set_ylim(-2.1, 2.4)
     output.parent.mkdir(parents=True, exist_ok=True)
@@ -1521,17 +1580,17 @@ def make_workflow_figure(output: Path) -> Path:
     from matplotlib.patches import FancyArrowPatch, FancyBboxPatch
 
     boxes = [
-        (0.04, 0.66, 0.20, 0.17, "6PPD-Q\nstructure + target prediction", "#dbe8f0"),
-        (0.29, 0.66, 0.20, 0.17, "NAFLD\npublic target sets", "#e8e1d0"),
-        (0.54, 0.66, 0.17, 0.17, "Intersection\ncandidate targets", "#dce8dc"),
+        (0.04, 0.66, 0.20, 0.17, "6PPD-Q\ntarget prediction", "#dbe8f0"),
+        (0.29, 0.66, 0.20, 0.17, "NAFLD\ntarget sets", "#e8e1d0"),
+        (0.54, 0.66, 0.17, 0.17, "Candidate\nintersection", "#dce8dc"),
         (0.76, 0.66, 0.20, 0.17, "STRING PPI\nhub ranking", "#e6ddec"),
-        (0.10, 0.33, 0.22, 0.17, "Bulk microarray\ntraining and validation", "#dbe8f0"),
+        (0.10, 0.33, 0.22, 0.17, "Bulk\ntraining + validation", "#dbe8f0"),
         (0.39, 0.33, 0.22, 0.17, "11-model CV\n+ SHAP", "#e8e1d0"),
-        (0.68, 0.33, 0.22, 0.17, "Mouse scRNA\n+ human snRNA", "#dce8dc"),
-        (0.24, 0.05, 0.22, 0.15, "Molecular docking\nVina", "#e6ddec"),
-        (0.54, 0.05, 0.22, 0.15, "100 ns MD\n+ MM-PBSA prep", "#eadfdc"),
+        (0.68, 0.33, 0.22, 0.17, "Single-cell\nvalidation", "#dce8dc"),
+        (0.24, 0.05, 0.22, 0.15, "Vina\ndocking", "#e6ddec"),
+        (0.54, 0.05, 0.22, 0.15, "100 ns MD\n+ MM-PBSA", "#eadfdc"),
     ]
-    fig, ax = plt.subplots(figsize=(7.2, 5.4))
+    fig, ax = plt.subplots(figsize=(7.4, 5.8))
     ax.set_xlim(0, 1)
     ax.set_ylim(0, 1)
     ax.axis("off")
@@ -1553,7 +1612,7 @@ def make_workflow_figure(output: Path) -> Path:
             label,
             ha="center",
             va="center",
-            fontsize=6.4,
+            fontsize=8.2,
         )
         centers[index] = (x + width / 2, y + height / 2)
     arrows = [
@@ -1579,12 +1638,46 @@ def make_workflow_figure(output: Path) -> Path:
             mutation_scale=12,
             linewidth=1.1,
             color="#7b8794",
-            connectionstyle="arc3,rad=0.08",
+            connectionstyle="arc3,rad=0.04",
             shrinkA=35,
             shrinkB=35,
         )
         ax.add_patch(arrow)
-    ax.set_title("Experiment plan one computational workflow", fontsize=13, fontweight="bold")
+    ax.text(
+        0.02,
+        0.94,
+        "Target discovery",
+        ha="left",
+        va="center",
+        fontsize=8.5,
+        fontweight="bold",
+        color="#4a5560",
+    )
+    ax.text(
+        0.02,
+        0.61,
+        "Modeling and validation",
+        ha="left",
+        va="center",
+        fontsize=8.5,
+        fontweight="bold",
+        color="#4a5560",
+    )
+    ax.text(
+        0.02,
+        0.29,
+        "Structural simulation",
+        ha="left",
+        va="center",
+        fontsize=8.5,
+        fontweight="bold",
+        color="#4a5560",
+    )
+    ax.set_title(
+        "Experiment plan one computational workflow",
+        fontsize=13.5,
+        fontweight="bold",
+    )
     output.parent.mkdir(parents=True, exist_ok=True)
     save_figure(fig, output)
     return output

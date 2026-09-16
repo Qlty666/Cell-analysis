@@ -745,24 +745,27 @@ def _plot_auc_heatmap(performance: pd.DataFrame, output: Path) -> None:
     if frame.empty:
         return
     matrix = frame.pivot(index="feature_set", columns="model", values="cv_auc_mean")
-    fig, ax = plt.subplots(figsize=(7.2, max(3.8, matrix.shape[0] * 0.7)))
-    image = ax.imshow(matrix.to_numpy(), cmap="YlGnBu", vmin=0.5, vmax=1.0)
+    fig, ax = plt.subplots(figsize=(7.6, max(4.0, matrix.shape[0] * 0.72)))
+    image = ax.imshow(matrix.to_numpy(), cmap="cividis", vmin=0.5, vmax=1.0)
     ax.set_xticks(np.arange(matrix.shape[1]))
-    ax.set_xticklabels(matrix.columns, rotation=45, ha="right", fontsize=5.8)
+    ax.set_xticklabels(matrix.columns, rotation=60, ha="right", fontsize=6.5)
     ax.set_yticks(np.arange(matrix.shape[0]))
-    ax.set_yticklabels(matrix.index, fontsize=6)
+    ax.set_yticklabels(matrix.index, fontsize=6.8)
     for row in range(matrix.shape[0]):
         for column in range(matrix.shape[1]):
             value = matrix.iloc[row, column]
             if pd.notna(value):
+                color_value = float(np.clip((value - 0.5) / 0.5, 0.0, 1.0))
+                red, green, blue, _ = plt.get_cmap("cividis")(color_value)
+                luminance = 0.2126 * red + 0.7152 * green + 0.0722 * blue
                 ax.text(
                     column,
                     row,
                     f"{value:.2f}",
                     ha="center",
                     va="center",
-                    fontsize=6.5,
-                    color="white" if value >= 0.82 else "#1f2933",
+                    fontsize=7,
+                    color="white" if luminance < 0.46 else "#101820",
                 )
     ax.set_title("Repeated cross-validated AUC", fontweight="bold")
     fig.colorbar(image, ax=ax, label="AUC", shrink=0.7)
@@ -790,7 +793,7 @@ def _plot_calibration(
     observed, predicted = calibration_curve(
         y,
         probability,
-        n_bins=min(8, max(3, len(y) // 7)),
+        n_bins=min(6, max(3, len(y) // 8)),
         strategy="quantile",
     )
     hl_p = _hosmer_lemeshow(y, probability)
@@ -812,7 +815,7 @@ def _plot_calibration(
         transform=ax.transAxes,
         ha="left",
         va="top",
-        fontsize=8,
+        fontsize=8.2,
     )
     ax.legend(frameon=False)
     save_figure(fig, output)
@@ -1069,12 +1072,19 @@ def _fallback_importance(model: Pipeline, X: pd.DataFrame) -> pd.DataFrame:
 
 
 def _shap_bar(importance: pd.DataFrame, output: Path) -> None:
-    top = importance.head(20).sort_values("mean_abs_shap", ascending=True)
-    fig, ax = plt.subplots(figsize=(6.4, max(4, len(top) * 0.32)))
-    ax.barh(top["gene"], top["mean_abs_shap"], color="#b24c3c")
+    top = importance.head(15).sort_values("mean_abs_shap", ascending=True)
+    fig, ax = plt.subplots(figsize=(6.6, max(4.2, len(top) * 0.38)))
+    ax.barh(
+        top["gene"],
+        top["mean_abs_shap"],
+        color="#D55E00",
+        edgecolor="white",
+        linewidth=0.4,
+    )
     ax.set_xlabel("Mean |SHAP value|")
     ax.set_ylabel("")
     ax.set_title("Global feature importance", fontweight="bold")
+    ax.grid(axis="x", color="#dfe5ea", linewidth=0.6, alpha=0.8)
     save_figure(fig, output)
 
 
@@ -1091,7 +1101,9 @@ def _shap_beeswarm(
             values,
             transformed,
             feature_names=feature_names,
-            max_display=20,
+            max_display=15,
+            alpha=0.65,
+            s=8,
             show=False,
             plot_size=(7.2, 6.2),
         )

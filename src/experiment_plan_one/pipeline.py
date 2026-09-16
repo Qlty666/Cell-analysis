@@ -39,6 +39,8 @@ from .bulk import (
 )
 from .common import (
     LOG,
+    FIGURE_PALETTE,
+    STATUS_COLORS,
     configure_logging,
     download_file,
     ensure_dir,
@@ -1993,25 +1995,81 @@ def _balanced_cell_sample(data: "ad.AnnData", max_cells: int, seed: int = 123) -
 
 def _plot_source_coverage(statuses: dict[str, Any], output: Path) -> None:
     names = list(statuses)
-    values = [1 if statuses[name].get("status") == "completed" else 0 for name in names]
-    fig, ax = plt.subplots(figsize=(6.6, 3.8))
-    ax.barh(names, values, color=["#4d9b6a" if value else "#c9ced4" for value in values])
+    fig, ax = plt.subplots(figsize=(6.6, max(3.2, 0.48 * len(names) + 0.7)))
     ax.set_xlim(0, 1)
-    ax.set_xticks([0, 1], ["unavailable/failed", "loaded"])
+    ax.set_ylim(-0.6, len(names) - 0.4)
+    ax.axis("off")
+    for row_index, name in enumerate(reversed(names)):
+        status = str(statuses[name].get("status") or "unknown")
+        count = statuses[name].get("count")
+        color = STATUS_COLORS.get(status, "#7A7A7A")
+        y = row_index
+        ax.scatter([0.05], [y], s=52, color=color, zorder=3)
+        ax.text(
+            0.11,
+            y,
+            str(name),
+            ha="left",
+            va="center",
+            fontsize=8.2,
+        )
+        status_label = status.replace("_", " ")
+        if count is not None:
+            status_label += f" ({int(count)} targets)"
+        ax.text(
+            0.98,
+            y,
+            status_label,
+            ha="right",
+            va="center",
+            fontsize=7.8,
+            color="#3f4b55",
+        )
+        ax.plot([0.03, 0.97], [y - 0.36, y - 0.36], color="#e1e6ea", lw=0.6)
     ax.set_title("Disease target source availability", fontweight="bold")
     save_figure(fig, output)
 
 
 def _plot_target_source_counts(sources: dict[str, set[str]], output: Path) -> None:
-    names = list(sources)
-    counts = [len(sources[name]) for name in names]
+    pairs = sorted(
+        ((name, len(genes)) for name, genes in sources.items()),
+        key=lambda item: (item[1], item[0]),
+    )
+    names = [pair[0] for pair in pairs]
+    counts = [pair[1] for pair in pairs]
     if not names:
         names = ["No source loaded"]
         counts = [0]
-    fig, ax = plt.subplots(figsize=(6.2, 3.6))
-    ax.barh(names, counts, color="#3f7f93")
+    fig, ax = plt.subplots(figsize=(6.2, max(3.0, 0.55 * len(names) + 1.0)))
+    colors = [
+        FIGURE_PALETTE[index % len(FIGURE_PALETTE)]
+        for index in range(len(names))
+    ]
+    bars = ax.barh(names, counts, color=colors, edgecolor="white", linewidth=0.6)
+    for bar, count in zip(bars, counts):
+        ax.text(
+            float(bar.get_width()) + max(counts, default=0) * 0.02,
+            bar.get_y() + bar.get_height() / 2,
+            str(count),
+            ha="left",
+            va="center",
+            fontsize=7.5,
+            fontweight="bold",
+        )
+    ax.set_xlim(0, max(max(counts, default=0) * 1.2, 1))
     ax.set_xlabel("Unique target genes")
     ax.set_title("Compound-target source coverage", fontweight="bold")
+    ax.text(
+        0,
+        -0.24,
+        "Only mapped human target genes are counted; unavailable sources are "
+        "listed separately in source-status files.",
+        transform=ax.transAxes,
+        ha="left",
+        va="top",
+        fontsize=7.2,
+        color="#4a5560",
+    )
     save_figure(fig, output)
 
 
