@@ -2,1499 +2,163 @@
 
 > 当前版本：1.7.1
 
-面向肝癌研究的本地生信自动化工作流，整合多条可实际运行的流水线：
+面向肝癌与肝病研究的本地生信自动化工作流。项目把表达谱分析、靶点证据整理、虚拟筛选、分子对接、分子动力学、结果报告和网页操作集中到同一套可复现流程中。
 
-- 表达谱分析（单细胞 / bulk RNA-seq / microarray 等）：GEO 数据下载、QC、差异表达、富集分析和 ML 可解释性分析；单细胞数据额外执行双细胞检测、聚类注释。
-- 虚拟筛选（CADD）：靶点证据收集、受体/配体准备、AutoDock Vina 并行对接、命中排序、精细重对接、ML/DL 重打分和 MD/外部工具交接。
-- 独立分子对接：单独运行受体/配体准备、AutoDock Vina 对接、结果分析、精细重对接和 HTML 报告，不依赖虚拟筛选的旁路分析。
-- 全自动集成流水线：从表达分析直接筛选关键基因/蛋白，再自动完成证据富集、虚拟敲除、虚拟筛选、MD/ML/工具交接、网络毒理学/FAERS 和细胞反馈，最终输出集成报告和湿实验验证方案。
-- 高级多队列分析：样本级与基因级数据识别、limma/ComBat、WGCNA、多模型机器学习、外部验证、免疫浸润/生存分析和本地 MR/共定位。
-- 多数据库证据中心：统一保存 Open Targets、ChEMBL、BindingDB、PubChem BioAssay、GWAS Catalog、ClinVar、GTEx、HPA 和 DepMap/本地快照等证据，输出覆盖率、来源消融稳定性和靶点优先级。
+支持单细胞、bulk RNA-seq、microarray 等表达数据，结果写入 `run_manifest.json`，记录配置、输入哈希、软件版本和运行参数。
 
-## 1. 项目解决什么问题
+## 功能
 
-表达谱分析和虚拟筛选通常依赖多个分散工具和手工流程，结果难以复现，也难以从“细胞图谱/样本表达谱”推进到“可干预靶点”。本项目把以下环节串成一条可检查、可断点续跑、可交付的本地链路：
-
-- GEO 表达数据从下载、QC、注释到差异表达与富集分析的完整分析链，支持单细胞、bulk RNA-seq、microarray 等表达数据。
-- 从显著差异基因中自动筛选关键基因/蛋白，并补充 UniProt、PDB、ChEMBL、BindingDB、PubChem、ChEBI、STRING、Reactome、Open Targets、PharmGKB、AlphaFold、KEGG 证据。
-- 对有 PDB 结构的靶点自动准备受体、收集已知配体并运行 AutoDock Vina 对接、命中排序和精细重对接。
-- 通过虚拟敲除对候选靶点做多维评分：表达差异、增殖共表达、共表达网络 hub、DepMap 依赖、疾病逆转、通路控制、细胞类型特异性、预后、成药性和脱靶风险。
-- 将排序后的候选靶点导出为分阶段湿实验验证方案（细胞系、类器官、药物剂量反应、动物模型、PDX）。
-- 每次运行写入 `run_manifest.json`，记录配置哈希、输入文件 SHA256、软件版本和本次参数，保证结果可复现、可追溯。
-
-## 2. 主要功能
-
-### 2.1 表达分析流水线（单细胞 / bulk RNA-seq / microarray 等）
-
-- 输入数据集编号（GEO `GSE125449`、ArrayExpress `E-MTAB-1234`、Expression Atlas 等），自动下载数据并识别常见格式（10x MTX、CSV、h5ad、loom、Series Matrix、逐样本 bulk 计数表）。
-- 内置 GSE125449 适配；支持 `--species hs/mm/auto`。
-- 单细胞数据执行 QC、双细胞检测（`scDblFinder`）、PCA/UMAP 聚类和细胞注释；bulk RNA-seq、microarray 等非单细胞数据按样本级表达矩阵运行，跳过双细胞与细胞级反馈。
-- 差异表达（DESeq2 pseudobulk 或 Seurat Wilcoxon 回退）与 GO/KEGG/GSEA 富集分析。
-- 按校正后 P 值排序输出差异最显著基因的横向小提琴图，并在图中标注 P 值。
-- QC 阶段计算并统计 `nFeature_RNA`、`nCount_RNA`、`percent.mt`、`percent.ribo`、`percent.hb`（血红蛋白，可发现红细胞污染），按条件做 Wilcoxon 秩和检验并输出 P 值图；默认对明显血红蛋白高占比细胞做 99% 分位数上限过滤，也可用 `LIVER_QC_MAX_HB` / `LIVER_QC_MAX_RIBO` 覆盖污染阈值。
-- QC 阶段输出 UMI 数与基因数关系散点图（`fig_49_qc_umi_feature_correlation.png`）及 raw/filtered 两阶段 log-log 回归统计，用于识别偏离主流关系的异常细胞并复核单变量过滤边界。
-- 报告生成器会对每个实际输出的结果图自动匹配同编号结果数据，生成“图 + 数据联合分析”，并输出独立 Markdown/JSON 分析报告（`result_analysis_report.md` / `result_analysis.json`）。
-- 可选 CellChat 细胞通讯分析（设置 `LIVER_RUN_CELLCHAT=yes`）。
-- ML 疾病分类（XGBoost 或 RandomForest）、特征重要性和 SHAP 解释。
-- 发表级分析：细胞周期打分与回归校正、聚类 marker 发现、功能签名打分、推断 CNV、SingleR 自动注释，以及可选 slingshot 拟时序。
-- 输出 50 余张分析图（当前单细胞流程代码共有 53 个图片保存点，部分按数据条件和环境变量可选）、HTML 总报告和“结果图 + 结果数据”联合分析报告，支持断点续跑、暂停/继续、停滞自动重启。
-- GO/KEGG 通路网络图按校正 P 值筛选后保留 Top5 核心通路，并延伸展示最佳 5 个通路，同时保留对应的 Top5 富集气泡图。
-
-新增分析可通过环境变量控制：
-
-| 环境变量 | 默认 | 说明 |
-| --- | --- | --- |
-| `LIVER_RUN_CELLCYCLE` | `yes` | 细胞周期打分与 UMAP/比例图 |
-| `LIVER_REGRESS_CELLCYCLE` | `no` | 在 ScaleData 时回归 S/G2M 得分 |
-| `LIVER_RUN_CLUSTER_MARKERS` | `yes` | `FindAllMarkers` 与聚类 marker 热图/DotPlot |
-| `LIVER_RUN_SIGNATURES` | `yes` | 增殖/EMT/缺氧/免疫检查点等签名打分 |
-| `LIVER_RUN_CNV` | `yes` | 基于染色体窗口均值的推断 CNV 热图 |
-| `LIVER_RUN_SINGLER` | `yes` | SingleR 参考注释与混淆矩阵 |
-| `LIVER_RUN_TRAJECTORY` | `no` | slingshot 拟时序轨迹（需安装 `slingshot`） |
-| `LIVER_DE_VIOLIN_TOP_N` | `12` | Top DEG 横向小提琴图展示的基因数 |
-| `LIVER_DE_VIOLIN_MAX_CELLS` | `1000` | 每个条件下用于该图的抽样细胞数 |
-| `LIVER_SKIP_GSEA` | `no` | 设为 `yes` 时跳过 GSEA GO/KEGG，避免大数据集富集阶段长时间运行 |
-| `LIVER_GSEA_MAX_GENES` | `0`（不限） | 限制参与 GSEA 的基因数，例如 `20000` 可显著缩短运行时间 |
-| `LIVER_ML_MODEL` | `xgb` | 表达分析 ML 模型：`xgb` / `rf` / `gbm` / `mlp` / `lasso_svm` |
-
-### 2.2 虚拟筛选（CADD）流水线
-
-| 命令 | 说明 |
+| 模块 | 主要内容 |
 | --- | --- |
-| `init` | 创建 docking 工作目录骨架和配置文件 |
-| `evidence` | 调用数据库 skill 收集靶点、通路和已知配体证据 |
-| `prepare-receptor` | 通过 Meeko/Open Babel/MGLTools 准备受体 PDBQT |
-| `prepare-ligands` | RDKit 标准化、3D 构象生成并输出 PDBQT |
-| `dock` | AutoDock Vina 并行对接，按配体写入结果，支持断点续跑 |
-| `analyze` | 按亲和力排序并输出 strong/moderate/weak 分级、阈值筛选、Tanimoto 多样性选择 |
-| `redock` | 对 Top 命中用更高 exhaustiveness 精细重对接 |
-| `ml-train` / `ml-predict` | 随机森林、GBDT、MLP、LASSO+SVM-RFE 或 PyTorch MLP 重打分 |
-| `md-simulation` | 把 Top 命中准备为 GROMACS 蛋白-配体复合物，执行 EM/NVT/NPT/生产模拟并输出 RMSD/RMSF、Rg、SASA、氢键与结合口袋 RMSF |
-| `export-md` / `export-external` | 导出 Amber/GROMACS 和 UniDock-Pro/HDOCK/HADDOCK 模板 |
-| `report` | 生成 HTML 汇总报告 |
-| `virtual-knockout` | 基因敲除优先级和多维靶点评分；传入 `--insilico-gene` 后调用官方 scTenifoldKnk（原始计数输入）并追加 UMAP 命运偏转、调控网络、GO/KEGG 与 HTML 报告 |
-| `network` | 化合物-疾病靶点交集、PPI hub、Venn 与 C-T-P-D 网络导出 |
-| `faers` | FAERS 风格 ROR/PRR/BCPNN/EBGM 不相称性信号检测 |
-| `export-validation` | 把排序后的靶点导出为湿实验验证方案 |
-| `cell-feedback` | 把虚拟敲除/对接结果返回 Seurat 单细胞对象做细胞级分析 |
-| `detect-box` | 从共晶配体自动检测对接盒并写回配置 |
-| `check-env` / `check-cadd` | 检查软件、库和数据库 skill 环境 |
-| `pipeline` | 按阶段执行准备、对接、分析、重对接、报告，支持断点续跑 |
+| 表达分析 | GEO、ArrayExpress、Expression Atlas 数据下载；QC、聚类、注释、差异表达、GO/KEGG/GSEA、ML/SHAP |
+| 全自动集成流水线 | 从表达分析筛选候选靶点，衔接证据排序、虚拟敲除、虚拟筛选、MD/ML 交接、网络毒理学、FAERS 和细胞反馈 |
+| 虚拟筛选与 CADD | 靶点证据、受体和配体准备、AutoDock Vina、命中排序、精细重对接、ML 重打分、MD 与外部工具导出 |
+| 独立分子对接 | 使用独立配置和工作目录运行受体/配体准备、Vina 对接、结果分析、精细重对接和 HTML 报告 |
+| 高级多队列分析 | limma/ComBat、WGCNA、多模型机器学习、外部验证、免疫浸润、生存分析与 MR/共定位 |
+| 多数据库证据中心 | 统一整理 Open Targets、ChEMBL、BindingDB、PubChem、GWAS Catalog、ClinVar、GTEx、HPA、DepMap 等证据 |
+| 网页端 | 任务启动、实时日志、暂停和继续、结果浏览、文件下载、环境检查与一键补全 |
 
-### 2.3 全自动集成流水线
+## 快速开始
 
-`scripts/run_full_pipeline.py` 把表达分析、候选靶点宇宙、多来源证据排序、启发式扰动评分、虚拟筛选和 CADD/安全性分析串成一条流水线：
+### 1. 安装环境
+
+Windows 新电脑推荐使用根目录脚本：
 
 ```text
-01 single_cell           GEO 表达分析（下载、QC、注释、差异表达、富集；bulk/microarray 等按样本级运行）
-02 key_targets           生成完整候选靶点宇宙，并保留兼容的关键基因 Top N 表
-03 evidence              结构/配体证据 + 多来源证据中心排序，输出覆盖率、来源消融和综合靶点优先级
-04 knockout_inputs       导出样本级伪 bulk 表达矩阵并生成敲除输入
-05 knockout              启发式扰动评分 + 证据整合靶点优先级 + 湿实验验证方案
-06 docking               对有 PDB 结构的靶点自动收集已知配体并跑 Vina 对接
-07 cadd_downstream       对成功对接靶点自动准备 GROMACS 输入、运行可选 MD、ML 重打分和 MD/外部工具导出
-08 network               网络毒理学（化合物-疾病靶点交集、PPI hub、Venn、C-T-P-D 网络与 Cytoscape XGMML/自动推送；无输入时自动跳过）
-09 faers                 FAERS 风格 ROR/PRR/BCPNN/EBGM 信号检测（无事件表时自动跳过）
-10 cell_feedback         把扰动评分/对接结果返回 Seurat 做细胞级反馈分析
-11 report                生成集成 HTML 报告和 run_manifest.json
+setup_new_computer.bat
+check_new_computer.bat
 ```
 
-每一阶段写标记文件，重跑时自动断点续跑；`--start-stage` 可从任意阶段开始。标记文件不再只是时间戳：每个阶段会记录配置和输入指纹（`signature`），当 `top_genes`、物种、标签、证据/对接配置、关键基因表或证据表发生变化时，会自动使当前阶段及下游阶段失效，避免“参数改了但结果仍是旧值”的静默错误。每个阶段完成后还会按 `STAGE_OUTPUTS` 校验必需输出，缺失或空文件不会写入完成标记。
+Linux/macOS 使用对应的 `.sh` 脚本。
 
-阶段 02 现在同时写出 `candidate_universe.csv` 和 `key_genes.csv`。前者不再被 `top_genes` 截断，默认 `candidate_universe_size=0` 保留全部符合筛选条件的 DEG，也可设置正整数限制候选池；后者保留旧的 Top N 接口。阶段 03 会把 `src/evidence` 的证据中心接入全流程，默认检索 `config/evidence_sources.json` 中启用的来源，并输出 `target_priority.csv`、`target_priority_summary.json`、`evidence_coverage.csv` 和 `source_ablation.csv`。阶段 03 还会把 Open Targets、GWAS 和其他证据来源中发现的非 DEG 靶点并入 `candidate_universe_evidence_expanded.csv`，由 `candidate_expansion_max_targets` 控制扩展规模。阶段 05 再把启发式扰动评分合并为 `integrated_target_priority.csv`，阶段 06 默认优先消费这张综合排序表，而不是旧的 `key_genes.csv`。
+也可以只安装实际需要的功能板块：
 
-证据中心支持 Open Targets、ChEMBL、BindingDB、PubChem BioAssay、GWAS Catalog、ClinVar、ClinicalTrials.gov、GTEx、HPA、DepMap，以及 CTD、Tox21/ToxCast、LINCS、DisGeNET 和授权数据库的本地快照。`evidence.max_targets` 控制联网检索规模，`evidence.hub_config` 指定来源配置，`evidence.allow_network=false` 或网页“仅用本地来源”用于离线运行；缺失证据会保留为 `not_found`/`not_queried`，不会被静默当作负证据。Open Targets 等聚合来源通过 `source_group` 做来源级去重，避免把同一底层证据重复计分。旧版 gene evidence 中的 ChEMBL 活性、PDB/AlphaFold 结构、Reactome 和 KEGG 证据也会转换成 canonical evidence records 参与排序。`evidence.strict=true` 或网页“证据来源失败即中断”会在来源或配置失败时真正终止阶段；非严格模式下，当前运行失败的来源会清除旧记录后再评分，避免使用过期成功结果。Tox21/ToxCast 等安全性证据会作为独立安全风险维度对最终优先级施加惩罚，而不会与正向疾病证据混为一类。
+```text
+launchers\install_expression_environment.bat
+launchers\install_docking_environment.bat
+launchers\install_molecular_docking_environment.bat
+launchers\install_md_environment.bat
+launchers\install_full_environment.bat
+launchers\install_web_environment.bat
+```
 
-新增 `benchmark_positive_targets` / `benchmark_negative_targets` / `benchmark_top_n`，可在网页或 CLI 中用 `--benchmark-positive` / `--benchmark-negative` / `--benchmark-top-n` 指定阳性/阴性对照，输出 Recall@N、Precision@N、F1@N、AUROC、AUPRC、富集倍数、bootstrap 置信区间和 permutation p 值。另提供 `benchmark_source` / `benchmark_version` / `benchmark_independent` / `benchmark_exclude_sources`，用于记录参考标签来源和版本、标记标签独立性，并对指定 `source_group` 做留出评分；只有来源独立或留出验证通过且指标达到阈值时，`paper_supporting` 才认可 benchmark。对接默认只选择 `GO` 或 `CONDITIONAL_GO` 靶点；需要保留 REVIEW 靶点时必须显式启用 `docking_selection.allow_review=true` 或 `--allow-review-docking`。
+通用环境检查：
 
-新增外部验证入口 `external_validation.path`，或网页/CLI 的 `--external-validation-path`。验证表默认只需要靶点和二元标签，评分强制从 `integrated_target_priority.csv` / `target_priority.csv` 回接，避免把外部评分误当成流水线评分；只有显式启用 `allow_external_score` 时才允许读取外部 `score` 列，该模式会标记 `score_provenance_valid=false`，不计入论文级门控。输出 AUROC、AUPRC、bootstrap 置信区间、precision、recall、F1、specificity、目标匹配率、未匹配靶点和混淆矩阵到 `external_validation_summary.json` / `external_validation_predictions.csv`。`paper_supporting` 要求流水线评分来源、目标匹配率至少 0.80 且 AUROC 至少达到 0.70。
+```text
+liverbio doctor
+```
 
-集成报告新增 `publication_readiness` 质量面板，明确区分 `exploratory`、`paper_supporting` 和 `publication_grade`，并列出多来源证据、候选池规模、候选靶点证据覆盖比例、基准排序、对接阳性对照、重复种子、真实完成 MD、外部验证和机制性扰动等未通过门控。`paper_supporting` 现在同时要求 benchmark（来源、版本和独立性可追踪）与流水线评分来源的外部验证文件；`publication_grade` 还要求检测到机制性扰动结果。默认 MD 仍是 `prepare`，默认对接仍为单次运行，因此未主动完成这些验证时，流水线不会把结果标记为论文级闭环。
+详细部署说明见 [NEW_COMPUTER_SETUP.md](NEW_COMPUTER_SETUP.md)。
 
-伪 bulk omics QC 现在除矩阵完整性、缺失率、零值率和分组检查外，还输出 PCA 离群点、样本相关矩阵摘要、低相关样本对、样本分布检查和批次指标（batch silhouette、batch-condition 混杂、卡方关联 p 值），写入 `omics_qc_pca.csv`、`omics_qc_correlation.csv`、`omics_qc_sample_metrics.csv` 和 `omics_qc_summary.json`。批次与条件完全或高度对齐时会明确标记混杂，而不是只依赖样本元数据匹配。
+### 2. 运行分析
 
-新增 `--dry-run`，不执行任何阶段，只打印每个阶段会 `RUN` 还是 `DONE` 及原因；新增 `--skip-qc-gate` 和 `--skip-differential-abundance` 可分别关闭 QC 门控和细胞组成差异检验。
+表达分析：
 
-表达分析阶段完成后会汇总 `qc_metrics.json`，包括样本/细胞数、基因数、双细胞率（仅单细胞）、伪 bulk 使用情况和下游阶段统计，并按 `config/full_pipeline_config.json` 中的 `qc_gate` 阈值给出 `pass/warn/fail` 门控结果；默认阈值不强制拦截，需要拦截时在配置中填写阈值即可。单细胞数据的差异表达阶段同时补做细胞类型组成差异检验（2×2 卡方 + Benjamini-Hochberg FDR），输出 `differential_abundance.csv` 并写入集成报告；非单细胞样本级数据集自动跳过该检验，避免把样本当细胞做比例检验。
+```text
+liverbio expression GSE125449 --output ../liver_cancer --species auto
+```
 
-虚拟筛选阶段增加对接盒有效性校验：中心/尺寸非有限值或尺寸非正数时跳过该靶点并写明原因；PDB 下载失败会自动重试 3 次，避免单次网络抖动直接丢弃有结构靶点。
+全自动集成流水线：
 
-`cadd_downstream` 阶段会遍历虚拟筛选成功的靶点：默认对每个靶点的 Top 命中准备 GROMACS 蛋白-配体复合物输入（`prepare` 模式），并把 Amber/GROMACS 模板与 UniDock-Pro/HDOCK/HADDOCK 外部工具模板一起导出；若系统中有 GROMACS 且设置 `--md-mode auto`，也会在本机继续跑 EM/NVT/NPT/生产模拟。全自动流水线还接入对接 ML 重打分：提供带标签的训练 CSV（`--docking-ml-training-csv`）时会对每个靶点训练并预测，已有训练模型时直接预测。单靶点失败不会中断整条流水线，错误会写入 `cadd_targets.csv` 供后续排查。
+```text
+liverbio full --accession GSE125449 --output ../liver_cancer --workdir ../liver_cancer_full
+```
 
-`network` 与 `faers` 阶段需要用户提供化合物-靶点表和 FAERS 风格事件表。提供 `network_toxicology.compound_targets_csv` / `target_sources` 后，会自动使用 `key_genes.csv` 作为疾病基因集，输出交集、PPI hub、Venn 和 C-T-P-D 网络，并始终写出可直接导入 Cytoscape 的 `ctpd_network.xgmml`；若 Cytoscape CyREST（默认 `http://127.0.0.1:1234`）正在运行且已安装 `py4cytoscape`，会自动推送网络、应用节点类型/PPI hub 样式并导出 PNG（`cytoscape: auto/on/off` 控制，`auto` 在无服务时不中断）。提供 `faers.input_csv` 后输出四种不相称性信号。未提供输入时阶段仍会写 `network_summary.json` / `faers_summary.json` 并注明 `skipped`，不会伪造分析结果。
+虚拟筛选：
 
-细胞反馈阶段会把虚拟敲除评分和虚拟筛选命中合并成反馈清单，重新读取单细胞 Seurat 对象，为每个候选基因写入细胞级表达、计算筛选靶点模块评分，并输出细胞类型表达汇总、模块富集检验、条件×细胞类型汇总和 UMAP/DotPlot/热图等结果；同时把反馈靶基因放回 Seurat 对象做条件差异表达（火山图、条件小提琴图），并对其做 GO/KEGG 富集分析。富集 Top5 使用与 `fig_22_go_network.png` 相同的 `cnetplot` 通路-基因网络图，不再使用气泡图，可直接查看 Top5 通路与哪些反馈靶基因关联更强；同时生成 `feedback_targets.csv`，把筛选优先级与细胞表达特异性合并为 `cell_support_score`，用于下一轮靶点收敛。bulk RNA-seq、microarray 等样本级数据集没有细胞级对象，此阶段自动跳过并在 `cell_feedback_summary.json` 中注明原因。
+```text
+liverbio docking pipeline --config config/docking_config.json
+```
 
-### 2.4 虚拟敲除与多维靶点评分
+数据集搜索：
 
-`virtual-knockout` 保留原有的基因优先级评分。当传入细胞级原始计数矩阵、`cell_type` 注释和 `--insilico-gene` 时，核心敲除默认改用 GitHub 上的官方 scTenifoldpy/scTenifoldKnk 工作流；同时保留 CellOracle 思路的局部 GRN 传播用于 UMAP 命运偏转和表达变化可视化。
+```text
+liverbio datasets --disease "liver cancer" --max-results 20
+```
 
-- scTenifoldKnk 对 WT 单细胞 GRN 做张量分解，把目标基因从网络中移除后做流形比对与差异调控检验，输出 distance/Z/FC/FDR；结果同时合并到靶基因排序。
-- 使用 KNN 平滑表达、表达相关性构建稀疏调控网络，并用带阻尼的迭代信号传播补充预测细胞状态位移和下游表达变化。
-- 输出 scTenifold differential regulation CSV、UMAP 命运偏转箭头图、以敲除基因为中心的调控网络图、WT/KO 靶基因柱状图和 Top 15 定量变化表。
-- 对变化最明显的靶基因运行 GO（BP/CC/MF）与 KEGG 富集，输出气泡图与富集 CSV。
-- 若配置 `drugreflector_checkpoint_dir`，会用 KO 与 WT 模拟表达差调用 GitHub 的 DrugReflector 官方模型，输出化合物排序表。
-- 自动生成 `in_silico_knockout_report.html` 中文报告，并把结果汇总到 `04_knockout/in_silico/`。
-
-该分析是网络层面的预测结果，不等同于真实敲除表型；需要湿实验验证。
-
-启用 DrugReflector 前需先从 Zenodo（DOI 10.5281/zenodo.16912444）下载官方模型权重，
-并把含 `model_fold_*.pt` 的目录配置为 `insilico_knockout.drugreflector_checkpoint_dir`。
-
-核心评分 `knockout_score` 由表达差异、增殖共表达、共表达网络 hub 程度和 DepMap CRISPR 依赖加权得到。提供附加数据后还会计算：
-
-- `reversal_score`：表达变化方向与疾病模块的一致性。
-- `pathway_score`：与细胞周期、凋亡、EMT、p53、PI3K-AKT 等通路基因集的平均相关性。
-- `specificity_score`：基于注释细胞类型的表达特异性，降低“误伤友军”风险。
-- `prognosis_score`：方向感知的风险比评分。
-- `druggability_score`：已知配体、蛋白结构和生物活性计数。
-- `safety_concern` / `off_target_paralogs`：脱靶和旁系同源标记。
-- `ppi_hub_score`：STRING/PPI 边表的 degree、betweenness 与 clustering 拓扑 hub 评分。
-
-以上维度按 `target_weights` 加权合并为 `target_score`，并把候选基因分为 `core_driver`、`microenvironment_regulator`、`biomarker`、`high_priority`、`low_priority`。
-
-### 2.5 网页版统一界面
-
-`web/web_ui.py` 负责网页服务生命周期与任务入口，`web/web_handler.py` 负责 HTTP 路由，`web/web_analysis.py` / `web/web_validation.py` 分别承载高级分析任务与真实数据验证任务，`web/web_files.py` / `web/web_utils.py` 提供结果文件发现和参数解析；静态数据、运行时状态与结果读取继续由 `web/web_data.py`、`web/web_state.py`、`web/web_results.py` 承担。除全自动流水线保留集成入口外，其余分析工具按功能拆成独立页面，顶部导航顺序为全自动流水线、环境补全、表达分析、数据集搜索、虚拟筛选、分子动力学、分子对接、虚拟敲除、网络毒理学、FAERS、真实数据验证、高级分析、结果清单、使用教程，“任务进度”固定在右上角：
-
-- 全自动流水线：`/full`
-- 环境补全：`/environment`
-- 表达分析：`/`
-- 数据集搜索：`/datasets`
-- 虚拟筛选：`/dock`
-- 分子动力学：`/md-simulation`
-- 分子对接：`/molecular-docking`
-- 虚拟敲除：`/knockout`
-- 网络毒理学：`/network`
-- FAERS：`/faers`
-- 真实数据验证：`/validation`
-- 高级分析：`/analysis`
-- 结果清单：`/results`
-- 使用教程：`/guide`
-- 任务进度：`/tasks`
-
-“使用教程”页（`/guide`）提供网页版从启动、首次补全环境、标准运行流程、任务管理到结果查看的完整步骤与页面速查表。“环境补全”页（`/environment`）按表达分析、数据集搜索、高级分析与 MR/共定位、虚拟筛选、独立分子对接、分子动力学、全自动流水线、网页版与 Codex Skills 分板块提供环境检查和一键补全，可填写自定义安装地址或勾选同时安装 ML/DL 依赖，并实时显示统一补全任务日志。
-
-网页使用优化：顶部导航按当前页面自动高亮，“任务进度”入口显示进行中任务数量徽标并定时刷新；表达分析与全自动流水线在启动任务时自动保存表单参数，之后可通过“恢复设置”直接复用上次运行参数。
-
-网页端支持任务启动、实时日志、暂停/继续、结果表和文件下载、环境检查与自动补全。任务完成或中断时会弹窗提醒，中断提示会显示运行到的阶段和原因；“任务进度”页集中显示流水线页面启动的排队、运行和暂停任务，保存已完成任务的历史记录并支持一键清空，同时可直接跳转到对应页面继续查看。切换顶部导航或刷新网页不会清除正在运行的任务记录，返回原页面后会自动恢复日志轮询；未关闭标签页或未修改任务参数时无需清空记录，关闭标签页后由浏览器自动清除会话记录。表达分析页的数据集编号需手动输入，不再预填示例；全自动流水线页支持直接填写工作目录加载已有结果，工作目录需填到 `outputs` 的上一层目录，未找到结果时会明确提示。数据集搜索页支持疾病、研究方向或原始查询搜索 NCBI GEO、ArrayExpress/BioStudies 和 Expression Atlas 数据集，可选 ML/DL 模型重排序、CSV/JSON 结果下载与批量下载；搜索结果可直接带入全自动流水线页，全自动流水线页也可内嵌搜索并选择数据集自动填入编号，启动后自动执行对应数据库的数据下载；表达分析完成后可在结果报告区直接打开包含逐文件分析的 `result_report.html`。
-全自动流水线页新增细胞反馈阶段的基因数、展示基因数和跳过选项，并在流程结果中显示 `feedback_targets.csv` 的细胞支持度排序表。
-全自动流水线页同步新增 QC 门控与差异丰度检验开关、`dry-run` 仅预演选项；流程结果区新增 QC 门控表和细胞类型差异丰度表，结果清单页补充 `qc_metrics.json` 与 `differential_abundance.csv` 的说明。
-网页全自动流水线页现已同步展示扩展候选宇宙、Benchmark 来源/版本/独立性和来源泄漏、五维靶点验证的证据完整度与来源状态、靶点层/平台层冲突决策、外部验证评分来源与目标匹配率、PCA/相关性/批次混杂 QC、PDBQT 转换后的 PoseBusters 状态、结构质量门控和 reproducibility manifest；表单也可直接设置候选扩展、阳性/阴性 benchmark、benchmark 留出来源、外部验证表和 REVIEW 对接开关。
-私密专用流水线默认不在网页显示。仅在设置 `LIVER_ENABLE_PRIVATE_PLAN_ONE=1` 且网页只绑定 loopback 时，环境补全中心和使用教程才显示通用的私密流水线板块，并检查 Vina、GROMACS、gmx_MMPBSA、R CellChat、PoseBusters 和 Python 科学包版本；结果清单中的相关文件说明也会按该开关过滤。使用教程内新增独立“私密本地研究流水线”章节，包含本机启动命令、loopback 限制、远程暴露禁止事项和启用后的表单行为。不得在公开主机或共享服务器上启用此变量。
-网页版整体布局优化：各页面统一页头与快捷入口、表单按“基础/分析/运行”分组折叠、全自动流水线与表达分析表单支持设置保存/恢复/重置、结果区增加统计卡片、任务页增加数量统计、结果清单页支持按文件名/用途筛选，并可按结果图名或完整本地路径直接定位、只显示命中的清单。
-虚拟筛选页只保留 AutoDock Vina 对接、重打分和结果浏览；分子动力学、虚拟敲除、网络毒理学、FAERS 与真实数据验证分别使用独立页面，避免所有 CADD 模块堆在同一个“虚拟筛选”入口下。结果清单页与结果图指南同步补充这些输出路径、用途与判读标准。
-各功能板块已完成参数分组与使用优化：虚拟筛选、分子动力学、虚拟敲除、网络毒理学和 FAERS 页均支持保存/恢复/重置表单设置；虚拟敲除页可按需调整建模基因数、细胞数、传播轮数、DrugReflector checkpoint 与 GO/KEGG 开关；网络毒理学可指定疾病基因列并控制 Venn 与 Cytoscape 输出；真实数据验证页可设置随机数据集数与种子并实时查看运行状态。
-真实数据验证页现可选择随机真实 GSE 全流程、TCGA/GSE165816 多队列靶点功能验证、真实 PDB 证据验证和随机真实证据/对接盒验证，并读取对应任务的报告、日志和完成状态。
-近期功能已全部接入网页端：表达分析页支持 `xgb` / `rf` / `gbm` / `mlp` / `lasso_svm` ML 模型选择；全自动流水线页新增 ML 模型、DepMap 依赖表、PPI 网络边表、Advanced/MR 配置衔接、高级分析优先级表，以及网络毒理学的多来源目录和 GO/KEGG 开关；虚拟筛选页新增重打分 ML 模型/训练 CSV/标签列，并支持重复对接、随机种子列表、阳性对照和阈值判定；分子动力学页支持速度生成种子、MM/PBSA 命令与超时，结果表同步展示 PCA/FEL 和 MM/PBSA 指标；虚拟敲除页支持 PPI 边表、scTenifoldKnk 引擎与原始计数开关；网络毒理学页支持多来源自动发现、7 类 PPI hub 指标和交集基因富集；高级分析页支持多队列分析、MR/共定位、分析工作区导出、任务日志和结果文件下载；结果清单补充 ML 校准曲线、`lasso_svm` 选定特征表、KEGG GSEA 状态及高级分析/MR/网络/对接/MD 输出。
-
-### 2.6 真实数据验证与可复现性
-
-- `scripts/validate_new_features.py` 使用 20 个 TCGA PanCancer Atlas 队列和 GSE165816 真实单细胞数据运行虚拟敲除与验证方案导出。
-- 其余 `scripts/validate_*.py` 分别验证合成数据流水线、对接流水线、真实 GEO 数据、证据收集和随机真实数据。
-- 每次评分/导出写入 `run_manifest.json`，记录配置、输入哈希、软件版本和参数。
-
-### 2.7 统一软件入口与功能 Skill
-
-新增 `liverbio` 统一入口，把表达分析、虚拟筛选、全自动流水线、数据集搜索、网页端和环境检查集中到一个命令中。`liverbio` 只做参数转发，不改变原有脚本行为：
+查看完整命令：
 
 ```text
 liverbio help
 liverbio version
-liverbio expression GSE125449 --output ../liver_cancer --species auto
-liverbio docking pipeline --config config/docking_config.json
-liverbio full --accession GSE125449 --output ../liver_cancer --workdir ../liver_cancer_full
-liverbio datasets --disease "liver cancer" --max-results 20
-liverbio evidence --disease NAFLD --targets GPAT3,PPP2R2A --output <OUTPUT_DIR>\evidence
-liverbio web --page full
-liverbio doctor
-liverbio setup
-liverbio package
 ```
 
-`skills/` 目录按功能拆分为四个 Codex skill 源文件：表达分析、虚拟筛选、全自动流水线和数据集搜索。Skill 只指导 Codex 调用本项目现有脚本，不复制核心分析代码；完整说明见 `docs/software_guide.md`。
-
-### 2.8 独立分子对接板块
-
-除虚拟筛选流水线外，项目还提供一套独立分子对接板块。它使用自己的工作目录、配置和结果报告，不调用虚拟筛选中的证据收集、虚拟敲除、网络毒理学或 FAERS 模块：
-
-- CLI：`scripts/run_molecular_docking.py`，支持 `init`、`prepare-receptor`、`prepare-ligands`、`dock`、`analyze`、`redock`、`report`、`detect-box` 和 `check-env`。
-- 默认工作目录：`molecular_docking/`，独立于 `dock/`。
-- 网页端：顶部导航“分子对接”独立页面，与“虚拟筛选”页面并存，支持任务日志、暂停/继续、设置保存/恢复、自动检测对接盒、结果表、图库、HTML 报告和 PDBQT 构象下载。
-- 结果目录：`molecular_docking/outputs/run_001/results/`，报告文件为 `molecular_docking_report.html`。
-
-### 2.9 与本地 Codex 分析工作区对接
-
-本项目的运行结果可一键导出到本地 Codex 分析工作区（例如 `<ANALYSIS_ROOT>`），
-写入该工作区约定的 `data/imported_results/<数据集编号>/`，并调用其
-`scripts/identify_imported_results.ps1` 刷新 `_inventory.json`，之后可直接进入
-`analysis/<任务名>` 做下游分析。导出命令：
+也可以绕过统一入口，直接运行原有脚本：
 
 ```text
-liverbio analysis-export ^
-  --source <RUN_OUTPUT> ^
-  --analysis-root <ANALYSIS_ROOT>
-```
-
-如果 `<ANALYSIS_ROOT>\config\local_projects.json` 已登记该数据集的输出根目录，
-可直接用数据集编号：
-
-```text
-liverbio analysis-export GSE125449
-launchers\export_to_analysis.bat GSE125449
-```
-
-若本机固定使用同一分析工作区，可在 `config/analysis_workspace.json` 中写入
-`analysis_root`；该文件不入库（参考 `config/analysis_workspace.example.json`），
-也可改用 `LIVER_ANALYSIS_ROOT` 环境变量。
-命令只做增量同步，不删除分析工作区里已经生成的 `analysis_report.md` 等说明文件。
-
-第一次使用时可直接记住分析工作区，之后只填数据集编号：
-
-```text
-liverbio analysis-export GSE125449 ^
-  --analysis-root <ANALYSIS_ROOT> ^
-  --remember-analysis-root
-liverbio analysis-export GSE125449
-```
-
-### 2.10 高级多队列分析与 MR/共定位
-
-新增 `liverbio advanced`，用于单细胞流程之外的多队列、基因级验证。该模块不会把细胞类型比例误当作基因级分类特征，并会显式区分 raw counts、normalized 表达和 microarray：
-
-```text
-liverbio advanced --config config/advanced_analysis.json --output <OUTPUT_DIR>\advanced
-liverbio mr --config config/mr_coloc.json --output <OUTPUT_DIR>\mr
-```
-
-表达分析主流程也可通过环境变量自动衔接这两个可选模块：
-
-```text
-set LIVER_ADVANCED_CONFIG=config\advanced_analysis.json
-set LIVER_MR_CONFIG=config\mr_coloc.json
-```
-
-全自动流水线可通过 `--advanced-priority-csv <integrated_priority.csv>` 使用上一轮高级分析的候选排序重新排列关键基因；配置文件中对应字段为 `advanced_priority_csv`。
-
-高级分析模块包含：
-
-- 发现有队列和独立验证队列读取、样本对齐、count / normalized / microarray 类型识别。
-- Python Welch 检验回退；R 可用时使用 limma，按需使用 `sva::ComBat`，并输出 `deg_primary.csv`。
-- WGCNA 软阈值、模块-性状相关、kME hub 基因和 `wgcna_hubs.csv`。
-- 基因级模型比较：Elastic Net、LASSO、Random Forest、GBM、SVM、MLP，以及可选的 XGBoost。
-- 重复分层交叉验证、独立队列外部验证、ROC 95% 置信区间、校准曲线、决策曲线、Brier score 和可选 SHAP。
-- 可选 immune deconvolution、Cox 生存分析和 `integrated_priority.csv` 证据综合排序。
-- 支持 `evidence_files`，把 PPI hub、预后、免疫相关性等外部证据按权重并入最终候选靶点排序；推荐使用 `{"path": "...", "score_column": "ppi_hub_score"}` 明确指定评分列，避免误用第一个数值列。
-
-本地孟德尔随机化和共定位模块 `liverbio mr` 接受导出的 eQTL/GWAS summary statistics，输出 harmonised instruments、IVW、weighted median、MR-Egger、Cochran Q、Egger intercept、leave-one-out 和可选 coloc 结果。默认会做距离剪枝；配置 `clump.bfile` 和 `clump.plink_executable` 时会改用真实 LD clumping。回文 SNP 缺少 EAF 或处于链方向不确定区时会被明确剔除并记录，不再静默纳入 MR。输入格式和数据列映射见 `config/mr_coloc.example.json`。
-
-GEO 下载器在没有补充 count matrix 时会回退解析 `series_matrix` 表达表，输出 gene x sample TSV 并按 normalized/microarray 路径处理；如果补充 count matrix 存在，仍优先使用 count matrix。
-
-单细胞流程还增加了以下可选能力：
-
-- `LIVER_DECONTX=yes` 时执行 ambient RNA 校正并输出 `fig_69_decontx_contamination.csv`。
-- `LIVER_SUBCLUSTER_CELLTYPES=Fibroblast,Hepatocyte` 时对指定细胞类型重新聚类并输出 UMAP 与 marker 表。
-- CellChat 在存在两个条件时自动生成条件特异通讯网络、差异互作、通路排名和 centrality 表。
-- sample-level 数据可通过 `LIVER_BULK_DE_METHOD=auto|deseq2|limma|limma-voom` 明确选择差异表达方法，避免把标准化表达矩阵强行四舍五入后送入 DESeq2。
-
-网络毒理学现在支持 CSV、TSV、JSON、JSONL 和目录自动发现，并增加 closeness、eigenvector、PageRank、MCC 和 consensus PPI hub 评分；设置 `network_toxicology.run_enrichment=true` 可对交集基因运行 GO/KEGG。
-
-虚拟筛选默认保持单次运行；在配置中设置 `docking.seeds` 和 `docking.replicates` 可执行多随机种子重复，分析阶段会输出中位亲和力、标准差、重复稳定性和 consensus rank。`docking.positive_control_pdbqt` 与 `docking.positive_control_max_affinity` 可执行已知配体对照。MD 可选执行蛋白 PCA/FEL，并通过 `md_simulation.mmpbsa_command` 接入本地 gmx_MMPBSA 或 Amber MM/PBSA 命令。
-
-### 2.11 多数据库证据中心
-
-新增独立证据层 `src/evidence/`，把不同数据库的靶点证据保存为统一、可追溯的长表，并将“没有检索到证据”和“负证据”严格区分。默认开放连接器覆盖 Open Targets、ChEMBL、BindingDB、PubChem BioAssay、GWAS Catalog、ClinVar、GTEx 和 Human Protein Atlas；DepMap、CTD、Tox21/ToxCast、LINCS、DisGeNET、cBioPortal、OncoKB、CIViC、ClinicalTrials.gov 以及 GeneCards、OMIM、TTD、DrugBank 等本地授权导出可通过本地表连接器接入。
-
-```text
-liverbio evidence --config config/evidence_sources.json \
-  --disease NAFLD --targets GPAT3,PPP2R2A --output <OUTPUT_DIR>\evidence
-```
-
-证据按 direct experimental、curated、predicted、genetic、disease association、liver context、dependency、pathway 和 structure 分层。评分只使用实际存在的类别，缺失类别保留为 `NaN` 并写入 `missing_categories`，同时通过 `source_ablation.csv` 评估移除任一来源后的排序稳定性。详细记录结构、来源矩阵和本地数据接入示例见 `docs/evidence_hub.md` 与 `config/evidence_local_sources.example.json`。
-大规模联网查询前可设置 `LIVER_CONTACT_EMAIL`，便于远程数据库在 API 流量异常时联系运行者。
-
-## 3. 安装方法
-
-### 新电脑快速部署
-
-新电脑推荐直接使用根目录的三个入口：
-
-```bat
-setup_new_computer.bat
-check_new_computer.bat
-liverbio.bat help
-```
-
-`setup_new_computer.bat` 等价于 `liverbio setup`，会安装表达分析 Python/R 依赖、
-虚拟筛选/对接依赖、ML/DL 包与项目 Codex skills；`check_new_computer.bat` 做整体检查。
-需要把源码带到另一台电脑时，先在当前电脑运行：
-
-```bat
-liverbio package
-```
-
-生成干净的源码 zip（不含本机结果、缓存、日志和下载工具），输出到
-`portable/`。详细步骤见 `NEW_COMPUTER_SETUP.md`。
-
-### 环境要求
-
-按功能板块查看“运行哪个入口、需要哪些软件、Python 包、R 包和安装脚本”的总览见
-[docs/environment_requirements.md](docs/environment_requirements.md)；虚拟筛选专项环境清单见
-[VIRTUAL_SCREENING_REQUIREMENTS.md](VIRTUAL_SCREENING_REQUIREMENTS.md)。
-
-- Python 3.10+（推荐 3.11）。
-- R 4.5+（表达分析和伪 bulk 导出需要）。
-- AutoDock Vina（虚拟筛选需要，可放在 `dock/tools/vina.exe` 或加入 PATH）。
-- 可选 Codex skills（仅证据收集需要）：`uniprot-skill`、`rcsb-pdb-skill`、`chembl-skill`、`bindingdb-skill`、`pubchem-pug-skill`、`chebi-skill`、`string-skill`、`reactome-skill`、`pharmgkb-skill`、`alphafold-skill`、`opentargets-skill`。
-- 可选项目功能 skills：`liver-expression-analysis`、`liver-virtual-screening`、`liver-full-pipeline`、`liver-dataset-search`。
-
-### 按板块一键补全环境
-
-新电脑上只需要运行某个功能板块时，不需要手工装完全部依赖。直接双击对应的
-`.bat`，脚本会安装该板块的 Python 包、R 包或对接工具，并自动做环境检查：
-
-| 功能板块 | 一键补全 | 检查 |
-| --- | --- | --- |
-| 表达分析 | `launchers\install_expression_environment.bat` | `launchers\check_expression_environment.bat` |
-| 数据集搜索 | `launchers\install_datasets_environment.bat` | 无专用检查 |
-| 高级分析与 MR/共定位 | `launchers\install_analysis_environment.bat` | `launchers\check_analysis_environment.bat` |
-| 虚拟筛选 / 对接 | `launchers\install_docking_environment.bat` | `launchers\check_docking_environment.bat` |
-| 独立分子对接 | `launchers\install_molecular_docking_environment.bat` | `launchers\check_molecular_docking_environment.bat` |
-| 分子动力学 | `launchers\install_md_environment.bat` | `launchers\check_md_environment.bat` |
-| 全自动集成流水线 | `launchers\install_full_environment.bat` | `launchers\check_full_environment.bat` |
-| 网页版 | `launchers\install_web_environment.bat` | 页面内检查 |
-| Codex Skills | `launchers\install_codex_skills_environment.bat` | `python scripts\install_codex_skills.py --list` |
-| 选择式安装 | `launchers\setup_environment.bat` | 同上 |
-
-也可以直接调用统一命令：
-
-```bat
-python launchers\install_environment.py install expression
-python launchers\install_environment.py install analysis
-python launchers\install_environment.py install docking --with-ml
-python launchers\install_environment.py check full
-python launchers\install_environment.py list
-```
-
-`liverbio` 统一入口也支持 `setup` 与 `package`：
-
-```text
-liverbio setup
-liverbio package
-```
-
-说明：
-
-- `expression`：自动执行 `pip install -r requirements.txt`；Windows 上若找不到
-  `Rscript`，会从 CRAN 下载并安装到当前用户目录，再安装表达分析 R 包。
-- `docking` / `molecular-docking` / `md`：自动下载缺失的 AutoDockTools 和
-  AutoDock Vina 到 `dock/tools/`；`md` 的 GROMACS 需要单独安装。
-- `--with-ml` 会额外安装 `joblib` 与 `torch`；不加时只安装核心对接依赖。
-- `--no-auto-install-r` 可关闭 R 自动下载；`--target` 可把包安装到指定目录。
-
-### 安装步骤
-
-复制整个项目文件夹后，在项目根目录执行：
-
-```text
-launchers\check_pipeline_environment.bat
-launchers\install_pipeline_dependencies.bat
-```
-
-离线或内网主机可跳过 NCBI GEO 网络探测：`python launchers\check_pipeline_environment.py --offline`（`check_pipeline_environment.bat` 入口不转发参数，需要离线检查时请直接调用该 Python 脚本）。
-
-`install_pipeline_dependencies.bat` 会安装表达分析所需的 R 包；使用 pip 手动安装 Python 依赖时执行：
-
-```bash
-python -m pip install -r requirements.txt
-```
-
-检查并安装虚拟筛选 Python 依赖（RDKit、Meeko、Open Babel、AutoDockTools 等）：
-
-```text
-launchers\check_dock_environment.bat
-launchers\install_dock_dependencies.bat
-```
-
-对应的 pip 手动安装命令为：
-
-```bash
-python -m pip install -r requirements_dock.txt
-```
-
-也可以用 conda 直接创建虚拟筛选环境：
-
-```text
-conda env create -f environment_dock.yml
-```
-
-安装项目功能 skills 到当前用户 Codex 目录：
-
-```text
-python scripts\install_codex_skills.py
-```
-
-网页端“软件环境”区域也可以填写安装地址后点击“自动补全环境”。完整软件/插件清单见 `VIRTUAL_SCREENING_REQUIREMENTS.md`。
-
-## 4. 使用方法
-
-### 4.1 表达分析命令行（单细胞 / bulk RNA-seq / microarray 等）
-
-```bash
 python scripts\run_pipeline.py GSE125449 --output ../liver_cancer --species auto
-```
-
-常用参数：
-
-```bash
-python scripts\run_pipeline.py GSE125449 --output ../liver_cancer --species hs --force
-python scripts\run_pipeline.py GSE125449 --output ../liver_cancer --skip-download
-python scripts\run_pipeline.py GSE125449 --output ../liver_cancer --skip-deps
-python scripts\run_pipeline.py GSE125449 --output ../liver_cancer --ml-model lasso_svm
-```
-
-Windows 下也可以直接使用：
-
-```text
-launchers\run_GSE125449.bat
-launchers\run_pipeline_prompt.bat
-```
-
-### 4.1.1 实验方案一专用分析
-
-`scripts/run_experiment_plan_one.py` 按 `实验方案一 .docx` 实现独立的
-6PPD-Q / NAFLD 分析入口，并把结果按 Figure 1-5 的用途分目录写入指定根目录：
-
-```bash
-python scripts\run_experiment_plan_one.py `
-  --config config\experiment_plan_one.json `
-  --output-root "..\experiment_plan_one_results"
-```
-
-也可以使用统一入口：
-
-```bash
-python scripts\liverbio.py experiment-plan-one --config config\experiment_plan_one.json
-```
-
-默认阶段为 `data,targets,disease,evidence,ppi,bulk,ml,mouse,human,docking,md,classify,figure_audit,report`。
-可以只运行或从指定阶段恢复：
-
-```bash
-python scripts\run_experiment_plan_one.py --stage bulk --force
-python scripts\run_experiment_plan_one.py --start-stage ml
-python scripts\run_experiment_plan_one.py --stage report --skip-stage md
-```
-
-实现按以下原则处理原始方案与公开数据之间的差异：
-
-- GSE89632 用作 HC/SS/NASH 三组训练集，使用 `limma` 做差异分析。
-- 在差异分析和 PPI 之外增加 WGCNA 风格共表达模块筛查：MAD 预筛、软阈值、
-  模块-疾病关联、kME 和 hub 输出。该实现明确标记为本地可复现的近似方法，
-  不使用 R WGCNA 名称冒充官方 TOM/动态树切割结果。
-- GSE49541 用于纤维化分期验证；GSE164441 在 GEO 中是 NAFLD 相关 HCC
-  肿瘤与癌旁组织比较，因此不会把其 AUC 误称为健康/NAFLD 验证。
-- 额外加入 GSE135251（10 例对照、206 例 NAFLD）作为补充的独立 NAFLD
-  验证集，以补足 GSE164441 与靶终点不一致的问题。
-- SwissTargetPrediction 直接请求公开页面；STITCH 无记录时明确记录
-  `no_results`。ChEMBL 无精确化合物记录时使用带 Tanimoto 分数的相似性
-  靶点来源，并在结果中明确标注。新增 SEA 开放 API 连接器；SEA 无结果或
-  超时时保留明确状态。还可通过 `compound.target_prediction_files` 接入
-  PharmMapper、SEA 导出表或其他本地预测表的多个命名来源。
-- GeneCards、OMIM、TTD 的批量导出受许可/账号限制；没有本地导出时不会
-  伪造基因列表，配置中可填写本地 CSV/TSV 文件。
-- 小鼠 GSE270583 与人类 GSE202379 使用本地 Scanpy 流程；CellChat 面板
-  使用显式配体-受体表做可审计的通讯评分近似。100 ns GROMACS 生产轨迹
-  默认只准备输入；设置配置中的 `md.run=true` 才执行完整模拟。
-- `classify` 阶段会在结果根目录创建 `按方案分类/`，按 Figure 1-5 和
-  Panel a-h/j 建立可读目录；文件使用硬链接组织，原始分析目录仍保留。
-- `figure_audit` 阶段同时生成 `10_reports/plan_coverage/plan_coverage.json`
-  和 `.md`，按 42 个 Panel 分别报告代码实现覆盖、当前执行结果覆盖、配置
-  外部前提后的预计覆盖、外部依赖和性能目标未达标项。当前实现覆盖 96.26%，
-  在授权疾病数据、独立 NAFLD 队列和 GROMACS/gmx_MMPBSA 满足时预计覆盖
-  98.33%；实际的 AUC、校准和 MD 结果不能由代码保证。GSE49541（纤维化
-  分期）和 GSE164441（HCC）不套用健康/NAFLD 的 AUC 阈值，性能目标单独
-  报告可评价和未评价 Panel。
-- 方案网页入口已集成到全自动流水线页面的“实验方案一：6PPD-Q / NAFLD”
-  表单，可直接配置本地 GeneCards/OMIM/TTD 导出、化合物靶点预测表、
-  SEA/PharmMapper、重复交叉验证、共表达筛查、CellChat-like 置换次数和
-  100 ns GROMACS 运行开关，并展示 plan coverage、
-  外部工具版本、性能未达标 Panel 和阶段状态。当前自动检查到的本机版本包括
-  Vina 1.2.7 和 GROMACS 2020.6-MODIFIED，与方案文字中的 1.2.3 和 2022
-  不同；gmx_MMPBSA 与 R CellChat 当前未安装，论文中必须记录这些偏差或
-  更换到方案指定版本。
-
-已有结果可在不重跑模型、MPBSA 或原始数据处理的情况下重新排版：
-
-```powershell
-python scripts\optimize_experiment_plan_figures.py `
-  --result-root <RESULT_ROOT> `
-  --output-dir <RESULT_ROOT>\10_reports\optimized_figures
-```
-
-该命令只读取原始 CSV/JSON/PDB/ROC 数据，把能够从源数据重建的 Panel
-用统一字体、配色、标签避让、诚实面积/缺失值表达和横向色条重绘；无法重建
-的 Panel 原样复制。原始结果和原始图片不被覆盖，优化结果写入独立目录，并
-生成 `figure_optimization_manifest.json`。
-
-### 4.2 虚拟筛选命令行
-
-先初始化工作目录：
-
-```bash
-python scripts\run_docking.py init
-```
-
-运行完整对接流程（准备受体、准备配体、对接、分析、精细重对接、HTML 报告，支持断点续跑）：
-
-```bash
+python scripts\run_full_pipeline.py --accession GSE125449 --output ../liver_cancer --workdir ../liver_cancer_full
 python scripts\run_docking.py pipeline --config config/docking_config.json
-```
-
-分阶段运行：
-
-```bash
-python scripts\run_docking.py evidence --uniprot P00533 --pdb 1M17 --target-name EGFR
-python scripts\run_docking.py prepare-receptor
-python scripts\run_docking.py prepare-ligands
-python scripts\run_docking.py dock
-python scripts\run_docking.py analyze
-python scripts\run_docking.py redock
-python scripts\run_docking.py report
-```
-
-ML/DL 重打分：
-
-```bash
-python scripts\run_docking.py ml-train --training-csv data/ml/training.csv --model rf
-python scripts\run_docking.py ml-predict
-```
-
-### 4.2.1 独立分子对接命令行
-
-初始化独立工作目录：
-
-```bash
-python scripts\run_molecular_docking.py init
-```
-
-运行完整对接流程：
-
-```bash
 python scripts\run_molecular_docking.py pipeline --config config/molecular_docking_config.json
 ```
 
-分阶段运行：
-
-```bash
-python scripts\run_molecular_docking.py prepare-receptor
-python scripts\run_molecular_docking.py prepare-ligands
-python scripts\run_molecular_docking.py dock
-python scripts\run_molecular_docking.py analyze
-python scripts\run_molecular_docking.py redock
-python scripts\run_molecular_docking.py report
-```
-
-常用覆盖参数示例：
-
-```bash
-python scripts\run_molecular_docking.py pipeline \
-  --workdir molecular_docking \
-  --receptor data/receptors/receptor.pdb \
-  --ligand data/ligands/library.sdf \
-  --center 10.0 20.0 30.0 \
-  --size 25.0 25.0 25.0 \
-  --exhaustiveness 16 \
-  --cutoff -7.5
-```
-
-导出 MD/外部交接模板：
-
-```bash
-python scripts\run_docking.py export-md
-python scripts\run_docking.py export-external
-```
-
-分子动力学模拟（先准备输入，再在安装 GROMACS + ACPYPE 后运行；配体拓扑也可放到 `md_simulation.topology_dir`）：
-
-```bash
-python scripts\run_docking.py md-simulation --md-mode prepare --md-top-n 1
-python scripts\run_docking.py md-simulation --md-mode auto --md-top-n 1 \
-  --md-gmx-data <GROMACS_DATA_DIR>
-```
-
-虚拟敲除（基础评分）：
-
-```bash
-python scripts\run_docking.py virtual-knockout \
-  --expression-csv data/knockout/expression.csv \
-  --metadata-csv data/knockout/metadata.csv \
-  --depmap-csv data/knockout/depmap_gene_effect.csv \
-  --ppi-network-csv data/network/string_edges.tsv \
-  --case-label Tumor --normal-label Normal
-```
-
-单细胞调控网络虚拟敲除（需要细胞级表达矩阵与含 `cell_type` 的元数据；可额外提供 UMAP 坐标 CSV 和候选调控因子 CSV）：
-
-```bash
-python scripts\run_docking.py virtual-knockout \
-  --expression-csv data/knockout/single_cell_expression.csv \
-  --metadata-csv data/knockout/single_cell_metadata.csv \
-  --insilico-gene Gata1 \
-  --insilico-engine scTenifoldKnk \
-  --insilico-species mm \
-  --insilico-embedding-csv data/knockout/umap_coordinates.csv \
-  --insilico-regulators-csv data/knockout/regulators.csv \
-  --insilico-photo-dir <PHOTO_DIR>
-```
-
-结果输出到 `<workdir>/outputs/run_001/results/04_knockout/in_silico/`；`data/insilico_scTenifold_results.csv` 保存官方 scTenifoldKnk 差异调控表。设置 `--insilico-photo-dir` 后会把最终图片、数据和 HTML 报告复制到指定目录。
-
-网络毒理学（化合物-疾病交集、PPI hub、Venn 与 C-T-P-D 网络）：
-
-```bash
-python scripts\run_docking.py network \
-  --compound-name "Bisphenol A" \
-  --disease-name "Hepatocellular Carcinoma" \
-  --compound-targets-csv data/network/compound_targets.csv \
-  --disease-genes-csv data/network/disease_genes.csv \
-  --ppi-network-csv data/network/string_edges.tsv \
-  --network-cytoscape auto \
-  --network-cytoscape-url http://127.0.0.1:1234 \
-  --network-cytoscape-layout cose \
-  --network-output-dir outputs/run_001/network_toxicology
-```
-
-FAERS 不相称性信号检测：
-
-```bash
-python scripts\run_docking.py faers \
-  --faers-input data/faers/events.csv \
-  --faers-drug-column drug \
-  --faers-event-column event \
-  --faers-count-column count \
-  --faers-min-count 3
-```
-
-多维评分与验证方案导出：
-
-```bash
-python scripts\run_docking.py virtual-knockout \
-  --expression-csv data/knockout/expression.csv \
-  --metadata-csv data/knockout/metadata.csv \
-  --prognosis-csv data/knockout/prognosis.csv \
-  --druggability-csv data/knockout/druggability.csv \
-  --off-target-csv data/knockout/off_target.csv \
-  --cell-type-column cell_type \
-  --case-label Tumor --normal-label Normal
-
-python scripts\run_docking.py export-validation --validation-top-n 10
-```
-
-把已有虚拟敲除/虚拟筛选结果返回表达分析：
-
-```bash
-python scripts\run_docking.py cell-feedback \
-  --workdir y3 \
-  --single-cell-root ../liver_cancer \
-  --feedback-top-n 12 \
-  --feedback-max-features 8 \
-  --feedback-species hs
-```
-
-环境检查：
-
-```bash
-python scripts\run_docking.py check-env
-python scripts\run_docking.py check-cadd
-```
-
-### 4.3 全自动集成流水线
-
-一键启动：
-
-```text
-launchers\run_full_pipeline.bat
-```
-
-或直接运行：
-
-```bash
-python scripts\run_full_pipeline.py \
-  --accession GSE125449 \
-  --output ../liver_cancer \
-  --workdir y3 \
-  --top-genes 50 \
-  --candidate-universe-size 0 \
-  --evidence-disease "liver cancer" \
-  --evidence-max-targets 300 \
-  --docking-targets 3
-```
-
-常用参数：
-
-- `--skip-scrna`：复用已完成的表达分析结果，直接从关键基因筛选开始。
-- `--skip-docking`：只跑虚拟敲除和验证方案，跳过对接。
-- `--skip-evidence-fetch`：不联网；旧证据使用缓存，证据中心只运行本地来源。
-- `--skip-download` / `--skip-deps` / `--skip-pseudobulk` / `--skip-knockout` / `--skip-cell-feedback`。
-- `--top-genes`：兼容视图中的关键基因数量，默认 50。
-- `--candidate-universe-size`：进入证据排序前的候选靶点数量，默认 0，保留全部符合筛选条件的 DEG；也可设置为正整数限制候选池。
-- `--skip-evidence-hub`：关闭多来源证据中心，只保留旧结构/配体证据。
-- `--evidence-hub-config`：多来源证据源配置，默认 `config/evidence_sources.json`。
-- `--evidence-disease` / `--evidence-disease-id`：证据检索使用的疾病名称和可选本体 ID。
-- `--evidence-max-targets`：证据中心最多检索的候选靶点数，默认 300；设置为 0 时检索全部候选宇宙。
-- `--evidence-max-records` / `--evidence-hub-timeout`：每个来源记录上限和证据中心超时。
-- `--evidence-hub-offline`：证据中心只用本地或缓存来源，不访问公共 API。
-- `--evidence-hub-strict`：任一配置来源失败时让证据阶段失败；默认记录失败并继续。
-- `--evidence-legacy-pool-size`：为旧版结构/配体证据保留的候选数，默认 50，并会自动覆盖对接靶点数。
-- `--candidate-expansion-max-targets`：从疾病/遗传证据中并入候选宇宙的非 DEG 靶点上限，默认 1000；设置为 0 时不设上限。
-- `--benchmark-positive` / `--benchmark-negative`：逗号分隔的阳性/阴性对照靶点，用于 Recall@N、AUROC 等排序评估。
-- `--benchmark-top-n`：benchmark 评估的 Top N，默认 20。
-- `--allow-review-docking`：显式允许 `REVIEW` 靶点进入对接；默认只允许 `GO` 和 `CONDITIONAL_GO`。
-- `--external-validation-path` / `--external-validation-target-column` / `--external-validation-score-column` / `--external-validation-label-column`：输入独立靶点验证表。
-- `--external-validation-threshold` / `--external-validation-bootstrap`：设置验证二分类阈值和 bootstrap 次数。
-- `--docking-targets`：参与对接的靶点数量，默认 3。
-- `--md-mode prepare|auto`：GROMACS MD 模式；`prepare` 只生成输入，`auto` 在本机运行完整模拟。
-- `--md-top-n`：每个靶点进入 MD 的 Top 命中数，默认 1。
-- `--skip-md` / `--skip-handoff` / `--skip-docking-ml`：分别关闭 MD 阶段、MD/外部工具导出和对接 ML 重打分。
-- `--docking-ml-training-csv` / `--docking-ml-label-column`：提供带标签配体 CSV 后自动训练对接 ML 重打分模型。
-- `--network-compound-targets-csv` / `--network-disease-genes-csv` / `--network-disease-gene-column`：启用并运行网络毒理学；疾病基因缺省使用 `key_genes.csv`。
-- `--network-cytoscape auto|on|off` / `--network-cytoscape-url` / `--network-cytoscape-layout` / `--network-cytoscape-session` / `--network-max-ppi-edges`：控制 Cytoscape 自动推送、CyREST 地址、布局、`.cys` 会话与 PPI 边数上限。
-- `--faers-input` / `--faers-drug-column` / `--faers-event-column` / `--faers-count-column`：提供 FAERS 风格事件表后自动运行信号检测。
-- `--skip-network` / `--skip-faers`：显式关闭网络毒理学或 FAERS 阶段。
-- `--feedback-top-n`：进入细胞反馈的基因数，默认 12。
-- `--feedback-max-features`：细胞反馈图中展示的基因数，默认 8。
-- `--feedback-timeout`：细胞反馈 R 分析超时秒数，默认 3600。
-- `--ligand-library`：自定义配体库（`.smi` / `.sdf` / `.csv`），也可放到 `dock/data/ligands/`。
-- `--case-label` / `--normal-label`：虚拟敲除的病例/正常分组标签。
-- `--ppi-network-csv`：STRING 风格 PPI 边表，用于虚拟敲除的 PPI hub 维度评分。
-- `--depmap-csv`：DepMap CRISPR 基因效应表，用于虚拟敲除依赖评分。
-- `--ml-model`：表达分析 ML 模型，可选 `xgb` / `rf` / `gbm` / `mlp` / `lasso_svm`。
-- `--start-stage 07`：从指定阶段继续，之前阶段自动标记为跳过。
-- `--dry-run`：不执行任何阶段，只打印每个阶段会运行还是跳过及原因。
-- `--skip-qc-gate` / `--skip-differential-abundance`：分别关闭 QC 门控和细胞组成差异检验。
-
-查看阶段清单：
-
-```bash
-python scripts\run_full_pipeline.py --list-stages
-```
-
-### 4.4 网页版
+### 3. 打开网页端
 
 ```text
 launchers\run_web_ui.bat
 ```
 
-浏览器默认打开 `http://127.0.0.1:8000/full`（全自动流水线页）。直接打开指定页面：
+默认地址：`http://127.0.0.1:8000/full`
+
+常用页面：
+
+| 页面 | 地址 |
+| --- | --- |
+| 全自动流水线 | `/full` |
+| 表达分析 | `/` |
+| 数据集搜索 | `/datasets` |
+| 虚拟筛选 | `/dock` |
+| 分子对接 | `/molecular-docking` |
+| 分子动力学 | `/md-simulation` |
+| 虚拟敲除 | `/knockout` |
+| 高级分析 | `/analysis` |
+| 结果清单 | `/results` |
+
+网页端默认只监听本机回环地址。绑定非回环地址时会自动启用访问令牌。
+
+## 输出位置
+
+| 运行类型 | 主要输出 |
+| --- | --- |
+| 表达分析 | `results/` 下的数据、图片、HTML/DOCX/PDF 报告与分析报告 |
+| 全自动流水线 | `integration_report.html`、`integration_summary.json`、`run_manifest.json` 及阶段目录 |
+| 虚拟筛选 | `dock/outputs/<run>/results/`、对接结果表、ML/MD 交接文件和 HTML 报告 |
+| 独立分子对接 | `molecular_docking/outputs/<run>/results/` 和 `molecular_docking_report.html` |
+
+`data_cache/`、`dock/outputs/`、`results/` 等运行产物默认不会提交到 Git。
+
+## 环境要求
+
+- Python 3.10+，推荐 3.11。
+- R 4.5+。
+- AutoDock Vina，虚拟筛选时使用。
+- GROMACS、ACPYPE 和 gmx_MMPBSA，运行分子动力学时使用。
+
+按功能板块查看软件、Python 包和 R 包要求：
+
+- [环境需求总览](docs/environment_requirements.md)
+- [虚拟筛选专项清单](VIRTUAL_SCREENING_REQUIREMENTS.md)
+
+## 文档
+
+| 文档 | 说明 |
+| --- | --- |
+| [软件使用指南](docs/software_guide.md) | `liverbio`、网页端、常用工作流和 Codex Skills |
+| [新电脑部署](NEW_COMPUTER_SETUP.md) | Windows/Linux/macOS 安装、检查与源码打包 |
+| [环境需求](docs/environment_requirements.md) | 各功能板块的环境清单与安装入口 |
+| [多数据库证据中心](docs/evidence_hub.md) | 证据模型、来源配置、评分和 CLI |
+| [项目结构](docs/project_structure.md) | 代码模块和目录职责 |
+| [结果图指南](docs/result_figure_guide.md) | 结果文件用途与判读说明 |
+| [更新日志](CHANGELOG.md) | 历史版本与变更记录 |
+
+## 测试
 
 ```text
-launchers\run_web_ui.bat --page dock
-launchers\run_web_ui.bat --page molecular-docking
-launchers\run_web_ui.bat --page validation
-launchers\run_web_ui.bat --page analysis
-launchers\run_web_ui.bat --page full
-launchers\run_web_ui.bat --page results
-launchers\run_web_ui.bat --page tasks
-```
-
-全自动流水线页的“表达分析结果目录”和“工作目录”均为必填项，须手动填写；工作目录需填到包含 `outputs` 的上一层目录，目录中没有结果时页面会显示错误提示。表达分析页需要手动填写数据集编号和结果保存地址。“高级分析”页可运行多队列分析、MR/共定位和本地分析工作区导出；“真实数据验证”页可选择随机全流程、多队列靶点、真实 PDB 证据或随机证据/对接盒验证。“结果清单”页展示 `scripts/run_full_pipeline.py` 成功且完整运行后应输出的图片、数据、报告、断点和溯源文件清单；“任务进度”页支持查看任务进度并跳转到对应任务页面。
-
-关闭所有网页标签后，本地网页服务会在数秒内自动退出并释放端口；正常退出时启动窗口也会自动关闭。再次启动时，如果检测到旧网页服务仍占用端口，会自动关闭旧实例后再启动；若端口被其他非网页程序占用，窗口会保留错误信息等待确认后关闭。
-
-网页服务默认绑定回环地址 `127.0.0.1`，此时无需认证，保持本地零配置；改用 `--host 0.0.0.0` 等非回环地址启动时会自动生成会话 token，必须用带 `?token=...` 的 URL 访问或为每个请求发送 `X-Auth-Token` 头，否则返回 403，同时终端会提示只应在可信网络中使用。结果浏览默认只允许读取项目输出根目录，以及本控制台启动过的任务工作目录；需要读取其他目录时用 `--allow-path <目录>`（可重复）显式放行。
-
-### 4.5 验证脚本与测试
-
-```bash
 python -m pytest -q
 ```
 
-测试配置见 `pytest.ini`，共享导入路径引导见 `tests/conftest.py`；`.github/workflows/tests.yml` 会在 Windows/Linux + Python 3.11 上运行同一命令。单独运行某个测试文件时可直接指定路径，例如 `python -m pytest -q tests/test_portable_package.py`。
+GitHub Actions 会在 Windows/Linux 和 Python 3.11 上运行测试。
 
-各验证脚本用途：
+## 许可
 
-| 脚本 | 用途 |
-| --- | --- |
-| `scripts/validate_pipeline.py` | 用 10 个合成表达数据集跑通完整表达流水线 |
-| `scripts/validate_dock_pipeline.py` | 用假 Vina 可执行文件验证对接流水线 |
-| `scripts/validate_real_pipeline.py` | 用 10 个真实肝病 GEO 数据集跑通完整流水线 |
-| `scripts/validate_real_evidence.py` | 用 10 个真实 PDB 结构验证证据收集 |
-| `scripts/validate_real_random.py` | 随机真实数据验证证据收集和对接盒检测 |
-| `scripts/validate_new_features.py` | 用 20 个 TCGA PanCancer 队列 + GSE165816 验证靶点评分 |
-| `scripts/validate_random_real_full_pipeline.py` | 随机真实 GSE 数据集跑通全自动流水线 |
-| `scripts/validate_dataset_search.py` | 用 50 轮随机疾病+研究方向组合验证多数据库数据集搜索召回 |
-
-### 4.6 自动搜索数据集
-
-`scripts/search_datasets.py` 自动搜索多个公共表达数据库，默认覆盖 NCBI GEO、EBI ArrayExpress/BioStudies 和 EBI Expression Atlas，并可按需下载可直接运行的数据集：
-
-```bash
-python scripts\search_datasets.py \
-  --query "hepatocellular carcinoma single cell" \
-  --max-results 20 \
-  --organism "Homo sapiens"
-```
-
-可以用 `--databases` 指定检索范围（`geo` / `biostudies` / `atlas`，默认全部）：
-
-```bash
-python scripts\search_datasets.py \
-  --disease "liver cancer" \
-  --research-direction "single cell RNA-seq" \
-  --databases geo,biostudies,atlas
-```
-
-也可以直接指定疾病和研究方向，脚本会自动组合成搜索词：
-
-```bash
-python scripts\search_datasets.py \
-  --disease "liver cancer" \
-  --research-direction "single cell RNA-seq" \
-  --max-results 20 \
-  --organism "Homo sapiens"
-```
-
-搜索支持更多筛选条件：`--data-type`（`single-cell` / `bulk` / `other`）、`--min-samples`、`--max-samples`、`--start-date`、`--end-date`、`--platform` 和 `--dataset-type`。例如：
-
-```bash
-python scripts\search_datasets.py \
-  --disease "liver cancer" \
-  --research-direction "single cell RNA-seq" \
-  --data-type single-cell \
-  --min-samples 3 \
-  --max-samples 200 \
-  --start-date 2024-01-01 \
-  --end-date 2025-12-31 \
-  --platform GPL24676 \
-  --dataset-type "high throughput sequencing"
-```
-
-搜索结束后会在 `data_cache/dataset_search/` 写出 `dataset_search_results.csv` 和 `dataset_search_results.json`，每行包含来源数据库（`database`）、数据类型（`data_type`）、质量分（`quality_score`）和是否为可自动运行候选（`run_supported`，实际文件可用性在下载时校验）等字段，网页端也会显示数据库与数据类型徽标。需要下载时追加下载参数：
-
-```bash
-python scripts\search_datasets.py \
-  --query "liver cancer scRNA-seq" \
-  --keyword "HCC" \
-  --download GSE125449 \
-  --download-root ../liver_cancer
-```
-
-ArrayExpress/BioStudies 数据集同样可直接下载，例如 `--download E-MTAB-1234`；`E-GEOD-xxxxx` 会自动映射到对应的 GEO `GSExxxxx` 再下载。
-
-也可以用 `--download-top N` 下载搜索结果的前 N 个数据集；下载状态写入 `data_cache/dataset_search/download_results.json`。
-
-网页端搜索结果每行提供“全自动流水线”入口，只有 `run_supported` 候选数据集会显示该入口；点击后自动带入数据集编号，全自动流水线页也可直接搜索并选择数据集，填入后启动即可复用对应数据库的自动下载流程。下载时会实际校验表达文件，缺失或不支持时会在下载结果中明确报错。全自动流水线支持 `single-cell`、`bulk`、`microarray` 和其他表达矩阵数据集：单细胞数据走细胞级分析，非单细胞数据按样本级表达矩阵运行差异表达与下游靶点评分。
-
-GEO 下载器会把 RAW tar 中的逐样本 bulk 计数表（如 `GSMxxxx_GCxxxx.txt.gz`）识别为 bulk 数据集，也会把其他样本级表达矩阵归入通用表达类型；BioStudies 下载器会选取 ArrayExpress/Expression Atlas 的 processed 表达文件并生成同一套 manifest。数据文件与 manifest 会缓存到 `data_cache/<编号>`，这些数据集可直接进入表达分析与全自动流水线，按样本级分析运行。
-
-网页版已同步支持：数据集搜索页可选择检索数据库，提供数据库、数据类型过滤（`single-cell` / `bulk` / `other`）并显示数据库/数据类型徽标，同时支持物种、关键词、样本数范围、日期范围、平台和数据集类型过滤；`run_supported` 候选表达数据集可选择进入全自动流水线；表达分析页说明非单细胞数据按样本级分析运行。
-
-批量随机验证搜索是否命中“疾病+研究方向”数据集：
-
-```bash
-python scripts\validate_dataset_search.py --rounds 50 --seed 20260812
-```
-
-验证结果写入 `data_cache/dataset_search/validation_50_rounds.csv` 和 `validation_50_rounds.json`；未命中时会自动用疾病名或研究方向名扩大搜索范围。
-
-默认训练标签由同义词启发式生成，只适合流程冒烟测试；需要真实相关性评估时，请用 `--manual-labels` 提供人工复核 CSV（列：`accession`、`disease`、`research_direction`、`label`），并优先用 `label_source=manual` 的样本训练和评估模型。提供人工标签后，`found`/`found_rate` 也会以人工标签为准，并在 summary 中输出 `manual_rounds` 与 `manual_found_rate`。`dataset_search_ml.py --eval --allow-heuristic-eval` 仅用于冒烟，不代表真实检索质量。
-
-此前一次 50 轮随机验证（`--seed 20260812`）在默认启发式标签下命中率 100%（50/50），其中 4 轮通过扩大搜索范围命中；该结果仅代表流程可运行，不构成真实相关性结论。
-
-### 4.7 数据集搜索 ML/DL 相关性排序
-
-`scripts/dataset_search_ml.py` 用 TF-IDF 特征训练机器学习/深度学习模型，对搜索结果按“疾病 + 研究方向”相关性重新排序：
-
-```bash
-python scripts\validate_dataset_search.py --rounds 50 --seed 20260812
-python scripts\dataset_search_ml.py \
-  --train \
-  --samples data_cache/dataset_search/training_samples.csv \
-  --output data_cache/dataset_search/relevance_model.joblib \
-  --model-type mlp
-```
-
-训练完成后，普通搜索和批量验证都可以传入模型：
-
-```bash
-python scripts\search_datasets.py \
-  --disease "liver cancer" \
-  --research-direction "single cell RNA-seq" \
-  --model data_cache/dataset_search/relevance_model.joblib
-
-python scripts\validate_dataset_search.py \
-  --rounds 50 \
-  --seed 20260812 \
-  --model data_cache/dataset_search/relevance_model.joblib \
-  --rerank-top 5
-```
-
-支持 `lr`、`rf`、`gbm`、`mlp` 四种模型；其中 `mlp` 为多层感知机。可用 `--eval` 对标注样本做交叉验证；此前一次 285 条启发式标签样本上 MLP 的 ROC AUC 为 0.81，该指标仅作为流程冒烟结果，不代表真实检索质量。
-
-### 4.8 统一软件入口与 Codex Skills
-
-在项目根目录可直接运行 `liverbio.bat`。若不在根目录，可用 `python scripts\liverbio.py <命令>` 调用同一入口。命令详细说明见 `docs/software_guide.md`。
-
-```text
-liverbio help
-liverbio doctor docking
-python scripts\install_codex_skills.py --list
-```
-
-### 4.9 导出到本地 Codex 分析工作区
-
-```bash
-python scripts\export_to_analysis.py --source <SOURCE_DIR>/GSE125449 --analysis-root <ANALYSIS_ROOT>
-liverbio analysis-export --source <SOURCE_DIR>/GSE125449 --analysis-root <ANALYSIS_ROOT>
-liverbio analysis-export GSE125449
-```
-
-导出前可用 `--dry-run` 查看文件数量，使用 `--no-inventory` 跳过清单刷新；
-加 `--remember-analysis-root` 会把 `--analysis-root` 保存到本机
-`config/analysis_workspace.json`，之后无需再传该参数。
-导出成功后会在目标目录写入 `_source.json`，记录来源目录、数据集、运行类型、
-导出时间、项目版本和 Git revision。只填数据集编号时，命令会读取分析工作区
-`config/local_projects.json` 中登记的 `output_roots` 自动定位运行目录。
-
-## 5. 输入输出示例
-
-### 5.1 表达分析
-
-输入：
-
-- 数据集编号，例如 `GSE125449`、`E-MTAB-1234`。
-- 输出目录，例如 `../liver_cancer`。
-- 物种：`hs` / `mm` / `auto`。
-
-输出（以 `../liver_cancer` 为例）：
-
-- `results/figures/`：50 余张结果图，按 `01_qc`、`02_doublets`、`03_cluster`、`04_annotation`、`05_deg`、`06_enrichment`、`07_ml`、`08_publication`、`09_cellchat` 阶段分子目录。
-- `results/figures/06_enrichment/fig_46_go_top5.png` 与 `fig_47_kegg_top5.png`：上调基因 GO/KEGG 经 `p.adjust <= 0.05` 筛选后的前 5 条通路富集气泡图。
-- `results/figures/01_qc/fig_48_qc_pvalue_comparison.png` 与 `results/data/01_qc/fig_48_qc_pvalue_comparison.csv`：过滤前后 QC 指标在条件间的 Wilcoxon 秩和检验 P 值对比。
-- `results/data/`：QC、双细胞、注释、差异表达、富集、ML 分类和可选 CellChat 表格，按与 `figures/` 相同的阶段分子目录存放；数据文件名与对应结果图编号一致，例如 `data/01_qc/fig_01_qc_metrics.csv`、`data/01_qc/fig_01_qc_thresholds.csv`、`data/02_doublets/fig_02_doublet_results.csv`、`data/05_deg/fig_09_deg_significant.csv`、`data/05_deg/fig_09_deg_horizontal_violin.csv`、`data/07_ml/fig_24_ml_feature_importance.csv`、`data/08_publication/fig_36_cnv_heatmap.csv`、`data/08_publication/fig_37_singleR_annotations.csv`、`data/08_publication/fig_39_trajectory_pseudotime.csv`、`data/09_cellchat/fig_40_cellchat_communication.csv`、`data/07_ml/fig_43_44_45_ml_classification_report.csv`。
-- `results/data/05_deg/fig_09_deg_significant.csv`：显著差异基因表。
-- `results/figures/05_deg/fig_09_deg_horizontal_violin.png`：按校正 P 值排序的差异最显著基因横向小提琴图。
-- `results/data/05_deg/fig_09_deg_horizontal_violin.csv`：该图对应的基因与 P 值数据。
-- `results/checkpoints/`：Seurat 断点对象。
-- `results/result_report.html`：最终 HTML 报告。
-- `results/result_analysis_report.md` / `results/result_analysis.json`：基于实际输出的结果图及其对应结果数据生成的联合分析报告（Markdown 可读版与 JSON 结构化版）。
-
-### 5.2 虚拟筛选
-
-输入：
-
-- 受体文件：`dock/data/receptors/receptor.pdb`。
-- 配体库：`dock/data/ligands/library.sdf`（也支持 `.smi` 和 CSV）。
-- 对接盒中心/尺寸：`config/docking_config.json`，或使用 `detect-box` 自动检测。
-- 可选训练标签：`dock/data/ml/training.csv`（包含 `smiles` 和 `active` 或 `affinity`）。
-- 可选敲除数据：`expression.csv`、`metadata.csv`、`depmap_gene_effect.csv`、`prognosis.csv`、`druggability.csv`、`off_target.csv`。
-
-输出（工作目录默认 `dock`）：
-
-- `data/receptors/receptor.pdbqt`：受体。
-- `data/ligands/prepared/`：配体准备结果和 `manifest.csv`。
-- `outputs/run_001/docked/results.csv`：对接结果。
-- `outputs/run_001/results/`：按阶段汇总的结果目录，`01_analysis`、`02_redock`、`03_ml`、`04_knockout`、`05_validation` 下分别用 `figures/` 和 `data/` 区分结果图与结果数据。
-- `outputs/run_001/results/01_analysis/data/fig_46_47_ranked_results.csv`、`fig_47_top_hits.csv`、`fig_48_diverse_hits.csv`、`docking_results.xlsx` 和编号 `fig_46` 至 `fig_49` 的结果图（含 `fig_49_redock_comparison.png` 与 `fig_49_redock_comparison.csv`）。
-- `outputs/run_001/results/docking_report.html`：HTML 报告。
-- `outputs/run_001/results/02_redock/data/fig_49_redock_results.csv`：精细重对接结果。
-- `outputs/run_001/results/04_knockout/data/fig_52_53_ranked_knockout.csv`、`fig_52_target_candidates.csv`、`target_report.md`，以及编号 `fig_52`、`fig_53` 的敲除结果图。
-- 单细胞虚拟敲除扩展输出位于 `outputs/run_001/results/04_knockout/in_silico/`：`in_silico_knockout_report.html`、`insilico_summary.json`、`data/insilico_target_changes.csv`、`data/insilico_scTenifold_results.csv`、`data/insilico_cell_shift.csv`、`data/insilico_regulatory_edges.csv`、`data/insilico_go_enrichment.csv`、`data/insilico_kegg_enrichment.csv`，以及 `fig_63` 至 `fig_68` 的结果图。
-- `outputs/run_001/results/05_validation/data/validation_candidates.csv`、`validation_plan.md`。
-- `evidence/evidence_report.md`、`known_ligands.csv`。
-
-附加数据文件格式：
-
-| 文件 | 必需列 | 说明 |
-| --- | --- | --- |
-| expression.csv | `gene` + 样本列，或 `gene/sample/value` | 宽矩阵或长表 |
-| metadata.csv | `sample` + `condition`，可加 `cell_type` | 分组和细胞类型注释 |
-| depmap.csv | 宽表 `ModelID + 基因列`，或长表 `gene/effect` | CRISPR 基因效应 |
-| prognosis.csv | `gene` + `hr` | 也支持 `hazard_ratio`、`cox_hr` |
-| druggability.csv | `gene` + `known_ligands`、`pdb_structures`、`chembl_bioactivities` | 成药性计数 |
-| off_target.csv | `gene` + `off_target_paralogs`、`safety_concern` | 脱靶风险 |
-
-### 5.3 全自动集成流水线
-
-输入：
-
-- 数据集编号（默认 `GSE125449`；也支持 `E-MTAB-1234`、`S-BSST123`）。
-- 表达分析输出目录（必填，例如 `y2`）。
-- 工作目录（必填，例如 `y3`）。
-- 可选配体库、病例/正常标签、DepMap CSV。
-- 候选靶点宇宙大小、证据疾病名称、证据检索靶点数、证据中心配置。
-
-输出（`<workdir>/outputs/integration/`）：
-
-- `candidate_universe.csv`：经过 DEG 方向、显著性和黑名单筛选后的完整候选靶点宇宙。
-- `candidate_universe_evidence_expanded.csv`：将 Open Targets、GWAS 等疾病/遗传证据发现的非 DEG 靶点并入后的扩展候选宇宙。
-- `key_genes.csv`：兼容旧流程的关键基因 Top N 表。
-- `target_priority.csv`：表达证据与多来源数据库证据的覆盖感知排序。
-- `integrated_target_priority.csv`：进一步合并启发式扰动评分后的综合靶点排序。
-- `target_validation_scores.csv`：按疾病关联、成药性、化学物质、临床先例和结构数据五个互斥证据轴输出 0-100 的靶点验证分数；同时输出每个轴的来源、证据状态、`evidence_completeness` 和临床检索质量。仅由 ClinicalTrials.gov 文本命中支持的临床轴最高计 10/20，并标记 `text_search_only`；应用安全风险惩罚和 `GO` / `CONDITIONAL_GO` / `REVIEW` / `NO_GO` 决策。
-- `external_validation_summary.json` / `external_validation_predictions.csv`：独立队列的 AUROC、AUPRC、置信区间、precision、recall、F1、specificity、评分来源、目标匹配率、未匹配靶点和混淆矩阵。
-- `target_decision_report.csv` / `target_decision_report.json`：把靶点自身证据与平台级冲突分开，输出 `target_action`、`platform_action`、`composite_action`、`target_decision` 和 `final_decision`，避免外部验证/omics/结构缺失被错误地写成每个靶点的独立结论。
-- `target_priority_summary.json` / `integrated_target_priority_summary.json`：靶点数量、证据覆盖、GO/CONDITIONAL_GO/REVIEW 分档和缺失来源摘要。
-- `evidence_hub/`：`evidence.sqlite`、`evidence_records.csv`、`evidence_coverage.csv`、`source_ablation.csv`、`target_priority.csv`、`evidence_hub_summary.json` 等可追溯证据文件。
-- `gene_evidence.csv`：每个基因的 UniProt、PDB、ChEMBL、STRING、Reactome、PharmGKB、AlphaFold、Open Targets、KEGG 证据与来源覆盖。
-- `knockout_summary.json`：启发式扰动评分与验证方案汇总。
-- `integration_summary.json` 中的 `publication_readiness`：论文支持等级和未通过的质量门控。
-- `reproducibility_manifest.json`：记录 Git 提交与 dirty 状态、Python/平台、关键依赖版本、配置/输入文件 SHA256、关键输出哈希和运行参数，便于跨机器复现和审计。
-- `omics_qc_summary.json` / `omics_qc_sample_metrics.csv` / `omics_qc_pca.csv` / `omics_qc_correlation.csv`：伪 bulk 表达矩阵的基因/样本数、重复基因、缺失率、零值率、负值、样本元数据匹配、分组样本数、PCA 离群点、样本相关性和批次/条件混杂诊断。
-- `docking_targets.csv`：每个靶点的对接状态、命中数和最佳亲和力。
-- `cadd_downstream_summary.json` / `cadd_targets.csv`：MD 准备/运行、ML 重打分和 MD/外部工具导出的逐靶点状态。
-- `structural_quality_summary.json` / `structural_quality_targets.csv`：结构验证门控，分别记录对接阳性对照、重复种子一致性、MD 完成状态、蛋白/配体 RMSD 尾部稳定性和 MM-PBSA 可用性。
-- `pose_qc_summary.json` / `pose_qc_results.csv`：优先检查 SDF poses；只有 PDBQT 时通过 Meeko 转换后检查，并保留原始受体的对应关系。安装 PoseBusters 时执行物理合理性检查；缺少 poses、受体或 PoseBusters 时会明确标记 unavailable/skipped，不会伪造通过状态。
-- `network_summary.json`：网络毒理学汇总；`outputs/run_001/network_toxicology/` 下含交集表、Venn 图、C-T-P-D 节点/边、XGMML 网络文件，Cytoscape 在线导出时另含 `figures/ctpd_network_cytoscape.png`。
-- `faers_summary.json`：FAERS 信号汇总；`outputs/run_001/faers/data/faers_signals.csv` 为信号表。
-- `cell_feedback/`：细胞反馈阶段输出，包括 `data/cell_scores.csv`、`data/feedback_targets.csv`、`data/celltype_summary.csv`、`data/celltype_enrichment.csv`、`data/condition_summary.csv`、`data/feedback_deg.csv`、`data/feedback_enrichment_go.csv`、`data/feedback_enrichment_kegg.csv`，以及 `fig_54` 至 `fig_62` 的结果图；其中 `fig_61/fig_62` 为反馈靶基因 GO/KEGG 富集 Top5 的通路-基因网络图。
-- `integration_report.html`：全流程集成报告。
-- `integration_summary.json` / `run_manifest.json`：本次运行的汇总和溯源信息。
-- `results/advanced/`：配置 `LIVER_ADVANCED_CONFIG` 时的多队列、WGCNA、基因级 ML、免疫/生存和 `integrated_priority.csv` 输出。
-- `results/mr_coloc/`：配置 `LIVER_MR_CONFIG` 时的协调工具变量、MR 方法、敏感性分析、汇总和可选 coloc 输出。
-
-每个靶点的对接在独立目录 `<workdir>/work/<gene>/` 下运行，支持单独断点续跑；MD 与导出产物也写入同一靶点目录（`outputs/run_001/results/06_md/`、`outputs/run_001/results/03_ml/`、`outputs/md/`、`outputs/run_001/external/`）。配体优先使用 ChEMBL/BindingDB 已知活性分子，无数据库配体时自动提取共晶配体作为对照，最后回退到用户提供的配体库。
-
-## 6. 脚本文件一览
-
-| 脚本 | 说明 |
-| --- | --- |
-| `scripts/run_pipeline.py` | 表达分析 CLI 入口 |
-| `scripts/run_experiment_plan_one.py` | 实验方案一（6PPD-Q / NAFLD）专用 CLI 入口 |
-| `scripts/run_evidence_hub.py` | 多数据库靶点证据采集、覆盖评价、来源消融与优先级排序入口 |
-| `scripts/run_docking.py` | 虚拟筛选 CLI 入口 |
-| `scripts/run_full_pipeline.py` | 全自动集成流水线 CLI 入口 |
-| `scripts/run_molecular_docking.py` | 独立分子对接 CLI 入口 |
-| `scripts/export_to_analysis.py` | 导出运行结果到本地 Codex 分析工作区 |
-| `scripts/liverbio.py` | 统一 CLI 入口，转发到各运行脚本 |
-| `scripts/install_codex_skills.py` | 安装 `skills/` 下的 Codex skill |
-| `scripts/run_web_full_new_datasets.py` | 通过网页端批量提交真实数据集全流程 |
-| `scripts/search_datasets.py` | 多数据库数据集搜索与下载（GEO / ArrayExpress-BioStudies / Expression Atlas） |
-| `scripts/dataset_search_ml.py` | 数据集搜索 ML/DL 相关性重排序 |
-| `scripts/validate_pipeline.py` | 合成数据表达流水线验证 |
-| `scripts/validate_dock_pipeline.py` | 假 Vina 对接流水线验证 |
-| `scripts/validate_real_pipeline.py` | 真实 GEO 数据流水线验证 |
-| `scripts/validate_real_evidence.py` | 真实 PDB 证据收集验证 |
-| `scripts/validate_real_random.py` | 随机真实数据验证 |
-| `scripts/validate_new_features.py` | 真实数据靶点评分/验证方案验证 |
-| `scripts/validate_random_real_full_pipeline.py` | 随机真实 GSE 全流程验证 |
-| `scripts/validate_dataset_search.py` | 多数据库数据集搜索随机验证（默认 GEO） |
-| `launchers/install_environment.py` | 按功能板块安装/检查环境 |
-| `launchers/_common.bat` | launchers 批处理公共 Python 3 探测 |
-| `launchers/install_*_environment.bat` | 各功能板块一键补全环境 |
-| `launchers/check_*.bat/.py` | 环境检查 |
-| `launchers/install_*.bat/.py` | 环境自动补全 |
-| `launchers/run_web_ui.bat` | 启动网页端 |
-| `launchers/run_experiment_plan_one.bat` / `.sh` | 实验方案一快捷入口 |
-| `launchers/run_docking.bat` | 虚拟筛选快捷入口 |
-| `launchers/run_full_pipeline.bat` | 全自动流水线快捷入口 |
-| `launchers/run_molecular_docking.bat` | 独立分子对接快捷入口 |
-| `launchers/export_to_analysis.bat` | 本地分析工作区导出快捷入口 |
-| `launchers/run_GSE125449.bat` | GSE125449 表达分析快捷入口 |
-| `launchers/run_pipeline_prompt.bat` | 交互式表达分析入口 |
-| `launchers/package_portable.py` | 生成干净源码 zip |
-| `liverbio.bat` | 根目录统一 CLI 入口 |
-| `setup_new_computer.bat` / `check_new_computer.bat` | 新电脑安装与检查 |
-| `package_for_new_computer.bat` | 新电脑源码包生成入口 |
-| `src/analysis/*` | R/Python 分析实现（QC、聚类、DEG、富集、CellChat、ML） |
-| `src/experiment_plan_one/*` | 实验方案一的数据、靶点、PPI、共表达模块、ML、单细胞、对接与报告实现 |
-| `src/evidence/*` | 统一证据模型、SQLite 证据库、数据库连接器、覆盖感知评分和来源消融分析 |
-| `src/analysis/analysis_pipeline.R` | 表达分析驱动脚本（参数、阶段调度与模块加载） |
-| `src/analysis/R/*.R` | 表达分析函数模块（读取、QC、聚类、注释、DEG、富集、出图） |
-| `src/common/*` | Rscript/工具路径、环境探测与通用 HTTP/HTML 工具 |
-| `src/common/http.py` | 通用 HTTP 请求（重试、退避、大小限制） |
-| `src/common/html_utils.py` | 报告 HTML 转义工具 |
-| `src/data/*` | GEO/ArrayExpress/BioStudies 下载、格式转换、合成数据生成 |
-| `src/docking/*` | 虚拟筛选、证据、虚拟敲除、MD、验证、报告等实现 |
-| `src/docking/http.py` | 证据收集 HTTP 下载（超时与重试） |
-| `src/docking/html_utils.py` | 对接报告 HTML 转义工具 |
-| `src/molecular_docking/*` | 独立分子对接板块实现 |
-| `src/liverbio_suite/*` | `liverbio` 统一入口实现 |
-| `src/pipeline/orchestrator.py` | 表达流水线编排 |
-| `src/pipeline/integration.py` | 全自动集成流水线编排 |
-| `src/pipeline/errors.py` | 全流程共享异常类型 |
-| `src/pipeline/qc.py` | QC 指标收集、门控判定与 `qc_metrics.json` 写入 |
-| `src/pipeline/differential.py` | 样本级细胞类型差异丰度检验 |
-| `src/pipeline/key_targets.py` | DEG 排序、黑名单过滤与关键基因输出 |
-| `src/pipeline/stage_paths.py` | 全自动流水线阶段目录、标记与输出清单 |
-| `src/pipeline/integrated_report.py` | 集成 HTML 报告生成 |
-| `src/pipeline/cell_feedback.py` / `cell_feedback.R` | 虚拟敲除/对接结果返回单细胞对象的闭环分析 |
-| `src/pipeline/export_pseudobulk.R` | 伪 bulk 表达矩阵导出 |
-| `src/report/*` | HTML/Word 报告生成 |
-| `src/report/guides.py` | 结果图/数据指南表 |
-| `web/web_ui.py` | 本地网页服务与任务调度 |
-| `web/web_handler.py` | 网页端 HTTP 路由与请求处理 |
-| `web/web_analysis.py` | 高级分析、MR/共定位与分析工作区导出任务 |
-| `web/web_validation.py` | 四类真实数据验证任务与报告读取 |
-| `web/web_files.py` | 网页结果文件发现与安全读取辅助 |
-| `web/web_utils.py` | 网页端参数、布尔值和路径解析辅助 |
-| `web/web_data.py` | 网页端静态数据表（导航、图目录、软件清单） |
-| `web/web_state.py` | 网页端任务、队列与历史运行时状态 |
-| `web/web_results.py` | 网页端任务状态、历史与结果清单读取 |
-| `web/templates/*` | 全流程、表达分析、数据集、虚拟筛选、分子对接、结果清单等页面模板 |
-| `config/*.json` | 表达分析、对接、独立分子对接、全流程和多数据库证据源配置 |
-| `skills/liver-*/SKILL.md` | Codex skill 定义 |
-| `docs/project_structure.md` | 代码文件结构化说明 |
-| `docs/evidence_hub.md` | 多数据库证据中心的数据模型、来源、评分和 CLI 说明 |
-| `pytest.ini` | pytest 配置（`testpaths = tests`） |
-| `tests/conftest.py` | pytest 共享 `sys.path` 引导 |
-| `tests/test_*.py` | 单元/集成测试 |
-| `tests/test_r_pipeline_syntax.py` | R 脚本解析与模块加载冒烟测试 |
-| `tests/test_module_structure.py` | 重构后的模块接口兼容性测试 |
-| `tests/test_web_security.py` | 网页端同源/跨站与路径安全测试 |
-| `tests/test_web_server_smoke.py` | 网页端真实 HTTP 服务冒烟测试 |
-| `tests/test_web_script_mode.py` | 网页端脚本模式状态一致性测试 |
-| `.github/workflows/tests.yml` | GitHub Actions 测试工作流（Windows/Linux，Python 3.11） |
-
-## 7. 目录结构
-
-```text
-Script/
-├── liverbio.bat
-├── setup_new_computer.bat
-├── check_new_computer.bat
-├── package_for_new_computer.bat
-├── setup_new_computer.sh
-├── check_new_computer.sh
-├── package_for_new_computer.sh
-├── NEW_COMPUTER_SETUP.md
-├── README.md
-├── AGENTS.md            # Codex 项目执行规则
-├── VIRTUAL_SCREENING_REQUIREMENTS.md
-├── requirements.txt
-├── requirements_dock.txt
-├── environment_dock.yml
-├── pytest.ini           # pytest 配置
-├── .gitignore
-├── .github/
-│   └── workflows/
-│       └── tests.yml    # GitHub Actions 测试工作流
-├── scripts/
-│   ├── run_pipeline.py
-│   ├── run_docking.py
-│   ├── run_full_pipeline.py
-│   ├── run_molecular_docking.py
-│   ├── run_evidence_hub.py
-│   ├── liverbio.py
-│   ├── install_codex_skills.py
-│   ├── run_web_full_new_datasets.py
-│   ├── search_datasets.py
-│   ├── dataset_search_ml.py
-│   └── validate_*.py
-├── config/
-│   ├── project_config.json
-│   ├── docking_config.json
-│   ├── molecular_docking_config.json
-│   ├── evidence_sources.json
-│   ├── evidence_local_sources.example.json
-│   └── full_pipeline_config.json
-├── src/
-│   ├── analysis/        # 表达分析 R/Python（analysis_pipeline.R 驱动 + R/ 模块）
-│   │   └── R/           # 表达分析函数模块
-│   ├── common/          # 环境探测、HTTP 与 HTML 工具
-│   ├── data/            # 数据下载与转换
-│   ├── docking/         # 虚拟筛选/CADD/MD/虚拟敲除
-│   ├── evidence/        # 多数据库证据、SQLite 证据库、覆盖评分与消融分析
-│   ├── molecular_docking/ # 独立分子对接
-│   ├── liverbio_suite/  # liverbio 统一入口
-│   ├── pipeline/        # 流水线编排、阶段路径、集成报告与细胞反馈
-│   └── report/          # 报告生成与结果图指南
-├── web/
-│   ├── web_ui.py        # 网页服务与任务调度
-│   ├── web_handler.py   # HTTP 路由与请求处理
-│   ├── web_data.py      # 静态数据表
-│   ├── web_state.py     # 运行时任务状态
-│   ├── web_results.py   # 任务状态、历史与结果读取
-│   ├── static/
-│   └── templates/
-├── launchers/           # .bat 快捷入口及同名 .py（_common.bat 为公共 Python 探测）
-├── skills/              # Codex skill 源文件
-├── docs/                # 使用与结构说明
-├── tests/               # 单元/集成测试（conftest.py 为 pytest 引导）
-├── data_cache/          # 运行时下载缓存（gitignore）
-├── dock/                # 虚拟筛选工作目录（产物 gitignore）
-│   ├── config/
-│   ├── data/
-│   ├── outputs/
-│   ├── tools/
-│   └── work/
-└── results/             # 表达分析结果（gitignore）
-```
-
-`dock/tools/`、`dock/outputs/`、`dock/logs/`、`dock/evidence/`、`dock/validation_real/`、`dock/work/`、`data_cache/` 等运行产物和二进制文件默认被 `.gitignore` 排除，不会上传 GitHub；其中 `dock/evidence/`、`dock/validation_real/`、`dock/logs/` 等目录在首次运行对应阶段时才创建。
-
-## 8. 数据来源与许可
-
-GSE125449: Tumor cell biodiversity drives microenvironmental reprogramming in liver cancer. PMID: 31588021
-
-GSE165816 和 TCGA PanCancer Atlas 仅用于真实数据验证。
-
-数据集搜索使用 NCBI E-utilities（GEO DataSets）与 EBI 公开 API（BioStudies/ArrayExpress、Expression Atlas），仅检索公开数据集；下载遵循各数据库的数据使用条款。
-
-MIT License. See `LICENSE` for details.
-
-## 9. 更新日志
-
-### v1.7.1
-
-- 补齐实验方案一使用的 `beautifulsoup4`、`anndata`、`scanpy` 运行依赖，并同步 GitHub Actions 最小依赖回退列表，修复 Linux/Windows CI 测试收集阶段的模块缺失问题。
-- 全量测试通过：427 个测试用例 + 80 个 subtests；GitHub Actions 的 Ubuntu 与 Windows 任务均通过。
-
-### v1.7.0
-
-- 新增 `src/evidence/` 多数据库证据中心：统一证据模型、SQLite 证据库、来源运行记录、实体和关系证据长表、覆盖感知评分与 leave-one-source-out 消融分析。
-- 新增 Open Targets、ChEMBL、BindingDB、PubChem BioAssay、GWAS Catalog、GTEx、Human Protein Atlas 和 DepMap/本地快照连接器；CTD、Tox21/ToxCast、LINCS、DisGeNET 及授权数据库支持本地表接入。
-- 实验方案一新增 `evidence` 阶段，位于 `disease` 与 `ppi` 之间，输出 `02b_evidence/target_priority.csv`、证据矩阵、来源消融和完整 SQLite 证据库。
-- 机器学习改为外层折内完成特征集和模型选择，并使用训练折内 sigmoid 校准后的概率进行外部验证；新增嵌套模型选择记录。
-- 修复样本级表达数据使用随机 PCA/UMAP 占位图的问题：改为真实 PCA，样本数不足时明确跳过 UMAP，单细胞 PCA/UMAP 失败时不再伪造降维结果。
-- 对接重复种子不足时自动生成互不相同的确定性随机种子，避免把同一 seed 的重复运行误报为独立重复。
-- 默认 GROMACS 生产步数调整为 100 ns，并增加证据阶段签名、阶段输出校验和虚拟敲除输入签名，配置或输入变化时不再静默复用旧结果。
-- 全量测试通过：426 个测试用例 + 80 个 subtests。
-- 将 v1.6.0 新增的高级分析、MR/共定位、分析工作区导出、多队列验证、网络多来源靶点、重复对接、阳性对照、PCA/FEL、MM/PBSA 和 KEGG GSEA 状态同步到网页端。
-- 新增网页版“高级分析”页，支持任务日志、状态轮询、历史记录和结果文件下载；全自动流水线页可配置 Advanced/MR 并衔接高级分析优先级表。
-- 真实数据验证页新增随机全流程、多队列靶点、真实 PDB 证据和随机证据/对接盒四类验证入口。
-- 拆分网页任务层：高级分析与 MR/导出任务、真实数据验证、结果文件发现和通用参数解析分别进入 `web_analysis.py`、`web_validation.py`、`web_files.py` 和 `web_utils.py`。
-- 拆分集成流水线公共能力：共享异常、QC 门控、样本级差异丰度与关键基因排序分别进入 `errors.py`、`qc.py`、`differential.py` 和 `key_targets.py`；`integration.py` 与 `web_ui.py` 保留兼容导出和原有运行行为。
-
-### v1.6.0
-
-- 新增 Advanced 多队列分析与本机 MR/共定位流水线，覆盖批量表达验证、WGCNA、免疫浸润、生存分析、因果分析和结果导出。
-- 新增本地 Codex 分析工作区导出功能，支持数据集编号、项目根目录登记、增量同步和结果清单刷新。
-- 修复 KEGG GSEA 与当前 `clusterProfiler` 的参数兼容问题，并新增 KEGG 状态文件、失败门控和回归测试。
-- 加固真实数据验证脚本：PDB 下载自动重试，验证输出状态可检测，单数据集 smoke test 与完整 20 队列验证使用独立门槛。
-- 修复 CADD、QC、CLI、环境检查、网页结果同步和文件导出中的多项运行缺陷，并补充 R 模块快照和语法测试。
-- 强化仓库隐私与发布安全：清理本机绝对路径示例，扩充凭据和临时文件忽略规则，并同步重写公开 Git 历史中的作者信息。
-- 全量测试通过：387 个测试用例 + 50 个 subtests。
-
-### v1.5.1
-
-- 依据只读代码审查修复 P0/P1 问题：MD 默认模拟时长与完成信息、可复现随机种子、HETATM 丢弃告警、信号检测零细胞修正、虚拟敲除输入校验、配置跨字段约束、`docking.cpu` / tanimoto 去重阈值接线、HTTP 超时重试、HTML 转义与失败原因记录。
-- 收敛 docking 与 molecular_docking 共享逻辑：参数化保存配置、流水线阶段/日志名与 CLI 公共参数，删除重复的盒子检测、路径解析、读取/转义/JSON 写入等私有副本。
-- 拆分巨型文件：`analysis_pipeline.R` 的 R 分析函数抽到 `src/analysis/R/*.R`；`web_ui.py` 抽成 `web/web_handler.py`、`web/web_data.py`、`web/web_state.py`、`web/web_results.py`；`integration.py` / `generate_report.py` 的阶段路径、HTML 报告与指南表抽到独立模块。
-- 补齐 R 模块快照与冒烟测试：orchestrator 运行时会同步 `src/analysis/R` 并设置 `LIVER_R_MODULES_DIR`；新增 `tests/test_r_pipeline_syntax.py`，逐文件解析 R 并验证模块可独立加载。
-- 清理静默异常与仓库卫生：网页/脚本路径读取失败改为带原因日志；离线环境检查、公共 `.bat` Python 探测、`.gitignore`、`pytest.ini` / `tests/conftest.py` 与 GitHub Actions Windows/Linux 测试工作流同步。
-- 全量测试通过：339 个测试用例 + 45 个 subtests。
-
-### v1.5.0
-
-- 把现有 CADD 功能全部接入全自动集成流水线：新增 `07_cadd_downstream`（GROMACS MD 准备/运行、对接 ML 重打分、Amber/GROMACS 与 UniDock-Pro/HDOCK/HADDOCK 工具导出）、`08_network`（网络毒理学）和 `09_faers`（FAERS 不相称性信号）阶段；细胞反馈顺延为 `10_cell_feedback`，集成报告顺延为 `11_report`。
-- 每个成功对接靶点在独立工作目录自动完成 MD/导出；MD 无 GROMACS 时默认只准备输入，不会阻断流水线。提供 `--md-mode auto`、`--md-top-n` 后可自动运行 GROMACS 模拟。
-- 对接 ML 重打分支持全流程训练/预测：`--docking-ml-training-csv`、`--docking-ml-label-column`、`--docking-ml-model`；已存在 `ml_model_info.json` 时自动直接重打分。
-- 网络毒理学与 FAERS 作为输入可选的流水线阶段接入：提供 `network_toxicology.compound_targets_csv` / `target_sources` 和 `faers.input_csv` 后自动运行，缺输入时写 `skipped` 汇总而不是中断或伪造结果。
-- 网页全自动流水线页同步增加 MD/ML/导出、网络毒理学与 FAERS 的输入控件、运行开关、阶段显示和结果表；结果清单文件扫描加入 MD 导出目录。
-- 集成报告与 `integration_summary.json` 新增 CADD 下游、网络毒理学和 FAERS 汇总；阶段标记升级后旧运行目录会自然重建新增阶段。
-- 审计修复：网络毒理学/FAERS 用户显式提供输入但运行失败时不再吞错，流水线返回失败；MD 逐靶点记录 `md_requested/md_failed`，全部失败时阶段状态为 failed 并中断。
-- 审计修复：运行前自动清理旧版 `07_cell_feedback` / `08_report` 等不再属于当前阶段表的遗留标记，避免网页进度虚高或阶段显示错误；网络毒理学 Venn 默认改为 true，与独立命令和文档一致。
-- 审计修复：未配置 ML 训练 CSV 时不再把空路径当作训练文件尝试读取；修复后会如实跳过 ML 重打分。
-- 全量测试通过：271 个测试用例 + 18 个 subtests（含新增 4 个审计修复回归测试）。
-
-### v1.4.0
-
-- `virtual-knockout` 默认检测原始计数矩阵并调用官方 scTenifoldpy/scTenifoldKnk 引擎，同时保留 CellOracle 风格的 GRN 传播；新增 scTenifold QC/网络/流形配置与 DrugReflector checkpoint 化合物排序。
-- 对接结果增加 strong / moderate / weak 亲和力分级并写入 CSV、图片与报告；GROMACS MD 扩展 Rg、SASA、蛋白-配体氢键、结合口袋残基 RMSF 与 last-half 稳定性标签，网页端与结果清单同步展示。
-- 单细胞 QC 新增 UMI-基因数 log-log 关系图和统计表，marker 图新增 RidgePlot 与堆叠小提琴视图；报告、结果清单和结果图指南同步更新。
-- GO 富集气泡图按 BP / CC / MF 分面展示，并优化 colorbar 与图例布局。
-- 报告主函数改为显式接收输出目录，避免 pytest 参数被误当成报告目录，并补充回归测试。
-- 网页版把原“虚拟筛选”页拆成独立功能页面：虚拟筛选、分子动力学、虚拟敲除、网络毒理学、FAERS 和真实数据验证；导航全站统一，CADD 页面脚本抽到 `web/static/dock_app.js`，不再在单个页面堆叠全部模块。
-- 各功能板块使用优化：参数分组折叠、设置保存/恢复/重置与启动自动保存；虚拟敲除支持建模基因数/细胞数/传播轮数/DrugReflector 等高级参数；网络毒理学可指定疾病基因列并控制 Venn；真实数据验证可设置数据集数与种子并实时查看运行状态。
-- 补充 `docs/project_structure.md` 代码结构说明和全站网页模板、测试与文档同步。
-- 全量测试通过：252 个测试用例 + 10 个 subtests。
-
-### v1.3.0
-
-- 新增血红蛋白 QC 跟踪与可配置污染过滤：表达分析 QC 统计 `percent.hb`，对明显血红蛋白高占比细胞默认做 99% 分位数上限过滤，并可用 `LIVER_QC_MAX_HB` / `LIVER_QC_MAX_RIBO` 覆盖阈值；血红蛋白模式同步纳入小鼠 `Hbq1b`。
-- 新增 `liverbio` 统一软件入口：`scripts/liverbio.py` 把表达分析、虚拟筛选、全自动流水线、数据集搜索、网页端和环境检查集中到同一命令，支持 `help`、`version`、`expression`、`docking`、`full`、`datasets`、`web` 和 `doctor` 子命令。
-- 新增数据集搜索、表达分析、全自动流水线、虚拟筛选四个功能 Codex skill 源文件，配套 `scripts/install_codex_skills.py` 与 `docs/software_guide.md`；skill 只指导 Codex 调用项目现有脚本，不复制核心分析代码。
-- 新增 GROMACS 分子动力学模拟模块：支持准备 GROMACS 输入、运行 MD、容错缺失分析文件并自动填充生产时间、按蛋白骨架对齐计算配体 RMSD；模块已接入虚拟筛选 CLI 与网页端。
-- 新增独立分子对接板块：`src/molecular_docking/`、`scripts/run_molecular_docking.py`、`config/molecular_docking_config.json` 与网页“分子对接”页面，提供独立工作目录、任务日志、暂停/继续、自动检测对接盒、结果表、图库、HTML 报告和 PDBQT 构象下载。
-- 网页版整体体验优化：统一页头与快捷入口、表单分组折叠、设置保存/恢复/重置、结果统计卡片、任务数量统计、结果清单实时筛选，并新增导航高亮与进行中任务数量徽标。
-- 新增 `tests/test_md_simulation.py`、`tests/test_molecular_docking.py`、`tests/test_liverbio_cli.py`，并同步补充网页端模板与运行接口测试。
-- 新增 `docs/project_structure.md`，按入口层、实现层、网页层、配置技能层、测试文档层整理全部代码文件；同步更新 README 的脚本文件一览与目录结构。
-- 全量测试通过：236 个测试用例 + 10 个 subtests。
-
-### v1.2.0
-
-- `virtual-knockout` 新增单细胞调控网络虚拟敲除扩展：传入 `--insilico-gene` 后，基于 CellOracle 思路的 KNN 平滑、稀疏 GRN 与迭代信号传播模拟基因敲除，并把结果整理成 UMAP 命运偏转矢量场、TF-靶基因调控网络、WT/KO 表达变化、Top 15 定量表、GO/KEGG 富集气泡图和中文 HTML 报告。
-- 输出目录统一为 `04_knockout/in_silico/`，数据与图编号为 `fig_63` 至 `fig_68`，支持 `--insilico-embedding-csv`、`--insilico-regulators-csv`、`--insilico-species` 和 `--insilico-photo-dir`。
-- 新增 `insilico_enrichment.R`，复用项目现有 `org.Hs.eg.db` / `org.Mm.eg.db` / `clusterProfiler` 环境完成 GO（BP/CC/MF）与 KEGG 富集。
-- 新增 `tests/test_insilico_knockout.py` 单元测试与 `requirements.txt` 中的 `umap-learn` 依赖。
-- 真实数据验证后修复密集 UMAP 箭头重叠问题：`fig_66_ko_shift_umap.png` 在细胞数较多时自动改为网格聚合箭头，避免箭头成片遮挡散点；新增 `src/docking/export_single_cell_insilico.R` 从 Seurat 对象导出虚拟敲除输入。
-- 图表细节优化：`fig_63_ko_target_expression_table.png` 增加中文标题与中文表头；`fig_65_ko_regulatory_network.png` 补全中心基因标签、连接线变细并放大节点；GO/KEGG 富集气泡图增加独立颜色条区域，避免右侧标签压入绘图区或被裁剪。
-
-### v1.1.0
-
-- 富集分析网络图拓展：`fig_22_go_network.png` / `fig_23_kegg_network.png` 在保留 Top5 核心通路的基础上，按 `p.adjust` 追加最佳 5 个延伸通路（`showCategory=10`），保持 `cnetplot` 通路-基因网络样式；报告、网页图开关、结果图指南与结果清单同步更新，并使用真实数据完成验证。
-- 网页版加固：任务运行/排队/暂停期间不再因页面空闲自动退出；POST 接口增加同源与跨站校验、请求体大小限制；任务历史与队列写入加锁，避免并发重复记录；非回环地址启动时输出安全警告。
-- 网页版结果清单搜索优化：支持按结果图名或完整本地路径直接定位对应清单，搜索后只显示命中的结果清单，不再展开指南章节或关联文件。
-- 修复 GEO manifest 中 `single_cell_hint` 被 bulk 文件名规则覆盖的问题。
-- 全量测试通过：208 个测试用例 + 4 个 subtests。
-
-### v1.0.1
-
-- 真实数据集全流程兼容性修复：GEO 下载器对同时包含 bulk 与单细胞文件的系列改为优先选择 bulk 计数表，避免把样本级矩阵与单细胞矩阵混载导致下游失败；新增 `.h5ad.gz` 自动解压转换。
-- 修复 10x 多文库数据合并时重复 barcode 报 `duplicate row.names` 的问题：每个文库按文件名生成唯一样本后缀，跨文库细胞名不再冲突。
-- 修复 GEO series matrix 中带引号逗号标题解析错误，并兼容不同 platform 的 series matrix 列不一致（`rbind.fill` 合并）。
-- 样本级（bulk/microarray）数据集差异表达改为直接对原始样本计数运行 DESeq2，不再先聚合成伪 bulk，解决小样本量下 DEG 全为空的问题；保留单细胞伪 bulk 逻辑。
-- 条件自动推断增强：支持按 `geo_accession` 匹配样本元数据，并把多类别条件（如 ICC/HCC、Normal/Tumor）自动归并为两组，避免无法推断分组导致流水线中断。
-- 大细胞数单细胞数据集 `FindAllMarkers` 增加 `max.cells.per.ident` 限制，避免聚类 marker 计算长时间停滞。
-- 全流程证据阶段增加空 `key_genes.csv` 保护，DEG 为空时跳过证据收集并生成空表，不再因缺列崩溃。
-- 新增 `scripts/run_web_full_new_datasets.py`：通过网页端 `/full/start` 自动提交并监控多个真实数据集的全流程任务。
-- 项目规则新增第 13 条：禁止“准备做”式中间回复，任务执行完成或遇到必须由用户处理的阻塞前不发送文字回复。
-
-### v1.0.0
-
-- 正式发布 1.0.0：表达分析、虚拟筛选、全自动集成流水线、网页端、数据集搜索与验证脚本形成完整可交付链路。
-- 修复验证脚本“全部失败仍报成功”的问题：`validate_real_evidence.py` / `validate_real_random.py` 新增最少成功靶点、最少配体记录和对接盒成功数阈值，未达标时返回非零退出码；技能脚本缺失时返回失败而不是崩溃。
-- 修复长时间验证脚本未捕获超时的问题：`validate_pipeline.py` / `validate_real_pipeline.py` 超时后明确报错并继续/退出，不再让单个数据集拖垮整个验证。
-- 真实数据验证兼容 ML 阶段跳过：`validate_real_pipeline.py` 与合成验证一致，ML 被跳过时不再强制要求 ML 图。
-- 数据集检索验证不再把同义词启发式标签当作真实相关性：新增 `--manual-labels` 人工标签、`label_source` 字段和 `manual_rounds` / `manual_found_rate` 汇总；提供人工标签后 `found` / `found_rate` 以人工标签为准。
-- ML/DL 相关性排序修复：训练要求同时包含相关与不相关样本，重排校验二分类模型；`--eval` 默认要求人工标签，`--allow-heuristic-eval` 仅用于冒烟。
-- 修复 `validate_random_real_full_pipeline.py --only` 未校验 GEO 编号导致的路径逃逸风险，新增 `GSE\d+` 白名单与单元测试。
-- 修复 docking 环境检查/安装假成功：AutoDockTools 源码与 zip 均缺失时安装返回失败；`check-dock-env` 与 `check_dock_environment.py` 按真实检查结果返回退出码。
-- 收敛 Rscript 探测到 `src/common/env.py`，统一 Windows PATH、Program Files 与用户目录探测，消除多处重复实现。
-- 修复真实 TCGA 生存分析 p 值固定为 1.0 的问题：改用 Cox 似然比检验输出真实 p 值；GSE165816 文件名解析增加回退规则。
-- 更新数据集搜索 `run_supported` 表述：搜索结果只标记“可自动运行候选”，实际文件可用性在下载时校验。
-- 全量测试通过：201 个测试用例 + 4 个 subtests。
-
-### v0.9.0
-
-- 数据集搜索从单一 NCBI GEO 扩展为多数据库检索：新增 EBI ArrayExpress/BioStudies 与 Expression Atlas，支持按数据库选择范围，并给每条结果增加来源数据库、质量分和 `run_supported` 标记。
-- 新增 `src/data/biostudies_downloader.py`：自动选择 BioStudies/Expression Atlas 的 processed 表达文件，生成与 GEO 相同的 manifest，可直接进入表达分析与全自动流水线；`E-GEOD-xxxxx` 自动映射到 GEO `GSExxxxx`。
-- 流水线入口、网页端和 CLI 支持 `GSE125449`、`E-MTAB-1234`、`S-BSST123` 等数据集编号；搜索页和全自动流水线页文案同步更新。
-- 新增/更新数据集搜索、BioStudies 下载、网页参数和 accession 校验测试。
-- 修复 ArrayExpress 等样本级数据集缺少 condition 元数据时无法自动推断分组的问题：R 流水线会按样本名 token 自动推断条件组，非单细胞数据可继续跑差异表达。
-- 修复富集为空时 stage 09 汇总读取 `go_up` 占位表导致 `undefined columns selected` 的问题，样本级数据集可正常生成 `summary.json` 并完成流水线。
-- 细胞反馈阶段新增反馈靶基因差异表达：把虚拟敲除/虚拟筛选得到的反馈基因放回 Seurat 对象，输出 `feedback_deg.csv`、`fig_59_feedback_targets_volcano.png` 和 `fig_60_feedback_condition_violin.png`。
-- 细胞反馈阶段新增 GO/KEGG 富集分析：对反馈靶基因运行 `enrichGO` / `enrichKEGG`，输出 `feedback_enrichment_go.csv` / `feedback_enrichment_kegg.csv`，富集 Top5 使用与 `fig_22_go_network.png` 相同的 `cnetplot` 通路-基因网络图（`fig_61_feedback_go_network.png` / `fig_62_feedback_kegg_network.png`），不再使用气泡图。
-- KEGG 富集在线注释超时放宽到 180 秒，并用 `setReadable` 把 KEGG 网络和结果表中的基因 ID 转换为基因符号，便于直接查看 Top5 通路关联基因。
-- 集成报告、网页全自动流水线结果区和结果图指南同步展示反馈差异表达与 GO/KEGG 富集结果；独立 `cell-feedback` 命令新增 `--feedback-species hs/mm`。
-
-### v0.8.2
-
-- 修复 stage 08 发表分析阶段给 Seurat 对象写入 `sample_label` 时携带样本名而非细胞条形码名，导致 `AddMetaData` 报 `No cell overlap between new meta data and Seurat object` 的问题：写入前移除向量 names，多样本数据集可正常完成发表分析。
-
-### v0.8.1
-
-- 修复 R 表达流水线在读取 `dataset_mode.txt` 时调用尚未定义的 `ckpt_path()` 导致启动即报错的问题：将 `ckpt_path()` 定义提前到读取数据集模式之前，单细胞与样本级数据均可正常启动流水线。
-
-### v0.8.0
-
-- 取消“全自动流水线仅支持单细胞”的限制，全面支持 bulk RNA-seq、microarray 和样本级表达矩阵：GEO 下载器不再拒绝非单细胞数据集，这些数据可直接进入表达分析与全自动流水线。
-- 修复逐样本单细胞 CSV（如 GSE165816 的 `GSMxxxx_counts.csv.gz`）被误判为 bulk 的问题：下载器会结合 Series Matrix 标题和矩阵表头中的细胞 barcode 自动识别为单细胞。
-- R 表达流水线新增 `dataset_mode` 模式：单细胞数据保留 QC、双细胞、聚类、注释和细胞级反馈；bulk RNA-seq、microarray 等非单细胞数据按样本级表达矩阵运行，自动跳过双细胞检测、细胞级发表分析和细胞反馈，保留差异表达、富集、虚拟敲除和虚拟筛选链路。
-- 全自动流水线对非单细胞样本级数据集自动跳过细胞类型差异丰度检验和细胞反馈阶段，并在 `differential_abundance_summary.json` / `cell_feedback_summary.json` 中注明原因。
-- 网页数据集搜索与全自动流水线页移除 bulk 选择限制，`single-cell`、`bulk`、`other` 均可带入并运行；网页文案统一改为“表达分析”。
-- 更新 GEO 数据集搜索、manifest 分类、流水线编排和全流程相关测试。
-
-### v0.7.2
-
-- 彻底修复 h5ad/loom 转换：正确解码 h5ad 中 bytes 类型的 obs/var 索引，避免 barcodes 为空或基因名变成 `b'...'`。
-- 支持通过 obs/var 的 `_index` 属性定位真实细胞/基因列；索引确实缺失时自动生成 `Cell1...CellN` / `Gene1...GeneN`，不会生成空 barcodes 文件。
-- h5ad 优先读取 `layers/counts` 原始计数层，X 为归一化数据时不再丢失真实计数；矩阵值非数值时自动置零。
-- 多文件 h5ad/loom 转换改为并行执行，大样本 GEO 数据集的转换耗时显著下降。
-- R 流水线增加防御性回退：barcodes/genes 文件为空或损坏时自动补位，不再因单个空文件导致整个 stage 01 反复失败。
-
-### v0.7.1
-
-- 修复 GEO 下载器未识别 `.h5ad`/`.loom` 单细胞补充文件的问题，h5ad 数据集（如 GSE315928）可自动转换为 10x MTX 后进入流水线。
-- 下载器增加已有文件跳过下载、已解压归档跳过重复解压逻辑，断点续跑不会重复下载大文件。
-- 修复 h5ad/loom 转换结果丢失 `_extracted/` 子目录的问题，manifest 现在引用实际生成的矩阵文件。
-
-### v0.7.0
-
-- 扩大证据数据库覆盖范围：虚拟筛选证据收集新增 STRING 互作网络、Open Targets 靶点关联、Reactome 通路、PharmGKB 药物基因组、AlphaFold 结构和 KEGG 通路来源。
-- 证据报告升级为数据库覆盖表，逐项展示每个数据库的状态与记录数；`check-cadd` 自动检查新增 skill 脚本。
-- 全自动流水线 stage 03 同步接入扩展数据库：`gene_evidence.csv` 新增 STRING/Reactome/PharmGKB/AlphaFold/Open Targets/KEGG 的计数、ID 和 `database_sources`，集成报告与结果清单同步展示。
-- 更新 `VIRTUAL_SCREENING_REQUIREMENTS.md` 环境清单和网页端证据收集文案。
-
-### v0.6.1
-
-- 网页端整合近期全部功能：单细胞分析页新增 ML 模型选择，支持 `xgb` / `rf` / `gbm` / `mlp` / `lasso_svm`。
-- 全自动流水线页新增单细胞 ML 模型、DepMap 依赖表和 PPI 网络边表输入，后端同步追加 `--ml-model`、`--depmap-csv`、`--ppi-network-csv`。
-- 虚拟筛选页新增重打分 ML 模型/训练 CSV/标签列，以及虚拟敲除 PPI 网络边表输入。
-- 结果清单和结果图指南补充 ML 校准曲线与 `lasso_svm` 选定特征表。
-- `run_full_pipeline.py` 新增 `--ml-model`，使全自动流水线可传递单细胞 ML 模型选择。
-- 补充网页控件、命令行参数和结果清单测试。
-
-### v0.6.0
-
-- 数据集搜索新增更多筛选条件：数据类型、最小/最大样本数、起始/结束日期、平台 GPL/名称、数据集类型。
-- 命令行 `scripts/search_datasets.py` 同步支持 `--data-type`、`--min-samples`、`--max-samples`、`--start-date`、`--end-date`、`--platform`、`--dataset-type`。
-- 网页数据集搜索页的“过滤与下载选项”和搜索结果过滤栏同步新增对应条件，可在已加载结果中即时筛选。
-- 搜索结果接口返回 `filters` 字段，便于网页端展示当前筛选状态。
-- 补充筛选函数、日期解析、网页参数传递和模板字段测试。
-
-### v0.5.1
-
-- 网页版虚拟筛选页新增“网络毒理学分析”和“FAERS 不相称性信号检测”卡片，支持填写工作目录/输入文件后直接运行，并展示交集表、PPI hub 评分、Venn 图、C-T-P-D 网络和 FAERS 信号表。
-- 新增 `/dock/network`、`/dock/faers` 同步运行接口及对应文件下载接口。
-- 结果清单页新增“网络毒理学与 FAERS 信号”信息板块；结果图指南同步补充输出路径、用途和判读标准。
-- 全自动流水线结果文件扫描与下载权限加入 `network_toxicology`、`faers` 输出目录。
-- 补充网页运行接口与文件下载安全测试。
-
-### v0.5.0
-
-- 新增网络毒理学命令 `python scripts\run_docking.py network`：支持化合物-疾病靶点交集、多数据库来源计数、STRING PPI hub 评分、Venn 图和 C-T-P-D 节点/边导出。
-- 新增 FAERS 风格信号检测命令 `python scripts\run_docking.py faers`：支持 ROR、PRR、BCPNN IC、EBGM 四种不相称性指标及组合信号判定。
-- 虚拟敲除新增 PPI hub 维度：`virtual-knockout --ppi-network-csv` 可把 STRING 边表的 degree/betweenness/clustering 合入 `target_score`；全自动流水线同步支持 `--ppi-network-csv` 和 `full_pipeline_config.json` 中的 `ppi_network_csv`。
-- 单细胞 ML 扩展：新增 `--ml-model` / `LIVER_ML_MODEL`，支持 `xgb`、`rf`、`gbm`、`mlp`、`lasso_svm`；`lasso_svm` 使用 LASSO 初筛 + SVM-RFE 特征选择，并输出选定特征表。
-- 单细胞 ML 新增校准曲线图 `fig_45_ml_calibration_curve.png`，与 ROC/PR、SHAP 一起构成更完整的模型诊断。
-- 同步更新 `config/docking_config.json`、`config/full_pipeline_config.json`，并新增网络毒理学与 FAERS 单元测试。
-
-### v0.4.2
-
-- 网页版同步 bulk 数据集检测：数据集搜索页新增数据类型过滤与说明，bulk 数据集只可下载、不能直接运行全自动流水线。
-- 全自动流水线页内嵌搜索新增数据类型列，bulk 数据集不可选择；带入链接携带 `data_type` 参数，启动前校验可拦截 bulk 数据集。
-- 单细胞分析页标注仅支持单细胞数据集。
-- 补充网页端 bulk 链接与搜索数据类型的单元测试。
-- 单细胞富集分析优化 `fig_22_go_network.png` / `fig_23_kegg_network.png`：网络图先按 `p.adjust <= 0.05` 筛选，再取前 5 个通路，保留原图并降低网络杂乱度。
-- 新增 `fig_46_go_top5.png` / `fig_47_kegg_top5.png`：展示上调基因 GO BP / KEGG 筛选后 Top5 富集结果。
-- 新增 `fig_48_qc_pvalue_comparison.png` / `fig_48_qc_pvalue_comparison.csv`：比较过滤前后 QC 指标在条件间的差异程度（Wilcoxon 秩和检验 + BH FDR）。
-- 同步报告、网页图开关、结果清单和流水线输出校验。
-
-### v0.4.1
-
-- 修复 bulk RNA-seq 数据集（如 GSE299321）下载时报 `No count matrix files found` 的误导性错误：下载器现可识别 RAW tar 中的逐样本计数表并标记为 bulk 数据集。
-- 单细胞与全自动流水线新增 bulk 数据集检测：遇到 bulk 数据集时明确提示当前流水线仅支持单细胞数据，原始计数文件和 manifest 仍保留在缓存中。
-- GEO 数据集搜索结果新增 `data_type` 字段（`single-cell` / `bulk` / `other`），网页端显示数据类型徽标，bulk 数据集不再提供“全自动流水线”入口。
-- 补充 bulk 检测、manifest 拒绝和搜索分类单元测试。
-
-### v0.4.0
-
-- 网页版整体布局优化：新增共享样式 `web/static/app.css`，统一卡片、按钮、表单、表格、状态卡片和移动端响应式细节；各页面统一页头、副标题与快捷入口。
-- 全自动流水线页表单按“基础设置 / 分析参数 / 反馈与起始阶段 / 运行开关”分组折叠，支持保存设置、恢复设置、恢复默认；结果区新增统计卡片，并保留 QC 门控与细胞类型差异丰度表。
-- 单细胞分析页改为分组折叠布局，支持表单保存/恢复/重置，结果图开关可折叠。
-- 数据集搜索页将搜索条件与过滤/下载选项分组，页面信息层级更清晰。
-- 任务进度页新增运行中、排队中、已暂停、进行中合计统计卡片。
-- 结果清单页新增按文件名、内容或用途实时筛选的工具条。
-- 修复 `/static/app.css` 的 MIME 类型，浏览器可正确应用共享样式。
-- 补充网页模板布局与静态样式测试；全量单元/集成测试 99 个全部通过。
-- 全自动流水线标记升级为“配置/输入指纹”标记：每个阶段记录签名，参数、物种、标签、配置或输入表变化时自动使当前及下游阶段失效，修复“改参数后仍跳过旧结果”的静默错误。
-- 新增阶段输出校验：每个阶段按必需输出清单验证，缺失或空输出不会写入完成标记，重跑时自动重建。
-- 新增 QC 门控：单细胞阶段后汇总 `qc_metrics.json`，按 `qc_gate` 阈值输出 `pass/warn/fail`，可配置最小细胞数、最小基因数、最大双细胞率和伪 bulk 强制要求。
-- 新增细胞类型组成差异检验：基于单细胞注释表计算条件间细胞比例变化（2×2 卡方 + BH FDR），输出 `differential_abundance.csv`，与差异表达配对防止漏掉组成偏移。
-- 虚拟筛选加固：对接盒中心/尺寸校验、非法盒自动跳过并记录原因；PDB 下载失败自动重试 3 次。
-- 全自动流水线新增 `--dry-run`、`--skip-qc-gate`、`--skip-differential-abundance`。
-- 集成报告新增 QC 门控和差异丰度结果表，汇总信息同步写入 `integration_summary.json`。
-- 补充阶段签名失效、QC 门控、差异丰度、对接盒校验、PDB 重试和 dry-run 单元测试。
-- 新增细胞反馈闭环：全自动流水线新增 `07_cell_feedback` 阶段，把虚拟敲除评分和虚拟筛选命中重新写回 Seurat 单细胞对象，计算每细胞靶基因表达、筛选靶点模块评分、细胞类型表达汇总与富集检验，并输出 UMAP/DotPlot/箱线图/热图和 `feedback_targets.csv`。
-- 新增独立命令 `python scripts\run_docking.py cell-feedback --single-cell-root <单细胞结果目录>`，可对已有虚拟敲除/虚拟筛选结果单独执行细胞反馈分析。
-- 全自动流水线支持 `--feedback-top-n`、`--feedback-max-features`、`--feedback-timeout` 和 `--skip-cell-feedback`。
-- 网页版全自动流水线新增细胞反馈参数、阶段显示和结果表；结果清单页新增细胞反馈输出说明。
-- 加固单细胞 R 流水线进程管理：运行前快照 `analysis_pipeline.R`，暂停或停滞时终止完整 R 进程树，避免残留子进程。
-- 优化停滞判断：日志长时间无更新但 R 进程仍在计算时延长等待，不再误杀活跃任务。
-- 补充流水线编排器单元测试，覆盖 R 脚本快照、CPU 采样和进程树终止。
-- `AGENTS.md` 明确任务分支隔离：不同任务必须创建不同功能分支，提交时只包含当前任务相关文件。
-
-### v0.3.0
-
-- 网页版统一界面新增 GEO 数据集搜索页：按疾病、研究方向或原始查询搜索，支持 ML/DL 相关性重排序、CSV/JSON 结果下载与批量下载。
-- 单细胞报告升级为总报告：对 `results/figures` 和 `results/data` 下每个结果文件生成独立分析，包括文件说明、表格规模、关键字段统计、P 值/差异方向/样本分组等结论，并汇总到 `result_report.html`；DOCX/PDF 导出同步加入结果文件清单与数量统计。
-- 单细胞分析新增 `fig_09_deg_horizontal_violin.png`：按校正 P 值排序的差异最显著基因横向小提琴图，并在图中标注 P 值；新增 `LIVER_DE_VIOLIN_TOP_N` 和 `LIVER_DE_VIOLIN_MAX_CELLS` 环境变量。
-- 网页版单细胞分析完成后的结果报告入口：可直接打开包含逐文件分析的 `result_report.html`。
-- UMAP 聚类图直接标注细胞类型名称。
-- 结果清单页优化为仅展示结果图和结果数据，并按阶段目录整理全流程输出。
-- 网页任务进度页支持历史记录、一键清空与完成/中断弹窗提醒。
-- 统一结果文件名与阶段输出目录，增强路径处理和网页端安全校验。
-- 自动 GEO 数据集搜索脚本 `scripts/search_datasets.py` 与 ML/DL 重排序脚本 `scripts/dataset_search_ml.py` 上线。
+MIT License。详见 [LICENSE](LICENSE)。
