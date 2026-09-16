@@ -247,6 +247,10 @@ a.file-link { color: #1665c0; text-decoration: none; margin-right: 12px; }
         <label>化合物靶点预测 CSV（可选）
           <input name="plan_target_prediction_file" placeholder="data/compound_targets.csv">
         </label>
+        <label>PharmMapper 结果 CSV（可选）
+          <input name="plan_pharmmapper_file" placeholder="本地 PharmMapper 导出文件">
+        </label>
+        <label class="toggle"><input type="checkbox" name="plan_use_sea" value="1" checked> 使用 SEA 化合物靶点预测</label>
         <label>GeneCards 导出（CSV/TSV，可选）
           <input name="plan_gene_cards_file" placeholder="本地授权导出文件">
         </label>
@@ -261,7 +265,7 @@ a.file-link { color: #1665c0; text-decoration: none; margin-right: 12px; }
           <input name="plan_docking_targets" type="number" min="1" value="5">
         </label>
         <label>对接 exhaustiveness
-          <input name="plan_docking_exhaustiveness" type="number" min="1" value="16">
+          <input name="plan_docking_exhaustiveness" type="number" min="1" value="100">
         </label>
         <label>对接 CPU
           <input name="plan_docking_cpu" type="number" min="1" value="4">
@@ -272,6 +276,10 @@ a.file-link { color: #1665c0; text-decoration: none; margin-right: 12px; }
         <label>CellChat-like 置换次数
           <input name="plan_cellchat_permutations" type="number" min="1" value="100">
         </label>
+        <label>ML 重复交叉验证次数
+          <input name="plan_ml_cv_repeats" type="number" min="1" value="5">
+        </label>
+        <label class="toggle"><input type="checkbox" name="plan_coexpression_enabled" value="1" checked> 运行 WGCNA 风格共表达模块筛查</label>
         <label class="toggle"><input type="checkbox" name="plan_md_run" value="1"> 运行 100 ns GROMACS 生产模拟</label>
         <label class="toggle"><input type="checkbox" name="plan_md_gpu" value="1" checked> MD 使用 GPU</label>
         <label>MD CPU
@@ -1188,7 +1196,7 @@ function renderPlanOneResults(data) {
     },
     {
       label: '性能目标达标 Panel',
-      value: (coverage.performance_targets_met !== undefined ? coverage.performance_targets_met : 'NA') + ' / ' + (coverage.panels || 'NA'),
+      value: (coverage.performance_targets_met !== undefined ? coverage.performance_targets_met : 'NA') + ' / ' + (coverage.performance_targets_evaluable !== undefined ? coverage.performance_targets_evaluable : (coverage.panels || 'NA')) + ' 可评价',
     },
   ].map((card) => (
     '<div class="stat-card ' + (card.cls || '') + '">' +
@@ -1199,7 +1207,8 @@ function renderPlanOneResults(data) {
     '<p class="muted">私密本地流水线：' + esc((coverage.panels || 0)) + ' 个 Panel；' +
     '代码实现覆盖 ' + esc(coverage.implementation_completion_percent !== undefined ? Number(coverage.implementation_completion_percent).toFixed(2) + '%' : 'NA') +
     '；当前执行结果覆盖 ' + esc(coverage.current_result_completion_percent !== undefined ? Number(coverage.current_result_completion_percent).toFixed(2) + '%' : 'NA') +
-    '；满足外部前提后的预计覆盖 ' + esc(coverage.projected_completion_percent_with_prerequisites !== undefined ? Number(coverage.projected_completion_percent_with_prerequisites).toFixed(2) + '%' : 'NA') + '</p>';
+    '；满足外部前提后的预计覆盖 ' + esc(coverage.projected_completion_percent_with_prerequisites !== undefined ? Number(coverage.projected_completion_percent_with_prerequisites).toFixed(2) + '%' : 'NA') +
+    '；性能目标未评价 Panel ' + esc(coverage.performance_targets_not_evaluated !== undefined ? coverage.performance_targets_not_evaluated : 'NA') + '</p>';
   const links = document.getElementById('fileLinks');
   links.innerHTML = '';
   (data.files || []).forEach((name) => {

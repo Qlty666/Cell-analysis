@@ -1088,6 +1088,8 @@ class TestFullStatus(unittest.TestCase):
             output = base / "plan-one"
             target_prediction = base / "targets.csv"
             target_prediction.write_text("gene,score\nEGFR,0.9\n", encoding="utf-8")
+            pharmmapper = base / "pharmmapper.csv"
+            pharmmapper.write_text("gene,score\nGPAT3,0.7\n", encoding="utf-8")
             with self.assertRaises(ValueError):
                 start_full_job(
                     {
@@ -1110,10 +1112,14 @@ class TestFullStatus(unittest.TestCase):
                         "plan_pubchem_cid": ["154926030"],
                         "plan_disease_name": ["NAFLD"],
                         "plan_target_prediction_file": [str(target_prediction)],
+                        "plan_pharmmapper_file": [str(pharmmapper)],
+                        "plan_use_sea": ["1"],
                         "plan_use_open_evidence": ["1"],
                         "plan_docking_targets": ["3"],
                         "plan_docking_exhaustiveness": ["8"],
                         "plan_cellchat_permutations": ["20"],
+                        "plan_ml_cv_repeats": ["7"],
+                        "plan_coexpression_enabled": ["1"],
                         "plan_md_run": ["1"],
                         "plan_md_gpu": ["1"],
                     }
@@ -1127,6 +1133,13 @@ class TestFullStatus(unittest.TestCase):
                 self.assertTrue(config_path.exists())
                 config = json.loads(config_path.read_text(encoding="utf-8"))
                 self.assertEqual(config["docking"]["targets"], 3)
+                self.assertIn("SEA", config["compound"]["target_databases"])
+                self.assertEqual(
+                    config["compound"]["target_prediction_files"][0]["name"],
+                    "PharmMapper",
+                )
+                self.assertEqual(config["ml"]["cv_repeats"], 7)
+                self.assertTrue(config["coexpression"]["enabled"])
                 self.assertEqual(
                     config["single_cell"]["mouse"]["cellchat_permutations"],
                     20,

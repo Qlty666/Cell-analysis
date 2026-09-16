@@ -371,16 +371,29 @@ def _dynamic_result_reviews(
 
     fibrosis = external.get("GSE49541_fibrosis")
     if fibrosis:
-        met = bool(fibrosis.get("target_met"))
+        evaluated = bool(fibrosis.get("evaluate_auc_target", True))
+        met = bool(fibrosis.get("target_met")) if evaluated else False
         reviews[(figure, "c")] = FigureReview(
-            "合理" if met else "部分合理",
+            "合理" if (met or not evaluated) else "部分合理",
             "良好",
-            "可用" if met else "结果未达标",
+            (
+                "可用"
+                if met
+                else "需限定解释"
+                if not evaluated
+                else "结果未达标"
+            ),
             (
                 "GSE49541检测的是纤维化分期，不是同一健康/NAFLD终点；"
                 f"AUC {_format_number(fibrosis.get('auc'))}，"
-                f"目标 {_format_number(fibrosis.get('target_auc'))}，"
-                f"{'已达到' if met else '未达到'}方案阈值。"
+                + (
+                    "该终点不套用NAFLD分类AUC阈值。"
+                    if not evaluated
+                    else (
+                        f"目标 {_format_number(fibrosis.get('target_auc'))}，"
+                        f"{'已达到' if met else '未达到'}方案阈值。"
+                    )
+                )
             ),
         )
 
@@ -390,16 +403,36 @@ def _dynamic_result_reviews(
         if (row := external.get(key))
     ]
     if external_validation:
-        all_met = all(bool(row.get("target_met")) for row in external_validation)
+        evaluated = [
+            row
+            for row in external_validation
+            if bool(row.get("evaluate_auc_target", True))
+        ]
+        all_met = bool(evaluated) and all(
+            bool(row.get("target_met")) for row in evaluated
+        )
         details = [
             f"{row.get('dataset')} AUC {_format_number(row.get('auc'))}"
-            f" (target {_format_number(row.get('target_auc'))})"
+            + (
+                f" (target {_format_number(row.get('target_auc'))})"
+                if bool(row.get("evaluate_auc_target", True))
+                else " (different endpoint; no NAFLD target)"
+            )
             for row in external_validation
         ]
         reviews[(figure, "d")] = FigureReview(
-            "合理" if all_met else "部分合理",
+            "合理" if all_met or not evaluated else "部分合理",
             "良好",
-            "可用" if all_met else "结果未全达标",
+            (
+                "可用"
+                if all_met and not any(
+                    not bool(row.get("evaluate_auc_target", True))
+                    for row in external_validation
+                )
+                else "需限定解释"
+                if all_met or not evaluated
+                else "结果未全达标"
+            ),
             (
                 "; ".join(details)
                 + "。GSE164441为HCC肿瘤与癌旁终点，GSE135251为补充NAFLD终点。"
@@ -670,6 +703,12 @@ def _recommended_output(verdict: str) -> str:
 def _summary(audit: pd.DataFrame) -> dict[str, Any]:
     available = audit[audit["status"] != "missing"]
     not_run = audit[audit["status"] == "prepared_not_run"]
+    all_panel_keys = set(map(tuple, audit[["figure", "panel"]].to_numpy()))
+    available_keys = set(
+        map(tuple, available[["figure", "panel"]].to_numpy())
+    )
+    not_run_keys = set(map(tuple, not_run[["figure", "panel"]].to_numpy()))
+    missing_keys = all_panel_keys - available_keys
     scores = pd.to_numeric(
         available["automatic_quality_score"],
         errors="coerce",
@@ -689,6 +728,12 @@ def _summary(audit: pd.DataFrame) -> dict[str, Any]:
             & ~available["has_svg"].astype(bool)
         )
     ]
+    oversize_keys = set(
+        map(tuple, oversize[["figure", "panel"]].to_numpy())
+    )
+    resolution_issue_keys = set(
+        map(tuple, resolution_issues[["figure", "panel"]].to_numpy())
+    )
     output_tiers = (
         available["recommended_output"]
         .value_counts()
@@ -711,7 +756,17 @@ def _summary(audit: pd.DataFrame) -> dict[str, Any]:
         audit["audit_verdict"].isin(
             {"需重绘", "不可替代Venn", "结果未达标", "结果未全达标", "不满足方案"}
         )
-    ]
+    ].drop_duplicates(subset=["figure", "panel"], keep="first")
+    severe_overlap_keys = set(
+        map(tuple, severe_overlaps[["figure", "panel"]].to_numpy())
+    )
+    minor_overlap_keys = set(
+        map(tuple, minor_overlaps[["figure", "panel"]].to_numpy())
+    )
+    minor_overlap_keys -= severe_overlap_keys
+    duplicate_anchor_keys = set(
+        map(tuple, duplicate_anchor_panels[["figure", "panel"]].to_numpy())
+    )
     return {
         "standard": "SCI IF>10 provisional figure screen",
         "target_journal": "not specified; exact journal requirements remain unverified",
@@ -720,32 +775,33 @@ def _summary(audit: pd.DataFrame) -> dict[str, Any]:
             if (
                 len(not_run)
                 or len(major_issues)
-                or len(resolution_issues)
-                or len(severe_overlaps)
-                or len(duplicate_anchor_panels)
+                or len(resolution_issue_keys)
+                or len(severe_overlap_keys)
+                or len(duplicate_anchor_keys)
             )
             else "conditional_ready"
         ),
-        "panel_entries": int(len(audit)),
-        "available_panels": int(len(available)),
-        "prepared_not_run_panels": int(len(not_run)),
-        "missing_panels": int((audit["status"] == "missing").sum()),
+        "panel_entries": int(len(all_panel_keys)),
+        "image_entries": int(len(audit)),
+        "available_panels": int(len(available_keys)),
+        "prepared_not_run_panels": int(len(not_run_keys)),
+        "missing_panels": int(len(missing_keys)),
         "mean_automatic_quality_score": float(scores.mean()) if len(scores) else None,
         "median_dpi_x": float(available["dpi_x"].median()) if len(available) else None,
-        "panels_wider_than_7_5_inches": int(len(oversize)),
-        "resolution_or_vector_issue_count": int(len(resolution_issues)),
+        "panels_wider_than_7_5_inches": int(len(oversize_keys)),
+        "resolution_or_vector_issue_count": int(len(resolution_issue_keys)),
         "recommended_output_counts": {
             str(key): int(value)
             for key, value in output_tiers.items()
         },
         "label_overlap_counts": {
-            "严重": int(len(severe_overlaps)),
-            "轻微": int(len(minor_overlaps)),
+            "严重": int(len(severe_overlap_keys)),
+            "轻微": int(len(minor_overlap_keys)),
             "无": int(
-                (available["label_overlap_severity"] == "无").sum()
+                len(available_keys - severe_overlap_keys - minor_overlap_keys)
             ),
         },
-        "duplicate_text_anchor_panel_count": int(len(duplicate_anchor_panels)),
+        "duplicate_text_anchor_panel_count": int(len(duplicate_anchor_keys)),
         "severe_label_overlap_panels": severe_overlaps[
             ["figure", "panel", "content", "label_overlap_notes"]
         ].to_dict(orient="records"),
@@ -880,6 +936,7 @@ def _render_audit_markdown(
         f"- Classified root: `{classified_root}`",
         f"- Overall verdict: **{summary['overall_verdict']}**",
         f"- Panel entries: {summary['panel_entries']}",
+        f"- Image aliases reviewed: {summary.get('image_entries', summary['panel_entries'])}",
         f"- Available panels: {summary['available_panels']}",
         f"- Prepared but not run: {summary['prepared_not_run_panels']}",
         f"- Major issues: {summary['major_issue_count']}",

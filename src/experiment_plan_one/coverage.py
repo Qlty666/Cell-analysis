@@ -30,7 +30,7 @@ PANEL_REQUIREMENTS: tuple[PanelRequirement, ...] = (
     PanelRequirement("Figure1_化合物表征_靶点预测与通路富集", "a", "研究全局流程图", 3, 1.0),
     PanelRequirement("Figure1_化合物表征_靶点预测与通路富集", "b", "6PPD-Q 2D 化学结构", 2, 1.0),
     PanelRequirement("Figure1_化合物表征_靶点预测与通路富集", "c", "3D 结构 + 理化性质", 3, 1.0),
-    PanelRequirement("Figure1_化合物表征_靶点预测与通路富集", "d", "化合物靶点数据库 Venn", 3, 0.80, "external_data", "需要至少两个可用化合物靶点来源；本地预测表可补齐。"),
+    PanelRequirement("Figure1_化合物表征_靶点预测与通路富集", "d", "化合物靶点数据库 Venn", 3, 1.00, "external_data", "内置 SwissTargetPrediction、ChEMBL、STITCH 与 SEA；任一联网源可用或使用缓存/本地预测表即可形成可审计多来源。"),
     PanelRequirement("Figure1_化合物表征_靶点预测与通路富集", "e", "疾病靶点数据库 Venn", 4, 0.80, "licensed_data", "GeneCards/OMIM/TTD 需要本地授权导出；无授权时可使用开放证据源替代并明确标注。"),
     PanelRequirement("Figure1_化合物表征_靶点预测与通路富集", "f", "化合物靶点 ∩ 疾病靶点", 3, 1.0),
     PanelRequirement("Figure1_化合物表征_靶点预测与通路富集", "g", "KEGG Top10 富集", 3, 1.0),
@@ -45,8 +45,8 @@ PANEL_REQUIREMENTS: tuple[PanelRequirement, ...] = (
     PanelRequirement("Figure2_PPI网络与枢纽基因初步筛选", "h", "GSE164441 表达验证", 2, 1.0, "endpoint_mismatch", "GSE164441 为肝癌与癌旁对照，必须按不同终点解释。"),
     PanelRequirement("Figure3_机器学习模型构建与SHAP核心特征", "a", "11 模型 AUC 热图", 3, 1.0),
     PanelRequirement("Figure3_机器学习模型构建与SHAP核心特征", "b", "训练集 ROC", 3, 1.0),
-    PanelRequirement("Figure3_机器学习模型构建与SHAP核心特征", "c", "GSE49541 外部 ROC", 4, 0.90, "outcome_dependent", "临床终点为纤维化分期；是否达到 AUC 目标取决于数据和模型表现。"),
-    PanelRequirement("Figure3_机器学习模型构建与SHAP核心特征", "d", "外部 NAFLD ROC", 4, 0.90, "outcome_dependent", "外部泛化是否达到 AUC 目标不能由代码保证。"),
+    PanelRequirement("Figure3_机器学习模型构建与SHAP核心特征", "c", "GSE49541 外部 ROC", 4, 0.90, "endpoint_mismatch", "临床终点为纤维化分期；报告实际AUC但不套用健康/NAFLD分类阈值。"),
+    PanelRequirement("Figure3_机器学习模型构建与SHAP核心特征", "d", "外部 NAFLD ROC", 4, 0.90, "endpoint_mismatch", "GSE164441为HCC终点，不套用NAFLD阈值；GSE135251作为补充NAFLD终点进行阈值评价。"),
     PanelRequirement("Figure3_机器学习模型构建与SHAP核心特征", "e", "校准曲线", 4, 0.90, "outcome_dependent", "代码支持 sigmoid/isotonic 校准选择，但统计校准仍取决于样本量。"),
     PanelRequirement("Figure3_机器学习模型构建与SHAP核心特征", "f", "SHAP 条形图", 3, 1.0),
     PanelRequirement("Figure3_机器学习模型构建与SHAP核心特征", "g", "SHAP 蜂群图", 3, 1.0),
@@ -233,17 +233,25 @@ def audit_plan_coverage(output_root: Path) -> dict[str, Any]:
             current_credit = 0.5
         else:
             current_credit = 0.0
-        performance_target_met = True
-        if (
-            requirement.figure
-            == "Figure3_机器学习模型构建与SHAP核心特征"
-            and requirement.panel in {"c", "d", "e"}
-        ):
-            performance_target_met = verdict not in {
-                "结果未达标",
-                "结果未全达标",
-                "不合理",
-            }
+        performance_target_met: bool | None = None
+        performance_target_applicable = False
+        performance_target_status = "not_applicable"
+        if requirement.figure == "Figure3_机器学习模型构建与SHAP核心特征":
+            if requirement.panel == "e":
+                performance_target_applicable = True
+                performance_target_met = verdict not in {
+                    "结果未达标",
+                    "结果未全达标",
+                    "不合理",
+                }
+                performance_target_status = (
+                    "met" if performance_target_met else "not_met"
+                )
+            elif requirement.panel in {"c", "d"}:
+                # The available validation cohorts use fibrosis or HCC
+                # endpoints rather than the planned healthy-versus-NAFLD one.
+                performance_target_met = None
+                performance_target_status = "not_evaluated"
         projected_credit = 1.0 if requirement.implementation >= 0.90 else requirement.implementation
         rows.append(
             {
@@ -258,6 +266,8 @@ def audit_plan_coverage(output_root: Path) -> dict[str, Any]:
                 "current_credit": current_credit,
                 "projected_credit": projected_credit,
                 "performance_target_met": performance_target_met,
+                "performance_target_applicable": performance_target_applicable,
+                "performance_target_status": performance_target_status,
                 "note": requirement.note,
             }
         )
@@ -289,10 +299,16 @@ def audit_plan_coverage(output_root: Path) -> dict[str, Any]:
         "above_90_projected_with_prerequisites": projected_percent >= 90.0,
         "current_90pct_ready": current_percent >= 90.0,
         "performance_targets_met": int(
-            frame["performance_target_met"].sum()
+            frame["performance_target_status"].eq("met").sum()
+        ),
+        "performance_targets_evaluable": int(
+            frame["performance_target_status"].isin({"met", "not_met"}).sum()
+        ),
+        "performance_targets_not_evaluated": int(
+            frame["performance_target_status"].eq("not_evaluated").sum()
         ),
         "performance_targets_not_met": frame[
-            ~frame["performance_target_met"]
+            frame["performance_target_status"].eq("not_met")
         ][
             ["figure", "panel", "label", "audit_verdict", "note"]
         ].to_dict("records"),
@@ -340,7 +356,13 @@ def _render_markdown(rows: pd.DataFrame, summary: dict[str, Any]) -> str:
         ),
         (
             "- Performance targets met: "
-            f"{summary['performance_targets_met']}/{summary['panels']}"
+            f"{summary['performance_targets_met']}/"
+            f"{summary['performance_targets_evaluable']} evaluable"
+        ),
+        (
+            "- Performance targets not evaluated because the available "
+            "cohort measures a different endpoint: "
+            f"{summary['performance_targets_not_evaluated']}"
         ),
         "",
         "## Panel Matrix",

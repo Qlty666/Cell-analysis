@@ -16,8 +16,9 @@ import anndata as ad
 
 from experiment_plan_one.common import bh_fdr, split_gene_symbol
 from experiment_plan_one.classify import classify_experiment_plan_results
+from experiment_plan_one.coexpression import run_coexpression_analysis
 from experiment_plan_one.coverage import audit_plan_coverage
-from experiment_plan_one.figure_audit import _dynamic_result_reviews
+from experiment_plan_one.figure_audit import _dynamic_result_reviews, _summary
 from experiment_plan_one.md_figures import generate_plan_md_figures
 from experiment_plan_one.ml import _nested_cv_evaluation, _pipeline, _model_zoo
 from experiment_plan_one.pipeline import (
@@ -28,6 +29,8 @@ from experiment_plan_one.pipeline import (
 from experiment_plan_one.single_cell import _cellchat_like_analysis
 from experiment_plan_one.targets import (
     _parse_swiss_target_table,
+    _sea_result_frame,
+    collect_compound_targets,
     load_compound_target_file,
     make_venn_figure,
 )
@@ -62,6 +65,91 @@ class TestExperimentPlanOne(unittest.TestCase):
         frame = _parse_swiss_target_table(page)
         self.assertEqual(frame.iloc[0]["gene"], "EGFR")
         self.assertAlmostEqual(frame.iloc[0]["probability"], 0.2234)
+
+    def test_sea_result_frame_keeps_only_significant_human_targets(self):
+        rows = [
+            {
+                "Target_Chembl_ID": "CHEMBL210",
+                "Target_Species": "Homo",
+                "Z_score": 3.2,
+                "p_value": 0.003,
+                "Target_Name": "Beta-2 adrenergic receptor",
+                "MaxTc": 0.36,
+                "Uniprot_Accession": "P07550",
+            },
+            {
+                "Target_Chembl_ID": "CHEMBL3440",
+                "Target_Species": "Mus",
+                "Z_score": 4.0,
+                "p_value": 0.001,
+                "Target_Name": "Beta-1 adrenergic receptor",
+                "MaxTc": 0.34,
+                "Uniprot_Accession": "P34971",
+            },
+            {
+                "Target_Chembl_ID": "CHEMBL999",
+                "Target_Species": "Homo",
+                "Z_score": 0.2,
+                "p_value": 0.5,
+                "Target_Name": "Non-significant target",
+                "MaxTc": 0.1,
+                "Uniprot_Accession": "P00000",
+            },
+        ]
+        with mock.patch(
+            "experiment_plan_one.targets._chembl_target_gene",
+            side_effect=lambda target_id: "ADRB2"
+            if target_id == "CHEMBL210"
+            else "",
+        ), mock.patch(
+            "experiment_plan_one.targets._map_uniprot_symbols",
+            return_value={},
+        ):
+            frame = _sea_result_frame(
+                rows,
+                p_value_threshold=0.05,
+                min_zscore=0.0,
+                max_targets=10,
+            )
+        self.assertEqual(frame["gene"].tolist(), ["ADRB2"])
+        self.assertEqual(frame["source"].tolist(), ["SEA"])
+        self.assertAlmostEqual(frame.iloc[0]["p_value"], 0.003)
+
+    def test_collect_compound_targets_can_run_sea_as_independent_source(self):
+        with tempfile.TemporaryDirectory(ignore_cleanup_errors=True) as tmp:
+            output = Path(tmp) / "targets"
+            sea = pd.DataFrame(
+                {
+                    "gene": ["ADRB2"],
+                    "source": ["SEA"],
+                    "probability": [2.5],
+                }
+            )
+            with mock.patch(
+                "experiment_plan_one.targets._fetch_sea_targets",
+                return_value=(
+                    sea,
+                    {
+                        "status": "completed",
+                        "task_id": "test",
+                        "targets": 1,
+                    },
+                ),
+            ):
+                combined, statuses = collect_compound_targets(
+                    {
+                        "canonical_smiles": "CCO",
+                        "iupac_name": "test",
+                    },
+                    output,
+                    enabled_sources=["SEA"],
+                )
+            self.assertEqual(combined["gene"].tolist(), ["ADRB2"])
+            self.assertEqual(statuses["SEA"]["status"], "completed")
+            self.assertEqual(
+                statuses["SwissTargetPrediction"]["status"],
+                "disabled",
+            )
 
     def test_venn_figure_creation(self):
         with tempfile.TemporaryDirectory(ignore_cleanup_errors=True) as tmp:
@@ -329,6 +417,52 @@ class TestExperimentPlanOne(unittest.TestCase):
         self.assertIn("fdr", result["interactions"].columns)
         self.assertIn("significant", result["interactions"].columns)
 
+    def test_coexpression_module_analysis_outputs_hubs(self):
+        rng = np.random.default_rng(3)
+        sample_count = 24
+        genes = [f"G{index:03d}" for index in range(90)]
+        signals = [
+            rng.normal(size=sample_count),
+            rng.normal(size=sample_count),
+            rng.normal(size=sample_count),
+        ]
+        with tempfile.TemporaryDirectory(ignore_cleanup_errors=True) as tmp:
+            root = Path(tmp)
+            values = np.vstack(
+                [
+                    signal + rng.normal(scale=0.15, size=sample_count)
+                    for signal in signals
+                    for _ in range(30)
+                ]
+            )
+            pd.DataFrame(
+                values,
+                index=genes,
+                columns=[f"S{index}" for index in range(sample_count)],
+            ).to_csv(root / "expression.csv")
+            pd.DataFrame(
+                {
+                    "condition": ["HC"] * 12 + ["NASH"] * 12,
+                },
+                index=[f"S{index}" for index in range(sample_count)],
+            ).to_csv(root / "metadata.csv")
+            result = run_coexpression_analysis(
+                root / "expression.csv",
+                root / "metadata.csv",
+                root / "coexpression",
+                max_genes=90,
+                min_module_size=10,
+            )
+            self.assertEqual(result["status"], "completed")
+            self.assertGreaterEqual(result["n_modules"], 2)
+            self.assertTrue(
+                (
+                    root
+                    / "coexpression"
+                    / "coexpression_hubs.csv"
+                ).exists()
+            )
+
     def test_plan_coverage_separates_implementation_from_results(self):
         with tempfile.TemporaryDirectory() as tmp:
             root = Path(tmp)
@@ -351,6 +485,8 @@ class TestExperimentPlanOne(unittest.TestCase):
             )
             self.assertIn("current_result_completion_percent", summary)
             self.assertIn("environment", summary)
+            self.assertEqual(summary["performance_targets_evaluable"], 1)
+            self.assertEqual(summary["performance_targets_not_evaluated"], 2)
 
     def test_ml_figure_reviews_follow_current_metrics(self):
         with tempfile.TemporaryDirectory(ignore_cleanup_errors=True) as tmp:
@@ -364,14 +500,16 @@ class TestExperimentPlanOne(unittest.TestCase):
                             {
                                 "dataset": "GSE49541_fibrosis",
                                 "auc": 0.309,
-                                "target_auc": 0.8,
-                                "target_met": False,
+                                "target_auc": None,
+                                "target_met": None,
+                                "evaluate_auc_target": False,
                             },
                             {
                                 "dataset": "GSE164441_tumor",
                                 "auc": 0.86,
-                                "target_auc": 0.8,
-                                "target_met": True,
+                                "target_auc": None,
+                                "target_met": None,
+                                "evaluate_auc_target": False,
                             },
                             {
                                 "dataset": "GSE135251_NAFLD",
@@ -393,12 +531,49 @@ class TestExperimentPlanOne(unittest.TestCase):
             )
             reviews = _dynamic_result_reviews(root)
             figure = "Figure3_机器学习模型构建与SHAP核心特征"
-            self.assertEqual(reviews[(figure, "c")].verdict, "结果未达标")
+            self.assertEqual(reviews[(figure, "c")].verdict, "需限定解释")
             self.assertIn("0.309", reviews[(figure, "c")].notes)
-            self.assertEqual(reviews[(figure, "d")].verdict, "可用")
+            self.assertEqual(reviews[(figure, "d")].verdict, "需限定解释")
             self.assertIn("0.909", reviews[(figure, "d")].notes)
             self.assertEqual(reviews[(figure, "e")].verdict, "可用")
             self.assertIn("0.140", reviews[(figure, "e")].notes)
+
+    def test_figure_summary_counts_unique_panels_not_file_aliases(self):
+        base = {
+            "figure": "Figure1",
+            "panel": "a",
+            "content": "panel a",
+            "status": "available",
+            "automatic_quality_score": 95,
+            "dpi_x": 600,
+            "dpi_y": 600,
+            "physical_width_in": 5.0,
+            "has_pdf": True,
+            "has_svg": True,
+            "recommended_output": "主图候选",
+            "label_overlap_severity": "无",
+            "label_overlap_notes": "",
+            "duplicate_svg_text_anchor_groups": 0,
+            "audit_verdict": "可用",
+            "notes": "",
+        }
+        audit = pd.DataFrame(
+            [
+                base,
+                {**base, "status": "missing"},
+                {
+                    **base,
+                    "panel": "b",
+                    "status": "missing",
+                    "automatic_quality_score": None,
+                },
+            ]
+        )
+        summary = _summary(audit)
+        self.assertEqual(summary["panel_entries"], 2)
+        self.assertEqual(summary["image_entries"], 3)
+        self.assertEqual(summary["available_panels"], 1)
+        self.assertEqual(summary["missing_panels"], 1)
 
 
 if __name__ == "__main__":

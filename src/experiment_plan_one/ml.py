@@ -27,7 +27,7 @@ from sklearn.metrics import (
     roc_auc_score,
     roc_curve,
 )
-from sklearn.model_selection import StratifiedKFold
+from sklearn.model_selection import RepeatedStratifiedKFold, StratifiedKFold
 from sklearn.neural_network import MLPClassifier
 from sklearn.pipeline import Pipeline
 from sklearn.preprocessing import StandardScaler
@@ -304,6 +304,7 @@ def run_ml_validation(
     *,
     seed: int = 42,
     cv_folds: int = 5,
+    cv_repeats: int = 5,
 ) -> dict[str, Any]:
     """Compare models and validate the best model without outcome leakage."""
     ensure_dir(output_dir)
@@ -356,7 +357,11 @@ def run_ml_validation(
         for name, (features, _, _) in feature_sets.items()
     }
     model_zoo = _model_zoo(seed)
-    splitter = StratifiedKFold(n_splits=cv_folds, shuffle=True, random_state=seed)
+    splitter = RepeatedStratifiedKFold(
+        n_splits=cv_folds,
+        n_repeats=max(1, int(cv_repeats)),
+        random_state=seed,
+    )
 
     for feature_name, (features, dynamic_k, feature_description) in feature_sets.items():
         X = all_matrix[features]
@@ -371,14 +376,16 @@ def run_ml_validation(
             fold_auc: list[float] = []
             fold_ap: list[float] = []
             fold_brier: list[float] = []
-            prediction = np.full(len(y), np.nan, dtype=float)
+            prediction_sum = np.zeros(len(y), dtype=float)
+            prediction_count = np.zeros(len(y), dtype=int)
             try:
                 for train_index, test_index in splitter.split(X, y):
                     X_train, X_test = X.iloc[train_index], X.iloc[test_index]
                     y_train = y.iloc[train_index]
                     fitted = clone(model).fit(X_train, y_train)
                     probability = fitted.predict_proba(X_test)[:, 1]
-                    prediction[test_index] = probability
+                    prediction_sum[test_index] += probability
+                    prediction_count[test_index] += 1
                     fold_auc.append(float(roc_auc_score(y.iloc[test_index], probability)))
                     fold_ap.append(
                         float(average_precision_score(y.iloc[test_index], probability))
@@ -387,6 +394,10 @@ def run_ml_validation(
                         float(brier_score_loss(y.iloc[test_index], probability))
                     )
                 fitted = clone(model).fit(X, y)
+                prediction = np.divide(
+                    prediction_sum,
+                    np.maximum(prediction_count, 1),
+                )
             except Exception as exc:  # noqa: BLE001
                 LOG.warning(
                     "model failed: %s x %s: %s",
@@ -425,6 +436,9 @@ def run_ml_validation(
                     "cv_auc_mean": float(np.mean(fold_auc)),
                     "cv_auc_sd": float(np.std(fold_auc, ddof=1)),
                     "cv_auc_folds": ";".join(f"{value:.6f}" for value in fold_auc),
+                    "cv_auc_ci_low": float(np.percentile(fold_auc, 2.5)),
+                    "cv_auc_ci_high": float(np.percentile(fold_auc, 97.5)),
+                    "cv_repeats": int(max(1, cv_repeats)),
                     "cv_average_precision": float(np.mean(fold_ap)),
                     "cv_brier": float(np.mean(fold_brier)),
                 }
@@ -494,6 +508,12 @@ def run_ml_validation(
         nested_probability,
         output_dir / "fig3e_calibration_curve.png",
     )
+    decision_curve = _plot_decision_curve(
+        y.to_numpy(),
+        nested_probability,
+        output_dir / "fig3e_decision_curve.png",
+    )
+    calibration["decision_curve"] = decision_curve
     calibration = {**calibration, **nested_metrics}
     cv_frame = pd.DataFrame(
         {
@@ -517,6 +537,8 @@ def run_ml_validation(
             dataset_name=dataset_name,
             title=spec.get("title") or dataset_name,
             endpoint_warning=str(spec.get("endpoint_warning") or ""),
+            evaluate_auc_target=bool(spec.get("evaluate_auc_target", True)),
+            endpoint_role=str(spec.get("endpoint_role") or ""),
         )
         validation_rows.append(result)
     validation = pd.DataFrame(validation_rows)
@@ -537,6 +559,10 @@ def run_ml_validation(
             "best_model": best_key[1],
             "cv_auc": float(best["cv_auc_mean"]),
             "cv_auc_sd": float(best["cv_auc_sd"]),
+            "cv_auc_ci_low": float(best["cv_auc_ci_low"]),
+            "cv_auc_ci_high": float(best["cv_auc_ci_high"]),
+            "cv_folds": int(cv_folds),
+            "cv_repeats": int(max(1, cv_repeats)),
             "nested_cv": nested_metrics,
             "calibration_method": "sigmoid_calibrated_outer_fold",
             "cv_auc_target": 0.85,
@@ -569,6 +595,8 @@ def validate_external_model(
     dataset_name: str,
     title: str,
     endpoint_warning: str = "",
+    evaluate_auc_target: bool = True,
+    endpoint_role: str = "",
 ) -> dict[str, Any]:
     training = read_expression(training_expression_path)
     validation = read_expression(validation_expression_path)
@@ -627,6 +655,12 @@ def validate_external_model(
         y.to_numpy(),
         probabilities,
     )
+    calibration_curve_frame = _external_calibration_curve(
+        y.to_numpy(),
+        probabilities,
+        output_dir / f"{dataset_name}_calibration.png",
+        title=title,
+    )
     fpr, tpr, thresholds = roc_curve(y, probabilities)
     prediction = pd.DataFrame(
         {
@@ -674,8 +708,15 @@ def validate_external_model(
         "brier": float(brier_score_loss(y, probabilities)),
         "calibration_slope": calibration["slope"],
         "calibration_intercept": calibration["intercept"],
-        "target_auc": 0.8,
-        "target_met": bool(auc >= 0.8),
+        "calibration_bins": calibration_curve_frame.to_dict(orient="records"),
+        "target_auc": 0.8 if evaluate_auc_target else None,
+        "target_met": (
+            bool(auc >= 0.8)
+            if evaluate_auc_target
+            else None
+        ),
+        "evaluate_auc_target": bool(evaluate_auc_target),
+        "endpoint_role": endpoint_role,
         "endpoint_warning": endpoint_warning,
     }
 
@@ -723,7 +764,7 @@ def _plot_auc_heatmap(performance: pd.DataFrame, output: Path) -> None:
                     fontsize=6.5,
                     color="white" if value >= 0.82 else "#1f2933",
                 )
-    ax.set_title("5-fold cross-validated AUC", fontweight="bold")
+    ax.set_title("Repeated cross-validated AUC", fontweight="bold")
     fig.colorbar(image, ax=ax, label="AUC", shrink=0.7)
     save_figure(fig, output)
 
@@ -782,6 +823,99 @@ def _plot_calibration(
         "calibration_intercept": calibration["intercept"],
         "target_met": bool(hl_p is not None and np.isfinite(hl_p) and hl_p > 0.05),
     }
+
+
+def _plot_decision_curve(
+    y: np.ndarray,
+    probability: np.ndarray,
+    output: Path,
+) -> dict[str, Any]:
+    thresholds = np.linspace(0.01, 0.99, 99)
+    prevalence = float(np.mean(y))
+    rows: list[dict[str, float]] = []
+    for threshold in thresholds:
+        selected = probability >= threshold
+        true_positive = float(np.sum(selected & (y == 1)))
+        false_positive = float(np.sum(selected & (y == 0)))
+        odds = threshold / (1.0 - threshold)
+        model_net_benefit = true_positive / len(y) - false_positive / len(y) * odds
+        all_net_benefit = prevalence - (1.0 - prevalence) * odds
+        rows.append(
+            {
+                "threshold": float(threshold),
+                "model": float(model_net_benefit),
+                "treat_all": float(all_net_benefit),
+                "treat_none": 0.0,
+            }
+        )
+    frame = pd.DataFrame(rows)
+    frame.to_csv(output.with_suffix(".csv"), index=False)
+    fig, ax = plt.subplots(figsize=(4.9, 4.2))
+    ax.plot(frame["threshold"], frame["model"], color="#2f6bb3", lw=2, label="Model")
+    ax.plot(
+        frame["threshold"],
+        frame["treat_all"],
+        color="#8a949e",
+        lw=1.5,
+        linestyle="--",
+        label="Treat all",
+    )
+    ax.axhline(0, color="#c7d0d8", lw=1)
+    ax.set_xlabel("Threshold probability")
+    ax.set_ylabel("Net benefit")
+    ax.set_title("Decision curve analysis", fontweight="bold")
+    ax.legend(frameon=False)
+    save_figure(fig, output)
+    positive = frame.loc[frame["model"] > 0, "threshold"]
+    return {
+        "max_model_net_benefit": float(frame["model"].max()),
+        "max_treat_all_net_benefit": float(frame["treat_all"].max()),
+        "positive_net_benefit_threshold_low": (
+            float(positive.min()) if not positive.empty else None
+        ),
+        "positive_net_benefit_threshold_high": (
+            float(positive.max()) if not positive.empty else None
+        ),
+    }
+
+
+def _external_calibration_curve(
+    y: np.ndarray,
+    probability: np.ndarray,
+    output: Path,
+    *,
+    title: str,
+) -> pd.DataFrame:
+    observed, predicted = calibration_curve(
+        y,
+        probability,
+        n_bins=min(6, max(2, len(y) // 6)),
+        strategy="quantile",
+    )
+    frame = pd.DataFrame(
+        {
+            "predicted_probability": predicted,
+            "observed_probability": observed,
+        }
+    )
+    frame.to_csv(output.with_suffix(".csv"), index=False)
+    fig, ax = plt.subplots(figsize=(4.8, 4.4))
+    ax.plot(predicted, observed, marker="o", color="#2f6bb3", lw=1.8)
+    ax.plot([0, 1], [0, 1], linestyle="--", color="#8a949e", lw=1)
+    ax.set_xlabel("Predicted probability")
+    ax.set_ylabel("Observed proportion")
+    ax.set_title(title, fontweight="bold")
+    ax.text(
+        0.03,
+        0.97,
+        f"Brier={brier_score_loss(y, probability):.3f}",
+        transform=ax.transAxes,
+        ha="left",
+        va="top",
+        fontsize=8,
+    )
+    save_figure(fig, output)
+    return frame
 
 
 def _calibration_parameters(

@@ -489,13 +489,18 @@ python scripts\run_experiment_plan_one.py --stage report --skip-stage md
 实现按以下原则处理原始方案与公开数据之间的差异：
 
 - GSE89632 用作 HC/SS/NASH 三组训练集，使用 `limma` 做差异分析。
+- 在差异分析和 PPI 之外增加 WGCNA 风格共表达模块筛查：MAD 预筛、软阈值、
+  模块-疾病关联、kME 和 hub 输出。该实现明确标记为本地可复现的近似方法，
+  不使用 R WGCNA 名称冒充官方 TOM/动态树切割结果。
 - GSE49541 用于纤维化分期验证；GSE164441 在 GEO 中是 NAFLD 相关 HCC
   肿瘤与癌旁组织比较，因此不会把其 AUC 误称为健康/NAFLD 验证。
 - 额外加入 GSE135251（10 例对照、206 例 NAFLD）作为补充的独立 NAFLD
   验证集，以补足 GSE164441 与靶终点不一致的问题。
 - SwissTargetPrediction 直接请求公开页面；STITCH 无记录时明确记录
   `no_results`。ChEMBL 无精确化合物记录时使用带 Tanimoto 分数的相似性
-  靶点来源，并在结果中明确标注。
+  靶点来源，并在结果中明确标注。新增 SEA 开放 API 连接器；SEA 无结果或
+  超时时保留明确状态。还可通过 `compound.target_prediction_files` 接入
+  PharmMapper、SEA 导出表或其他本地预测表的多个命名来源。
 - GeneCards、OMIM、TTD 的批量导出受许可/账号限制；没有本地导出时不会
   伪造基因列表，配置中可填写本地 CSV/TSV 文件。
 - 小鼠 GSE270583 与人类 GSE202379 使用本地 Scanpy 流程；CellChat 面板
@@ -505,12 +510,15 @@ python scripts\run_experiment_plan_one.py --stage report --skip-stage md
   Panel a-h/j 建立可读目录；文件使用硬链接组织，原始分析目录仍保留。
 - `figure_audit` 阶段同时生成 `10_reports/plan_coverage/plan_coverage.json`
   和 `.md`，按 42 个 Panel 分别报告代码实现覆盖、当前执行结果覆盖、配置
-  外部前提后的预计覆盖、外部依赖和性能目标未达标项。当前实现覆盖 95.77%，
+  外部前提后的预计覆盖、外部依赖和性能目标未达标项。当前实现覆盖 96.26%，
   在授权疾病数据、独立 NAFLD 队列和 GROMACS/gmx_MMPBSA 满足时预计覆盖
-  97.85%；实际的 AUC、校准和 MD 结果不能由代码保证。
+  98.33%；实际的 AUC、校准和 MD 结果不能由代码保证。GSE49541（纤维化
+  分期）和 GSE164441（HCC）不套用健康/NAFLD 的 AUC 阈值，性能目标单独
+  报告可评价和未评价 Panel。
 - 方案网页入口已集成到全自动流水线页面的“实验方案一：6PPD-Q / NAFLD”
   表单，可直接配置本地 GeneCards/OMIM/TTD 导出、化合物靶点预测表、
-  CellChat-like 置换次数和 100 ns GROMACS 运行开关，并展示 plan coverage、
+  SEA/PharmMapper、重复交叉验证、共表达筛查、CellChat-like 置换次数和
+  100 ns GROMACS 运行开关，并展示 plan coverage、
   外部工具版本、性能未达标 Panel 和阶段状态。当前自动检查到的本机版本包括
   Vina 1.2.7 和 GROMACS 2020.6-MODIFIED，与方案文字中的 1.2.3 和 2022
   不同；gmx_MMPBSA 与 R CellChat 当前未安装，论文中必须记录这些偏差或
@@ -1077,7 +1085,7 @@ liverbio analysis-export GSE125449
 | `setup_new_computer.bat` / `check_new_computer.bat` | 新电脑安装与检查 |
 | `package_for_new_computer.bat` | 新电脑源码包生成入口 |
 | `src/analysis/*` | R/Python 分析实现（QC、聚类、DEG、富集、CellChat、ML） |
-| `src/experiment_plan_one/*` | 实验方案一的数据、靶点、PPI、ML、单细胞、对接与报告实现 |
+| `src/experiment_plan_one/*` | 实验方案一的数据、靶点、PPI、共表达模块、ML、单细胞、对接与报告实现 |
 | `src/evidence/*` | 统一证据模型、SQLite 证据库、数据库连接器、覆盖感知评分和来源消融分析 |
 | `src/analysis/analysis_pipeline.R` | 表达分析驱动脚本（参数、阶段调度与模块加载） |
 | `src/analysis/R/*.R` | 表达分析函数模块（读取、QC、聚类、注释、DEG、富集、出图） |

@@ -50,6 +50,7 @@ from .common import (
     write_json,
 )
 from .classify import classify_experiment_plan_results
+from .coexpression import run_coexpression_analysis
 from .coverage import audit_plan_coverage
 from .figure_audit import audit_figures
 from .docking_md import prepare_or_run_md, run_docking_for_targets
@@ -271,10 +272,23 @@ def default_config() -> dict[str, Any]:
         "compound": {
             "name": "6PPD-Q",
             "pubchem_cid": "154926030",
-            "target_databases": ["ChEMBL", "STITCH", "SwissTargetPrediction"],
+            "target_databases": [
+                "ChEMBL",
+                "STITCH",
+                "SwissTargetPrediction",
+                "SEA",
+            ],
             "target_prediction_file": None,
             "target_prediction_gene_column": None,
             "target_prediction_score_column": None,
+            "target_prediction_files": [],
+            "sea": {
+                "p_value_threshold": 0.05,
+                "min_zscore": 0.0,
+                "max_targets": 100,
+                "timeout_seconds": 900,
+                "poll_interval_seconds": 5,
+            },
         },
         "disease": {
             "name": "NAFLD",
@@ -318,7 +332,15 @@ def default_config() -> dict[str, Any]:
             },
         },
         "ppi": {"required_score": 700, "top_n": 20, "add_nodes": 50},
-        "ml": {"cv_folds": 5, "seed": 42},
+        "ml": {"cv_folds": 5, "cv_repeats": 5, "seed": 42},
+        "coexpression": {
+            "enabled": True,
+            "max_genes": 2000,
+            "min_module_size": 20,
+            "distance_threshold": 0.5,
+            "kme_threshold": 0.5,
+            "top_hubs_per_module": 25,
+        },
         "evidence": {
             "enabled": True,
             "config_file": "config/evidence_sources.json",
@@ -342,7 +364,9 @@ def default_config() -> dict[str, Any]:
         },
         "docking": {
             "targets": 5,
-            "exhaustiveness": 16,
+            "exhaustiveness": 100,
+            "num_modes": 20,
+            "replicates": 3,
             "cpu": 4,
             "timeout_seconds": 3600,
         },
@@ -350,6 +374,7 @@ def default_config() -> dict[str, Any]:
             "run": False,
             "gpu": True,
             "cpu": 4,
+            "protein_forcefield": "amber14sb",
             "timeout_seconds": 172800,
         },
     }
@@ -549,6 +574,10 @@ class ExperimentPlanOne:
             properties,
             out_dir,
             cache_dir=self.context.output_root / "00_data" / "cache",
+            enabled_sources=list(
+                self.context.config["compound"].get("target_databases") or []
+            ),
+            sea_config=self.context.config["compound"].get("sea") or {},
         )
         source_dir = out_dir / "sources"
         extra_prediction, extra_status = load_compound_target_file(
@@ -562,11 +591,37 @@ class ExperimentPlanOne:
             ),
         )
         statuses["LocalPrediction"] = extra_status
+        local_prediction_written = not extra_prediction.empty
         if not extra_prediction.empty:
             extra_prediction.to_csv(
                 source_dir / "LocalPrediction.csv",
                 index=False,
             )
+        for index, spec in enumerate(
+            self.context.config["compound"].get("target_prediction_files") or [],
+            start=1,
+        ):
+            if not isinstance(spec, dict):
+                LOG.warning(
+                    "ignoring target_prediction_files[%s]: expected an object",
+                    index,
+                )
+                continue
+            name = str(spec.get("name") or f"LocalPrediction{index}").strip()
+            frame, status = load_compound_target_file(
+                name,
+                spec.get("path"),
+                gene_column=spec.get("gene_column"),
+                score_column=spec.get("score_column"),
+            )
+            statuses[name] = status
+            if not frame.empty:
+                frame.to_csv(
+                    source_dir / f"{slug(name)}.csv",
+                    index=False,
+                )
+                local_prediction_written = True
+        if local_prediction_written:
             source_frames: dict[str, pd.DataFrame] = {}
             for path in sorted(source_dir.glob("*.csv")):
                 frame = pd.read_csv(path)
@@ -1198,6 +1253,47 @@ class ExperimentPlanOne:
                 index=False,
             )
 
+        coexpression_config = dict(
+            self.context.config.get("coexpression") or {}
+        )
+        if bool(coexpression_config.get("enabled", True)):
+            try:
+                coexpression = run_coexpression_analysis(
+                    gse89632_expr,
+                    gse89632_meta,
+                    out_dir / "coexpression",
+                    max_genes=int(coexpression_config.get("max_genes", 2000)),
+                    min_module_size=int(
+                        coexpression_config.get("min_module_size", 20)
+                    ),
+                    distance_threshold=float(
+                        coexpression_config.get("distance_threshold", 0.5)
+                    ),
+                    kme_threshold=float(
+                        coexpression_config.get("kme_threshold", 0.5)
+                    ),
+                    top_hubs_per_module=int(
+                        coexpression_config.get("top_hubs_per_module", 25)
+                    ),
+                )
+            except Exception as exc:  # noqa: BLE001
+                LOG.warning("co-expression screening failed: %s", exc)
+                coexpression = {
+                    "status": "failed",
+                    "reason": str(exc),
+                }
+                write_json(
+                    out_dir
+                    / "coexpression"
+                    / "coexpression_summary.json",
+                    coexpression,
+                )
+        else:
+            coexpression = {
+                "status": "skipped",
+                "reason": "coexpression.enabled is false",
+            }
+
         candidates = self._core_candidate_genes()
         ordered = [gene for gene in candidates if gene in set(hc_vs_nafld["gene"])]
         top_candidates = ordered[:30] or hc_vs_nafld["gene"].head(30).tolist()
@@ -1251,6 +1347,7 @@ class ExperimentPlanOne:
                     "non-tumor tissue, not healthy liver versus NAFLD. Its AUC "
                     "is reported as a different clinical endpoint."
                 ),
+                "coexpression": coexpression,
             },
         )
         return {
@@ -1263,6 +1360,7 @@ class ExperimentPlanOne:
             },
             "heatmap": _serializable(heatmap),
             "candidate_genes": top_candidates,
+            "coexpression": coexpression,
         }
 
     def stage_ml(self) -> dict[str, Any]:
@@ -1291,6 +1389,33 @@ class ExperimentPlanOne:
                 )
             ),
         }
+        coexpression_hubs_path = (
+            self.context.output_root
+            / "04_bulk_training"
+            / "coexpression"
+            / "coexpression_hubs.csv"
+        )
+        if coexpression_hubs_path.exists():
+            coexpression_hubs = pd.read_csv(coexpression_hubs_path)
+            if not coexpression_hubs.empty and "gene" in coexpression_hubs.columns:
+                candidate_sets["coexpression_hubs"] = (
+                    coexpression_hubs["gene"].astype(str).tolist()
+                )
+        coexpression_modules_path = (
+            self.context.output_root
+            / "04_bulk_training"
+            / "coexpression"
+            / "coexpression_disease_module_genes.csv"
+        )
+        if coexpression_modules_path.exists():
+            coexpression_modules = pd.read_csv(coexpression_modules_path)
+            if (
+                not coexpression_modules.empty
+                and "gene" in coexpression_modules.columns
+            ):
+                candidate_sets["coexpression_disease_modules"] = (
+                    coexpression_modules["gene"].astype(str).tolist()
+                )
         validation = {
             "GSE49541_fibrosis": {
                 "expression": str(paths["GSE49541_expression"]),
@@ -1298,6 +1423,8 @@ class ExperimentPlanOne:
                 "condition_map": {"mild_fibrosis": 0, "advanced_fibrosis": 1},
                 "comparison": ("advanced fibrosis", "mild fibrosis"),
                 "title": "GSE49541: advanced vs mild fibrosis",
+                "evaluate_auc_target": False,
+                "endpoint_role": "different_endpoint_fibrosis",
                 "endpoint_warning": (
                     "Fibrosis stage is not the same endpoint as healthy "
                     "versus NAFLD; do not interpret this AUC as the primary "
@@ -1310,6 +1437,8 @@ class ExperimentPlanOne:
                 "condition_map": {"adjacent_normal": 0, "tumor": 1},
                 "comparison": ("tumor", "adjacent normal"),
                 "title": "GSE164441: tumor vs adjacent non-tumor",
+                "evaluate_auc_target": False,
+                "endpoint_role": "different_endpoint_hcc",
                 "endpoint_warning": (
                     "Tumor versus adjacent normal is an HCC endpoint, not a "
                     "healthy versus NAFLD endpoint."
@@ -1321,6 +1450,8 @@ class ExperimentPlanOne:
                 "condition_map": {"control": 0, "NAFLD": 1},
                 "comparison": ("NAFLD", "control"),
                 "title": "GSE135251: NAFLD vs healthy control",
+                "evaluate_auc_target": True,
+                "endpoint_role": "supplementary_true_nafld",
             },
         }
         result = run_ml_validation(
@@ -1331,6 +1462,7 @@ class ExperimentPlanOne:
             out_dir,
             seed=int(self.context.config["ml"]["seed"]),
             cv_folds=int(self.context.config["ml"]["cv_folds"]),
+            cv_repeats=int(self.context.config["ml"].get("cv_repeats", 5)),
         )
         aliases = {
             "GSE49541_fibrosis_roc.png": "fig3c_gse49541_external_roc.png",
@@ -1457,6 +1589,8 @@ class ExperimentPlanOne:
             compound,
             out_dir,
             exhaustiveness=int(self.context.config["docking"]["exhaustiveness"]),
+            num_modes=int(self.context.config["docking"].get("num_modes", 20)),
+            replicates=int(self.context.config["docking"].get("replicates", 3)),
             cpu=int(self.context.config["docking"]["cpu"]),
             timeout=int(self.context.config["docking"]["timeout_seconds"]),
         )
@@ -1470,6 +1604,12 @@ class ExperimentPlanOne:
             run=bool(self.context.config["md"]["run"]),
             gpu=bool(self.context.config["md"]["gpu"]),
             cpu=int(self.context.config["md"]["cpu"]),
+            protein_forcefield=str(
+                self.context.config["md"].get(
+                    "protein_forcefield",
+                    "amber14sb",
+                )
+            ),
             timeout=int(self.context.config["md"]["timeout_seconds"]),
         )
         write_json(out_dir / "md_stage_summary.json", result)
@@ -2137,6 +2277,10 @@ code {{ background: #f1f4f6; padding: 2px 4px; }}
 versus adjacent non-tumor tissue, not a healthy-versus-NAFLD cohort.
 SwissTargetPrediction is queried directly. ChEMBL is represented by an
 explicit similarity-based target screen when no exact ChEMBL molecule exists.
+SEA is queried through its public API when enabled; cached or local target
+tables are accepted when a service is unavailable. A WGCNA-style local
+co-expression screen is supplementary to the five-plan figures and is not
+presented as the original R WGCNA implementation.
 GeneCards, OMIM and TTD bulk exports require licensed access unless local
 files are supplied. The CellChat panel uses an explicit ligand-receptor table
 and is labelled as a screening approximation. The 100 ns MD production run is
@@ -2175,6 +2319,10 @@ def _render_markdown_report(
         "tissue. Its model AUC is reported for that different endpoint.",
         "- ChEMBL has no exact molecule record for every query; an explicit "
         "similarity-based ChEMBL target source is used and labelled.",
+        "- SEA is queried when enabled, with cache and explicit failure states; "
+        "local prediction tables can supply PharmMapper or other sources.",
+        "- The supplementary co-expression module screen is a local "
+        "WGCNA-style approximation, not the original R WGCNA implementation.",
         "- GeneCards, OMIM and TTD require licensed/credentialed bulk access "
         "unless local source tables are supplied.",
         "- The CellChat-like panel uses a local ligand-receptor table and is "
@@ -2229,18 +2377,26 @@ def _render_results_summary(
             [
                 f"- Best cross-validated classifier: {ml.get('best_model')} "
                 f"({ml.get('best_feature_set')}), CV AUC "
-                f"{float(ml.get('cv_auc', float('nan'))):.3f}.",
+                f"{float(ml.get('cv_auc', float('nan'))):.3f}; "
+                f"{ml.get('cv_folds', 'NA')}-fold x "
+                f"{ml.get('cv_repeats', 'NA')} repeats.",
                 f"- SHAP core genes: {', '.join(ml.get('core_genes') or [])}.",
                 "",
-                "| External cohort | Endpoint | n | AUC | AUC >= 0.8? |",
+                "| External cohort | Endpoint | n | AUC | Endpoint target evaluation |",
                 "|---|---|---:|---:|---|",
             ]
         )
         for row in ml.get("external_validation") or []:
+            if row.get("evaluate_auc_target") is False:
+                evaluation = "not evaluated (different endpoint)"
+            elif row.get("target_met") is True:
+                evaluation = "met"
+            else:
+                evaluation = "not met"
             lines.append(
                 f"| {row.get('dataset')} | {row.get('comparison')} | "
                 f"{row.get('n')} | {float(row.get('auc', float('nan'))):.3f} | "
-                f"{'yes' if row.get('target_met') else 'no'} |"
+                f"{evaluation} |"
             )
     mouse_path = (
         context.output_root / "06_single_cell_mouse" / "mouse_single_cell_summary.json"
@@ -2262,6 +2418,29 @@ def _render_results_summary(
             f"- Human snRNA-seq: {human.get('n_cells', 0):,} nuclei, "
             f"{human.get('samples', 0)} GEO samples.",
         ]
+    coexpression_path = (
+        context.output_root
+        / "04_bulk_training"
+        / "coexpression"
+        / "coexpression_summary.json"
+    )
+    if coexpression_path.exists():
+        coexpression = read_json(coexpression_path, {})
+        if coexpression.get("status") == "completed":
+            lines += [
+                "",
+                (
+                    "- WGCNA-style co-expression screen: "
+                    f"{coexpression.get('n_modules', 0)} modules, "
+                    f"{coexpression.get('n_hubs', 0)} disease-module hubs; "
+                    f"soft power {coexpression.get('selected_soft_power', 'NA')}."
+                ),
+                (
+                    "- Co-expression method note: local signed-correlation "
+                    "module screening, not the original R WGCNA TOM/dynamic "
+                    "tree-cut implementation."
+                ),
+            ]
     docking_path = context.output_root / "08_docking" / "docking_scores.csv"
     if docking_path.exists():
         docking = pd.read_csv(docking_path).sort_values("best_affinity_kcal_mol")
@@ -2295,7 +2474,10 @@ def _render_results_summary(
             "## Figure Audit",
             "",
             f"- Overall verdict: **{audit.get('overall_verdict', 'unknown')}**",
-            f"- Available panels: {audit.get('available_panels', 0)}/46",
+            (
+                f"- Available panels: {audit.get('available_panels', 0)}/"
+                f"{audit.get('panel_entries', 42)}"
+            ),
             f"- Median DPI: {audit.get('median_dpi_x', 'NA')}",
             f"- Major issues: {audit.get('major_issue_count', 0)}",
             (
@@ -2344,7 +2526,10 @@ def _render_results_summary(
             (
                 "- Performance targets met: "
                 f"{coverage.get('performance_targets_met', 'NA')}/"
-                f"{coverage.get('panels', 'NA')}"
+                f"{coverage.get('performance_targets_evaluable', 'NA')} evaluable; "
+                f"{coverage.get('performance_targets_not_evaluated', 'NA')} "
+                "not evaluated because the available cohort measures a "
+                "different endpoint"
             ),
             "- Detailed panel matrix: `10_reports/plan_coverage/plan_coverage.md`",
         ]
@@ -2423,10 +2608,10 @@ def _figure_index(root: Path) -> pd.DataFrame:
         ("Figure 5", "a", "3D 对接构象", "08_docking/fig5a_*.png"),
         ("Figure 5", "b", "相互作用平面图", "08_docking/fig5b_*.png"),
         ("Figure 5", "c", "结合能热图", "08_docking/fig5c_*.png"),
-        ("Figure 5", "d-g", "MD RMSD/RMSF/Rg", "09_md_mmpbsa/fig5d_*.png"),
-        ("Figure 5", "d-g", "MD RMSD/RMSF/Rg", "09_md_mmpbsa/fig5e_*.png"),
-        ("Figure 5", "d-g", "MD RMSD/RMSF/Rg", "09_md_mmpbsa/fig5f_*.png"),
-        ("Figure 5", "d-g", "MD RMSD/RMSF/Rg", "09_md_mmpbsa/fig5g_*.png"),
+        ("Figure 5", "d", "蛋白主链 RMSD", "09_md_mmpbsa/fig5d_*.png"),
+        ("Figure 5", "e", "配体 RMSD", "09_md_mmpbsa/fig5e_*.png"),
+        ("Figure 5", "f", "关键残基 RMSF", "09_md_mmpbsa/fig5f_*.png"),
+        ("Figure 5", "g", "回旋半径 Rg", "09_md_mmpbsa/fig5g_*.png"),
         ("Figure 5", "h", "MM-PBSA", "09_md_mmpbsa/fig5h_*.png"),
     ]
     rows: list[dict[str, str]] = []

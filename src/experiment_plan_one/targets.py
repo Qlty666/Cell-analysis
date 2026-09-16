@@ -47,7 +47,9 @@ PUBCHEM_3D_SDF_URL = (
 )
 CHEMBL_BASE = "https://www.ebi.ac.uk/chembl/api/data"
 SWISS_TARGET_BASE = "https://www.swisstargetprediction.ch"
+SEA_BASE = "https://sea.docking.org"
 OPEN_TARGETS_GRAPHQL = "https://api.platform.opentargets.org/api/v4/graphql"
+_CHEMBL_TARGET_GENE_CACHE: dict[str, str] = {}
 
 
 def compound_properties(cid: int | str) -> dict[str, Any]:
@@ -450,6 +452,285 @@ def _fetch_stitch(cid: str) -> tuple[pd.DataFrame, dict[str, Any]]:
     return output.reset_index(drop=True), {"status": "completed", "identifier": identifier}
 
 
+def _post_json(
+    url: str,
+    payload: dict[str, Any],
+    *,
+    timeout: int = 60,
+) -> dict[str, Any]:
+    body = json.dumps(payload).encode("utf-8")
+    request = urllib.request.Request(
+        url,
+        data=body,
+        headers={
+            "Content-Type": "application/json",
+            "User-Agent": "Mozilla/5.0 (compatible; liver-cancer-pipeline/1.7)",
+        },
+    )
+    with urllib.request.urlopen(request, timeout=timeout) as response:
+        return json.loads(response.read().decode("utf-8", "replace"))
+
+
+def _sea_human_target(row: dict[str, Any]) -> bool:
+    species = str(row.get("Target_Species") or "").strip().lower()
+    return species in {"homo", "human", "homo sapiens"}
+
+
+def _map_uniprot_symbols(accessions: list[str]) -> dict[str, str]:
+    """Resolve UniProt accessions to HGNC symbols with MyGene.info."""
+    unique = sorted(
+        {
+            str(accession).strip()
+            for accession in accessions
+            if str(accession).strip()
+        }
+    )
+    output: dict[str, str] = {}
+    for accession in unique:
+        params = urllib.parse.urlencode(
+            {
+                "q": f"uniprot:{accession}",
+                "species": "human",
+                "fields": "symbol",
+                "size": 1,
+            }
+        )
+        try:
+            payload = get_json(
+                f"https://mygene.info/v3/query?{params}",
+                timeout=30,
+                retries=2,
+            )
+        except Exception:
+            continue
+        hits = payload if isinstance(payload, list) else [payload]
+        for hit in hits:
+            if not isinstance(hit, dict):
+                continue
+            symbol = split_gene_symbol(hit.get("symbol") or "")
+            if symbol:
+                output[accession] = symbol
+                break
+    return output
+
+
+def _sea_result_frame(
+    rows: list[dict[str, Any]],
+    *,
+    p_value_threshold: float,
+    min_zscore: float,
+    max_targets: int,
+) -> pd.DataFrame:
+    """Normalize SEA's ranked target table and retain human genes only."""
+    records: list[dict[str, Any]] = []
+    for row in rows:
+        if not isinstance(row, dict) or not _sea_human_target(row):
+            continue
+        p_value = _number(row.get("p_value"))
+        z_score = _number(row.get("Z_score"))
+        if p_value is None or p_value > float(p_value_threshold):
+            continue
+        if z_score is None or z_score < float(min_zscore):
+            continue
+        records.append(
+            {
+                "target_chembl_id": str(row.get("Target_Chembl_ID") or ""),
+                "target_name": _clean_target_name(row.get("Target_Name") or ""),
+                "uniprot_accession": str(row.get("Uniprot_Accession") or ""),
+                "p_value": float(p_value),
+                "z_score": float(z_score),
+                "max_tanimoto": _number(row.get("MaxTc")),
+            }
+        )
+    if not records:
+        return pd.DataFrame(
+            columns=[
+                "gene",
+                "source",
+                "score",
+                "probability",
+                "target_chembl_id",
+                "target_name",
+                "uniprot_accession",
+                "p_value",
+                "z_score",
+                "max_tanimoto",
+            ]
+        )
+    frame = pd.DataFrame(records).sort_values(
+        ["p_value", "z_score"],
+        ascending=[True, False],
+    )
+    frame = frame.head(max(1, int(max_targets))).reset_index(drop=True)
+    frame["gene"] = [
+        _chembl_target_gene(target_id) for target_id in frame["target_chembl_id"]
+    ]
+    missing_accessions = frame.loc[
+        frame["gene"].astype(str).eq(""),
+        "uniprot_accession",
+    ].astype(str).tolist()
+    accession_symbols = _map_uniprot_symbols(missing_accessions)
+    frame.loc[frame["gene"].astype(str).eq(""), "gene"] = frame.loc[
+        frame["gene"].astype(str).eq(""),
+        "uniprot_accession",
+    ].map(accession_symbols)
+    frame["gene"] = frame["gene"].map(split_gene_symbol)
+    frame = frame[frame["gene"] != ""].copy()
+    frame["score"] = -np.log10(frame["p_value"].clip(lower=1e-300))
+    frame["probability"] = frame["score"]
+    frame["source"] = "SEA"
+    frame = (
+        frame.sort_values(["score", "z_score"], ascending=[False, False])
+        .drop_duplicates("gene")
+        .reset_index(drop=True)
+    )
+    return frame[
+        [
+            "gene",
+            "source",
+            "score",
+            "probability",
+            "target_chembl_id",
+            "target_name",
+            "uniprot_accession",
+            "p_value",
+            "z_score",
+            "max_tanimoto",
+        ]
+    ]
+
+
+def _fetch_sea_targets(
+    smiles: str,
+    compound_name: str = "",
+    *,
+    p_value_threshold: float = 0.05,
+    min_zscore: float = 0.0,
+    max_targets: int = 100,
+    timeout: int = 900,
+    poll_interval: int = 5,
+) -> tuple[pd.DataFrame, dict[str, Any]]:
+    """Submit one SMILES to SEA and poll the public result endpoint."""
+    query = " ".join(
+        value
+        for value in (str(smiles).strip(), str(compound_name).strip())
+        if value
+    )
+    payload = {
+        "query": query,
+        "fingerprint_type": "ecfp4",
+        "reference_target": "all",
+        "query_target": "all",
+    }
+    try:
+        submitted = _post_json(
+            f"{SEA_BASE}/api/submit",
+            payload,
+            timeout=60,
+        )
+    except Exception as exc:  # noqa: BLE001
+        return pd.DataFrame(), {
+            "status": "failed",
+            "reason": f"SEA submission failed: {exc}",
+        }
+    task_id = str(submitted.get("task_id") or "").strip()
+    if not task_id:
+        return pd.DataFrame(), {
+            "status": "failed",
+            "reason": f"SEA returned no task_id: {submitted}",
+        }
+    deadline = time.monotonic() + max(1, int(timeout))
+    last_status: dict[str, Any] = {}
+    while time.monotonic() < deadline:
+        try:
+            last_status = get_json(
+                f"{SEA_BASE}/api/result?"
+                + urllib.parse.urlencode({"taskId": task_id}),
+                timeout=60,
+                retries=2,
+            )
+        except Exception as exc:  # noqa: BLE001
+            last_status = {"status": "RUNNING", "error": str(exc)}
+            time.sleep(max(1, int(poll_interval)))
+            continue
+        status = str(last_status.get("status") or "").upper()
+        if status == "SUCCESS":
+            frame = _sea_result_frame(
+                list(last_status.get("result") or []),
+                p_value_threshold=p_value_threshold,
+                min_zscore=min_zscore,
+                max_targets=max_targets,
+            )
+            return frame, {
+                "status": "completed" if not frame.empty else "empty",
+                "task_id": task_id,
+                "targets": int(len(frame)),
+                "p_value_threshold": float(p_value_threshold),
+                "min_zscore": float(min_zscore),
+                "reason": (
+                    ""
+                    if not frame.empty
+                    else "SEA returned no human target below the configured threshold"
+                ),
+            }
+        if status in {"ERROR", "FAILED"} or bool(last_status.get("failed")):
+            return pd.DataFrame(), {
+                "status": "failed",
+                "task_id": task_id,
+                "reason": str(
+                    last_status.get("error")
+                    or "SEA reported a failed task"
+                ),
+            }
+        time.sleep(max(1, int(poll_interval)))
+    return pd.DataFrame(), {
+        "status": "timeout",
+        "task_id": task_id,
+        "reason": f"SEA did not finish within {timeout} seconds",
+        "last_status": last_status,
+    }
+
+
+def _chembl_target_gene(target_id: str) -> str:
+    target_id = str(target_id or "").strip()
+    if not target_id:
+        return ""
+    if target_id in _CHEMBL_TARGET_GENE_CACHE:
+        return _CHEMBL_TARGET_GENE_CACHE[target_id]
+    try:
+        target = get_json(f"{CHEMBL_BASE}/target/{target_id}.json", timeout=60)
+    except Exception:
+        _CHEMBL_TARGET_GENE_CACHE[target_id] = ""
+        return ""
+    if str(target.get("organism") or "") != "Homo sapiens":
+        _CHEMBL_TARGET_GENE_CACHE[target_id] = ""
+        return ""
+    gene = ""
+    for component in target.get("target_components") or []:
+        synonyms = component.get("target_component_synonyms") or []
+        for synonym in synonyms:
+            if str(synonym.get("syn_type") or "").upper().startswith(
+                "GENE_SYMBOL"
+            ):
+                gene = split_gene_symbol(synonym.get("component_synonym", ""))
+                if gene:
+                    break
+        if gene:
+            break
+        for accession in component.get("target_component_xrefs") or []:
+            if str(accession.get("xref_src_db", "")).lower() in {
+                "hgnc",
+                "gene symbol",
+            }:
+                gene = split_gene_symbol(accession.get("xref_id", ""))
+                if gene:
+                    break
+        if gene:
+            break
+    _CHEMBL_TARGET_GENE_CACHE[target_id] = gene
+    return gene
+
+
 def _read_tsv_text(text: str) -> pd.DataFrame:
     from io import StringIO
 
@@ -527,35 +808,7 @@ def _chembl_similarity_targets(
     # Resolve the target gene symbol once per ChEMBL target.
     gene_map: dict[str, str] = {}
     for target_id in activities["target_chembl_id"].dropna().unique():
-        try:
-            target = get_json(f"{CHEMBL_BASE}/target/{target_id}.json", timeout=60)
-        except Exception:
-            continue
-        if str(target.get("organism") or "") != "Homo sapiens":
-            continue
-        gene = ""
-        for component in target.get("target_components") or []:
-            synonyms = component.get("target_component_synonyms") or []
-            for synonym in synonyms:
-                if str(synonym.get("syn_type") or "").upper().startswith(
-                    "GENE_SYMBOL"
-                ):
-                    gene = split_gene_symbol(synonym.get("component_synonym", ""))
-                    if gene:
-                        break
-            if gene:
-                break
-            for accession in component.get("target_component_xrefs") or []:
-                if str(accession.get("xref_src_db", "")).lower() in {
-                    "hgnc",
-                    "gene symbol",
-                }:
-                    gene = split_gene_symbol(accession.get("xref_id", ""))
-                    if gene:
-                        break
-            if gene:
-                break
-        gene_map[target_id] = gene
+        gene_map[target_id] = _chembl_target_gene(target_id)
     activities["gene"] = activities["target_chembl_id"].map(gene_map)
     activities = activities[activities["gene"] != ""]
     if activities.empty:
@@ -638,6 +891,8 @@ def collect_compound_targets(
     *,
     cache_dir: Path | None = None,
     max_swiss_targets: int = 500,
+    enabled_sources: list[str] | None = None,
+    sea_config: dict[str, Any] | None = None,
 ) -> tuple[pd.DataFrame, dict[str, Any]]:
     """Collect and combine accessible compound-target sources."""
     ensure_dir(out_dir)
@@ -646,10 +901,23 @@ def collect_compound_targets(
         ensure_dir(cache_dir)
     statuses: dict[str, Any] = {}
     frames: dict[str, pd.DataFrame] = {}
+    enabled = {
+        str(source).strip().lower()
+        for source in (enabled_sources or [])
+        if str(source).strip()
+    }
+
+    def source_enabled(*names: str) -> bool:
+        if not enabled:
+            return True
+        return any(name.strip().lower() in enabled for name in names)
 
     swiss_cache = (cache_dir or out_dir) / "swisstargetprediction_targets.csv"
     swiss_status_cache = (cache_dir or out_dir) / "swisstargetprediction_status.json"
-    if swiss_cache.exists():
+    if not source_enabled("SwissTargetPrediction"):
+        swiss_frame = pd.DataFrame()
+        statuses["SwissTargetPrediction"] = {"status": "disabled"}
+    elif swiss_cache.exists():
         swiss_frame = pd.read_csv(swiss_cache)
         statuses["SwissTargetPrediction"] = {
             "status": "cached",
@@ -680,7 +948,10 @@ def collect_compound_targets(
 
     stitch_cache = (cache_dir or out_dir) / "stitch_targets.csv"
     stitch_status_cache = (cache_dir or out_dir) / "stitch_status.json"
-    if stitch_cache.exists():
+    if not source_enabled("STITCH"):
+        stitch_frame = pd.DataFrame()
+        statuses["STITCH"] = {"status": "disabled"}
+    elif stitch_cache.exists():
         stitch_frame = pd.read_csv(stitch_cache)
         statuses["STITCH"] = {"status": "cached", "source": str(stitch_cache)}
     elif stitch_status_cache.exists():
@@ -702,7 +973,10 @@ def collect_compound_targets(
 
     chembl_cache = (cache_dir or out_dir) / "chembl_similarity_targets.csv"
     chembl_status_cache = (cache_dir or out_dir) / "chembl_similarity_status.json"
-    if chembl_cache.exists():
+    if not source_enabled("ChEMBL", "ChEMBL_similarity"):
+        chembl_frame = pd.DataFrame()
+        statuses["ChEMBL_similarity"] = {"status": "disabled"}
+    elif chembl_cache.exists():
         chembl_frame = pd.read_csv(chembl_cache)
         statuses["ChEMBL_similarity"] = {
             "status": "cached",
@@ -731,7 +1005,48 @@ def collect_compound_targets(
             ["gene", "source", "probability"]
         ].copy()
 
-    for name in ("SwissTargetPrediction", "STITCH", "ChEMBL_similarity"):
+    sea_cache = (cache_dir or out_dir) / "sea_targets.csv"
+    sea_status_cache = (cache_dir or out_dir) / "sea_status.json"
+    if not source_enabled("SEA"):
+        sea_frame = pd.DataFrame()
+        statuses["SEA"] = {"status": "disabled"}
+    elif sea_cache.exists():
+        sea_frame = pd.read_csv(sea_cache)
+        statuses["SEA"] = {"status": "cached", "source": str(sea_cache)}
+    elif sea_status_cache.exists():
+        sea_frame = pd.DataFrame()
+        statuses["SEA"] = read_json(
+            sea_status_cache,
+            {"status": "cached_empty"},
+        )
+    else:
+        sea_options = dict(sea_config or {})
+        sea_frame, sea_status = _fetch_sea_targets(
+            str(compound.get("canonical_smiles") or ""),
+            str(compound.get("iupac_name") or compound.get("name") or ""),
+            p_value_threshold=float(
+                sea_options.get("p_value_threshold", 0.05)
+            ),
+            min_zscore=float(sea_options.get("min_zscore", 0.0)),
+            max_targets=int(sea_options.get("max_targets", 100)),
+            timeout=int(sea_options.get("timeout_seconds", 900)),
+            poll_interval=int(sea_options.get("poll_interval_seconds", 5)),
+        )
+        statuses["SEA"] = sea_status
+        write_json(sea_status_cache, sea_status)
+        if not sea_frame.empty:
+            sea_frame.to_csv(sea_cache, index=False)
+    if not sea_frame.empty:
+        frames["SEA"] = sea_frame[
+            ["gene", "source", "probability"]
+        ].copy()
+
+    for name in (
+        "SwissTargetPrediction",
+        "STITCH",
+        "ChEMBL_similarity",
+        "SEA",
+    ):
         frame = frames.get(name)
         if frame is None:
             pd.DataFrame(columns=["gene", "source", "probability"]).to_csv(

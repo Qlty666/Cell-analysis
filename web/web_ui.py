@@ -2148,6 +2148,8 @@ def _start_plan_one_job(data: dict) -> dict:
     disease = config.setdefault("disease", {})
     md = config.setdefault("md", {})
     docking = config.setdefault("docking", {})
+    ml = config.setdefault("ml", {})
+    coexpression = config.setdefault("coexpression", {})
     single_cell = config.setdefault("single_cell", {}).setdefault("mouse", {})
 
     for field, key in (
@@ -2160,6 +2162,33 @@ def _start_plan_one_job(data: dict) -> dict:
         value = _first(data, field, "").strip()
         if value:
             compound[key] = value
+    target_databases = [
+        str(value)
+        for value in compound.get("target_databases") or []
+        if str(value).strip()
+    ]
+    use_sea = _first(data, "plan_use_sea", "") in (
+        "1",
+        "true",
+        "on",
+        "yes",
+    )
+    target_databases = [
+        value for value in target_databases if value.upper() != "SEA"
+    ]
+    if use_sea:
+        target_databases.append("SEA")
+    compound["target_databases"] = target_databases
+    pharmmapper_file = _first(data, "plan_pharmmapper_file", "").strip()
+    if pharmmapper_file:
+        compound.setdefault("target_prediction_files", []).append(
+            {
+                "name": "PharmMapper",
+                "path": pharmmapper_file,
+                "gene_column": None,
+                "score_column": None,
+            }
+        )
     for field, key in (
         ("plan_disease_name", "name"),
         ("plan_gene_cards_file", "gene_cards_file"),
@@ -2200,6 +2229,14 @@ def _start_plan_one_job(data: dict) -> dict:
     md_cpu = _int_field(data, "plan_md_cpu")
     if md_cpu is not None:
         md["cpu"] = md_cpu
+    cv_repeats = _int_field(data, "plan_ml_cv_repeats")
+    if cv_repeats is not None:
+        ml["cv_repeats"] = max(1, cv_repeats)
+    coexpression["enabled"] = _first(
+        data,
+        "plan_coexpression_enabled",
+        "",
+    ) in ("1", "true", "on", "yes")
     mouse_cells = _int_field(data, "plan_mouse_max_cells")
     if mouse_cells is not None:
         single_cell["max_cells"] = mouse_cells

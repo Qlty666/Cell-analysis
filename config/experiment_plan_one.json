@@ -7,11 +7,20 @@
     "target_databases": [
       "ChEMBL",
       "STITCH",
-      "SwissTargetPrediction"
+      "SwissTargetPrediction",
+      "SEA"
     ],
     "target_prediction_file": null,
     "target_prediction_gene_column": null,
-    "target_prediction_score_column": null
+    "target_prediction_score_column": null,
+    "target_prediction_files": [],
+    "sea": {
+      "p_value_threshold": 0.05,
+      "min_zscore": 0.0,
+      "max_targets": 100,
+      "timeout_seconds": 900,
+      "poll_interval_seconds": 5
+    }
   },
   "disease": {
     "name": "NAFLD",
@@ -60,7 +69,16 @@
   },
   "ml": {
     "cv_folds": 5,
+    "cv_repeats": 5,
     "seed": 42
+  },
+  "coexpression": {
+    "enabled": true,
+    "max_genes": 2000,
+    "min_module_size": 20,
+    "distance_threshold": 0.5,
+    "kme_threshold": 0.5,
+    "top_hubs_per_module": 25
   },
   "evidence": {
     "enabled": true,
@@ -89,7 +107,9 @@
   },
   "docking": {
     "targets": 5,
-    "exhaustiveness": 16,
+    "exhaustiveness": 100,
+    "num_modes": 20,
+    "replicates": 3,
     "cpu": 4,
     "timeout_seconds": 3600
   },
@@ -97,6 +117,7 @@
     "run": false,
     "gpu": true,
     "cpu": 4,
+    "protein_forcefield": "amber14sb",
     "timeout_seconds": 172800
   }
 }
