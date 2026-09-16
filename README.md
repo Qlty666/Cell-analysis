@@ -20,6 +20,14 @@
 
 ## 快速开始
 
+### 在 GitHub Codespaces 打开网页端
+
+[![Open in GitHub Codespaces](https://github.com/codespaces/badge.svg)](https://codespaces.new/Qlty666/Cell-analysis?quickstart=1)
+
+点击按钮后会在 GitHub 云端创建开发环境，并自动启动网页端。端口 `8000` 会自动转发并在浏览器中打开。
+
+Codespaces 首次启动只准备网页控制台；进入 `/environment` 页后可按实际需要补全表达分析、虚拟筛选、分子动力学等依赖。项目包含本地 Python 服务、R 分析、AutoDock Vina 和 GROMACS，因此不能直接用 GitHub Pages 托管完整功能。
+
 ### 1. 安装环境
 
 Windows 新电脑推荐使用根目录脚本：
