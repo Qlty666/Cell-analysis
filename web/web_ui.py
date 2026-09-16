@@ -2441,6 +2441,8 @@ def start_full_job(data: dict) -> dict:
     ):
         value = _first(data, attr, "").strip()
         if value:
+            if attr == "evidence_hub_config":
+                value = _cli_path(value)
             cmd += ["--" + attr.replace("_", "-"), value]
     for attr in (
         "evidence_max_targets",
