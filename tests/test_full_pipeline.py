@@ -738,9 +738,11 @@ class TestScientificGates(unittest.TestCase):
                 {
                     "status": "completed",
                     "gate_passed": True,
+                    "de_inference_supported": True,
                 },
             )
-            self.assertEqual(readiness["level"], "publication_grade")
+            self.assertEqual(readiness["level"], "paper_supporting")
+            self.assertFalse(readiness["checks"]["mechanistic_perturbation"])
 
     def test_skipping_knockout_removes_stale_integrated_priority(self):
         with tempfile.TemporaryDirectory() as tmp:

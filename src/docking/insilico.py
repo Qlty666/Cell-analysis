@@ -17,6 +17,7 @@ import shutil
 import subprocess
 import warnings
 from pathlib import Path
+from common.fingerprints import file_hash, fingerprint
 
 import numpy as np
 import pandas as pd
@@ -333,6 +334,10 @@ def run_insilico_knockout(
     )
     summary = {
         "status": "completed",
+        "schema_version": 2,
+        "config_signature": fingerprint({"knockout": knockout, "insilico_knockout": isko}),
+        "inputs": {str(p.resolve()): file_hash(p) for p in (expression_csv, metadata_csv) if p is not None},
+        "output_hashes": {str(p.resolve()): file_hash(p) for p in data_files.values()},
         "ko_gene": gene,
         "engine": engine_label,
         "cells": int(len(gem)),

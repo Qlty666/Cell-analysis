@@ -38,6 +38,7 @@ import numpy as np
 import pandas as pd
 from scipy import stats
 from sklearn.base import clone
+from analysis.model_validation import nested_predictions, splits as validation_splits
 from sklearn.calibration import calibration_curve
 from sklearn.ensemble import GradientBoostingClassifier, RandomForestClassifier
 from sklearn.feature_selection import SelectKBest, f_classif
@@ -397,7 +398,7 @@ def _classification_models(random_state: int) -> dict[str, Pipeline]:
     models: dict[str, Pipeline] = {}
     models["elastic_net"] = Pipeline(
         [
-            ("impute", SimpleImputer(strategy="median")),
+            ("impute", SimpleImputer(strategy="median", keep_empty_features=True)),
             ("select", SelectKBest(f_classif, k="all")),
             ("scale", StandardScaler()),
             (
@@ -416,7 +417,7 @@ def _classification_models(random_state: int) -> dict[str, Pipeline]:
     )
     models["lasso"] = Pipeline(
         [
-            ("impute", SimpleImputer(strategy="median")),
+            ("impute", SimpleImputer(strategy="median", keep_empty_features=True)),
             ("select", SelectKBest(f_classif, k="all")),
             ("scale", StandardScaler()),
             (
@@ -433,7 +434,7 @@ def _classification_models(random_state: int) -> dict[str, Pipeline]:
     )
     models["random_forest"] = Pipeline(
         [
-            ("impute", SimpleImputer(strategy="median")),
+            ("impute", SimpleImputer(strategy="median", keep_empty_features=True)),
             ("select", SelectKBest(f_classif, k="all")),
             (
                 "clf",
@@ -450,7 +451,7 @@ def _classification_models(random_state: int) -> dict[str, Pipeline]:
     )
     models["gradient_boosting"] = Pipeline(
         [
-            ("impute", SimpleImputer(strategy="median")),
+            ("impute", SimpleImputer(strategy="median", keep_empty_features=True)),
             ("select", SelectKBest(f_classif, k="all")),
             (
                 "clf",
@@ -465,7 +466,7 @@ def _classification_models(random_state: int) -> dict[str, Pipeline]:
     )
     models["svm_rbf"] = Pipeline(
         [
-            ("impute", SimpleImputer(strategy="median")),
+            ("impute", SimpleImputer(strategy="median", keep_empty_features=True)),
             ("select", SelectKBest(f_classif, k="all")),
             ("scale", StandardScaler()),
             (
@@ -481,7 +482,7 @@ def _classification_models(random_state: int) -> dict[str, Pipeline]:
     )
     models["mlp"] = Pipeline(
         [
-            ("impute", SimpleImputer(strategy="median")),
+            ("impute", SimpleImputer(strategy="median", keep_empty_features=True)),
             ("select", SelectKBest(f_classif, k="all")),
             ("scale", StandardScaler()),
             (
@@ -500,7 +501,7 @@ def _classification_models(random_state: int) -> dict[str, Pipeline]:
 
         models["xgboost"] = Pipeline(
             [
-                ("impute", SimpleImputer(strategy="median")),
+                ("impute", SimpleImputer(strategy="median", keep_empty_features=True)),
                 ("select", SelectKBest(f_classif, k="all")),
                 (
                     "clf",
@@ -686,7 +687,7 @@ def _evaluate_models(
     if len(genes) < 2:
         raise ValueError("fewer than two candidate genes are present in the matrix")
     X = expression.loc[genes, :].T
-    y_text = labels.astype(str)
+    y_text = labels.reindex(X.index).astype(str)
     encoder = LabelEncoder()
     y = encoder.fit_transform(y_text)
     positive_hits = np.where(
@@ -718,7 +719,9 @@ def _evaluate_models(
         shuffle=True,
         random_state=int(config.get("seed", 42)),
     )
-    feature_cap = config.get("feature_cap")
+    groups = config.get("groups")
+    partitions = validation_splits(X, y, n_splits, int(config.get("seed", 42)), groups)
+    feature_cap = config.get("feature_cap", config.get("top_genes", 500))
     models = _classification_models(int(config.get("seed", 42)))
     rows: list[dict] = []
     fitted_models: dict[str, Pipeline] = {}
@@ -735,7 +738,7 @@ def _evaluate_models(
         )
         aucs: list[float] = []
         accuracies: list[float] = []
-        for train_idx, test_idx in cv.split(X, y):
+        for train_idx, test_idx in (partitions if groups is not None else cv.split(X, y)):
             fold_model = clone(fitted)
             fold_model.fit(X.iloc[train_idx], y[train_idx])
             proba = fold_model.predict_proba(X.iloc[test_idx])
@@ -770,7 +773,7 @@ def _evaluate_models(
                 clone(fitted),
                 X,
                 y,
-                cv=predictor_cv,
+                cv=partitions,
                 method="predict_proba",
             )
             oof_store[name] = _positive_probabilities(
@@ -818,8 +821,11 @@ def _evaluate_models(
         index=False,
     )
 
-    if best_name in oof_store:
-        probabilities = oof_store[best_name]
+    nested_models = {name: clone(model) for name, model in fitted_models.items()}
+    probabilities, fold_records = nested_predictions(nested_models, X, y, positive_label, n_splits, int(config.get("seed", 42)), groups)
+    _json_write(out_dir / "ml_nested_folds.json", fold_records)
+    pd.DataFrame({"sample": X.index, "label": y_positive, "probability": probabilities}).to_csv(out_dir / "ml_nested_predictions.csv", index=False)
+    if np.isfinite(probabilities).all():
         auc_value = float(roc_auc_score(y_positive, probabilities))
         lower, upper = _bootstrap_auc_ci(
             y_positive,
@@ -832,7 +838,7 @@ def _evaluate_models(
         plt.plot([0, 1], [0, 1], "--", color="grey")
         plt.xlabel("False positive rate")
         plt.ylabel("True positive rate")
-        plt.title(f"{best_name} cross-validated ROC")
+        plt.title("Nested cross-validated model-selection ROC")
         plt.legend()
         plt.tight_layout()
         plt.savefig(out_dir / "ml_roc.png", dpi=160)
@@ -874,6 +880,9 @@ def _evaluate_models(
             {
                 "status": "completed",
                 "best_model": best_name,
+                "evaluation": "nested_cross_validation",
+                "group_disjoint": groups is not None,
+                "feature_selection": "training_fold_only",
                 "cv_auc": auc_value,
                 "cv_auc_ci95": [lower, upper],
                 "average_precision": float(
@@ -884,7 +893,7 @@ def _evaluate_models(
                 ),
                 "positive_class": str(config.get("case_label")),
                 "selected_features": selected_genes,
-                "external_validation_generated": True,
+                "external_validation_generated": False,
             },
         )
         if config.get("shap", False):
@@ -945,6 +954,14 @@ def _write_shap_if_available(
         )
 
 
+def _ml_expression(frame):
+    """Sample-local transforms only; no full-cohort ComBat/quantile fitting."""
+    numeric = frame.astype(float)
+    if _looks_like_counts(numeric):
+        return np.log2(numeric.div(numeric.sum(axis=0).replace(0, np.nan), axis=1) * 1e6 + 1.0)
+    return numeric.replace([np.inf, -np.inf], np.nan)
+
+
 def _external_validation(
     discovery_expression: pd.DataFrame,
     discovery_labels: pd.Series,
@@ -969,7 +986,7 @@ def _external_validation(
             continue
         X_train = discovery_expression.loc[genes, :].T
         y_train = (discovery_labels.astype(str) == str(config.get("case_label"))).astype(int)
-        X_test = cohort.expression.loc[genes, :].T
+        X_test = _ml_expression(cohort.expression).loc[genes, :].T
         y_test = (cohort.labels.astype(str) == str(cohort.case_label)).astype(int)
         for name, template in _classification_models(
             int(config.get("seed", 42))
@@ -1326,30 +1343,27 @@ def run(args) -> int:
     ml_config.setdefault("cv_folds", 5)
     ml_config.setdefault("cv_repeats", 5)
     ml_config.setdefault("seed", 42)
-    if "padj" in deg.columns:
-        candidate = deg[
-            pd.to_numeric(deg["padj"], errors="coerce")
-            <= float(ml_config.get("padj", 0.05))
-        ]
-    else:
-        candidate = deg.head(int(ml_config.get("top_genes", 500)))
-    if candidate.empty:
-        candidate = deg.head(int(ml_config.get("top_genes", 500)))
-    candidate_genes = candidate["gene"].astype(str).head(
-        int(ml_config.get("top_genes", 500))
-    ).tolist()
+    # DEG tables remain descriptive; validation starts with the complete gene universe.
+    candidate_genes = list(primary.expression.index)
+    ml_config.setdefault("feature_cap", ml_config.get("top_genes", 500))
+    group_column = ml_config.get("group_column") or next((c for c in ("patient", "patient_id", "donor", "donor_id") if c in primary.metadata.columns), None)
+    if group_column:
+        if group_column not in primary.metadata:
+            raise ValueError(f"ML group column not found: {group_column}")
+        ml_config["groups"] = primary.metadata.loc[primary.expression.columns, group_column].tolist()
+    ml_expression = _ml_expression(primary.expression)
     ml_summary: dict = {"status": "skipped", "reason": "disabled"}
     ml_importance = pd.DataFrame()
     if not args.skip_ml:
         comparison, ml_importance, selected = _evaluate_models(
-            expression,
+            ml_expression,
             primary.labels,
             candidate_genes,
             ml_config,
             out_dir,
         )
         external = _external_validation(
-            expression,
+            ml_expression,
             primary.labels,
             validation,
             candidate_genes,

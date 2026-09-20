@@ -226,6 +226,7 @@ def extract_key_genes(
     out_cols = [
         "rank",
         "gene",
+        "inference_level",
         "direction",
         "avg_log2fc",
         "p_val_adj",

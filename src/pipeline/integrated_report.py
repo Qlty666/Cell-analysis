@@ -6,6 +6,7 @@ import logging
 import os
 from datetime import datetime
 from pathlib import Path
+from common.fingerprints import file_hash, fingerprint, read_state
 
 import pandas as pd
 
@@ -146,6 +147,7 @@ def _publication_readiness(
         errors="coerce",
     ).iloc[0]
     checks = {
+        "sample_level_inference": bool((omics_qc_summary or {}).get("de_inference_supported", False)),
         "omics_qc": bool(
             str((omics_qc_summary or {}).get("status", "")) == "completed"
             and (omics_qc_summary or {}).get("gate_passed", False)
@@ -199,7 +201,7 @@ def _publication_readiness(
             and pd.notna(external_auroc)
             and float(external_auroc) >= 0.70
         ),
-        "mechanistic_perturbation": mechanistic_path.exists(),
+        "mechanistic_perturbation": _valid_perturbation(mechanistic_path, docking_config),
         "mmpbsa_available": bool(
             structural_gates.get("mmpbsa_available", False)
         ),
@@ -208,6 +210,7 @@ def _publication_readiness(
         ),
     }
     required = (
+        "sample_level_inference",
         "omics_qc",
         "multi_source_evidence",
         "candidate_universe_not_top50_only",
@@ -243,6 +246,31 @@ def _publication_readiness(
         "checks": checks,
         "missing": missing,
     }
+
+
+def _valid_perturbation(path: Path, config_path: Path) -> bool:
+    summary = read_state(path)
+    try:
+        cfg = load_config(config_path)
+        expected = fingerprint({"knockout": cfg.data.get("knockout", {}), "insilico_knockout": cfg.data.get("insilico_knockout", {})})
+        if (summary.get("status") != "completed" or summary.get("schema_version") != 2
+            or summary.get("config_signature") != expected or not summary.get("ko_gene")
+            or int(summary.get("cells", 0)) <= 0 or int(summary.get("genes_modeled", 0)) <= 0
+            or not summary.get("top_targets")):
+            return False
+        inputs, outputs = summary.get("inputs"), summary.get("output_hashes")
+        if not isinstance(inputs, dict) or not inputs or not isinstance(outputs, dict) or not outputs:
+            return False
+        expression = cfg._resolve(cfg.get("knockout", "expression_csv"))
+        if str(expression.resolve()) not in inputs:
+            return False
+        for name, digest in {**inputs, **outputs}.items():
+            file = Path(name)
+            if not file.is_file() or file.stat().st_size == 0 or file_hash(file) != digest:
+                return False
+        return all(Path(name).resolve().is_relative_to(path.parent.resolve()) for name in outputs)
+    except (ValueError, TypeError, OSError, KeyError):
+        return False
 
 
 def generate_integrated_report(
@@ -410,6 +438,11 @@ def generate_integrated_report(
     )
     qc_metrics = _read_json(out_dir / "qc_metrics.json")
     omics_qc_summary = _read_json(out_dir / "omics_qc_summary.json")
+    de_state = _read_json(single_cell_root / "results/data/05_deg/de_inference_summary.json")
+    if not de_state:
+        candidates = list((single_cell_root / "results/data").glob("*/de_inference_summary.json"))
+        de_state = _read_json(candidates[0]) if len(candidates) == 1 else {}
+    omics_qc_summary["de_inference_supported"] = de_state.get("inference_level") == "sample_supported"
     differential_abundance = (
         pd.read_csv(out_dir / "differential_abundance.csv")
         if (out_dir / "differential_abundance.csv").exists()

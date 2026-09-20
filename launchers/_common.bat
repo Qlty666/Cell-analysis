@@ -4,6 +4,12 @@ rem Sets PYTHON_EXE to "py -3" or "python"; returns 0 on success, 1 when no
 rem working Python 3 interpreter can be found.
 setlocal
 set "PYTHON_EXE="
+if defined LIVER_PYTHON (
+  "%LIVER_PYTHON%" -c "import sys; print(sys.executable)"
+  if errorlevel 1 exit /b 1
+  set PYTHON_EXE="%LIVER_PYTHON%"
+  goto python_ready
+)
 where py >nul 2>nul
 if not errorlevel 1 (
   py -3 -c "import sys" >nul 2>nul
@@ -23,5 +29,6 @@ if not defined PYTHON_EXE (
   endlocal
   exit /b 1
 )
+:python_ready
 endlocal & set "PYTHON_EXE=%PYTHON_EXE%"
 exit /b 0

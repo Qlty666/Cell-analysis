@@ -12,7 +12,7 @@ matplotlib.use("Agg")
 import matplotlib.pyplot as plt
 import numpy as np
 import pandas as pd
-from sklearn.base import BaseEstimator, TransformerMixin
+from sklearn.base import BaseEstimator, TransformerMixin, clone
 from sklearn.calibration import calibration_curve
 from sklearn.ensemble import (
     GradientBoostingClassifier,
@@ -35,7 +35,7 @@ from sklearn.model_selection import (
 )
 from sklearn.neural_network import MLPClassifier
 from sklearn.pipeline import Pipeline
-from sklearn.preprocessing import LabelEncoder
+from sklearn.preprocessing import LabelEncoder, StandardScaler
 from sklearn.svm import SVC
 
 log = logging.getLogger("ml_analysis")
@@ -254,47 +254,42 @@ def main() -> int:
             # features on its training split only (no leakage).
             estimator = Pipeline(
                 [
+                    ("scale", StandardScaler()),
                     ("select", _LassoRfeSelector(random_state=42)),
                     ("clf", estimator),
                 ]
             )
             feature_selection = "lasso_svm"
 
+        if chosen_model == "mlp":
+            estimator = Pipeline([("scale", StandardScaler()), ("clf", estimator)])
         min_class = min(pd.Series(y_enc).value_counts())
+        if min_class < 2:
+            raise ValueError("each ML class needs at least two independent samples")
         n_splits = max(2, min(5, min_class))
         cv = StratifiedKFold(
             n_splits=n_splits,
             shuffle=True,
             random_state=42,
         )
-        scores = cross_val_score(
-            estimator,
-            X,
-            y_enc,
-            cv=cv,
-            scoring="accuracy",
-        )
-        y_pred = cross_val_predict(estimator, X, y_enc, cv=cv)
-        try:
-            y_proba = cross_val_predict(
-                estimator,
-                X,
-                y_enc,
-                cv=cv,
-                method="predict_proba",
-            )
-        except Exception as exc:
-            log.warning(
-                "cross-validated probabilities unavailable (%s); "
-                "ROC/calibration will be skipped",
-                exc,
-            )
-            y_proba = None
+        scores = []
+        y_pred = np.empty_like(y_enc)
+        y_proba = np.full((len(y_enc), len(le.classes_)), np.nan)
+        for train, test in cv.split(X, y_enc):
+            fitted = clone(estimator).fit(X.iloc[train], y_enc[train])
+            y_pred[test] = fitted.predict(X.iloc[test])
+            y_proba[test] = fitted.predict_proba(X.iloc[test])
+            scores.append(float(np.mean(y_pred[test] == y_enc[test])))
+        scores = np.asarray(scores)
         estimator.fit(X, y_enc)
         if chosen_model == "lasso_svm":
             selector = estimator.named_steps["select"]
             selected_columns = selector.selected_columns(X.columns)
-            fit_X = selector.transform(X)
+            fit_X = selector.transform(estimator.named_steps["scale"].transform(X))
+            model = estimator.named_steps["clf"]
+        elif chosen_model == "mlp":
+            selected_columns = list(X.columns)
+            fit_X = estimator.named_steps["scale"].transform(X)
             model = estimator.named_steps["clf"]
         else:
             selected_columns = list(X.columns)

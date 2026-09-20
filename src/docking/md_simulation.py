@@ -22,7 +22,9 @@ import re
 import shutil
 import shlex
 import subprocess
+import time
 from pathlib import Path
+from common.fingerprints import file_hash, fingerprint, read_state, atomic_json
 
 import numpy as np
 import pandas as pd
@@ -125,6 +127,13 @@ def run_md_simulation(
         entry["equil_ns"] = equil_ns
         entry["prod_ns"] = prod_ns
         try:
+            _maxwarn(cfg)
+            if force and run_dir.exists():
+                if run_dir.resolve().parent != out_dir.resolve():
+                    raise DockingError("unexpected MD run directory")
+                archive = out_dir / "history"
+                archive.mkdir(exist_ok=True)
+                shutil.move(str(run_dir), str(archive / f"{run_dir.name}_{time.time_ns()}"))
             entry.update(_prepare_hit_dir(cfg, row, run_dir, log))
             if mode == "auto":
                 metrics = _run_gromacs_hit(cfg, row, run_dir, log, force=force)
@@ -369,15 +378,32 @@ def _run_gromacs_hit(
     log,
     force: bool = False,
 ) -> dict:
-    if not force and (run_dir / "md.tpr").exists():
-        log.info("reusing existing GROMACS simulation for %s", row.get("id"))
-        return _analyze_gromacs_output(cfg, run_dir)
-
     gmx = _find_gmx(cfg)
     if not gmx:
         raise ToolNotFoundError(
             "GROMACS gmx not found; add it to PATH or set md_simulation.executable"
         )
+    signature = fingerprint({
+        "settings": cfg.data.get("md_simulation", {}),
+        "inputs": {name: file_hash(run_dir / name) for name in ("protein.pdb", "ligand.pdb", "em.mdp", "nvt.mdp", "npt.mdp", "md.mdp")},
+        "tool": file_hash(gmx), "code": file_hash(__file__),
+        "topology": {str(p): file_hash(p) for p in Path(str(cfg.get("md_simulation", "topology_dir") or run_dir / "no_external_topology")).glob("*") if p.is_file()},
+    })
+    state_path = run_dir / "simulation_state.json"
+    state = read_state(state_path)
+    if (run_dir / "md.tpr").exists() and not force:
+        if state.get("signature") != signature:
+            raise DockingError("MD inputs changed or provenance missing; rerun with force in a fresh run directory")
+        try:
+            _verify_md_completion(gmx, cfg, run_dir)
+        except DockingError:
+            if not (run_dir / "md.cpt").is_file():
+                raise DockingError("MD interrupted: no valid completed trajectory or checkpoint")
+            _check_gmx(run_command([gmx, "mdrun", "-deffnm", "md", "-cpi", "md.cpt", "-append", "-ntmpi", "1", "-ntomp", str(cfg.get("md_simulation", "cpu", 4))], cwd=run_dir, timeout=_timeout(cfg), env=_gmx_env(gmx, cfg)), "resume mdrun")
+        _verify_md_completion(gmx, cfg, run_dir)
+        _make_whole_trajectory(gmx, cfg, run_dir)
+        return _analyze_completed_md(cfg, run_dir, state_path, signature)
+    atomic_json(state_path, {"signature": signature, "status": "running"})
     if not (run_dir / "complex.pdb").exists():
         _prepare_hit_dir(cfg, row, run_dir, log)
 
@@ -396,8 +422,44 @@ def _run_gromacs_hit(
     _write_index(run_dir)
     log.info("GROMACS: running em/nvt/npt/production for %s", row.get("id"))
     _run_stages(gmx, cfg, run_dir)
+    _verify_md_completion(gmx, cfg, run_dir)
     log.info("GROMACS: analyzing RMSD/Rg/SASA/H-bonds/RMSF for %s", row.get("id"))
-    return _analyze_gromacs_output(cfg, run_dir)
+    return _analyze_completed_md(cfg, run_dir, state_path, signature)
+
+
+def _maxwarn(cfg) -> int:
+    value = cfg.get("md_simulation", "maxwarn", 0)
+    number = float(0 if value is None else value)
+    if not np.isfinite(number) or number < 0 or not number.is_integer():
+        raise DockingError("md_simulation.maxwarn must be a non-negative integer")
+    return int(number)
+
+
+def _verify_md_completion(gmx, cfg, run_dir):
+    for name in ("md.tpr", "md.xtc", "md.gro", "md.log"):
+        path = run_dir / name
+        if not path.is_file() or path.stat().st_size == 0:
+            raise DockingError(f"MD incomplete: missing or empty {name}")
+    if "Finished mdrun" not in (run_dir / "md.log").read_text(errors="replace"):
+        raise DockingError("MD incomplete: normal termination not recorded")
+    checked = run_command([gmx, "check", "-f", "md.xtc"], cwd=run_dir, timeout=_timeout(cfg), env=_gmx_env(gmx, cfg))
+    _check_gmx(checked, "trajectory validation")
+    times = re.findall(r"(?:Last|Reading)\s+frame\s+\d+\s+time\s+([\d.eE+-]+)", (checked.stdout or "") + (checked.stderr or ""))
+    target_ps = _md_float(cfg, "prod_steps", 50000000) * _md_float(cfg, "dt_ps", 0.002)
+    if not times or max(map(float, times)) < target_ps - max(1e-6, target_ps * 0.001):
+        raise DockingError("MD incomplete: trajectory does not reach requested production duration")
+
+
+def _analyze_completed_md(cfg, run_dir, state_path, signature):
+    try:
+        metrics = _analyze_gromacs_output(cfg, run_dir)
+        if metrics.get("rmsd_protein_mean_nm") in (None, ""):
+            raise DockingError("MD analysis failed: protein RMSD unavailable")
+    except Exception:
+        atomic_json(state_path, {"signature": signature, "status": "analysis_failed"})
+        raise
+    atomic_json(state_path, {"signature": signature, "status": "completed"})
+    return metrics
 
 
 def _run_pdb2gmx(gmx: str, cfg: ResolvedConfig, run_dir: Path) -> None:
@@ -667,7 +729,7 @@ def _solvate_and_ions(gmx: str, cfg: ResolvedConfig, run_dir: Path) -> None:
                 "-o",
                 "ions.tpr",
                 "-maxwarn",
-                str(int(cfg.get("md_simulation", "maxwarn", 20) or 20)),
+                str(_maxwarn(cfg)),
             ],
             timeout=timeout,
             cwd=run_dir,
@@ -753,7 +815,7 @@ def _run_stages(gmx: str, cfg: ResolvedConfig, run_dir: Path) -> None:
             "-o",
             f"{name}.tpr",
             "-maxwarn",
-            str(int(cfg.get("md_simulation", "maxwarn", 20) or 20)),
+            str(_maxwarn(cfg)),
         ]
         if ref:
             grompp += ["-r", ref]
@@ -830,11 +892,11 @@ def _analyze_gromacs_output(cfg: ResolvedConfig, run_dir: Path) -> dict:
     metrics = _empty_md_metrics()
     tpr = run_dir / "md.tpr"
     xtc = run_dir / "md_nojump.xtc"
-    if not tpr.exists() or not xtc.exists():
-        return metrics
+    if not tpr.is_file() or not xtc.is_file() or tpr.stat().st_size == 0 or xtc.stat().st_size == 0:
+        raise DockingError("MD analysis requires non-empty TPR and trajectory")
     gmx = _find_gmx(cfg)
     if not gmx:
-        return metrics
+        raise ToolNotFoundError("GROMACS required for MD analysis")
     timeout = _timeout(cfg)
     fraction = _md_float(cfg, "equilibrate_fraction", 0.5)
     ndx = run_dir / "index.ndx"
