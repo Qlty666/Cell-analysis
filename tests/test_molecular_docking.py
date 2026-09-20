@@ -199,10 +199,12 @@ class TestMolecularDockingPipeline(unittest.TestCase):
                 ("01", "prepare-receptor"),
                 ("02", "prepare-ligands"),
             ]:
-                (stage_dir / f"{code}_{name}.done").write_text(
-                    "done",
-                    encoding="utf-8",
-                )
+                from docking.pipeline import _stage_fingerprint, _stage_outputs
+                from common.fingerprints import atomic_json, file_hash
+                atomic_json(stage_dir / f"{code}_{name}.done", {
+                    "signature": _stage_fingerprint(cfg, code),
+                    "outputs": {str(p): file_hash(p) for p in _stage_outputs(cfg, code, None)},
+                })
 
             run_pipeline(cfg, force=False)
             report = cfg.reports_dir() / "molecular_docking_report.html"

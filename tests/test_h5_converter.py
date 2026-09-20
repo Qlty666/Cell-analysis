@@ -32,7 +32,8 @@ def _read_gzip(path: Path) -> str:
 def _mtx_entries(path: Path) -> dict[tuple[int, int], int]:
     """Parse a MatrixMarket file into {(row, col): value} (1-based)."""
     entries: dict[tuple[int, int], int] = {}
-    for line in _read_gzip(path).splitlines()[2:]:
+    body = [line for line in _read_gzip(path).splitlines() if line.strip() and not line.startswith("%")]
+    for line in body[1:]:
         row, col, value = line.split()
         entries[(int(row), int(col))] = int(value)
     return entries

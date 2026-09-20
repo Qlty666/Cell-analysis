@@ -154,11 +154,12 @@ def _driver_deps_available() -> bool:
         "if (length(missing) > 0) quit(status = 2)\n"
     )
     try:
-        proc = _run_r(code, timeout=120)
+        with tempfile.TemporaryDirectory() as tmp:
+            proc = _run_r_script(code + '\ncat("DEPS_OK")\n', cwd=Path(tmp), timeout=120)
     except (OSError, subprocess.TimeoutExpired):
         _R_DRIVER_DEPS_OK = False
         return False
-    _R_DRIVER_DEPS_OK = proc.returncode == 0
+    _R_DRIVER_DEPS_OK = proc.returncode == 0 and "DEPS_OK" in proc.stdout
     return _R_DRIVER_DEPS_OK
 
 

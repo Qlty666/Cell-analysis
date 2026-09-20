@@ -163,7 +163,8 @@ liver_module_files <- c(
   "read_10x.R",
   "read_h5ad.R",
   "read_generic.R",
-  "metadata.R"
+  "metadata.R",
+  "celltype_pseudobulk.R"
 )
 for (liver_module in liver_module_files) {
   source(file.path(liver_modules_dir, liver_module), local = globalenv())
@@ -1755,6 +1756,8 @@ if (stage_allowed("06")) run_stage("06_differential_expression", {
   ))
   sample_counts <- table(sample_cond$condition)
   deg <- NULL
+  de_warning_path <- file.path(data_dir, "pseudobulk_warning.txt")
+  if (file.exists(de_warning_path)) unlink(de_warning_path)
   # Sample-level datasets already contain one column per biological sample,
   # so differential expression must be computed on the raw sample counts
   # directly instead of aggregating them into a pseudobulk matrix.
@@ -2016,7 +2019,22 @@ if (stage_allowed("06")) run_stage("06_differential_expression", {
       }
     }
   }
+  de_exploratory <- file.exists(de_warning_path)
+  de_state <- list(status = "completed", inference_level = if (de_exploratory) "exploratory" else "sample_supported",
+                   inference_unit = if (de_exploratory) "cell" else "biological_sample",
+                   reason = if (de_exploratory) paste(readLines(de_warning_path, warn = FALSE), collapse = " ") else "")
+  jsonlite::write_json(de_state, stage_data_file("de_inference_summary.json"), auto_unbox = TRUE, pretty = TRUE)
+  if (dataset_mode == "single_cell") {
+    covariates <- trimws(strsplit(Sys.getenv("LIVER_DE_COVARIATES", unset = ""), ",", fixed = TRUE)[[1]])
+    covariates <- covariates[nzchar(covariates)]
+    counts_by_cell <- tryCatch(GetAssayData(seurat, assay = "RNA", layer = "counts"),
+                               error = function(e) GetAssayData(seurat, assay = "RNA", slot = "counts"))
+    celltype_de <- liver_celltype_pseudobulk(counts_by_cell, seurat@meta.data[colnames(counts_by_cell), , drop = FALSE], covariates)
+    write.csv(celltype_de$results, stage_data_file("celltype_pseudobulk_de.csv"), row.names = FALSE)
+    jsonlite::write_json(celltype_de$status, stage_data_file("celltype_pseudobulk_status.json"), auto_unbox = TRUE, pretty = TRUE)
+  }
   deg <- ensure_deg_columns(deg)
+    deg$inference_level <- rep(de_state$inference_level, nrow(deg))
   if (
     !nzchar(Sys.getenv("LIVER_DE_MIN_BASEMEAN", unset = "")) &&
     de_min_base_mean == 0

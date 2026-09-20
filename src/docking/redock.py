@@ -5,9 +5,12 @@ from __future__ import annotations
 
 from concurrent.futures import ThreadPoolExecutor, as_completed
 from pathlib import Path
+import os
+from common.concurrency import bounded_futures
 
 from .config import ResolvedConfig
-from .docking import _append_row, _dock_one, _read_csv
+from .docking import _append_row, _dock_one, _read_csv, prepare_resume
+from common.fingerprints import file_hash
 from .utils import DockingError, ToolNotFoundError, find_tool, write_json
 
 
@@ -43,40 +46,13 @@ def run_redock(cfg: ResolvedConfig, log) -> dict:
     redock_data = redock_dir / "data"
     redock_data.mkdir(parents=True, exist_ok=True)
     results_path = redock_data / "fig_49_redock_results.csv"
-    if not cfg.get("redock", "resume", True) and results_path.exists():
-        results_path.unlink()
-
-    done: set[tuple[str, str]] = set()
-    if cfg.get("redock", "resume", True) and results_path.exists():
-        done = {
-            (
-                str(row.get("id", "")),
-                str(row.get("replicate", "1") or "1"),
-            )
-            for row in _read_csv(results_path)
-            if row.get("status") == "ok"
-        }
-
-    max_workers = int(cfg.get("redock", "max_workers", 4))
+    max_workers = min(int(cfg.get("redock", "max_workers", 4)), max(1, (os.cpu_count() or 1) // max(1, int(cfg.get("docking", "cpu", 1)))))
     tasks = []
     for row in selected_manifest.values():
         task = dict(row)
         task.setdefault("replicate", 1)
         task.setdefault("seed", cfg.get("redock", "seed", cfg.get("docking", "seed", 42)))
         tasks.append(task)
-    pending = [
-        row for row in tasks
-        if (
-            str(row.get("id", "")),
-            str(row.get("replicate", "1")),
-        ) not in done
-    ]
-    log.info(
-        "redocking %s top hits with exhaustiveness %s",
-        len(pending),
-        cfg.get("redock", "exhaustiveness", 32),
-    )
-
     original = {
         key: cfg.data["docking"].get(key)
         for key in ["exhaustiveness", "num_modes", "energy_range"]
@@ -85,20 +61,19 @@ def run_redock(cfg: ResolvedConfig, log) -> dict:
     cfg.data["docking"]["num_modes"] = cfg.get("redock", "num_modes", 9)
     cfg.data["docking"]["energy_range"] = cfg.get("redock", "energy_range", 3.0)
     try:
+        done = prepare_resume(cfg, vina, tasks, results_path, cfg.get("redock", "resume", True))
+        pending = [r for r in tasks if (str(r["id"]), str(r["replicate"])) not in done]
         if pending:
             with ThreadPoolExecutor(max_workers=max_workers) as pool:
-                futures = {
-                    pool.submit(_dock_one, cfg, vina, row, redock_dir, log): row
-                    for row in pending
-                }
-                for future in as_completed(futures):
-                    row = futures[future]
+                for future, row in bounded_futures(pool, lambda task: _dock_one(cfg, vina, task, redock_dir, log), pending, max_workers * 2):
                     try:
                         record = future.result()
                     except Exception as exc:
                         from .docking import _record
 
                         record = _record(row, status="error", error=str(exc))
+                    record["signature"] = row["signature"]
+                    record["pose_sha256"] = file_hash(record.get("pose_file") or "")
                     _append_row(results_path, record)
     finally:
         for key, value in original.items():

@@ -4,9 +4,12 @@ from __future__ import annotations
 
 import logging
 import os
+import re
+import urllib.error
 import time
 import urllib.request
 from pathlib import Path
+from .fingerprints import atomic_json, read_state
 
 logger = logging.getLogger(__name__)
 
@@ -118,30 +121,53 @@ def http_download(
     """Stream ``url`` into ``out``, resuming a partial file when supported.
 
     The response is written in chunks so large archives never have to fit in
-    memory. A partial ``out`` from an earlier attempt is resumed with a Range
-    request; servers that ignore the range cause a clean restart. Failures
+    memory. A ``.part`` file with a matching resource validator is resumed
+    with Range/If-Range; servers ignoring the range cause a clean restart. Failures
     raise :class:`HttpError` naming the URL.
     """
     out = Path(out)
     out.parent.mkdir(parents=True, exist_ok=True)
+    partial = out.with_name(out.name + ".part")
+    metadata = partial.with_name(partial.name + ".json")
     attempts = max(1, int(retries))
     last_error: Exception | None = None
     for attempt in range(1, attempts + 1):
-        existing = out.stat().st_size if out.exists() else 0
+        saved = read_state(metadata)
+        validator = saved.get("etag") or saved.get("last_modified")
+        existing = partial.stat().st_size if partial.exists() and saved.get("url") == url and validator else 0
         try:
             request = _build_request(url, user_agent=user_agent)
             if existing:
                 request.add_header("Range", f"bytes={existing}-")
+                request.add_header("If-Range", validator)
             with urllib.request.urlopen(request, timeout=timeout) as response:
                 status = getattr(response, "status", 200)
                 resuming = bool(existing) and status == 206
+                total = None
+                if status == 206:
+                    match = re.fullmatch(r"bytes (\d+)-(\d+)/(\d+)", response.headers.get("Content-Range", ""))
+                    if not match:
+                        raise HttpError("missing or invalid Content-Range")
+                    start, end, total = map(int, match.groups())
+                    if start != existing or end < start or end >= total:
+                        raise HttpError("incorrect Content-Range for requested offset")
+                    if existing and ((saved.get("etag") and response.headers.get("ETag") != saved["etag"]) or (not saved.get("etag") and response.headers.get("Last-Modified") != saved.get("last_modified"))):
+                        raise HttpError("resource changed during resumed download")
                 if existing and not resuming:
                     existing = 0
                 declared = _content_length(response)
                 expected = None if declared is None else declared + existing
+                if total is not None:
+                    if declared is not None and declared != end - start + 1:
+                        raise HttpError("Content-Length disagrees with Content-Range")
+                    expected = total
                 _check_declared_size(url, expected, max_bytes)
+                etag = response.headers.get("ETag")
+                if etag and etag.startswith("W/"):
+                    etag = None
+                atomic_json(metadata, {"url": url, "etag": etag, "last_modified": response.headers.get("Last-Modified")})
                 written = existing
-                with out.open("ab" if resuming else "wb") as fh:
+                with partial.open("ab" if resuming else "wb") as fh:
                     while True:
                         chunk = response.read(1024 * 1024)
                         if not chunk:
@@ -153,11 +179,27 @@ def http_download(
                                 f"{max_bytes} byte limit"
                             )
                         fh.write(chunk)
-            if not out.exists() or out.stat().st_size == 0:
+            if not partial.exists() or partial.stat().st_size == 0:
                 raise RuntimeError("downloaded file is empty")
+            if expected is not None and written != expected:
+                raise OSError(f"incomplete download: expected {expected} bytes, received {written}")
+            os.replace(partial, out)
+            metadata.unlink(missing_ok=True)
             return out
         except HttpError:
+            partial.unlink(missing_ok=True)
+            metadata.unlink(missing_ok=True)
             raise
+        except urllib.error.HTTPError as exc:
+            # An unsatisfied range does not prove that a local file is complete.
+            if exc.code == 416:
+                partial.unlink(missing_ok=True)
+                metadata.unlink(missing_ok=True)
+            elif exc.code not in (408, 429, 500, 502, 503, 504):
+                raise HttpError(f"GET {url} failed: HTTP {exc.code}") from exc
+            last_error = exc
+            if attempt < attempts:
+                time.sleep(backoff ** attempt)
         except Exception as exc:  # noqa: BLE001 - normalized into HttpError below
             last_error = exc
             if attempt < attempts:

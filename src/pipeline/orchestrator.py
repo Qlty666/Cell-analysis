@@ -16,6 +16,7 @@ import sys
 import threading
 import time
 from pathlib import Path
+from common.fingerprints import file_hash, fingerprint, read_state, atomic_json
 
 try:
     import psutil
@@ -508,10 +509,27 @@ def run_pipeline(
     if not skip_deps:
         install_deps()
 
+    resume_state = OUTPUT_ROOT / "results" / "expression_resume.json"
+    raw_root = OUTPUT_ROOT / "data"
+    signature = fingerprint({
+        "accession": accession, "species": species, "ml_model": ml_model,
+        "settings": {k: v for k, v in os.environ.items() if k.startswith("LIVER_") and k not in {"LIVER_R_MODULES_DIR"}},
+        "config": cfg,
+        "orchestrator": file_hash(Path(__file__)),
+        "inputs": {str(p.relative_to(raw_root)): file_hash(p) for p in raw_root.rglob("*") if p.is_file()},
+        "code": {str(p.relative_to(ROOT)): file_hash(p) for p in (ROOT / "src/analysis").rglob("*") if p.suffix in {".R", ".py"}},
+    })
+    old_state = read_state(resume_state)
+    if old_state.get("signature") != signature:
+        force = True
+    atomic_json(resume_state, {"signature": signature, "status": "running"})
     complete_file = OUTPUT_ROOT / "results" / "pipeline_complete.json"
-    if complete_file.exists() and not force:
+    previous_outputs = old_state.get("outputs", {})
+    outputs_valid = bool(previous_outputs) and all(file_hash(p) == digest and digest != "missing" for p, digest in previous_outputs.items())
+    if complete_file.exists() and not force and old_state.get("status") == "completed" and outputs_valid:
         log("pipeline already complete; use --force to rerun")
         generate_report()
+        atomic_json(resume_state, old_state)
         return 0
 
     success = False
@@ -562,6 +580,8 @@ def run_pipeline(
     if os.environ.get("LIVER_RUN_CELLCHAT", "").lower() == "yes":
         run_cellchat(species)
     generate_report()
+    output_files = [complete_file, OUTPUT_ROOT / "results/summary.json"] + list((OUTPUT_ROOT / "results/data").rglob("*.csv"))
+    atomic_json(resume_state, {"signature": signature, "status": "completed", "outputs": {str(p): file_hash(p) for p in output_files}})
     log("pipeline finished successfully")
     return 0
 

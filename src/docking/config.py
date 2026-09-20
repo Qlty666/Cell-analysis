@@ -114,7 +114,7 @@ DEFAULTS = {
         "cpu": 4,
         "gpu": False,
         "figures": True,
-        "maxwarn": 20,
+        "maxwarn": 0,
         "contact_cutoff_nm": 0.6,
         "equilibrate_fraction": 0.5,
         "mmpbsa_command": None,
@@ -424,6 +424,9 @@ class ResolvedConfig:
                     f"{section}.{key} must be "
                     f"{'>' if strict else '>='} {minimum:g}"
                 )
+        maxwarn = self._number("md_simulation", "maxwarn", 0)
+        if maxwarn < 0 or not maxwarn.is_integer():
+            raise ValueError("md_simulation.maxwarn must be a non-negative integer")
         fraction = self._number("md_simulation", "equilibrate_fraction", 0.5)
         if not 0.0 <= fraction <= 1.0:
             raise ValueError(
@@ -793,7 +796,7 @@ def save_config(
             "cpu": cfg.get("md_simulation", "cpu", 4),
             "gpu": cfg.get("md_simulation", "gpu", False),
             "figures": cfg.get("md_simulation", "figures", True),
-            "maxwarn": cfg.get("md_simulation", "maxwarn", 20),
+            "maxwarn": cfg.get("md_simulation", "maxwarn", 0),
             "contact_cutoff_nm": cfg.get(
                 "md_simulation", "contact_cutoff_nm", 0.6
             ),

@@ -401,6 +401,22 @@ def _stage_signature(code: str, args, workdir: Path, ctx: dict) -> str:
     payload: dict = {"stage": code}
 
     if code == "01":
+        expression_root = Path(str(ctx.get("single_cell_root") or workdir))
+        raw_root = expression_root / "data"
+        source_root = Path(__file__).resolve().parents[1]
+        payload["expression_inputs"] = {
+            str(p.relative_to(raw_root)): _sha256_file(p)
+            for p in sorted(raw_root.rglob("*")) if p.is_file()
+        }
+        payload["expression_code"] = {
+            str(p.relative_to(source_root)): _sha256_file(p)
+            for folder in (source_root / "analysis", source_root / "pipeline")
+            for p in sorted(folder.rglob("*")) if p.suffix in {".py", ".R"}
+        }
+        payload["expression_environment"] = {
+            k: v for k, v in os.environ.items()
+            if k.startswith("LIVER_") and k != "LIVER_R_MODULES_DIR"
+        }
         payload.update(
             {
                 "single_cell_root": str(ctx.get("single_cell_root") or ""),

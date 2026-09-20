@@ -241,14 +241,18 @@ class TestHttpHelper(unittest.TestCase):
     def test_http_download_resumes_partial_file(self):
         with tempfile.TemporaryDirectory() as tmp:
             out = Path(tmp) / "file.bin"
-            out.write_bytes(b"down")
+            out.with_name(out.name + ".part").write_bytes(b"down")
+            from common.fingerprints import atomic_json
+            atomic_json(out.with_name(out.name + ".part.json"), {"url": "https://example.test/file.bin", "etag": "v1"})
 
             def fake_urlopen(request, timeout=None):
                 self.assertEqual(
                     request.headers.get("Range"),
                     "bytes=4-",
                 )
-                return _FakeResponse([b"loaded"], status=206, content_length=6)
+                response = _FakeResponse([b"loaded"], status=206, content_length=6)
+                response.headers.update({"Content-Range": "bytes 4-9/10", "ETag": "v1"})
+                return response
 
             with mock.patch(
                 "common.http.urllib.request.urlopen",

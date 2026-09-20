@@ -9,6 +9,7 @@ from pathlib import Path
 import h5py
 import numpy as np
 import scipy.sparse as sp
+from scipy.io import mmwrite
 
 # Layers (in preference order) that are expected to hold raw integer counts.
 COUNTS_LAYER_NAMES = ("counts", "raw_counts", "count")
@@ -61,11 +62,8 @@ def _is_integer_counts(matrix) -> bool:
 
 def _write_mtx(path: Path, matrix: sp.spmatrix, genes, cells) -> None:
     matrix = _as_integer_counts(matrix, path.name).tocoo()
-    with gzip.open(path, "wt", encoding="utf-8") as fh:
-        fh.write("%%MatrixMarket matrix coordinate integer general\n")
-        fh.write(f"{matrix.shape[0]} {matrix.shape[1]} {matrix.nnz}\n")
-        for i, j, v in zip(matrix.row, matrix.col, matrix.data):
-            fh.write(f"{i + 1} {j + 1} {int(v)}\n")
+    with gzip.open(path, "wb") as fh:
+        mmwrite(fh, matrix, field="integer", symmetry="general")
     with gzip.open(path.with_name(path.name.replace("matrix.mtx", "barcodes.tsv")), "wt", encoding="utf-8") as fh:
         fh.write("\n".join(cells) + "\n")
     with gzip.open(path.with_name(path.name.replace("matrix.mtx", "genes.tsv")), "wt", encoding="utf-8") as fh:
@@ -139,7 +137,11 @@ def _load_matrix(x) -> sp.spmatrix:
         indptr = x["indptr"][:]
         shape = tuple(int(v) for v in x.attrs["shape"])
         return constructor((data, indices, indptr), shape=shape)
-    return sp.csr_matrix(np.asarray(x))
+    if len(x.shape) != 2:
+        raise ValueError("expression matrix must be two-dimensional")
+    rows = max(1, (32 * 1024 * 1024) // max(1, x.shape[1] * x.dtype.itemsize))
+    chunks = [sp.csr_matrix(x[start:start + rows, :]) for start in range(0, x.shape[0], rows)]
+    return sp.vstack(chunks, format="csr") if chunks else sp.csr_matrix(x.shape)
 
 
 def _count_matrix_candidates(f) -> list[tuple[str, object]]:

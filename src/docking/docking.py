@@ -4,11 +4,15 @@
 from __future__ import annotations
 
 import csv
+import os
+import shutil
 import sys
 import threading
 import time
 from concurrent.futures import ThreadPoolExecutor, as_completed
 from pathlib import Path
+from common.fingerprints import file_hash, fingerprint
+from common.concurrency import bounded_futures
 
 import pandas as pd
 
@@ -37,6 +41,8 @@ RESULT_FIELDS = [
     "status",
     "error",
     "wall_seconds",
+    "signature",
+    "pose_sha256",
 ]
 _CSV_LOCK = threading.Lock()
 
@@ -85,23 +91,9 @@ def run_docking(cfg: ResolvedConfig, log):
             tasks.append(task)
     if not tasks:
         raise DockingError("no prepared PDBQT ligands found in the manifest")
-    if not cfg.get("docking", "resume", True) and results_path.exists():
-        results_path.unlink()
+    done = prepare_resume(cfg, vina, tasks, results_path, cfg.get("docking", "resume", True))
 
-    done: set[tuple[str, str]] = set()
-    if cfg.get("docking", "resume", True) and results_path.exists():
-        done = {
-            (
-                str(row.get("id", "")),
-                str(row.get("replicate", "1") or "1"),
-            )
-            for row in _read_csv(results_path)
-            if row.get("status") == "ok"
-        }
-        if done:
-            log.info("resuming: %s ligands already docked", len(done))
-
-    max_workers = int(cfg.get("docking", "max_workers", 4))
+    max_workers = min(int(cfg.get("docking", "max_workers", 4)), max(1, (os.cpu_count() or 1) // max(1, int(cfg.get("docking", "cpu", 1)))))
     pending = [
         row for row in tasks
         if (
@@ -117,16 +109,13 @@ def run_docking(cfg: ResolvedConfig, log):
 
     if pending:
         with ThreadPoolExecutor(max_workers=max_workers) as pool:
-            futures = {
-                pool.submit(_dock_one, cfg, vina, row, docked_dir, log): row
-                for row in pending
-            }
-            for future in as_completed(futures):
-                row = futures[future]
+            for future, row in bounded_futures(pool, lambda task: _dock_one(cfg, vina, task, docked_dir, log), pending, max_workers * 2):
                 try:
                     record = future.result()
                 except Exception as exc:
                     record = _record(row, status="error", error=str(exc))
+                record["signature"] = row["signature"]
+                record["pose_sha256"] = file_hash(record.get("pose_file") or "")
                 _append_row(results_path, record)
 
     positive_control = _run_positive_control(
@@ -232,6 +221,7 @@ def _dock_one(cfg: ResolvedConfig, vina: str, row: dict, docked_dir: Path, log):
     lig_id = safe_name(row.get("id"), "ligand")
     replicate = int(row.get("replicate", 1) or 1)
     out_path = docked_dir / f"{lig_id}_rep{replicate}.pdbqt"
+    out_path.unlink(missing_ok=True)
     cmd = build_vina_command(
         cfg,
         vina,
@@ -257,7 +247,7 @@ def _dock_one(cfg: ResolvedConfig, vina: str, row: dict, docked_dir: Path, log):
             wall=elapsed,
         )
     modes = parse_vina_affinities(result.stdout)
-    if not modes:
+    if not modes or not out_path.is_file() or out_path.stat().st_size == 0:
         return _record(
             row,
             status="no_pose",
@@ -345,6 +335,44 @@ def _read_csv(path: Path) -> list[dict]:
         return []
     with path.open("r", newline="", encoding="utf-8") as fh:
         return list(csv.DictReader(fh))
+
+
+def prepare_resume(cfg, vina, tasks, path, resume):
+    """Keep only current, verified successful tasks; archive the previous table."""
+    executable = shutil.which(str(vina)) or str(vina)
+    common = {
+        "receptor": file_hash(cfg.receptor_output()),
+        "flexible": [file_hash(p) for p in cfg.receptor_flexible()],
+        "executable": file_hash(executable),
+        "runner": file_hash(__file__),
+    }
+    for row in tasks:
+        row["signature"] = fingerprint({
+            **common, "ligand": file_hash(row["pdbqt"]),
+            "command": build_vina_command(cfg, vina, str(cfg.receptor_output()), str(row["pdbqt"]), "POSE", seed=row.get("seed")),
+        })
+    expected = {(safe_name(r.get("id"), "ligand"), str(r.get("replicate", 1))): r["signature"] for r in tasks}
+    kept = {}
+    if path.exists():
+        if resume:
+            for row in _read_csv(path):
+                key = (row.get("id", ""), str(row.get("replicate") or 1))
+                pose = Path(row.get("pose_file") or "")
+                if (row.get("status") == "ok" and row.get("signature") == expected.get(key)
+                    and pose.is_file() and pose.stat().st_size > 0
+                    and row.get("pose_sha256") == file_hash(pose)):
+                    kept[key] = row
+        archive = path.parent / "history"
+        archive.mkdir(exist_ok=True)
+        shutil.copy2(path, archive / f"{path.stem}_{time.time_ns()}.csv")
+    path.parent.mkdir(parents=True, exist_ok=True)
+    temporary = path.with_suffix(path.suffix + ".tmp")
+    with temporary.open("w", newline="", encoding="utf-8") as stream:
+        writer = csv.DictWriter(stream, fieldnames=RESULT_FIELDS)
+        writer.writeheader()
+        writer.writerows({k: r.get(k, "") for k in RESULT_FIELDS} for r in kept.values())
+    temporary.replace(path)
+    return set(kept)
 
 
 def _append_row(path: Path, row: dict) -> None:

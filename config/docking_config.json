@@ -74,7 +74,7 @@
     "cpu": 4,
     "gpu": false,
     "figures": true,
-    "maxwarn": 20,
+    "maxwarn": 0,
     "contact_cutoff_nm": 0.6,
     "equilibrate_fraction": 0.5,
     "mmpbsa_command": null,
