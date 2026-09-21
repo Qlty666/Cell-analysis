@@ -104,6 +104,7 @@ def prepare_bulk_data(
             )
         else:
             raise AssertionError(accession)
+        _validate_metadata(mapped.columns, metadata, accession)
         mapped = mapped.apply(pd.to_numeric, errors="coerce").dropna(how="all")
         save_expression(mapped, expression_path)
         metadata.to_csv(metadata_path, encoding="utf-8")
@@ -158,6 +159,7 @@ def prepare_bulk_data(
                 ],
             }
         ).set_index("sample_id")
+        _validate_metadata(mapped.columns, metadata, "GSE164441")
         save_expression(mapped, expression_path)
         metadata.to_csv(metadata_path, encoding="utf-8")
     outputs["GSE164441_expression"] = expression_path
@@ -211,11 +213,25 @@ def prepare_bulk_data(
             mapped = standardize_expression(mapped, already_log=False)
             metadata = _parse_gse135251_metadata(raw_dir / "GSE135251_family.soft.gz")
             metadata = metadata.reindex(mapped.columns)
+            _validate_metadata(mapped.columns, metadata, "GSE135251")
             save_expression(mapped, expression_path)
             metadata.to_csv(metadata_path, encoding="utf-8")
         outputs["GSE135251_expression"] = expression_path
         outputs["GSE135251_metadata"] = metadata_path
     return outputs
+
+
+def _validate_metadata(sample_ids: Any, metadata: pd.DataFrame, accession: str) -> None:
+    """Fail closed when GEO annotation parsing loses samples or labels."""
+    sample_ids = pd.Index(sample_ids).astype(str)
+    if metadata.index.astype(str).duplicated().any():
+        raise ValueError(f"{accession} metadata contains duplicate sample IDs")
+    aligned = metadata.reindex(sample_ids)
+    if aligned.empty or aligned["condition"].isna().any():
+        missing = aligned.index[aligned["condition"].isna()].tolist()
+        raise ValueError(f"{accession} metadata has missing conditions for {missing[:5]}")
+    if aligned["condition"].nunique() < 2:
+        raise ValueError(f"{accession} metadata has fewer than two conditions")
 
 
 def _parse_gse135251_metadata(path: Path) -> pd.DataFrame:

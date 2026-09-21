@@ -11,18 +11,30 @@ import shutil
 from pathlib import Path
 from typing import Any
 
-import anndata as ad
+try:  # Keep bulk/target stages importable without the optional scRNA stack.
+    import anndata as ad
+    import scanpy as sc
+except Exception:  # pragma: no cover - optional stack may be absent or incompatible
+    ad = None
+    sc = None
 import matplotlib.patheffects as path_effects
 import matplotlib.pyplot as plt
 import numpy as np
 import pandas as pd
-import scanpy as sc
 from scipy import sparse, stats
 from scipy.io import mmread
 
 from .common import bh_fdr, ensure_dir, save_figure, slug, write_json
 
 LOG = logging.getLogger("experiment_plan_one.single_cell")
+
+
+def _require_scanpy() -> None:
+    if ad is None or sc is None:
+        raise RuntimeError(
+            "single-cell stages require anndata and scanpy; install the "
+            "single-cell optional dependencies before running mouse/human stages"
+        )
 
 MOUSE_MARKERS = {
     "Hepatocytes": ["Alb", "Apoa1", "Apoa2", "Apoe", "Ttr", "Hnf4a", "Asgr1"],
@@ -105,6 +117,7 @@ def load_mouse_dataset(
     max_mito_pct: float = 20.0,
 ) -> ad.AnnData:
     """Load the four GSE270583 10x libraries into one AnnData object."""
+    _require_scanpy()
     metadata = parse_geo_soft_samples(soft_path)
     matrix_files = sorted(extracted_dir.rglob("*_filtered_feature_bc_matrix_matrix.mtx.gz"))
     if not matrix_files:
@@ -273,6 +286,7 @@ def run_mouse_single_cell(
     cellchat_permutations: int = 100,
     cellchat_seed: int = 123,
 ) -> dict[str, Any]:
+    _require_scanpy()
     ensure_dir(output_dir)
     data_path = output_dir / "mouse_liver_processed.h5ad"
     if data_path.exists() and not sample_key:
@@ -969,6 +983,7 @@ def run_human_single_cell(
     seed: int = 42,
 ) -> dict[str, Any]:
     """Process GSE202379 raw count CSVs into a disease-spectrum atlas."""
+    _require_scanpy()
     ensure_dir(output_dir)
     data_path = output_dir / "human_liver_processed.h5ad"
     if data_path.exists():

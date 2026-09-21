@@ -31,6 +31,8 @@ from evidence import (
 
 from . import __version__
 from .bulk import (
+    GSE164441_COUNT_URL,
+    SERIES_MATRIX_URLS,
     differential_expression_limma,
     differential_summary_table,
     candidate_heatmap,
@@ -170,6 +172,11 @@ class PipelineContext:
             "config": self.config,
             "previous": {},
             "inputs": {},
+            "code": {
+                str(path.relative_to(self.root)): self.fingerprint_file(path)
+                for path in sorted((self.root / "src" / "experiment_plan_one").rglob("*"))
+                if path.is_file() and path.suffix in {".py", ".R"}
+            },
         }
         for previous in previous_stages:
             state_path = self.state_dir / f"{previous}.json"
@@ -225,8 +232,14 @@ STAGE_INPUT_PATHS: dict[str, list[Path]] = {
     ],
     "bulk": [Path("00_data/raw"), Path("00_data/processed")],
     "ml": [Path("00_data/processed"), Path("04_bulk_training")],
-    "mouse": [Path("00_data/raw/extracted/GSE270583")],
-    "human": [Path("00_data/raw/extracted/GSE202379")],
+    "mouse": [
+        Path("00_data/raw/extracted/GSE270583"),
+        Path("05_machine_learning/ml_core_genes.json"),
+    ],
+    "human": [
+        Path("00_data/raw/extracted/GSE202379"),
+        Path("05_machine_learning/ml_core_genes.json"),
+    ],
     "docking": [
         Path("05_machine_learning/ml_core_genes.json"),
         Path("02b_evidence/target_priority.csv"),
@@ -238,7 +251,12 @@ STAGE_INPUT_PATHS: dict[str, list[Path]] = {
 }
 
 STAGE_REQUIRED_OUTPUTS: dict[str, list[Path]] = {
-    "data": [Path("00_data/raw/dataset_inventory.json")],
+    "data": [
+        Path("00_data/raw/dataset_inventory.json"),
+        Path("00_data/raw/dataset_receipts.json"),
+        *[Path("00_data/raw") / filename for filename in ARCHIVES],
+        *[Path("00_data/raw") / filename for filename in SOFT_URLS],
+    ],
     "targets": [
         Path("01_compound_characterization/compound_properties.csv"),
         Path("01_compound_characterization/compound_targets.csv"),
@@ -249,7 +267,10 @@ STAGE_REQUIRED_OUTPUTS: dict[str, list[Path]] = {
         Path("02b_evidence/target_priority.csv"),
     ],
     "ppi": [Path("03_intersection_ppi/ppi_summary.json")],
-    "bulk": [Path("04_bulk_training/bulk_summary.json")],
+    "bulk": [
+        Path("04_bulk_training/bulk_summary.json"),
+        Path("04_bulk_training/bulk_source_manifest.json"),
+    ],
     "ml": [Path("05_machine_learning/ml_summary.json")],
     "mouse": [Path("06_single_cell_mouse/mouse_single_cell_summary.json")],
     "human": [Path("07_single_cell_human/human_single_cell_summary.json")],
@@ -271,6 +292,7 @@ STAGE_REQUIRED_OUTPUTS: dict[str, list[Path]] = {
 def default_config() -> dict[str, Any]:
     return {
         "completion_target_percent": 90.0,
+        "novelty_exclusions": ["TNF", "IL1B", "IL6", "TP53", "MAPK14", "PTGS2"],
         "compound": {
             "name": "6PPD-Q",
             "pubchem_cid": "154926030",
@@ -321,7 +343,8 @@ def default_config() -> dict[str, Any]:
                 "condition_column": "condition",
             },
             "GSE135251": {
-                "role": "supplementary_external_validation_nafld",
+                "role": "primary_external_validation_nafld",
+                "endpoint": "healthy_vs_NAFLD",
                 "condition_column": "condition",
             },
             "GSE270583": {
@@ -538,6 +561,7 @@ class ExperimentPlanOne:
 
     def stage_data(self) -> dict[str, Any]:
         outputs: dict[str, str] = {}
+        receipts: dict[str, dict[str, Any]] = {}
         for filename, spec in ARCHIVES.items():
             archive = self.context.raw_dir / filename
             download_file(
@@ -550,12 +574,24 @@ class ExperimentPlanOne:
             extract_tar(archive, extraction)
             outputs[filename] = str(archive)
             outputs[f"{spec['extract_to']}_extracted"] = str(extraction)
+            receipts[filename] = {
+                "url": spec["url"],
+                "expected_size": int(spec["size"]),
+                "size": archive.stat().st_size,
+                "sha256": sha256_file(archive),
+            }
         for filename, url in SOFT_URLS.items():
             destination = self.context.raw_dir / filename
             download_file(url, destination, timeout=180)
             outputs[filename] = str(destination)
+            receipts[filename] = {
+                "url": url,
+                "size": destination.stat().st_size,
+                "sha256": sha256_file(destination),
+            }
         # Bulk series matrices and platforms are handled by their dedicated stage.
         write_json(self.context.raw_dir / "dataset_inventory.json", outputs)
+        write_json(self.context.raw_dir / "dataset_receipts.json", receipts)
         return {"outputs": outputs}
 
     def stage_targets(self) -> dict[str, Any]:
@@ -1198,6 +1234,25 @@ class ExperimentPlanOne:
         gse135251_expr = Path(paths["GSE135251_expression"])
         gse135251_meta = Path(paths["GSE135251_metadata"])
 
+        bulk_sources = {
+            "GSE89632_series_matrix": {
+                "url": SERIES_MATRIX_URLS["GSE89632"],
+                "path": str(self.context.raw_dir / "GSE89632_series_matrix.txt.gz"),
+            },
+            "GSE49541_series_matrix": {
+                "url": SERIES_MATRIX_URLS["GSE49541"],
+                "path": str(self.context.raw_dir / "GSE49541_series_matrix.txt.gz"),
+            },
+            "GSE164441_count": {
+                "url": GSE164441_COUNT_URL,
+                "path": str(self.context.raw_dir / "GSE164441_count.txt.gz"),
+            },
+        }
+        for record in bulk_sources.values():
+            source_path = Path(record["path"])
+            record.update({"size": source_path.stat().st_size, "sha256": sha256_file(source_path)})
+        write_json(out_dir / "bulk_source_manifest.json", bulk_sources)
+
         hc_vs_nafld = differential_expression_limma(
             gse89632_expr,
             gse89632_meta,
@@ -1568,6 +1623,10 @@ class ExperimentPlanOne:
             gene
             for gene in dict.fromkeys(core + ppi["gene"].astype(str).tolist())
             if not re.match(r"^(MIR|LET|LINC|SNOR|SCARNA|RMRP)", gene, flags=re.I)
+            and gene.upper() not in {
+                str(value).upper()
+                for value in self.context.config.get("novelty_exclusions", [])
+            }
         ]
         limit = int(self.context.config["docking"]["targets"])
         selected = ordered[:limit]
@@ -1749,7 +1808,15 @@ class ExperimentPlanOne:
         )
         if not path.exists():
             return []
-        return pd.read_csv(path)["gene"].astype(str).tolist()
+        exclusions = {
+            str(value).upper()
+            for value in self.context.config.get("novelty_exclusions", [])
+        }
+        return [
+            gene
+            for gene in pd.read_csv(path)["gene"].astype(str).tolist()
+            if gene.upper() not in exclusions
+        ]
 
     def _ml_core_genes(self) -> list[str]:
         path = self.context.output_root / "05_machine_learning" / "ml_core_genes.json"
@@ -1763,6 +1830,10 @@ class ExperimentPlanOne:
             gene
             for gene in dict.fromkeys(core)
             if not re.match(r"^(MIR|LET|LINC|SNOR|SCARNA|RMRP)", gene, flags=re.I)
+            and gene.upper() not in {
+                str(value).upper()
+                for value in self.context.config.get("novelty_exclusions", [])
+            }
         ]
         return core[:3] or self._core_candidate_genes()[:3]
 
@@ -1924,6 +1995,7 @@ class ExperimentPlanOne:
                     "file": str(relative),
                     "absolute_path": str(path),
                     "size_bytes": path.stat().st_size,
+                    "sha256": sha256_file(path),
                     "modified": time.strftime(
                         "%Y-%m-%d %H:%M:%S",
                         time.localtime(path.stat().st_mtime),
@@ -1968,6 +2040,19 @@ class ExperimentPlanOne:
                 "output_root": str(self.context.output_root),
                 "config": self.context.config,
                 "software": software,
+                "reproducibility": {
+                    "git_commit": _git_commit(self.context.root),
+                    "random_seeds": {
+                        "ml": self.context.config.get("ml", {}).get("seed"),
+                        "single_cell_mouse": self.context.config.get("single_cell", {}).get("mouse", {}).get("cellchat_seed"),
+                        "single_cell_human": self.context.config.get("single_cell", {}).get("human", {}).get("seed"),
+                    },
+                    "dataset_sources": {
+                        name: {"role": spec.get("role"), "platform": spec.get("platform"), "species": spec.get("species")}
+                        for name, spec in (self.context.config.get("datasets") or {}).items()
+                    },
+                    "novelty_exclusions": self.context.config.get("novelty_exclusions", []),
+                },
                 "stages": {
                     name: read_json(self.context.state_dir / f"{name}.json", {"status": "not_run"})
                     for name in STAGES
@@ -2271,6 +2356,24 @@ def _package_versions(packages: list[str]) -> dict[str, str]:
         except metadata.PackageNotFoundError:
             output[package] = "not_installed"
     return output
+
+
+def _git_commit(root: Path) -> str | None:
+    """Return the source revision when the workflow is run from a checkout."""
+    try:
+        import subprocess
+
+        result = subprocess.run(
+            ["git", "-C", str(root), "rev-parse", "HEAD"],
+            check=True,
+            capture_output=True,
+            text=True,
+            timeout=10,
+        )
+    except (OSError, subprocess.SubprocessError):
+        return None
+    commit = result.stdout.strip()
+    return commit or None
 
 
 def _serializable(value: Any) -> Any:
