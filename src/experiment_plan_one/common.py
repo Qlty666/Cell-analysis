@@ -153,7 +153,19 @@ def download_file(
                     LOG.warning("server did not honor resume for %s; restarting", url)
                     partial.unlink(missing_ok=True)
                     start = 0
+                if status == 206:
+                    content_range = response.headers.get("Content-Range", "")
+                    match = re.fullmatch(r"bytes (\d+)-(\d+)/(\d+|\*)", content_range)
+                    if not match or int(match.group(1)) != start:
+                        raise ValueError(
+                            f"invalid Content-Range for resumed download: {content_range!r}"
+                        )
                 total = _content_length(response)
+                if expected_size is not None and status == 200 and total is not None and total != expected_size:
+                    raise ValueError(
+                        f"server declared {total} bytes for {destination.name}; "
+                        f"expected {expected_size}"
+                    )
                 if total is not None and status == 206:
                     total += start
                 mode = "ab" if start else "wb"

@@ -1,5 +1,13 @@
 {
   "completion_target_percent": 90.0,
+  "novelty_exclusions": [
+    "TNF",
+    "IL1B",
+    "IL6",
+    "TP53",
+    "MAPK14",
+    "PTGS2"
+  ],
   "output_root": "../y1",
   "compound": {
     "name": "6PPD-Q",
@@ -51,7 +59,8 @@
       "condition_column": "condition"
     },
     "GSE135251": {
-      "role": "supplementary_external_validation_nafld",
+      "role": "primary_external_validation_nafld",
+      "endpoint": "healthy_vs_NAFLD",
       "condition_column": "condition"
     },
     "GSE270583": {
