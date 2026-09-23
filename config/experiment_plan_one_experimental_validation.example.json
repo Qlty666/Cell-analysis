@@ -1,0 +1,22 @@
+{
+  "schema_version": 1,
+  "experiment_plan": "experiment_plan_one",
+  "status": "not_run",
+  "records": [
+    {
+      "claim_id": "replace-with-claim-id",
+      "claim_text": "replace-with-exact-causal-claim",
+      "experiment_type": "exposure_intervention_rescue_or_binding",
+      "status": "not_run",
+      "dataset_or_experiment_id": "",
+      "source_data": "",
+      "protocol": "",
+      "ethics_or_animal_approval": "",
+      "analysis_code_commit": "",
+      "result_files": [],
+      "reviewer": "",
+      "reviewed_at": "",
+      "limitations": []
+    }
+  ]
+}

@@ -37,7 +37,12 @@ from experiment_plan_one.pipeline import (
     default_config,
     merge_config,
 )
-from experiment_plan_one.planning import write_analysis_plan
+from experiment_plan_one.planning import (
+    audit_delivery_readiness,
+    load_governance,
+    write_analysis_plan,
+    write_governance_artifacts,
+)
 from experiment_plan_one.ppi import run_ppi_analysis
 from experiment_plan_one.single_cell import (
     _cellchat_like_analysis,
@@ -211,6 +216,56 @@ class TestExperimentPlanOne(unittest.TestCase):
             self.assertIn("same_endpoint_external_candidate", plan_text)
             self.assertIn("different_endpoints_are_not_external_validation", plan_text)
             self.assertIn("GSE164441", set(manifest["accession"]))
+
+    def test_governance_freeze_register_and_method_changes_are_complete(self):
+        governance = load_governance()
+        self.assertEqual(governance["freeze"]["state"], "frozen")
+        self.assertTrue(governance["freeze"]["analysis_modules_locked"])
+        self.assertEqual(
+            set(governance["freeze"]["allowed_change_categories"]),
+            {
+                "code_defect",
+                "data_alignment",
+                "status_determination",
+                "traceability",
+            },
+        )
+        self.assertEqual(len(governance["issue_register"]), 26)
+        self.assertGreaterEqual(
+            governance["issue_register"]["status"].isin(
+                {"blocked", "not_run"}
+            ).sum(),
+            8,
+        )
+        self.assertFalse(
+            governance["method_changes"]["equivalent"]
+            .astype(str)
+            .str.lower()
+            .eq("true")
+            .any()
+        )
+
+    def test_governance_artifacts_are_written_to_run(self):
+        with tempfile.TemporaryDirectory(ignore_cleanup_errors=True) as tmp:
+            root = Path(tmp)
+            paths = write_governance_artifacts(root)
+            for key in (
+                "script_freeze",
+                "delivery_tiers",
+                "issue_register",
+                "method_changes",
+                "verification",
+                "issue_register_summary",
+            ):
+                self.assertTrue(paths[key].exists(), key)
+
+    def test_delivery_readiness_never_claims_publication_without_rerun(self):
+        with tempfile.TemporaryDirectory(ignore_cleanup_errors=True) as tmp:
+            readiness = audit_delivery_readiness(Path(tmp))
+            self.assertFalse(readiness["publication_grade"])
+            self.assertEqual(readiness["tiers"]["T1"]["status"], "met")
+            self.assertEqual(readiness["tiers"]["T2"]["status"], "not_run")
+            self.assertEqual(readiness["tiers"]["T3"]["status"], "blocked")
 
     def test_paired_count_sample_parser_accepts_explicit_n_t_labels(self):
         self.assertEqual(
@@ -819,6 +874,27 @@ class TestExperimentPlanOne(unittest.TestCase):
             self.assertEqual(summary["performance_targets_evaluable"], 0)
             self.assertEqual(summary["performance_targets_unknown"], 1)
             self.assertEqual(summary["performance_targets_not_evaluated"], 2)
+
+    def test_plan_coverage_marks_missing_tools_as_blocked_not_met(self):
+        with tempfile.TemporaryDirectory(ignore_cleanup_errors=True) as tmp:
+            root = Path(tmp)
+            audit_dir = root / "10_reports" / "figure_quality_audit"
+            audit_dir.mkdir(parents=True)
+            pd.DataFrame(
+                {
+                    "figure": [
+                        "Figure5_分子对接与分子动力学模拟",
+                    ],
+                    "panel": ["d"],
+                    "status": ["prepared_not_run"],
+                    "audit_verdict": ["不满足方案"],
+                }
+            ).to_csv(audit_dir / "figure_quality_audit.csv", index=False)
+            summary = audit_plan_coverage(root)
+            self.assertGreater(summary["blocked_panels"], 0)
+            self.assertGreater(summary["not_run_panels"], 0)
+            self.assertIn("blocked", summary["evidence_state_vocabulary"])
+            self.assertIn("not_run", summary["evidence_state_vocabulary"])
 
     def test_ml_figure_reviews_follow_current_metrics(self):
         with tempfile.TemporaryDirectory(ignore_cleanup_errors=True) as tmp:

@@ -1,5 +1,9 @@
 # 实验方案一脚本覆盖度评估
 
+> 说明：本文件保留为历史覆盖度评估。权重百分比不能表示科学结论完整或投稿级，当前脚本冻结、交付分级和状态口径以
+> `docs/experiment_plan_one_script_freeze_20260923.md` 及运行产物
+> `10_reports/governance/delivery_readiness.json` 为准。
+
 ## 评估范围
 
 依据 `实验方案一 .docx` 的 Figure 1-5，共 42 个有效 Panel：

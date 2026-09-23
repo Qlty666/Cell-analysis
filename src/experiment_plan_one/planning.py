@@ -2,7 +2,9 @@
 
 from __future__ import annotations
 
+import hashlib
 import json
+import shutil
 from collections.abc import Iterable
 from pathlib import Path
 from typing import Any
@@ -12,6 +14,7 @@ import pandas as pd
 from .common import ensure_dir, sha256_file, write_json
 
 PLAN_DIR = "00_plan"
+GOVERNANCE_DIR = "governance"
 COHORT_COLUMNS = [
     "accession",
     "sample_id",
@@ -30,6 +33,388 @@ COHORT_COLUMNS = [
     "data_version",
     "source",
 ]
+
+GOVERNANCE_FILES = {
+    "script_freeze": "experiment_plan_one_freeze.json",
+    "delivery_tiers": "experiment_plan_one_delivery_tiers.json",
+    "issue_register": "experiment_plan_one_issue_register.csv",
+    "method_changes": "experiment_plan_one_method_changes.csv",
+    "verification": "experiment_plan_one_verification.json",
+}
+
+ISSUE_REGISTER_COLUMNS = {
+    "issue_id",
+    "category",
+    "scope",
+    "problem_statement",
+    "evidence",
+    "responsibility_role",
+    "disposition",
+    "status",
+    "delivery_tier",
+    "in_scope_now",
+    "last_reviewed",
+}
+
+METHOD_CHANGE_COLUMNS = {
+    "change_id",
+    "panel_scope",
+    "original_method",
+    "implemented_method",
+    "reason",
+    "status",
+    "equivalent",
+    "requires_protocol_revision",
+    "reported_name",
+    "responsibility_role",
+    "evidence",
+}
+
+ISSUE_STATUSES = {
+    "resolved_verified",
+    "recorded_substitution",
+    "limited",
+    "blocked",
+    "not_run",
+}
+
+METHOD_CHANGE_STATUSES = {
+    "recorded_substitution",
+    "blocked",
+    "not_run",
+    "equivalent_verified",
+}
+
+
+def _repo_root() -> Path:
+    return Path(__file__).resolve().parents[2]
+
+
+def _read_json(path: Path, default: Any) -> Any:
+    try:
+        return json.loads(path.read_text(encoding="utf-8"))
+    except (OSError, ValueError):
+        return default
+
+
+def governance_sources(root: Path | None = None) -> dict[str, Path]:
+    base = (root or _repo_root()) / "config"
+    return {
+        key: base / filename
+        for key, filename in GOVERNANCE_FILES.items()
+    }
+
+
+def analysis_code_files(root: Path | None = None) -> list[Path]:
+    base = root or _repo_root()
+    files = list((base / "src" / "experiment_plan_one").glob("*.py"))
+    files.extend((base / "src" / "experiment_plan_one" / "R").glob("*.R"))
+    files.extend(
+        [
+            base / "src" / "docking" / "insilico.py",
+            base / "src" / "docking" / "insilico_enrichment.R",
+            base / "src" / "docking" / "md_simulation.py",
+        ]
+    )
+    return sorted(path for path in files if path.is_file())
+
+
+def analysis_code_fingerprint(root: Path | None = None) -> str:
+    base = root or _repo_root()
+    hashes = {
+        str(path.relative_to(base)): sha256_file(path)
+        for path in analysis_code_files(base)
+    }
+    return hashlib.sha256(
+        json.dumps(hashes, sort_keys=True).encode("utf-8")
+    ).hexdigest()
+
+
+def load_governance(root: Path | None = None) -> dict[str, Any]:
+    """Load and validate the freeze policy issue register and method log."""
+    sources = governance_sources(root)
+    missing = [str(path) for path in sources.values() if not path.exists()]
+    if missing:
+        raise FileNotFoundError(f"missing governance files: {missing}")
+    freeze = _read_json(sources["script_freeze"], {})
+    tiers = _read_json(sources["delivery_tiers"], {})
+    verification = _read_json(sources["verification"], {})
+    issues = pd.read_csv(sources["issue_register"]).fillna("")
+    changes = pd.read_csv(sources["method_changes"]).fillna("")
+    if not ISSUE_REGISTER_COLUMNS.issubset(issues.columns):
+        raise ValueError("issue register is missing required columns")
+    if not METHOD_CHANGE_COLUMNS.issubset(changes.columns):
+        raise ValueError("method change log is missing required columns")
+    invalid_issue_statuses = set(issues["status"].astype(str)) - ISSUE_STATUSES
+    if invalid_issue_statuses:
+        raise ValueError(
+            f"invalid issue statuses: {sorted(invalid_issue_statuses)}"
+        )
+    invalid_method_statuses = (
+        set(changes["status"].astype(str)) - METHOD_CHANGE_STATUSES
+    )
+    if invalid_method_statuses:
+        raise ValueError(
+            f"invalid method-change statuses: {sorted(invalid_method_statuses)}"
+        )
+    return {
+        "sources": sources,
+        "freeze": freeze,
+        "delivery_tiers": tiers,
+        "verification": verification,
+        "issue_register": issues,
+        "method_changes": changes,
+    }
+
+
+def write_governance_artifacts(
+    output_root: Path,
+    root: Path | None = None,
+) -> dict[str, Path]:
+    """Copy freeze governance inputs into the run output and summarize them."""
+    governance = load_governance(root)
+    out_dir = ensure_dir(Path(output_root) / PLAN_DIR / GOVERNANCE_DIR)
+    copied: dict[str, Path] = {}
+    for key, source in governance["sources"].items():
+        destination = out_dir / source.name
+        shutil.copy2(source, destination)
+        copied[key] = destination
+    issues = governance["issue_register"]
+    changes = governance["method_changes"]
+    current_fingerprint = analysis_code_fingerprint(root)
+    expected_fingerprint = str(
+        governance["verification"].get("analysis_code_fingerprint") or ""
+    )
+    verification_status = str(
+        governance["verification"].get("status") or ""
+    )
+    if (
+        str(governance["freeze"].get("state") or "") == "frozen"
+        and verification_status != "passed"
+    ):
+        raise RuntimeError(
+            "script freeze verification is not passed; update the "
+            "verification record before running the frozen pipeline"
+        )
+    if expected_fingerprint and current_fingerprint != expected_fingerprint:
+        raise RuntimeError(
+            "analysis code changed after freeze verification; rerun tests and "
+            "update the frozen analysis_code_fingerprint"
+        )
+    write_json(
+        out_dir / "issue_register_summary.json",
+        {
+            "status_counts": (
+                issues["status"].value_counts().to_dict()
+                if not issues.empty
+                else {}
+            ),
+            "category_counts": (
+                issues["category"].value_counts().to_dict()
+                if not issues.empty
+                else {}
+            ),
+            "in_scope_now": int(
+                issues["in_scope_now"].astype(str).str.lower().eq("yes").sum()
+            )
+            if not issues.empty
+            else 0,
+            "method_change_count": int(len(changes)),
+            "analysis_code_fingerprint": current_fingerprint,
+            "analysis_code_fingerprint_match": (
+                True
+                if not expected_fingerprint
+                else current_fingerprint == expected_fingerprint
+            ),
+            "non_equivalent_method_changes": int(
+                changes["equivalent"]
+                .astype(str)
+                .str.lower()
+                .ne("true")
+                .sum()
+            )
+            if not changes.empty
+            else 0,
+        },
+    )
+    copied["issue_register_summary"] = out_dir / "issue_register_summary.json"
+    return copied
+
+
+def _full_rerun_status(output_root: Path) -> dict[str, Any]:
+    manifest = _read_json(
+        Path(output_root) / "10_reports" / "analysis_manifest.json",
+        {},
+    )
+    stages = manifest.get("stages") or {}
+    governance = load_governance()
+    required = list(governance["freeze"].get("full_rerun_stages") or [])
+    statuses = {
+        stage: str((stages.get(stage) or {}).get("status") or "not_run")
+        for stage in required
+    }
+    incomplete = {
+        stage: status
+        for stage, status in statuses.items()
+        if status not in {"completed", "valid_negative", "valid_positive"}
+    }
+    return {
+        "status": "completed" if required and not incomplete else "not_run",
+        "stages": statuses,
+        "incomplete_stages": incomplete,
+    }
+
+
+def audit_delivery_readiness(
+    output_root: Path,
+    *,
+    coverage_summary: dict[str, Any] | None = None,
+) -> dict[str, Any]:
+    """Evaluate the three delivery tiers without claiming unrun science."""
+    governance = load_governance()
+    freeze = governance["freeze"]
+    verification = governance["verification"]
+    issues = governance["issue_register"]
+    changes = governance["method_changes"]
+    coverage_path = (
+        Path(output_root)
+        / "10_reports"
+        / "plan_coverage"
+        / "plan_coverage.csv"
+    )
+    coverage = (
+        pd.read_csv(coverage_path).fillna("")
+        if coverage_path.exists()
+        else pd.DataFrame()
+    )
+    panel_statuses = (
+        coverage["current_status"].astype(str).value_counts().to_dict()
+        if not coverage.empty and "current_status" in coverage
+        else {}
+    )
+    unresolved = {
+        status: int(count)
+        for status, count in panel_statuses.items()
+        if status
+        in {
+            "missing",
+            "missing_audit",
+            "blocked",
+            "not_run",
+            "prepared_not_run",
+            "needs_revision",
+        }
+    }
+    full_rerun = _full_rerun_status(output_root)
+    non_equivalent_changes = changes[
+        changes["equivalent"].astype(str).str.lower().ne("true")
+    ]
+    blocking_method_changes = changes[
+        changes["status"].astype(str).eq("blocked")
+        | changes["reported_name"].astype(str).str.strip().eq("")
+    ]
+    unresolved_issues = issues[
+        issues["status"].astype(str).isin({"blocked", "not_run"})
+    ]
+    tier1_met = (
+        str(freeze.get("state") or "") == "frozen"
+        and bool(freeze.get("analysis_modules_locked"))
+        and str(verification.get("status") or "") == "passed"
+        and (
+            not verification.get("analysis_code_fingerprint")
+            or str(verification.get("analysis_code_fingerprint"))
+            == analysis_code_fingerprint()
+        )
+    )
+    tier2_met = (
+        tier1_met
+        and full_rerun["status"] == "completed"
+        and not unresolved
+        and blocking_method_changes.empty
+        and (
+            not coverage_summary
+            or not coverage_summary.get("missing_or_unmet_panels")
+        )
+    )
+    experimental_manifest = _read_json(
+        Path(output_root) / PLAN_DIR / "experimental_validation_manifest.json",
+        {},
+    )
+    experimental_records = experimental_manifest.get("records") or []
+    tier3_met = bool(experimental_records) and all(
+        str(record.get("status") or "") == "completed_verified"
+        for record in experimental_records
+        if isinstance(record, dict)
+    )
+    tier_status = {
+        "T1": {
+            "name": "reproducible_computational_pipeline",
+            "status": "met" if tier1_met else "not_met",
+        },
+        "T2": {
+            "name": "complete_42_panel_evidence",
+            "status": "met" if tier2_met else "not_run",
+            "full_rerun": full_rerun,
+            "unresolved_panel_statuses": unresolved,
+            "non_equivalent_method_changes": (
+                non_equivalent_changes[
+                    [
+                        "change_id",
+                        "panel_scope",
+                        "original_method",
+                        "implemented_method",
+                        "status",
+                    ]
+                ].to_dict("records")
+                if not non_equivalent_changes.empty
+                else []
+            ),
+            "blocking_method_changes": (
+                blocking_method_changes[
+                    [
+                        "change_id",
+                        "panel_scope",
+                        "original_method",
+                        "implemented_method",
+                        "status",
+                    ]
+                ].to_dict("records")
+                if not blocking_method_changes.empty
+                else []
+            ),
+        },
+        "T3": {
+            "name": "wet_lab_causal_validation",
+            "status": "met" if tier3_met else "blocked",
+            "experimental_manifest": str(
+                Path(output_root)
+                / PLAN_DIR
+                / "experimental_validation_manifest.json"
+            ),
+            "reason": (
+                ""
+                if tier3_met
+                else "real exposure intervention rescue or binding validation has not been supplied"
+            ),
+        },
+    }
+    return {
+        "freeze_id": freeze.get("freeze_id"),
+        "script_freeze_state": freeze.get("state"),
+        "publication_grade": bool(tier1_met and tier2_met and tier3_met),
+        "publication_grade_note": (
+            "Publication-grade status requires a completed full rerun "
+            "resolved panels and wet-lab support for causal claims."
+        ),
+        "tiers": tier_status,
+        "unresolved_issue_counts": (
+            unresolved_issues["status"].value_counts().to_dict()
+            if not unresolved_issues.empty
+            else {}
+        ),
+        "policy": governance["delivery_tiers"].get("publication_grade_policy")
+        or {},
+    }
 
 
 def dataset_registry(config: dict[str, Any]) -> list[dict[str, Any]]:

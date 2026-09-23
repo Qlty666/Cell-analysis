@@ -61,9 +61,11 @@ from .md_figures import generate_plan_md_figures
 from .ml import run_ml_validation
 from .planning import (
     append_cohort_rows,
+    audit_delivery_readiness,
     dataset_registry,
     update_data_checksums,
     write_analysis_plan,
+    write_governance_artifacts,
 )
 from .ppi import run_ppi_analysis
 from .single_cell import (
@@ -209,6 +211,17 @@ class PipelineContext:
             payload["inputs"]["evidence_config"] = self.fingerprint_file(
                 evidence_path.resolve()
             )
+        if stage == "plan":
+            for filename in (
+                "experiment_plan_one_freeze.json",
+                "experiment_plan_one_delivery_tiers.json",
+                "experiment_plan_one_issue_register.csv",
+                "experiment_plan_one_method_changes.csv",
+                "experiment_plan_one_verification.json",
+            ):
+                payload["inputs"][filename] = self.fingerprint_file(
+                    self.root / "config" / filename
+                )
         encoded = json.dumps(
             payload,
             ensure_ascii=False,
@@ -259,6 +272,11 @@ STAGE_REQUIRED_OUTPUTS: dict[str, list[Path]] = {
         Path("00_plan/sample_inclusion_exclusion.tsv"),
         Path("00_plan/metadata_corrections.tsv"),
         Path("00_plan/data_checksums.json"),
+        Path("00_plan/governance/experiment_plan_one_freeze.json"),
+        Path("00_plan/governance/experiment_plan_one_delivery_tiers.json"),
+        Path("00_plan/governance/experiment_plan_one_issue_register.csv"),
+        Path("00_plan/governance/experiment_plan_one_method_changes.csv"),
+        Path("00_plan/governance/experiment_plan_one_verification.json"),
     ],
     "data": [
         Path("00_data/raw/dataset_inventory.json"),
@@ -293,6 +311,7 @@ STAGE_REQUIRED_OUTPUTS: dict[str, list[Path]] = {
         Path("10_reports/figure_quality_audit/figure_quality_audit.json"),
         Path("10_reports/plan_coverage/plan_coverage.json"),
         Path("10_reports/plan_coverage/environment_audit.json"),
+        Path("10_reports/governance/delivery_readiness.json"),
     ],
     "report": [Path("10_reports/experiment_plan_one_report.html")],
 }
@@ -637,6 +656,7 @@ class ExperimentPlanOne:
                     state["elapsed_seconds"],
                 )
         self._write_manifest()
+        self._write_delivery_readiness()
         return self.results
 
     def _missing_stage_outputs(self, stage: str) -> list[str]:
@@ -652,9 +672,26 @@ class ExperimentPlanOne:
             self.context.output_root,
             {**self.context.config, "run_id": self.run_id},
         )
+        outputs.update(
+            write_governance_artifacts(self.context.output_root)
+        )
         update_data_checksums(
             self.context.output_root,
-            [self.context.root / "config" / "experiment_plan_one.json"],
+            [
+                self.context.root / "config" / "experiment_plan_one.json",
+                *[
+                    path
+                    for key, path in outputs.items()
+                    if key
+                    in {
+                        "script_freeze",
+                        "delivery_tiers",
+                        "issue_register",
+                        "method_changes",
+                        "verification",
+                    }
+                ],
+            ],
         )
         return {
             "status": "completed",
@@ -2089,6 +2126,16 @@ class ExperimentPlanOne:
         figure_index = _figure_index(self.context.output_root)
         figure_index.to_csv(out_dir / "figure_index.csv", index=False)
         status = self._stage_statuses()
+        coverage = read_json(
+            out_dir / "plan_coverage" / "plan_coverage.json",
+            {},
+        )
+        delivery = audit_delivery_readiness(
+            self.context.output_root,
+            coverage_summary=coverage,
+        )
+        governance_dir = ensure_dir(out_dir / "governance")
+        write_json(governance_dir / "delivery_readiness.json", delivery)
         report = _render_report(self.context, inventory, status, figure_index)
         report_path = out_dir / "experiment_plan_one_report.html"
         report_path.write_text(report, encoding="utf-8")
@@ -2117,6 +2164,7 @@ class ExperimentPlanOne:
                     out_dir / "plan_coverage" / "plan_coverage.json",
                     {},
                 ),
+                "delivery_readiness": delivery,
                 "completion_target_percent": float(
                     self.context.config.get("completion_target_percent", 90.0)
                 ),
@@ -2146,6 +2194,7 @@ class ExperimentPlanOne:
                     "Communication analysis uses explicit ligand-receptor scoring and tests labels across independent biological units only when replication permits.",
                     "Predicted perturbation results use a local sparse GRN when scTenifoldKnk is unavailable and are not wet-lab knockouts.",
                     "100 ns MD production is prepared but started only when md.run=true.",
+                    "Publication-grade status remains false until a full rerun resolves all panels and causal claims have wet-lab evidence.",
                 ],
             },
         )
@@ -2165,10 +2214,32 @@ class ExperimentPlanOne:
     def stage_figure_audit(self) -> dict[str, Any]:
         result = audit_figures(self.context.output_root)
         coverage = audit_plan_coverage(self.context.output_root)
+        delivery = audit_delivery_readiness(
+            self.context.output_root,
+            coverage_summary=coverage,
+        )
+        governance_dir = ensure_dir(
+            self.context.output_root / "10_reports" / "governance"
+        )
+        write_json(governance_dir / "delivery_readiness.json", delivery)
+        pd.DataFrame(
+            [
+                {
+                    "tier": tier,
+                    **(
+                        dict(payload)
+                        if isinstance(payload, dict)
+                        else {"status": str(payload)}
+                    ),
+                }
+                for tier, payload in (delivery.get("tiers") or {}).items()
+            ]
+        ).to_csv(governance_dir / "delivery_readiness.csv", index=False)
         return _serializable(
             {
                 "figure_audit": result,
                 "plan_coverage": coverage,
+                "delivery_readiness": delivery,
             }
         )
 
@@ -2405,6 +2476,12 @@ class ExperimentPlanOne:
             {
                 "version": __version__,
                 "run_id": self.run_id,
+                "script_freeze": read_json(
+                    self.context.root
+                    / "config"
+                    / "experiment_plan_one_freeze.json",
+                    {},
+                ),
                 "created_at": time.strftime("%Y-%m-%d %H:%M:%S"),
                 "output_root": str(self.context.output_root),
                 "config": self.context.config,
@@ -2435,6 +2512,36 @@ class ExperimentPlanOne:
                 },
             },
         )
+
+    def _write_delivery_readiness(self) -> None:
+        coverage = read_json(
+            self.context.output_root
+            / "10_reports"
+            / "plan_coverage"
+            / "plan_coverage.json",
+            {},
+        )
+        delivery = audit_delivery_readiness(
+            self.context.output_root,
+            coverage_summary=coverage,
+        )
+        governance_dir = ensure_dir(
+            self.context.output_root / "10_reports" / "governance"
+        )
+        write_json(governance_dir / "delivery_readiness.json", delivery)
+        pd.DataFrame(
+            [
+                {
+                    "tier": tier,
+                    **(
+                        dict(payload)
+                        if isinstance(payload, dict)
+                        else {"status": str(payload)}
+                    ),
+                }
+                for tier, payload in (delivery.get("tiers") or {}).items()
+            ]
+        ).to_csv(governance_dir / "delivery_readiness.csv", index=False)
 
 
 def _balanced_cell_sample(data: Any, max_cells: int, seed: int = 123) -> np.ndarray:

@@ -229,6 +229,12 @@ Script/
 | `config/*.json` | 表达分析、虚拟筛选、独立分子对接与项目默认配置 |
 | `config/evidence_sources.json` | 多数据库连接器、记录上限和证据评分配置 |
 | `config/evidence_local_sources.example.json` | CTD、Tox21、LINCS、DisGeNET 等本地授权快照接入示例 |
+| `config/experiment_plan_one_freeze.json` | 实验方案一脚本冻结基线、允许变更类别和禁止变更范围 |
+| `config/experiment_plan_one_issue_register.csv` | 问题、证据、责任角色和处置状态总表 |
+| `config/experiment_plan_one_method_changes.csv` | 原方法、实际实现方法、替代原因和等价性登记 |
+| `config/experiment_plan_one_delivery_tiers.json` | T1 可复现计算流程、T2 完整 Panel 证据、T3 湿实验因果验证定义 |
+| `config/experiment_plan_one_verification.json` | 冻结脚本的测试、真实数据冒烟核查和已知限制记录 |
+| `config/experiment_plan_one_experimental_validation.example.json` | T3 湿实验因果验证记录模板 |
 | `skills/liver-*/SKILL.md` | Codex skill 定义 |
 | `skills/liver-*/agents/openai.yaml` | skill agent 配置 |
 | `pytest.ini` | pytest 配置（`testpaths = tests`） |

@@ -152,6 +152,7 @@ launchers\run_web_ui.bat
 | [环境需求](docs/environment_requirements.md) | 各功能板块的环境清单与安装入口 |
 | [多数据库证据中心](docs/evidence_hub.md) | 证据模型、来源配置、评分和 CLI |
 | [项目结构](docs/project_structure.md) | 代码模块和目录职责 |
+| [脚本冻结与交付分级](docs/experiment_plan_one_script_freeze_20260923.md) | 实验方案一冻结范围、问题总表、方法替代登记和三级交付门槛 |
 | [结果图指南](docs/result_figure_guide.md) | 结果文件用途与判读说明 |
 | [更新日志](CHANGELOG.md) | 历史版本与变更记录 |
 

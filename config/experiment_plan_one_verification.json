@@ -1,0 +1,36 @@
+{
+  "verified_at": "2026-09-23",
+  "baseline_commit": "e6c0370b3b7210ac557ae9c5432e72af74f14b35",
+  "analysis_code_fingerprint": "10dcfb340e7938629ee8b0a8d6612bcc3f215ad751d2458126d721b371bbdd7c",
+  "status": "passed",
+  "scope": "Frozen script implementation checks only; not a scientific completion certificate.",
+  "checks": [
+    {
+      "name": "targeted_experiment_plan_tests",
+      "status": "passed",
+      "command": "python -m pytest tests/test_experiment_plan_one.py -q",
+      "evidence": "37 passed"
+    },
+    {
+      "name": "cross_module_regression_tests",
+      "status": "passed",
+      "command": "python -m pytest -q --ignore=tests/test_portable_package.py",
+      "evidence": "510 passed and 75 subtests passed"
+    },
+    {
+      "name": "real_data_smoke",
+      "status": "passed",
+      "detail": "Bulk counts pairing metadata and human-mouse orthology were checked on local frozen inputs."
+    }
+  ],
+  "known_out_of_scope_failure": {
+    "test": "tests/test_portable_package.py::TestPortablePackage::test_source_files_are_clean",
+    "reason": "Unchanged audit document contains an absolute repository path; not introduced by the analysis-script task."
+  },
+  "limitations": [
+    "No full pipeline rerun.",
+    "No real 100 ns MD trajectory.",
+    "No MM-PBSA residue decomposition.",
+    "No wet-lab causal validation."
+  ]
+}

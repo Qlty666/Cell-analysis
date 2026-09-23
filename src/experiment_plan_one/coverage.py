@@ -100,13 +100,38 @@ def _status(
     review: dict[str, Any] | None,
 ) -> str:
     if review is None:
+        if requirement.dependency in {
+            "external_data",
+            "licensed_data",
+            "external_tool",
+            "gromacs",
+            "gmx_mmpbsa",
+            "method_equivalent",
+            "algorithm_equivalent",
+            "visualization_equivalent",
+        }:
+            return "blocked"
         return "missing_audit"
     raw_status = str(review.get("status") or "")
     verdict = str(review.get("audit_verdict") or "")
     if raw_status == "missing":
-        return "missing"
+        return (
+            "blocked"
+            if requirement.dependency
+            in {
+                "external_data",
+                "licensed_data",
+                "external_tool",
+                "gromacs",
+                "gmx_mmpbsa",
+                "method_equivalent",
+                "algorithm_equivalent",
+                "visualization_equivalent",
+            }
+            else "not_run"
+        )
     if raw_status == "prepared_not_run":
-        return "prepared_not_run"
+        return "not_run"
     if verdict in {"不满足方案", "未运行"} or raw_status == "not_run":
         return "not_run"
     if verdict in {"不可替代Venn", "不合理", "需重绘", "不满足方案"}:
@@ -321,14 +346,16 @@ def audit_plan_coverage(output_root: Path) -> dict[str, Any]:
         "standard": "experiment-plan-one weighted implementation/output coverage (not publication readiness)",
         "publication_readiness": "not_assessed",
         "evidence_state_vocabulary": [
+            "blocked",
             "not_run",
-            "input_prepared",
             "failed",
             "exploratory",
             "valid_negative",
             "valid_positive",
             "unknown",
         ],
+        "blocked_panels": int(frame["current_status"].eq("blocked").sum()),
+        "not_run_panels": int(frame["current_status"].eq("not_run").sum()),
         "method_valid_panels": int(frame["method_valid"].sum()),
         "evidence_sufficient_panels": int(frame["evidence_sufficient"].sum()),
         "file_generated_panels": int(frame["file_generated"].sum()),
@@ -396,6 +423,8 @@ def _render_markdown(rows: pd.DataFrame, summary: dict[str, Any]) -> str:
         f"- Panels with generated files: {summary['file_generated_panels']}/{summary['panels']}",
         f"- Panels with method-valid audits: {summary['method_valid_panels']}/{summary['panels']}",
         f"- Panels with sufficient evidence audits: {summary['evidence_sufficient_panels']}/{summary['panels']}",
+        f"- Blocked panels: {summary['blocked_panels']}",
+        f"- Not-run panels: {summary['not_run_panels']}",
         (
             "- Projected coverage with required external data/tools: "
             f"{summary['projected_completion_percent_with_prerequisites']:.2f}%"

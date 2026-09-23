@@ -1,0 +1,52 @@
+{
+  "schema_version": 1,
+  "tiers": [
+    {
+      "tier_id": "T1",
+      "name": "reproducible_computational_pipeline",
+      "purpose": "Frozen scripts run reproducibly and report code defects, data alignment, status and traceability without claiming scientific completeness.",
+      "required_evidence": [
+        "script freeze policy",
+        "input and output checksums",
+        "run_id and analysis manifest",
+        "targeted tests and real-data smoke checks"
+      ],
+      "scientific_completeness_required": false
+    },
+    {
+      "tier_id": "T2",
+      "name": "complete_42_panel_evidence",
+      "purpose": "All 42 panels have valid methods, real outputs, documented limitations and no blocked_or_not_run panel.",
+      "required_evidence": [
+        "completed full pipeline rerun",
+        "42-panel evidence ledger",
+        "actual external methods or recorded substitutions",
+        "valid negative and positive results",
+        "source data and methods"
+      ],
+      "scientific_completeness_required": true
+    },
+    {
+      "tier_id": "T3",
+      "name": "wet_lab_causal_validation",
+      "purpose": "Claims of exposure-target mediation, direct binding or causal disease effect are supported by real experimental data.",
+      "required_evidence": [
+        "exposure or intervention experiments",
+        "target perturbation and rescue",
+        "direct binding or target-engagement evidence",
+        "disease-relevant phenotype",
+        "ethics and data provenance"
+      ],
+      "scientific_completeness_required": true
+    }
+  ],
+  "publication_grade_policy": {
+    "requires_full_rerun": true,
+    "requires_all_panels_resolved": true,
+    "requires_panel_evidence_ledger": true,
+    "requires_claim_evidence_match": true,
+    "requires_wet_lab_when_claim_is_causal": true,
+    "missing_tool_status": "blocked",
+    "not_executed_status": "not_run"
+  }
+}
