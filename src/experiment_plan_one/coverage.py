@@ -234,6 +234,12 @@ def audit_plan_environment() -> dict[str, Any]:
         ),
         None,
     )
+    try:
+        from openbabel import openbabel as ob
+
+        openbabel_inchikey = bool(ob.OBConversion().FindFormat("inchikey"))
+    except Exception:  # noqa: BLE001
+        openbabel_inchikey = False
     mmpbsa_candidates = [
         shutil.which("gmx_MMPBSA"),
         shutil.which("gmx_MMPBSA.py"),
@@ -308,6 +314,11 @@ def audit_plan_environment() -> dict[str, Any]:
         "plip": {
             "path": str(plip_path) if plip_path else "",
             "available": bool(plip_path),
+            "runtime_backend": "python_api_in_process",
+            "openbabel_inchikey_format": openbabel_inchikey,
+            "inchikey_writer_patch_required": bool(
+                plip_path and not openbabel_inchikey
+            ),
         },
         "r_packages": r_packages,
         "python_scripts": {

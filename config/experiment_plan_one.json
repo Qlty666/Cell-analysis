@@ -138,6 +138,7 @@
     "mouse": {
       "max_cells": 5000,
       "cellchat_backend": "r_cellchat",
+      "cellchat_max_cells": 5000,
       "cellchat_permutations": 100,
       "cellchat_seed": 123,
       "inference_unit": "library_or_verified_animal"

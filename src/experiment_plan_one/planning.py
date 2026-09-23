@@ -308,8 +308,14 @@ def audit_delivery_readiness(
         }
     }
     full_rerun = _full_rerun_status(output_root)
-    non_equivalent_changes = changes[
-        changes["equivalent"].astype(str).str.lower().ne("true")
+    retired_changes = changes[
+        changes["status"].astype(str).eq("retired_original_restored")
+    ]
+    active_changes = changes[
+        ~changes["status"].astype(str).eq("retired_original_restored")
+    ]
+    non_equivalent_changes = active_changes[
+        active_changes["equivalent"].astype(str).str.lower().ne("true")
     ]
     blocking_method_changes = changes[
         changes["status"].astype(str).eq("blocked")
@@ -369,6 +375,19 @@ def audit_delivery_readiness(
                     ]
                 ].to_dict("records")
                 if not non_equivalent_changes.empty
+                else []
+            ),
+            "retired_original_method_changes": (
+                retired_changes[
+                    [
+                        "change_id",
+                        "panel_scope",
+                        "original_method",
+                        "implemented_method",
+                        "status",
+                    ]
+                ].to_dict("records")
+                if not retired_changes.empty
                 else []
             ),
             "blocking_method_changes": (

@@ -2,12 +2,14 @@
 
 from __future__ import annotations
 
+import contextlib
+import io
 import json
 import math
 import re
 import shutil
-import subprocess
 import sys
+import threading
 import urllib.parse
 import urllib.request
 from pathlib import Path
@@ -33,6 +35,7 @@ RCSB_SEARCH = "https://search.rcsb.org/rcsbsearch/v2/query"
 RCSB_FILE = "https://files.rcsb.org/download/{pdb_id}.pdb"
 ALPHAFOLD_API = "https://alphafold.ebi.ac.uk/api/prediction/{accession}"
 ALPHAFOLD_FILE = "https://alphafold.ebi.ac.uk/files/{entry_id}-model_v4.pdb"
+_PLIP_RUNTIME_LOCK = threading.Lock()
 
 
 def uniprot_for_gene(gene: str, *, species: int = 9606) -> dict[str, Any]:
@@ -647,50 +650,102 @@ def _write_ligand_pdb(
     output.write_text("\n".join(lines) + "\n", encoding="utf-8")
 
 
+def _run_plip_report(
+    complex_path: Path,
+    report_dir: Path,
+) -> tuple[int, str, bool]:
+    """Run PLIP in-process and tolerate Open Babel builds without InChI."""
+    try:
+        from openbabel import openbabel as ob
+        from openbabel import pybel
+        import plip.plipcmd as plipcmd
+    except Exception as exc:  # noqa: BLE001
+        return 1, str(exc), False
+    has_inchikey = bool(ob.OBConversion().FindFormat("inchikey"))
+    output = io.StringIO()
+    original_write = pybel.Molecule.write
+    original_argv = sys.argv[:]
+    code = 0
+    with _PLIP_RUNTIME_LOCK:
+        try:
+            if not has_inchikey:
+                def compatible_write(
+                    molecule,
+                    format: str = "smi",
+                    *args: Any,
+                    **kwargs: Any,
+                ) -> str:
+                    if str(format).lower() in {"inchi", "inchikey"}:
+                        return ""
+                    return original_write(
+                        molecule,
+                        format,
+                        *args,
+                        **kwargs,
+                    )
+
+                pybel.Molecule.write = compatible_write
+            sys.argv = [
+                "plip",
+                "-f",
+                str(complex_path),
+                "-o",
+                str(report_dir),
+                "-x",
+                "-q",
+                "--nofix",
+                "--maxthreads",
+                "1",
+                "--name",
+                "plip_report",
+            ]
+            with (
+                contextlib.redirect_stdout(output),
+                contextlib.redirect_stderr(output),
+            ):
+                try:
+                    plipcmd.main()
+                except SystemExit as exc:
+                    code = int(exc.code or 0)
+                except Exception as exc:  # noqa: BLE001
+                    code = 1
+                    output.write(f"\n{type(exc).__name__}: {exc}\n")
+        finally:
+            pybel.Molecule.write = original_write
+            sys.argv = original_argv
+    return code, output.getvalue(), not has_inchikey
+
+
 def _plip_interactions(
     receptor: Path,
     ligand_atoms: list[dict[str, Any]],
     output_dir: Path,
 ) -> tuple[pd.DataFrame, dict[str, Any]]:
-    executable = _find_plip()
-    if not executable:
+    try:
+        import openbabel  # noqa: F401
+        import plip  # noqa: F401
+    except Exception:  # noqa: BLE001
         return pd.DataFrame(), {
             "status": "blocked",
-            "reason": "PLIP executable is not installed in this environment",
+            "reason": "PLIP or Open Babel is not installed in this environment",
         }
     work_dir = ensure_dir(output_dir / "plip")
     complex_path = work_dir / "complex.pdb"
     _write_ligand_pdb(receptor, ligand_atoms, complex_path)
     report_dir = ensure_dir(work_dir / "report")
-    process = subprocess.run(
-        [
-            executable,
-            "-f",
-            str(complex_path),
-            "-o",
-            str(report_dir),
-            "-x",
-            "-q",
-            "--nofix",
-            "--maxthreads",
-            "1",
-            "--name",
-            "plip_report",
-        ],
-        capture_output=True,
-        text=True,
-        encoding="utf-8",
-        errors="replace",
-        check=False,
-        timeout=600,
+    return_code, process_text, inchikey_patched = _run_plip_report(
+        complex_path,
+        report_dir,
     )
     xml_path = report_dir / "plip_report.xml"
-    if process.returncode != 0 or not xml_path.exists():
-        detail = (process.stderr or process.stdout or "").strip()
+    if return_code != 0 or not xml_path.exists():
         return pd.DataFrame(), {
             "status": "failed",
-            "reason": detail[-1200:] or "PLIP did not produce an XML report",
+            "reason": process_text.strip()[-1200:]
+            or "PLIP did not produce an XML report",
             "complex": str(complex_path),
+            "backend": "PLIP Python API (in-process)",
+            "inchikey_writer_patched": inchikey_patched,
         }
     from plip.exchange.xml import PlipXML
 
@@ -767,6 +822,8 @@ def _plip_interactions(
     return frame, {
         "status": "completed" if not frame.empty else "valid_negative",
         "method": "PLIP 3.0.1",
+        "backend": "PLIP Python API (in-process)",
+        "inchikey_writer_patched": inchikey_patched,
         "complex": str(complex_path),
         "xml_report": str(xml_path),
         "n_interactions": int(len(frame)),
@@ -878,7 +935,6 @@ def _write_interaction_figure(
             "metal_complex": "#6d7f3c",
             "hydrogen_bond_geometric_candidate": "#2f6bb3",
             "polar_contact_candidate": "#6b8eb5",
-            "hydrophobic_contact": "#d29b32",
             "salt_bridge_candidate": "#c0392b",
             "aromatic_contact_candidate": "#6c5fa7",
             "vdw_contact": "#7b8794",

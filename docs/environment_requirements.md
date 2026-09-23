@@ -166,7 +166,7 @@ python scripts\run_docking.py check-cadd
 
 - Python 3.10+。
 - 与虚拟筛选核心相同的对接依赖：`requirements_dock.txt`、AutoDockTools、AutoDock Vina。
-- PLIP 3.0.1（`requirements.txt`）用于 Figure 5b 的相互作用复核；仅有几何距离时状态保持候选。
+- PLIP 3.0.1（`requirements.txt`）用于 Figure 5b 的相互作用复核；仅有几何距离时状态保持候选。若 Open Babel 构建不提供 InChIKey 格式，代码会在隔离锁内使用兼容写回，并在 `fig5b_status.json` 中记录该环境差异。
 - 不需要证据收集 Codex skills，也不需要 R。
 
 ```bat

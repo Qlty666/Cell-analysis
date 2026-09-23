@@ -369,6 +369,117 @@ def _dynamic_result_reviews(
     figure = "Figure3_机器学习模型构建与SHAP核心特征"
     reviews: dict[tuple[str, str], FigureReview] = {}
 
+    ppi_summary = read_json(
+        output_root / "03_intersection_ppi" / "ppi_summary.json",
+        {},
+    )
+    if isinstance(ppi_summary, dict) and ppi_summary:
+        module_method = str(ppi_summary.get("module_method") or "")
+        ppi_status = str(ppi_summary.get("status") or "unknown")
+        reviews[("Figure2_PPI网络与枢纽基因初步筛选", "b")] = FigureReview(
+            "合理",
+            "良好",
+            (
+                "可用"
+                if ppi_status == "completed" and module_method.upper() == "MCL"
+                else "阴性结果"
+                if ppi_status == "valid_negative"
+                else "需限定解释"
+            ),
+            (
+                f"status={ppi_status}; "
+                f"module_method={module_method or 'unknown'}; "
+                f"inflation={ppi_summary.get('mcl_inflation', 'NA')}; "
+                "MCL为原方案方法，Louvain只能作为登记后的替代方法。"
+            ),
+        )
+
+    mouse_dir = output_root / "06_single_cell_mouse"
+    cellchat_summary = read_json(
+        mouse_dir / "cellchat_permutation_summary.json",
+        {},
+    )
+    if isinstance(cellchat_summary, dict) and cellchat_summary:
+        communication_status = str(
+            cellchat_summary.get("status") or "unknown"
+        )
+        method = str(cellchat_summary.get("method") or "unknown")
+        reviews[("Figure4_单细胞图谱_细胞通讯与虚拟扰动", "f")] = FigureReview(
+            "合理",
+            "良好",
+            (
+                "阴性结果"
+                if communication_status == "valid_negative"
+                else "需限定解释"
+            ),
+            (
+                f"method={method}; status={communication_status}; "
+                f"interactions={cellchat_summary.get('n_interactions', 'NA')}; "
+                "细胞级通讯概率不替代独立生物单位统计。"
+            ),
+        )
+
+    insilico_candidates = sorted(mouse_dir.rglob("insilico_summary.json"))
+    insilico_summary = (
+        read_json(insilico_candidates[0], {})
+        if insilico_candidates
+        else {}
+    )
+    if isinstance(insilico_summary, dict) and insilico_summary:
+        insilico_status = str(
+            insilico_summary.get("status") or "unknown"
+        )
+        engine = str(insilico_summary.get("engine") or "unknown")
+        scientific_role = str(
+            insilico_summary.get("scientific_role")
+            or "predicted_perturbation_response"
+        )
+        insilico_review = FigureReview(
+            "合理",
+            "良好",
+            "可用" if insilico_status == "completed" else "需限定解释",
+            (
+                f"engine={engine}; status={insilico_status}; "
+                f"role={scientific_role}; "
+                "结果仍是预测扰动响应，不是湿实验敲除。"
+            ),
+        )
+        reviews[
+            ("Figure4_单细胞图谱_细胞通讯与虚拟扰动", "g")
+        ] = insilico_review
+        reviews[
+            ("Figure4_单细胞图谱_细胞通讯与虚拟扰动", "h")
+        ] = insilico_review
+
+    interaction_status = read_json(
+        output_root / "08_docking" / "fig5b_status.json",
+        {},
+    )
+    if isinstance(interaction_status, dict) and interaction_status:
+        validated = bool(interaction_status.get("validated"))
+        interaction_state = str(
+            interaction_status.get("status") or "unknown"
+        )
+        reviews[
+            ("Figure5_分子对接与分子动力学模拟", "b")
+        ] = FigureReview(
+            "合理",
+            "良好",
+            (
+                "可用"
+                if validated
+                else "阴性结果"
+                if interaction_state == "valid_negative"
+                else "需限定解释"
+            ),
+            (
+                f"status={interaction_state}; "
+                f"method={interaction_status.get('method') or 'geometric candidates'}; "
+                f"validated={validated}; "
+                "PLIP验证只针对所选docking pose，不等于实验结合证据。"
+            ),
+        )
+
     fibrosis = external.get("GSE49541_fibrosis")
     if fibrosis:
         reviews[(figure, "c")] = FigureReview(
