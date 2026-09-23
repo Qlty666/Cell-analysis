@@ -80,6 +80,7 @@ ISSUE_STATUSES = {
 
 METHOD_CHANGE_STATUSES = {
     "recorded_substitution",
+    "retired_original_restored",
     "blocked",
     "not_run",
     "equivalent_verified",
@@ -113,6 +114,7 @@ def analysis_code_files(root: Path | None = None) -> list[Path]:
         [
             base / "src" / "docking" / "insilico.py",
             base / "src" / "docking" / "insilico_enrichment.R",
+            base / "src" / "docking" / "R" / "sctenifoldknk.R",
             base / "src" / "docking" / "md_simulation.py",
         ]
     )

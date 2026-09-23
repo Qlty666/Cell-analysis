@@ -4,6 +4,9 @@ from __future__ import annotations
 
 import io
 import math
+import shutil
+import subprocess
+import tempfile
 import urllib.parse
 import urllib.request
 from pathlib import Path
@@ -162,6 +165,89 @@ def louvain_clusters(graph: nx.Graph) -> list[set[str]]:
     ]
 
 
+def _rscript_path() -> str | None:
+    return shutil.which("Rscript") or shutil.which("Rscript.exe")
+
+
+def mcl_clusters(
+    graph: nx.Graph,
+    *,
+    inflation: float = 2.0,
+    rscript: str | None = None,
+) -> list[set[str]]:
+    """Run the original MCL method through the R MCL package."""
+    if graph.number_of_nodes() == 0:
+        return []
+    executable = rscript or _rscript_path()
+    if not executable:
+        raise RuntimeError(
+            "MCL is configured but Rscript is unavailable; install R and the "
+            "MCL package before running Figure 2b"
+        )
+    script = Path(__file__).resolve().parent / "R" / "mcl_communities.R"
+    with tempfile.TemporaryDirectory(prefix="plan-one-mcl-") as temp:
+        temp_dir = Path(temp)
+        edges_path = temp_dir / "edges.tsv"
+        nodes_path = temp_dir / "nodes.txt"
+        output_path = temp_dir / "clusters.tsv"
+        pd.DataFrame(
+            [
+                {
+                    "node1": str(source),
+                    "node2": str(target),
+                    "score": float(data.get("weight", 1.0)),
+                }
+                for source, target, data in graph.edges(data=True)
+            ]
+        ).to_csv(edges_path, sep="\t", index=False)
+        nodes_path.write_text(
+            "\n".join(str(node) for node in graph.nodes()),
+            encoding="utf-8",
+        )
+        process = subprocess.run(
+            [
+                executable,
+                "--vanilla",
+                str(script),
+                f"--edges={edges_path}",
+                f"--nodes={nodes_path}",
+                f"--output={output_path}",
+                f"--inflation={float(inflation):g}",
+            ],
+            capture_output=True,
+            text=True,
+            encoding="utf-8",
+            errors="replace",
+            check=False,
+        )
+        if process.returncode != 0 or not output_path.exists():
+            detail = (process.stderr or process.stdout or "").strip()
+            raise RuntimeError(
+                "R MCL failed; verify that the MCL package is installed. "
+                f"{detail[-800:]}"
+            )
+        clusters = pd.read_csv(output_path, sep="\t")
+    if not {"node", "cluster"}.issubset(clusters.columns):
+        raise RuntimeError("R MCL returned an invalid cluster table")
+    grouped = (
+        clusters.assign(
+            node=clusters["node"].astype(str),
+            cluster=pd.to_numeric(clusters["cluster"], errors="coerce"),
+        )
+        .dropna(subset=["cluster"])
+        .assign(cluster=lambda frame: frame["cluster"].astype(int))
+        .query("cluster > 0")
+        .groupby("cluster", sort=True)["node"]
+        .agg(list)
+    )
+    major = [
+        set(values)
+        for values in grouped
+        if len(values) >= 3
+    ]
+    return sorted(major, key=lambda value: (-len(value), sorted(value)))
+
+
 def run_ppi_analysis(
     genes: list[str],
     output_dir: Path,
@@ -170,15 +256,16 @@ def run_ppi_analysis(
     top_n: int = 20,
     add_nodes: int = 50,
     force: bool = False,
-    module_method: str = "louvain",
+    module_method: str = "mcl",
+    mcl_inflation: float = 2.0,
 ) -> dict[str, Any]:
     ensure_dir(output_dir)
     genes = sorted(set(str(gene).upper() for gene in genes if str(gene).strip()))
-    method = str(module_method or "louvain").strip().lower()
-    if method != "louvain":
+    method = str(module_method or "mcl").strip().lower()
+    if method not in {"mcl", "louvain"}:
         raise ValueError(
-            "only the validated Louvain implementation is enabled; "
-            "install and validate MCL before naming it as the method"
+            "module_method must be 'mcl' or 'louvain'; method substitutions "
+            "must be recorded before changing this setting"
         )
     if not genes:
         empty = pd.DataFrame(
@@ -260,7 +347,20 @@ def run_ppi_analysis(
             str(row.node2).upper(),
             weight=float(row.score) / 1000.0,
         )
-    clusters = louvain_clusters(graph)
+    if method == "mcl":
+        clusters = mcl_clusters(graph, inflation=mcl_inflation)
+        method_label = "MCL"
+        method_note = (
+            f"Original MCL method executed with the R MCL package; "
+            f"inflation={float(mcl_inflation):g}."
+        )
+    else:
+        clusters = louvain_clusters(graph)
+        method_label = "Louvain"
+        method_note = (
+            "Recorded substitution: deterministic Louvain communities were "
+            "used instead of the original MCL method."
+        )
     major_clusters = [cluster for cluster in clusters if len(cluster) >= 3]
     assigned_major = set().union(*major_clusters) if major_clusters else set()
     clusters_for_output = major_clusters + [
@@ -316,7 +416,7 @@ def run_ppi_analysis(
         graph,
         metrics,
         output_dir / "fig2b_cytoscape_module_network.png",
-        title="PPI modules (Louvain communities)",
+        title=f"PPI modules ({method_label} communities)",
         node_color=None,
         focus_genes=set(metrics["gene"]),
         node_modules=node_modules,
@@ -348,10 +448,10 @@ def run_ppi_analysis(
             "network_nodes": int(graph.number_of_nodes()),
             "network_edges": int(graph.number_of_edges()),
             "required_score": required_score,
-            "module_method": "Louvain",
-            "module_method_note": (
-                "The original MCL label was replaced with the actually "
-                "executed Louvain implementation."
+            "module_method": method_label,
+            "module_method_note": method_note,
+            "mcl_inflation": (
+                float(mcl_inflation) if method == "mcl" else None
             ),
             "betweenness_definition": {
                 "graph": "undirected simple graph",

@@ -15,7 +15,8 @@ if (!requireNamespace("BiocManager", quietly = TRUE)) {
 cran_pkgs <- c(
   "Seurat", "dplyr", "ggplot2", "patchwork", "Matrix", "data.table",
   "jsonlite", "ggrepel", "pheatmap", "RColorBrewer", "harmony",
-  "R.utils", "WGCNA", "survival", "survminer", "timeROC", "glmnet"
+  "R.utils", "WGCNA", "survival", "survminer", "timeROC", "glmnet",
+  "MCL", "CellChat", "scTenifoldNet", "scTenifoldKnk"
 )
 
 bioc_pkgs <- c(

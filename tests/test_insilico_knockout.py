@@ -20,6 +20,8 @@ from docking.config import load_config  # noqa: E402
 from docking.insilico import run_insilico_knockout  # noqa: E402
 from docking.insilico import _looks_like_raw_counts  # noqa: E402
 from docking.insilico import _merge_scTenifold  # noqa: E402
+from docking.insilico import _r_sctenifold_available  # noqa: E402
+from docking.insilico import _run_r_scTenifoldKnk  # noqa: E402
 from docking.insilico import _scTenifold_available  # noqa: E402
 from docking.insilico import _plot_enrichment_bubble  # noqa: E402
 from docking.insilico import _plot_umap_shift  # noqa: E402
@@ -158,7 +160,41 @@ class TestInSilicoKnockout(unittest.TestCase):
         self.assertIsNotNone(kept)
         self.assertIn("sctenifold_score", merged.columns)
         self.assertIn("combined_impact", merged.columns)
-        self.assertEqual(merged["gene"].iloc[0], "A")
+        self.assertIn("local_delta_rank", merged.columns)
+        self.assertEqual(merged["gene"].iloc[0], "D")
+
+    @unittest.skipUnless(
+        _r_sctenifold_available(),
+        "R scTenifoldKnk not installed",
+    )
+    def test_original_r_sctenifoldknk_returns_diff_regulation(self):
+        rng = np.random.default_rng(7)
+        counts = pd.DataFrame(
+            rng.poisson(5, size=(20, 50)),
+            index=[f"G{index}" for index in range(1, 21)],
+            columns=[f"C{index}" for index in range(1, 51)],
+        )
+        with tempfile.TemporaryDirectory() as tmp:
+            diff, metadata = _run_r_scTenifoldKnk(
+                counts,
+                "G1",
+                {
+                    "seed": 7,
+                    "scTenifold_n_networks": 2,
+                    "scTenifold_n_cells": 50,
+                    "scTenifold_n_comp": 2,
+                    "scTenifold_q": 0.9,
+                    "scTenifold_K": 2,
+                    "scTenifold_ma_dim": 2,
+                    "scTenifold_jobs": 1,
+                    "scTenifold_timeout_seconds": 300,
+                    "_provenance_output_dir": tmp,
+                },
+                LOG,
+            )
+            self.assertIn("gene", diff.columns)
+            self.assertIn("p.adjust", diff.columns)
+            self.assertEqual(metadata["engine"], "scTenifoldKnk (R package)")
 
     @unittest.skipUnless(
         _scTenifold_available(),

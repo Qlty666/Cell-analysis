@@ -1,21 +1,21 @@
 {
   "verified_at": "2026-09-23",
   "baseline_commit": "e6c0370b3b7210ac557ae9c5432e72af74f14b35",
-  "analysis_code_fingerprint": "10dcfb340e7938629ee8b0a8d6612bcc3f215ad751d2458126d721b371bbdd7c",
+  "analysis_code_fingerprint": "b10dde7d596b3fc0269c0d30f58c6766f26d501f184b0af74a5216f8228b28d9",
   "status": "passed",
   "scope": "Frozen script implementation checks only; not a scientific completion certificate.",
   "checks": [
     {
       "name": "targeted_experiment_plan_tests",
       "status": "passed",
-      "command": "python -m pytest tests/test_experiment_plan_one.py -q",
-      "evidence": "37 passed"
+      "command": "python -m pytest tests/test_experiment_plan_one.py tests/test_insilico_knockout.py -q",
+      "evidence": "46 passed, 2 deselected; includes real R MCL, R CellChat and R scTenifoldKnk smoke tests"
     },
     {
       "name": "cross_module_regression_tests",
       "status": "passed",
       "command": "python -m pytest -q --ignore=tests/test_portable_package.py",
-      "evidence": "510 passed and 75 subtests passed"
+      "evidence": "514 passed, 1 skipped and 75 subtests passed"
     },
     {
       "name": "real_data_smoke",

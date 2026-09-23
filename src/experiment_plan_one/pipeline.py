@@ -417,7 +417,8 @@ def default_config() -> dict[str, Any]:
             "required_score": 700,
             "top_n": 20,
             "add_nodes": 50,
-            "module_method": "louvain",
+            "module_method": "mcl",
+            "mcl_inflation": 2.0,
         },
         "ml": {"cv_folds": 5, "cv_repeats": 5, "seed": 42},
         "coexpression": {
@@ -444,6 +445,7 @@ def default_config() -> dict[str, Any]:
         "single_cell": {
             "mouse": {
                 "max_cells": 5000,
+                "cellchat_backend": "r_cellchat",
                 "cellchat_permutations": 100,
                 "cellchat_seed": 123,
                 "inference_unit": "library_or_verified_animal",
@@ -454,9 +456,17 @@ def default_config() -> dict[str, Any]:
                 "inference_unit": "donor",
             },
             "insilico": {
-                "engine": "local_grn",
+                "engine": "sctenifoldknk_r",
                 "scientific_role": "predicted_perturbation_response",
                 "perturbation_scope": "pre_specified_primary_target",
+                "scTenifold_n_networks": 5,
+                "scTenifold_n_cells": 500,
+                "scTenifold_n_comp": 3,
+                "scTenifold_q": 0.95,
+                "scTenifold_K": 3,
+                "scTenifold_ma_dim": 2,
+                "scTenifold_jobs": 1,
+                "scTenifold_timeout_seconds": 86400,
             },
         },
         "docking": {
@@ -1414,7 +1424,10 @@ class ExperimentPlanOne:
             add_nodes=int(self.context.config["ppi"].get("add_nodes", 50)),
             force=self.context.force,
             module_method=str(
-                self.context.config["ppi"].get("module_method", "louvain")
+                self.context.config["ppi"].get("module_method", "mcl")
+            ),
+            mcl_inflation=float(
+                self.context.config["ppi"].get("mcl_inflation", 2.0)
             ),
         )
         enrichment = run_go_kegg(
@@ -1939,6 +1952,12 @@ class ExperimentPlanOne:
             soft,
             core_genes,
             out_dir,
+            cellchat_backend=str(
+                self.context.config["single_cell"]["mouse"].get(
+                    "cellchat_backend",
+                    "r_cellchat",
+                )
+            ),
             cellchat_permutations=int(
                 self.context.config["single_cell"]["mouse"].get(
                     "cellchat_permutations",
@@ -2191,8 +2210,8 @@ class ExperimentPlanOne:
                 "notes": [
                     "GSE164441 is tumor versus adjacent non-tumor, not a healthy-versus-NAFLD cohort.",
                     "GSE135251 is a same-endpoint candidate but prior analysis exposure is recorded; it is not described as fully unseen.",
-                    "Communication analysis uses explicit ligand-receptor scoring and tests labels across independent biological units only when replication permits.",
-                    "Predicted perturbation results use a local sparse GRN when scTenifoldKnk is unavailable and are not wet-lab knockouts.",
+                    "Communication analysis uses R CellChat when configured; cell-level probabilities are never treated as independent biological replication.",
+                    "Predicted perturbation results use R scTenifoldKnk in the experiment-plan configuration and remain network predictions, not wet-lab knockouts.",
                     "100 ns MD production is prepared but started only when md.run=true.",
                     "Publication-grade status remains false until a full rerun resolves all panels and causal claims have wet-lab evidence.",
                 ],
@@ -2406,6 +2425,7 @@ class ExperimentPlanOne:
                     "enrichment_timeout": 900,
                     "figures": True,
                     "_input_signature": input_signature,
+                    "_provenance_output_dir": str(knockout_dir),
                 },
             }
             config_path = knockout_dir / "insilico_config.json"
@@ -2420,7 +2440,15 @@ class ExperimentPlanOne:
             return {"status": "completed", "gene": gene, "result": _serializable(result)}
         except Exception as exc:  # noqa: BLE001
             LOG.warning("virtual knockout failed: %s", exc)
-            return {"status": "failed", "reason": str(exc)}
+            reason = str(exc)
+            return {
+                "status": (
+                    "blocked"
+                    if "blocked" in reason.lower()
+                    else "failed"
+                ),
+                "reason": reason,
+            }
 
     def _inventory(self) -> pd.DataFrame:
         rows: list[dict[str, Any]] = []
@@ -2921,9 +2949,10 @@ tables are accepted when a service is unavailable. A WGCNA-style local
 co-expression screen is supplementary to the five-plan figures and is not
 presented as the original R WGCNA implementation.
 GeneCards, OMIM and TTD bulk exports require licensed access unless local
-files are supplied. The CellChat panel uses an explicit ligand-receptor table
-and is labelled as a screening approximation. The 100 ns MD production run is
-prepared but not started unless <code>md.run=true</code>.
+files are supplied. The CellChat panel runs the original R implementation when
+the configured backend is <code>r_cellchat</code>; cell-level probabilities
+remain descriptive without biological-unit replication. The 100 ns MD
+production run is prepared but not started unless <code>md.run=true</code>.
 </div>
 <h2>Stages</h2>
 <table><thead><tr><th>Stage</th><th>Status</th><th>Elapsed seconds</th></tr></thead>
@@ -2964,8 +2993,9 @@ def _render_markdown_report(
         "WGCNA-style approximation, not the original R WGCNA implementation.",
         "- GeneCards, OMIM and TTD require licensed/credentialed bulk access "
         "unless local source tables are supplied.",
-        "- The communication panel uses explicit ligand-receptor scoring and "
-        "is not represented as a full CellChat run.",
+        "- The communication panel runs the original R CellChat implementation "
+        "when the configured backend is `r_cellchat`; cell-level probabilities "
+        "are descriptive unless biological-unit replication is sufficient.",
         "- GROMACS inputs are prepared for 100 ns; production is not started "
         "unless `md.run` is true.",
         "",
@@ -3182,9 +3212,9 @@ def _render_results_summary(
         "validation cohort.",
         "- GeneCards, OMIM and TTD are not available without licensed or "
         "credentialed bulk access; local files can be supplied in the config.",
-          "- The communication panel uses ligand-receptor scoring with "
-          "biological-unit condition-label permutations and FDR when "
-          "replication permits; it is not the R CellChat implementation.",
+          "- The communication panel uses R CellChat and retains cell-level "
+          "probabilities as descriptive evidence; group-level significance "
+          "still requires independent biological units.",
         "- The Figure 5d-h panels are generated from GROMACS/MM-PBSA outputs "
         "only when the 100 ns production run is actually executed; otherwise "
         "they are explicitly marked not run.",

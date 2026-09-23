@@ -51,10 +51,10 @@ GROMACS 输入准备。对 `y1` 现有结果的审计显示：
   结果作为独立来源加入 Panel 1d Venn。
 - 疾病阶段可补充 GWAS Catalog 和 ClinVar 开放证据，并在授权导出缺失时形成
   可审计的多来源交集，而不是伪造 GeneCards/OMIM/TTD。
-- CellChat-like 分析改为细胞类型内条件标签置换、p 值和 BH-FDR，不再只报告
-  简单的 ligand/receptor 最小值。
-- 对接结果新增氢键、疏水、盐桥、芳香接触和 vdW 分类，并改进 3D 结合口袋
-  与 ligand 呈现。
+- Figure 4f 默认恢复 R CellChat，将细胞级概率与独立生物单位统计分开；旧显式
+  ligand/receptor 评分仅保留为显式后备方法，不再冒充 CellChat。
+- 对接结果优先调用 PLIP 3.0.1 生成验证后的相互作用表；缺少 PLIP 结果时才
+  回到距离/几何候选层级，并保留证据边界。
 - 新增 `md_figures.py`，从真实 GROMACS XVG 和 MM-PBSA 输出生成 Figure
   5d-h；没有轨迹时明确生成 not-run 面板，不制造数值。
 - Figure 4g 的 Top10 变化图改为从虚拟敲除源数据按 600 dpi 重绘。
@@ -80,27 +80,51 @@ GROMACS 输入准备。对 `y1` 现有结果的审计显示：
   分类性能；真正可评价的补充 NAFLD 终点目前只有 GSE135251。如果最终
   必须达到 AUC >=0.80 且 H-L p>0.05，需要扩大训练样本、增加独立 NAFLD
   队列、改进终点定义，或在方案中预先规定替代性能标准。
-- 100 ns GROMACS 和 gmx_MMPBSA 需要本机算力与外部工具；默认只准备输入。
-- CellChat、Discovery Studio 和湿实验不能由 Python 脚本完全替代，只能提供
-  经过审计的近似分析或可导入的外部工具交接文件。
+- 100 ns GROMACS 和 gmx_MMPBSA 需要可用算力、兼容版本和真实轨迹；当前工具
+  已发现，但只应生成准备状态和 `not_run` 面板，不能由代码补造。
+- PLIP 可以验证计算构象中的相互作用，但不能替代湿实验直接结合证据；
+  Discovery Studio 只属于可选复核工具。
 
 ## 当前机器环境差异
 
-本机自动检查到的版本与方案文字存在差异，必须在论文方法中记录或更换版本：
+本轮重新核查后的状态如下；工具可用不等于真实结果已经生成：
 
-- AutoDock Vina：本机为 `1.2.7`，方案写的是 `1.2.3`。
-- GROMACS：本机为 `2020.6-MODIFIED`，方案写的是 `GROMACS 2022`。
-- `gmx_MMPBSA`：当前未安装，Figure 5h 无法完成真实自由能分解。
-- R `CellChat`：当前未安装，Figure 4f 使用本仓库的置换近似；如要求原版
-  CellChat，需安装 R 包并保留完整参数。
+- AutoDock Vina：本机为 `1.2.7`，方案写的是 `1.2.3`。版本差异须在 Methods
+  中如实记录，不能把 1.2.7 写成 1.2.3。
+- GROMACS：环境审计发现 `E:\BaiduNetdiskDownload\gmx2020.6_GPU\bin\gmx.EXE`
+  为 `2020.6-MODIFIED`，方案文字写的是 2022；版本差异须记录。由于尚未执行
+  Figure 5d–5g 仍为 `not_run`，不能由占位图或旧结果替代。
+- `gmx_MMPBSA`：可执行文件已安装在
+  `D:\AAA Liver cancer\envs\experiment_plan_one\Scripts`，版本为 1.7.0；缺少
+  真实 GROMACS 轨迹和拓扑，Figure 5h 仍不能标记完成。
+- R `MCL`：已安装 `MCL 1.0`，Figure 2b 默认恢复原方案 MCL，并记录
+  `inflation`。
+- R `CellChat`：已安装 `CellChat 1.6.1`，Figure 4f 默认调用原方案 R 实现。
+  当前数据只有 1 个 NCD 文库和 2 个 HFD 文库，细胞级概率不能当成独立
+  生物学重复的显著组间结果。
+- R `scTenifoldKnk`：已安装 `scTenifoldKnk 1.1` 和 `scTenifoldNet 1.4`，
+  Figure 4g/4h 默认调用 R 原版实现；工具缺失或运行失败时会标记
+  `blocked/failed`，不再静默回退局部 GRN。
+- PLIP：已安装 `PLIP 3.0.1`，Figure 5b 在存在真实 docking pose 时运行 PLIP
+  并保存机器可读结果；当前尚未基于冻结版本完成全流程对接重跑。
 - PoseBusters：当前 Python 环境未安装，结构合理性独立复核需要使用其他环境。
 
 ## 结论
 
-调整后的脚本在代码实现层面达到 96.26%，并在授权数据、NAFLD 外部队列和
-GROMACS/gmx_MMPBSA 前提满足时达到 98.33% 的预计 Panel 覆盖。旧 `y1` 的
-当前结果覆盖为 75.61%，不能代表新代码重新执行后的状态。若要求“当前已有
-输出立即达到 90%”，必须重新运行 targets/disease、bulk/coexpression、ML、
-single-cell、docking、MD、classify 和 figure audit；其中 100 ns MD 和
-gmx_MMPBSA 是不可省略的前提。性能目标现在单独报告“可评价/未评价”，避免把
-纤维化分期或 HCC 终点错误地当成 NAFLD 分类达标或未达标。
+当前结论不再使用 96.26% 或 98.33% 作为投稿成熟度：这些数值只反映旧版本
+代码入口和文件覆盖，不能证明原方案方法已经运行、统计单位正确或结论可复现。
+本轮已完成的关键修复是恢复原方案方法、删除静默回退、强化状态和溯源，并补充
+真实小规模工具验证；尚未完成一次冻结版本的真实全流程重跑。
+
+因此当前应明确分为：
+
+1. **代码和方法对齐已改善**：MCL、R CellChat、R scTenifoldKnk 和 PLIP 已接入，
+   环境审计能够识别缺失工具。
+2. **真实结果仍未全部生成**：旧 `y1` 结果属于历史运行，不能与新代码混合；
+   必须使用新 `run_id` 重跑 00–10 阶段。
+3. **科学前提仍然缺失**：GeneCards/OMIM/TTD 授权导出、未参与调参的同终点
+   外部队列、GSE270583 独立动物重复、100 ns GROMACS 轨迹和湿实验因果验证
+   不能由脚本补造。
+
+在上述缺口关闭前，实验方案一只能声明为可复现计算流程持续修复中；不能声明
+42 个 Panel 已完成或达到投稿级。

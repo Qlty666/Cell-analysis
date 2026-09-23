@@ -1,6 +1,6 @@
 change_id,panel_scope,original_method,implemented_method,reason,status,equivalent,requires_protocol_revision,reported_name,responsibility_role,evidence
-MC-001,2b,MCL,Louvain community detection,当前仓库未实现并验证MCL,recorded_substitution,false,true,Louvain,分析开发人员,ppi_summary.json
-MC-002,4f,CellChat,Explicit ligand-receptor scoring with biological-unit permutation,当前环境未安装R CellChat,recorded_substitution,false,true,Explicit ligand-receptor scoring,分析开发人员,cellchat_permutation_summary.json
-MC-003,4g and 4h,scTenifoldKnk,Local sparse GRN predicted perturbation,当前环境未安装scTenifoldpy,recorded_substitution,false,true,Local sparse GRN predicted perturbation,分析开发人员,insilico_summary.json
+MC-001,2b,MCL,R MCL 1.0,原方案方法已恢复且调用原始R实现,retired_original_restored,false,false,MCL,分析开发人员,mcl_communities.R;ppi_summary.json
+MC-002,4f,CellChat,R CellChat 1.6.1,原方案方法已恢复且使用原始R实现,retired_original_restored,false,false,CellChat,分析开发人员,cellchat_analysis.R;cellchat_r_summary.json
+MC-003,4g and 4h,scTenifoldKnk,R scTenifoldKnk 1.1,原方案方法已恢复且使用原始R实现,retired_original_restored,false,false,scTenifoldKnk,分析开发人员,sctenifoldknk.R;sctenifoldknk_summary.json
 MC-004,supplementary coexpression,WGCNA equivalent,Local signed-correlation coexpression screen,未证明完整WGCNA拓扑重叠和动态树切割,recorded_substitution,false,true,Local coexpression screen,分析开发人员,coexpression_summary.json
-MC-005,5b,PLIP or validated interaction geometry,Distance and geometry candidate classification,PLIP未安装且经验证工具未运行,blocked,false,true,Geometric interaction candidates,结构模拟人员,fig5b_status.json
+MC-005,5b,PLIP or validated interaction geometry,PLIP 3.0.1 validated interaction table,原方案验证工具已接入；真实pose缺失时状态保持not_run,retired_original_restored,false,false,PLIP,结构模拟人员,plip_interactions.csv;fig5b_status.json

@@ -941,7 +941,13 @@ def _network_hub_scores(
     top = mat.loc[variances.nlargest(min(max_genes, len(variances))).index]
     corr = top.T.corr()
     corr = corr.replace([np.inf, -np.inf], 0.0).fillna(0.0)
-    np.fill_diagonal(corr.values, 0.0)
+    corr_values = corr.to_numpy(copy=True)
+    np.fill_diagonal(corr_values, 0.0)
+    corr = pd.DataFrame(
+        corr_values,
+        index=corr.index,
+        columns=corr.columns,
+    )
 
     cutoff = float(ko.get("corr_cutoff", 0.7))
     degree = (corr.abs() >= cutoff).sum(axis=1)

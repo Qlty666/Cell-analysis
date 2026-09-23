@@ -18,5 +18,6 @@ scanpy==1.11.5
 psutil==7.2.2
 umap-learn==0.5.12
 scTenifoldpy==0.4.0
+plip==3.0.1
 # drugreflector is optional; it needs model checkpoints from Zenodo
 # pip install drugreflector

@@ -6,6 +6,7 @@ import importlib.util
 import re
 import shutil
 import subprocess
+import sys
 from dataclasses import dataclass
 from pathlib import Path
 from typing import Any
@@ -36,7 +37,7 @@ PANEL_REQUIREMENTS: tuple[PanelRequirement, ...] = (
     PanelRequirement("Figure1_化合物表征_靶点预测与通路富集", "g", "KEGG Top10 富集", 3, 1.0),
     PanelRequirement("Figure1_化合物表征_靶点预测与通路富集", "h", "GO BP/CC/MF 富集", 3, 1.0),
     PanelRequirement("Figure2_PPI网络与枢纽基因初步筛选", "a", "STRING PPI 网络", 3, 1.0),
-    PanelRequirement("Figure2_PPI网络与枢纽基因初步筛选", "b", "模块网络", 2, 0.95, "algorithm_equivalent", "方案修订为可复现 Louvain 社区检测，并在图中明确方法名称；不再冒充 MCL。"),
+    PanelRequirement("Figure2_PPI网络与枢纽基因初步筛选", "b", "模块网络", 2, 0.95, "algorithm_equivalent", "按原方案运行 R MCL 并记录 inflation；若明确改用 Louvain，须单独登记方法替代。"),
     PanelRequirement("Figure2_PPI网络与枢纽基因初步筛选", "c", "Degree Top20", 2, 1.0),
     PanelRequirement("Figure2_PPI网络与枢纽基因初步筛选", "d", "Betweenness 排名", 2, 1.0),
     PanelRequirement("Figure2_PPI网络与枢纽基因初步筛选", "e", "MCC ∩ Degree", 3, 1.0),
@@ -56,13 +57,13 @@ PANEL_REQUIREMENTS: tuple[PanelRequirement, ...] = (
     PanelRequirement("Figure4_单细胞图谱_细胞通讯与虚拟扰动", "c", "核心基因各亚群表达", 2, 1.0),
     PanelRequirement("Figure4_单细胞图谱_细胞通讯与虚拟扰动", "d", "核心基因 UMAP 特征图", 2, 1.0),
     PanelRequirement("Figure4_单细胞图谱_细胞通讯与虚拟扰动", "e", "细胞组成图", 2, 1.0),
-    PanelRequirement("Figure4_单细胞图谱_细胞通讯与虚拟扰动", "f", "细胞通讯网络", 4, 0.90, "method_equivalent", "实际执行显式配体-受体评分；只有达到独立生物重复门槛时才输出置换/FDR，否则仅描述。"),
-    PanelRequirement("Figure4_单细胞图谱_细胞通讯与虚拟扰动", "g", "预测扰动响应", 3, 0.95, "external_tool", "scTenifoldKnk 可用时执行；否则明确报告局部网络扰动，不称真实敲除或CellOracle实现。"),
+    PanelRequirement("Figure4_单细胞图谱_细胞通讯与虚拟扰动", "f", "细胞通讯网络", 4, 0.90, "method_equivalent", "按原方案运行 R CellChat；细胞级概率只作描述，组间统计仍需独立生物单位。"),
+    PanelRequirement("Figure4_单细胞图谱_细胞通讯与虚拟扰动", "g", "预测扰动响应", 3, 0.95, "external_tool", "按原方案运行 R scTenifoldKnk；工具缺失时标记 blocked，不静默替换为局部GRN。"),
     PanelRequirement("Figure4_单细胞图谱_细胞通讯与虚拟扰动", "h", "虚拟敲除后富集", 2, 0.95),
     PanelRequirement("Figure4_单细胞图谱_细胞通讯与虚拟扰动", "i", "人类疾病谱 UMAP", 3, 1.0),
     PanelRequirement("Figure4_单细胞图谱_细胞通讯与虚拟扰动", "j", "人类核心基因细胞类型验证", 3, 1.0),
     PanelRequirement("Figure5_分子对接与分子动力学模拟", "a", "3D 对接构象", 3, 0.90, "visualization_equivalent", "使用可复现的 3D 构象与结合口袋可视化；Discovery Studio 为可选复核工具。"),
-    PanelRequirement("Figure5_分子对接与分子动力学模拟", "b", "2D 相互作用图", 3, 0.90, "visualization_equivalent", "距离/元素/几何规则输出候选接触，并明确证据级别；不得将距离接近直接写成已证实氢键或π堆积。"),
+    PanelRequirement("Figure5_分子对接与分子动力学模拟", "b", "2D 相互作用图", 3, 0.90, "visualization_equivalent", "优先运行 PLIP 并保存机器可读相互作用表；几何候选不得写成经验证的氢键、盐桥或π堆积。"),
     PanelRequirement("Figure5_分子对接与分子动力学模拟", "c", "对接能量热图", 2, 1.0),
     PanelRequirement("Figure5_分子对接与分子动力学模拟", "d", "蛋白 RMSD", 4, 1.0, "gromacs", "需要 md.run=true 或外部 GROMACS 完成 100 ns 轨迹。"),
     PanelRequirement("Figure5_分子对接与分子动力学模拟", "e", "配体 RMSD", 4, 1.0, "gromacs", "需要 md.run=true 或外部 GROMACS 完成 100 ns 轨迹。"),
@@ -192,16 +193,78 @@ def audit_plan_environment() -> dict[str, Any]:
         else ""
     )
     rscript = shutil.which("Rscript") or shutil.which("Rscript.exe")
-    cellchat_text = (
+    r_package_text = (
         _command_output(
             [
                 str(rscript),
+                "--vanilla",
                 "-e",
-                'cat(requireNamespace("CellChat", quietly=TRUE))',
+                (
+                    'cat(paste(c("MCL","CellChat","scTenifoldKnk"), '
+                    'vapply(c("MCL","CellChat","scTenifoldKnk"), '
+                    "requireNamespace, logical(1), quietly=TRUE), sep=':'))"
+                ),
             ],
             timeout=30,
         )
         if rscript
+        else ""
+    )
+    r_packages = {}
+    for token in re.findall(r"([A-Za-z0-9.]+):(TRUE|FALSE)", r_package_text):
+        r_packages[token[0]] = token[1] == "TRUE"
+    plip_candidates = [
+        shutil.which("plip"),
+        shutil.which("plip.exe"),
+        str(Path(sys.executable).parent / (
+            "plip.exe" if sys.platform.startswith("win") else "plip"
+        )),
+        str(Path(sys.executable).parent / "Scripts" / (
+            "plip.exe" if sys.platform.startswith("win") else "plip"
+        )),
+        str(Path(sys.executable).parent / "bin" / (
+            "plip.exe" if sys.platform.startswith("win") else "plip"
+        )),
+    ]
+    plip_path = next(
+        (
+            Path(candidate)
+            for candidate in plip_candidates
+            if candidate and Path(candidate).exists()
+        ),
+        None,
+    )
+    mmpbsa_candidates = [
+        shutil.which("gmx_MMPBSA"),
+        shutil.which("gmx_MMPBSA.py"),
+        shutil.which("gmx_MMPBSA.exe"),
+        str(Path(sys.executable).parent / (
+            "gmx_MMPBSA.exe"
+            if sys.platform.startswith("win")
+            else "gmx_MMPBSA"
+        )),
+        str(Path(sys.executable).parent / "Scripts" / (
+            "gmx_MMPBSA.exe"
+            if sys.platform.startswith("win")
+            else "gmx_MMPBSA"
+        )),
+        str(Path(sys.executable).parent / "bin" / (
+            "gmx_MMPBSA.exe"
+            if sys.platform.startswith("win")
+            else "gmx_MMPBSA"
+        )),
+    ]
+    gmx_mmpbsa = next(
+        (
+            candidate
+            for candidate in mmpbsa_candidates
+            if candidate and Path(candidate).exists()
+        ),
+        None,
+    )
+    gmx_mmpbsa_text = (
+        _command_output([str(gmx_mmpbsa), "--version"])
+        if gmx_mmpbsa
         else ""
     )
     return {
@@ -232,7 +295,24 @@ def audit_plan_environment() -> dict[str, Any]:
         },
         "cellchat": {
             "rscript": str(rscript) if rscript else "",
-            "available": "TRUE" in cellchat_text.upper(),
+            "available": bool(r_packages.get("CellChat")),
+        },
+        "mcl": {
+            "rscript": str(rscript) if rscript else "",
+            "available": bool(r_packages.get("MCL")),
+        },
+        "r_sctenifoldknk": {
+            "rscript": str(rscript) if rscript else "",
+            "available": bool(r_packages.get("scTenifoldKnk")),
+        },
+        "plip": {
+            "path": str(plip_path) if plip_path else "",
+            "available": bool(plip_path),
+        },
+        "r_packages": r_packages,
+        "python_scripts": {
+            "plip": str(plip_path) if plip_path else "",
+            "gmx_mmpbsa": str(gmx_mmpbsa) if gmx_mmpbsa else "",
         },
         "python_packages": {
             name: bool(importlib.util.find_spec(name))
@@ -240,6 +320,8 @@ def audit_plan_environment() -> dict[str, Any]:
                 "rdkit",
                 "scanpy",
                 "shap",
+                "plip",
+                "scTenifold",
                 "torch",
                 "posebusters",
                 "meeko",
