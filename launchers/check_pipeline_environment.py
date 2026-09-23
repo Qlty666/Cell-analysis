@@ -28,6 +28,8 @@ PYTHON_PACKAGES = [
     "scipy",
     "sklearn",
     "fpdf",
+    "plip",
+    "scTenifold",
 ]
 
 R_PACKAGES = [
@@ -48,6 +50,9 @@ R_PACKAGES = [
     "org.Mm.eg.db",
     "enrichplot",
     "DESeq2",
+    "MCL",
+    "CellChat",
+    "scTenifoldKnk",
 ]
 
 

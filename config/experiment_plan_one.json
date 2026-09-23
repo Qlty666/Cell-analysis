@@ -104,7 +104,8 @@
   "ppi": {
     "required_score": 700,
     "top_n": 20,
-    "module_method": "louvain"
+    "module_method": "mcl",
+    "mcl_inflation": 2.0
   },
   "ml": {
     "cv_folds": 5,
@@ -136,6 +137,7 @@
   "single_cell": {
     "mouse": {
       "max_cells": 5000,
+      "cellchat_backend": "r_cellchat",
       "cellchat_permutations": 100,
       "cellchat_seed": 123,
       "inference_unit": "library_or_verified_animal"
@@ -146,9 +148,17 @@
       "inference_unit": "donor"
     },
     "insilico": {
-      "engine": "local_grn",
+      "engine": "sctenifoldknk_r",
       "scientific_role": "predicted_perturbation_response",
-      "perturbation_scope": "pre_specified_primary_target"
+      "perturbation_scope": "pre_specified_primary_target",
+      "scTenifold_n_networks": 5,
+      "scTenifold_n_cells": 500,
+      "scTenifold_n_comp": 3,
+      "scTenifold_q": 0.95,
+      "scTenifold_K": 3,
+      "scTenifold_ma_dim": 2,
+      "scTenifold_jobs": 1,
+      "scTenifold_timeout_seconds": 86400
     }
   },
   "docking": {

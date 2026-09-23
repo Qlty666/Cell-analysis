@@ -14,6 +14,7 @@ from unittest import mock
 import numpy as np
 import pandas as pd
 import anndata as ad
+import networkx as nx
 
 from experiment_plan_one.common import bh_fdr, split_gene_symbol
 from experiment_plan_one.bulk import (
@@ -23,7 +24,14 @@ from experiment_plan_one.bulk import (
 from experiment_plan_one import cache as plan_cache
 from experiment_plan_one.classify import classify_experiment_plan_results
 from experiment_plan_one.coexpression import run_coexpression_analysis
-from experiment_plan_one.coverage import audit_plan_coverage
+from experiment_plan_one.coverage import (
+    audit_plan_coverage,
+    audit_plan_environment,
+)
+from experiment_plan_one.docking_md import (
+    _find_plip,
+    _write_ligand_pdb,
+)
 from experiment_plan_one.figure_audit import _dynamic_result_reviews, _summary
 from experiment_plan_one.md_figures import generate_plan_md_figures
 from experiment_plan_one.ml import (
@@ -43,11 +51,13 @@ from experiment_plan_one.planning import (
     write_analysis_plan,
     write_governance_artifacts,
 )
-from experiment_plan_one.ppi import run_ppi_analysis
+from experiment_plan_one.ppi import mcl_clusters, run_ppi_analysis
 from experiment_plan_one.single_cell import (
+    _cellchat_r_available,
     _cellchat_like_analysis,
     _donor_expression,
     _patient_id,
+    _run_r_cellchat_analysis,
     map_human_to_mouse_homologs,
 )
 from experiment_plan_one.targets import (
@@ -204,6 +214,136 @@ class TestExperimentPlanOne(unittest.TestCase):
         config = merge_config(default_config(), {"ml": {"seed": 7}})
         self.assertEqual(config["ml"]["seed"], 7)
         self.assertEqual(config["ml"]["cv_folds"], 5)
+        self.assertEqual(config["ppi"]["module_method"], "mcl")
+        self.assertEqual(
+            config["single_cell"]["mouse"]["cellchat_backend"],
+            "r_cellchat",
+        )
+        self.assertEqual(
+            config["single_cell"]["insilico"]["engine"],
+            "sctenifoldknk_r",
+        )
+
+    @unittest.skipUnless(
+        shutil.which("Rscript") or shutil.which("Rscript.exe"),
+        "Rscript is unavailable",
+    )
+    def test_original_mcl_is_called_for_module_detection(self):
+        graph = nx.Graph()
+        graph.add_weighted_edges_from(
+            [
+                ("A", "B", 1.0),
+                ("A", "C", 1.0),
+                ("B", "C", 1.0),
+                ("D", "E", 1.0),
+                ("D", "F", 1.0),
+                ("E", "F", 1.0),
+            ]
+        )
+        clusters = mcl_clusters(graph, inflation=2.0)
+        self.assertEqual(
+            {frozenset(cluster) for cluster in clusters},
+            {frozenset({"A", "B", "C"}), frozenset({"D", "E", "F"})},
+        )
+
+    def test_environment_audit_records_original_method_tools(self):
+        environment = audit_plan_environment()
+        for key in (
+            "mcl",
+            "cellchat",
+            "r_sctenifoldknk",
+            "plip",
+            "gmx_mmpbsa",
+        ):
+            self.assertIn(key, environment)
+        self.assertIn("plip", environment["python_packages"])
+        self.assertIn("scTenifold", environment["python_packages"])
+
+    @unittest.skipUnless(_find_plip(), "PLIP is unavailable")
+    def test_plip_complex_writer_creates_machine_readable_pdb(self):
+        receptor = (
+            "ATOM      1  CA  ALA A   1      11.000  12.000  13.000"
+            "  1.00 20.00           C\n"
+        )
+        with tempfile.TemporaryDirectory(ignore_cleanup_errors=True) as tmp:
+            root = Path(tmp)
+            receptor_path = root / "receptor.pdb"
+            receptor_path.write_text(receptor, encoding="utf-8")
+            output = root / "complex.pdb"
+            _write_ligand_pdb(
+                receptor_path,
+                [
+                    {
+                        "coordinate": np.asarray([1.0, 2.0, 3.0]),
+                        "atom": "C1",
+                        "element": "C",
+                    }
+                ],
+                output,
+            )
+            text = output.read_text(encoding="utf-8")
+            self.assertIn("ATOM      1  CA  ALA A   1", text)
+            self.assertIn("HETATM    1 C1   LIG Z   1", text)
+            self.assertTrue(text.endswith("END\n"))
+
+    @unittest.skipUnless(
+        _cellchat_r_available(),
+        "R CellChat is unavailable",
+    )
+    def test_r_cellchat_runs_on_raw_counts_without_group_pvalue_claims(self):
+        genes = [
+            "Tgfb1",
+            "Tgfbr1",
+            "Tgfbr2",
+            "Acvr1",
+            "Alb",
+            "Cd68",
+            "Col1a1",
+            "Pecam1",
+            "Krt19",
+        ]
+        cell_types = np.asarray(
+            ["Hepatocytes", "Stellate"] * 40,
+            dtype=object,
+        )
+        conditions = np.asarray(["NCD"] * 40 + ["HFD"] * 40, dtype=object)
+        matrix = np.zeros((80, len(genes)), dtype=np.float32)
+        matrix[:, 0] = 4
+        matrix[:, 1] = 3
+        matrix[np.arange(80) % 2 == 1, 0] = 1
+        matrix[np.arange(80) % 2 == 0, 1] = 1
+        matrix[:, 2:] = 1
+        data = ad.AnnData(
+            X=matrix,
+            obs=pd.DataFrame(
+                {
+                    "condition": conditions,
+                    "cell_type": cell_types,
+                    "donor_id": [
+                        f"D{index % 4 + 1}" for index in range(80)
+                    ],
+                },
+                index=[f"C{index}" for index in range(80)],
+            ),
+            var=pd.DataFrame(index=genes),
+        )
+        data.layers["counts"] = matrix.copy()
+        with tempfile.TemporaryDirectory(ignore_cleanup_errors=True) as tmp:
+            result = _run_r_cellchat_analysis(
+                data,
+                Path(tmp),
+                species="mm",
+                group_column="condition",
+                cell_type_column="cell_type",
+                min_cells=3,
+            )
+            status = result["status"]
+            self.assertEqual(status["method"], "R CellChat")
+            self.assertIn(
+                status["status"],
+                {"descriptive_only", "valid_negative", "completed"},
+            )
+            self.assertFalse(status.get("group_statistics", True))
 
     def test_analysis_plan_freezes_endpoint_roles_and_manifest(self):
         with tempfile.TemporaryDirectory(ignore_cleanup_errors=True) as tmp:
@@ -230,7 +370,7 @@ class TestExperimentPlanOne(unittest.TestCase):
                 "traceability",
             },
         )
-        self.assertEqual(len(governance["issue_register"]), 26)
+        self.assertEqual(len(governance["issue_register"]), 27)
         self.assertGreaterEqual(
             governance["issue_register"]["status"].isin(
                 {"blocked", "not_run"}

@@ -140,7 +140,7 @@ PANEL_ALIASES: tuple[PanelAlias, ...] = (
     PanelAlias(
         "Figure2_PPI网络与枢纽基因初步筛选",
         "b",
-        "Louvain 模块网络",
+        "MCL 模块网络",
         "03_intersection_ppi/fig2b_cytoscape_module_network.png",
         "Fig2b_PPI模块网络.png",
     ),
@@ -287,9 +287,9 @@ PANEL_ALIASES: tuple[PanelAlias, ...] = (
     PanelAlias(
         "Figure4_单细胞图谱_细胞通讯与虚拟扰动",
         "f",
-        "显式配体-受体评分网络（非CellChat实现）",
+        "R CellChat 细胞通讯网络",
         "06_single_cell_mouse/fig4f_cellchat_network.png",
-        "Fig4f_配体受体评分网络.png",
+        "Fig4f_CellChat细胞通讯网络.png",
     ),
     PanelAlias(
         "Figure4_单细胞图谱_细胞通讯与虚拟扰动",
@@ -653,8 +653,8 @@ def _write_readme(target: Path, records: Iterable[dict[str, Any]]) -> None:
         "",
         "- Figure 1d、1e 中 GeneCards、OMIM、TTD 无本地授权数据时，"
         "使用来源状态图而不是伪造 Venn 交集。",
-        "- Figure 4f 是显式配体-受体评分，不等于完整 R CellChat 分析；"
-        "独立生物重复不足时只作描述。",
+        "- Figure 4f 使用原方案 R CellChat；细胞级概率在"
+        "独立生物重复不足时只作描述，不作组间显著性结论。",
         "- Figure 5d-5h 标记为 `prepared_not_run`，表示 100 ns GROMACS "
         "生产轨迹未实际运行，输入文件和未运行说明均已归档。",
         "",

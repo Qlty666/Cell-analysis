@@ -41,7 +41,7 @@
 python -m pip install -r requirements.txt
 ```
 
-基础检查覆盖：`numpy`、`pandas`、`matplotlib`、`pyyaml`、`openpyxl`、`h5py`、`scipy`、`scikit-learn`、`fpdf2`、`pillow`、`beautifulsoup4`。`requirements.txt` 还包含 `anndata`、`scanpy`、`umap-learn`、`scTenifoldpy==0.4.0`，供单细胞处理、虚拟敲除 / 全自动流水线等模块使用。
+基础检查覆盖：`numpy`、`pandas`、`matplotlib`、`pyyaml`、`openpyxl`、`h5py`、`scipy`、`scikit-learn`、`fpdf2`、`pillow`、`beautifulsoup4`。`requirements.txt` 还包含 `anndata`、`scanpy`、`umap-learn`、`scTenifoldpy==0.4.0` 和 `plip==3.0.1`，供单细胞处理、虚拟敲除、相互作用复核 / 全自动流水线等模块使用。
 
 **R 包：**
 
@@ -51,10 +51,10 @@ launchers\install_pipeline_dependencies.bat
 
 实际安装清单以 `src/analysis/install_deps.R` 为准，主要包括：
 
-- CRAN：`Seurat`、`dplyr`、`ggplot2`、`patchwork`、`Matrix`、`data.table`、`jsonlite`、`ggrepel`、`pheatmap`、`RColorBrewer`、`harmony`、`R.utils`、`WGCNA`、`survival`、`survminer`、`timeROC`、`glmnet`
+- CRAN：`Seurat`、`dplyr`、`ggplot2`、`patchwork`、`Matrix`、`data.table`、`jsonlite`、`ggrepel`、`pheatmap`、`RColorBrewer`、`harmony`、`R.utils`、`WGCNA`、`survival`、`survminer`、`timeROC`、`glmnet`、`MCL`、`CellChat`、`scTenifoldNet`、`scTenifoldKnk`
 - Bioconductor：`BiocManager`、`scDblFinder`、`SingleCellExperiment`、`clusterProfiler`、`org.Hs.eg.db`、`org.Mm.eg.db`、`enrichplot`、`BiocParallel`、`SingleR`、`celldex`、`DESeq2`、`hdf5r`、`limma`、`edgeR`、`sva`、`GSVA`、`celda`
 
-可选功能：CellChat（`LIVER_RUN_CELLCHAT=yes`）、slingshot 拟时序（`LIVER_RUN_TRAJECTORY=yes`）、decontX（`LIVER_DECONTX=yes`）和指定细胞类型再聚类（`LIVER_SUBCLUSTER_CELLTYPES=...`）需要额外单独安装对应 R 包。
+通用表达分析中的 CellChat 仍可通过 `LIVER_RUN_CELLCHAT=yes` 控制；实验方案一默认直接调用 R CellChat、R MCL 和 R scTenifoldKnk。slingshot 拟时序（`LIVER_RUN_TRAJECTORY=yes`）、decontX（`LIVER_DECONTX=yes`）和指定细胞类型再聚类（`LIVER_SUBCLUSTER_CELLTYPES=...`）仍按需单独安装。
 
 多队列、WGCNA、基因级 ML、免疫浸润和生存分析入口：
 
@@ -149,7 +149,8 @@ python scripts\run_docking.py check-cadd
 
 **虚拟敲除子板块：**
 
-- `scTenifoldKnk` 引擎：需要 `requirements.txt` 中的 `scTenifoldpy>=0.3.0`。
+- `scTenifoldKnk_r` 引擎：实验方案一默认使用 R `scTenifoldKnk` 1.1；缺少该包时 Figure 4g/4h 标记 `blocked`，不会静默改用局部 GRN。
+- `triple` / Python 兼容路径：需要 `requirements.txt` 中的 `scTenifoldpy==0.4.0`，仅在明确选择时使用并登记为独立实现。
 - UMAP 命运偏转图：需要 `umap-learn`。
 - GO/KEGG 富集与细胞反馈：需要第 1 节 R 环境。
 
@@ -165,6 +166,7 @@ python scripts\run_docking.py check-cadd
 
 - Python 3.10+。
 - 与虚拟筛选核心相同的对接依赖：`requirements_dock.txt`、AutoDockTools、AutoDock Vina。
+- PLIP 3.0.1（`requirements.txt`）用于 Figure 5b 的相互作用复核；仅有几何距离时状态保持候选。
 - 不需要证据收集 Codex skills，也不需要 R。
 
 ```bat

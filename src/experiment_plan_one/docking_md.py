@@ -6,6 +6,8 @@ import json
 import math
 import re
 import shutil
+import subprocess
+import sys
 import urllib.parse
 import urllib.request
 from pathlib import Path
@@ -402,23 +404,24 @@ def run_docking_for_targets(
             output_dir / "fig5a_docking_pose_3d.png",
             str(best_target["gene"]),
         )
-        _write_interaction_figure(best_dir, output_dir / "fig5b_interaction_schematic.png", str(best_target["gene"]))
+        interaction_status = _write_interaction_figure(
+            best_dir,
+            output_dir / "fig5b_interaction_schematic.png",
+            str(best_target["gene"]),
+        )
         write_json(
             output_dir / "fig5b_status.json",
             {
-                "status": "geometric_candidates_only",
-                "method": (
-                    "distance plus donor-H-acceptor angle where explicit "
-                    "hydrogens are present"
-                ),
+                **interaction_status,
                 "limitations": (
-                    "Aromatic plane/pi-stacking, protonation and charge "
-                    "evidence were not validated with PLIP or an equivalent "
-                    "chemistry engine; candidate labels must not be reported "
-                    "as confirmed interactions."
-                ),
-                "machine_readable_table": str(
-                    output_dir / "fig5b_interaction_schematic.csv"
+                    "PLIP interactions describe the selected docking pose; "
+                    "they are not experimental binding evidence."
+                    if interaction_status.get("validated")
+                    else (
+                        "Aromatic plane, protonation and charge evidence were "
+                        "not validated with PLIP; candidate labels must not "
+                        "be reported as confirmed interactions."
+                    )
                 ),
             },
         )
@@ -601,11 +604,187 @@ def _plot_docking_heatmap(scores: pd.DataFrame, output: Path) -> None:
     save_figure(fig, output)
 
 
-def _write_interaction_figure(target_dir: Path, output: Path, gene: str) -> None:
+def _find_plip() -> str | None:
+    discovered = (
+        shutil.which("plip")
+        or shutil.which("plip.exe")
+    )
+    if discovered:
+        return discovered
+    executable = "plip.exe" if sys.platform.startswith("win") else "plip"
+    candidates = [
+        Path(sys.executable).parent / executable,
+        Path(sys.executable).parent / "Scripts" / executable,
+        Path(sys.executable).parent / "bin" / executable,
+    ]
+    local = next((path for path in candidates if path.exists()), None)
+    return str(local) if local else None
+
+
+def _write_ligand_pdb(
+    receptor: Path,
+    ligand_atoms: list[dict[str, Any]],
+    output: Path,
+) -> None:
+    lines: list[str] = []
+    with receptor.open("r", encoding="utf-8", errors="replace") as handle:
+        for line in handle:
+            if line.startswith("ATOM"):
+                lines.append(line.rstrip("\n"))
+    for serial, atom in enumerate(ligand_atoms, start=1):
+        coordinate = np.asarray(atom["coordinate"], dtype=float)
+        element = str(atom.get("element") or "C").upper()[:1]
+        atom_name = re.sub(r"[^A-Za-z0-9]", "", str(atom.get("atom") or element))
+        if not atom_name:
+            atom_name = f"{element}{serial}"
+        lines.append(
+            "HETATM"
+            f"{serial:5d} {atom_name[:4]:<4} LIG Z{1:4d}    "
+            f"{coordinate[0]:8.3f}{coordinate[1]:8.3f}{coordinate[2]:8.3f}"
+            f"  1.00  0.00          {element:>2}"
+        )
+    lines.append("END")
+    output.write_text("\n".join(lines) + "\n", encoding="utf-8")
+
+
+def _plip_interactions(
+    receptor: Path,
+    ligand_atoms: list[dict[str, Any]],
+    output_dir: Path,
+) -> tuple[pd.DataFrame, dict[str, Any]]:
+    executable = _find_plip()
+    if not executable:
+        return pd.DataFrame(), {
+            "status": "blocked",
+            "reason": "PLIP executable is not installed in this environment",
+        }
+    work_dir = ensure_dir(output_dir / "plip")
+    complex_path = work_dir / "complex.pdb"
+    _write_ligand_pdb(receptor, ligand_atoms, complex_path)
+    report_dir = ensure_dir(work_dir / "report")
+    process = subprocess.run(
+        [
+            executable,
+            "-f",
+            str(complex_path),
+            "-o",
+            str(report_dir),
+            "-x",
+            "-q",
+            "--nofix",
+            "--maxthreads",
+            "1",
+            "--name",
+            "plip_report",
+        ],
+        capture_output=True,
+        text=True,
+        encoding="utf-8",
+        errors="replace",
+        check=False,
+        timeout=600,
+    )
+    xml_path = report_dir / "plip_report.xml"
+    if process.returncode != 0 or not xml_path.exists():
+        detail = (process.stderr or process.stdout or "").strip()
+        return pd.DataFrame(), {
+            "status": "failed",
+            "reason": detail[-1200:] or "PLIP did not produce an XML report",
+            "complex": str(complex_path),
+        }
+    from plip.exchange.xml import PlipXML
+
+    report = PlipXML(str(xml_path))
+    type_map = {
+        "hydrogen_bond": (
+            "hbonds",
+            lambda item: getattr(item, "dist", np.nan),
+            lambda item: getattr(item, "don_angle", np.nan),
+        ),
+        "hydrophobic_contact": (
+            "hydrophobics",
+            lambda item: getattr(item, "dist", np.nan),
+            lambda item: np.nan,
+        ),
+        "water_bridge": (
+            "wbridges",
+            lambda item: getattr(item, "dist", np.nan),
+            lambda item: getattr(item, "don_angle", np.nan),
+        ),
+        "salt_bridge": (
+            "sbridges",
+            lambda item: getattr(item, "dist", np.nan),
+            lambda item: np.nan,
+        ),
+        "pi_stacking": (
+            "pi_stacks",
+            lambda item: getattr(item, "dist", np.nan),
+            lambda item: getattr(item, "angle", np.nan),
+        ),
+        "pi_cation": (
+            "pi_cations",
+            lambda item: getattr(item, "dist", np.nan),
+            lambda item: np.nan,
+        ),
+        "halogen_bond": (
+            "halogens",
+            lambda item: getattr(item, "dist", np.nan),
+            lambda item: getattr(item, "don_angle", np.nan),
+        ),
+        "metal_complex": (
+            "metal_complexes",
+            lambda item: getattr(item, "dist", np.nan),
+            lambda item: np.nan,
+        ),
+    }
+    records: list[dict[str, Any]] = []
+    sites = list(report.bsites.values())
+    for interaction_type, (attribute, distance, angle) in type_map.items():
+        items = [
+            item
+            for site in sites
+            for item in getattr(site, attribute, [])
+        ]
+        for item in items:
+            records.append(
+                {
+                    "interaction_type": interaction_type,
+                    "ligand_atom": str(
+                        getattr(item, "ligcarbonidx", "")
+                        or getattr(item, "donoridx", "")
+                        or getattr(item, "lig_idx_list", "")
+                    ),
+                    "residue": str(getattr(item, "restype", "")),
+                    "residue_number": int(getattr(item, "resnr", 0) or 0),
+                    "chain": str(getattr(item, "reschain", "")),
+                    "distance_angstrom": distance(item),
+                    "angle_degrees": angle(item),
+                    "evidence_class": "PLIP_3.0.1",
+                    "evidence_note": "validated by PLIP chemistry rules",
+                }
+            )
+    frame = pd.DataFrame(records)
+    return frame, {
+        "status": "completed" if not frame.empty else "valid_negative",
+        "method": "PLIP 3.0.1",
+        "complex": str(complex_path),
+        "xml_report": str(xml_path),
+        "n_interactions": int(len(frame)),
+    }
+
+
+def _write_interaction_figure(
+    target_dir: Path,
+    output: Path,
+    gene: str,
+) -> dict[str, Any]:
     receptor = target_dir / "data" / "receptors" / "receptor.pdb"
     pose_table = target_dir / "outputs" / "run_001" / "docked" / "results.csv"
     if not receptor.exists() or not pose_table.exists():
-        return
+        return {
+            "status": "not_run",
+            "reason": "receptor or docking result table is missing",
+        }
     results = pd.read_csv(pose_table)
     energy_column = next(
         (
@@ -622,9 +801,23 @@ def _write_interaction_figure(target_dir: Path, output: Path, gene: str) -> None
     if not pose_path.is_absolute():
         pose_path = target_dir / pose_path
     if not pose_path.exists():
-        return
+        return {
+            "status": "not_run",
+            "reason": "top docking pose file is missing",
+        }
     ligand_atoms = _parse_pdbqt_atoms(pose_path)
-    contacts = _typed_interactions(receptor, ligand_atoms)
+    contacts, plip_status = _plip_interactions(
+        receptor,
+        ligand_atoms,
+        target_dir / "outputs" / "interaction_validation",
+    )
+    validated = not contacts.empty
+    plip_ran = str(plip_status.get("status") or "") in {
+        "completed",
+        "valid_negative",
+    }
+    if not validated and not plip_ran:
+        contacts = _typed_interactions(receptor, ligand_atoms)
     contacts.to_csv(output.with_suffix(".csv"), index=False)
     fig, ax = plt.subplots(figsize=(7.2, 5.2))
     ax.axis("off")
@@ -650,7 +843,17 @@ def _write_interaction_figure(target_dir: Path, output: Path, gene: str) -> None
         transform=ax.transAxes,
     )
     if contacts.empty:
-        ax.text(0.5, 0.42, "No contact within 4.5 A", ha="center", transform=ax.transAxes)
+        ax.text(
+            0.5,
+            0.42,
+            (
+                "No PLIP-validated interaction"
+                if plip_ran
+                else "No contact within 4.5 A"
+            ),
+            ha="center",
+            transform=ax.transAxes,
+        )
     else:
         top = (
             contacts.sort_values("distance_angstrom")
@@ -665,6 +868,14 @@ def _write_interaction_figure(target_dir: Path, output: Path, gene: str) -> None
             .head(18)
         )
         type_colors = {
+            "hydrogen_bond": "#2f6bb3",
+            "hydrophobic_contact": "#d29b32",
+            "water_bridge": "#2b9eb3",
+            "salt_bridge": "#c0392b",
+            "pi_stacking": "#6c5fa7",
+            "pi_cation": "#8e6bb3",
+            "halogen_bond": "#7b6d5d",
+            "metal_complex": "#6d7f3c",
             "hydrogen_bond_geometric_candidate": "#2f6bb3",
             "polar_contact_candidate": "#6b8eb5",
             "hydrophobic_contact": "#d29b32",
@@ -719,9 +930,14 @@ def _write_interaction_figure(target_dir: Path, output: Path, gene: str) -> None
     ax.text(
         0.5,
         0.02,
-        "Interaction labels are distance/geometry candidates; PLIP or another "
-        "validated analyzer is required before claiming confirmed hydrogen "
-        "bonds, salt bridges or pi-stacking.",
+        (
+            "Interactions validated by PLIP 3.0.1."
+            if validated
+            else "PLIP 3.0.1 completed without a validated interaction."
+            if plip_ran
+            else "Interaction labels are distance/geometry candidates; PLIP "
+            "did not provide a validated interaction table."
+        ),
         ha="center",
         va="bottom",
         fontsize=7.8,
@@ -729,6 +945,12 @@ def _write_interaction_figure(target_dir: Path, output: Path, gene: str) -> None
         transform=ax.transAxes,
     )
     save_figure(fig, output)
+    return {
+        **plip_status,
+        "figure": str(output),
+        "machine_readable_table": str(output.with_suffix(".csv")),
+        "validated": validated,
+    }
 
 
 def _write_docking_pose_figure(target_dir: Path, output: Path, gene: str) -> None:

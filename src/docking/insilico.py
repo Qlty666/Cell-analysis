@@ -1,12 +1,11 @@
 #!/usr/bin/env python3
-"""Single-cell predicted perturbation analysis with optional scTenifoldKnk.
+"""Single-cell predicted perturbation analysis with scTenifoldKnk.
 
-The module can call the official scTenifoldpy implementation of
-scTenifoldKnk when the input is a raw count matrix. It also keeps the
-local sparse GRN propagation used for expression-shift and UMAP vector-field
-visualisation, plus optional DrugReflector compound ranking and GO/KEGG
-enrichment. The local path is not CellOracle and the perturbation is a network
-prediction, not a wet-lab knockout.
+The original R scTenifoldKnk implementation is used for the experiment-plan
+engine. The Python scTenifoldpy port and local sparse GRN are retained only as
+explicitly selected methods, never as silent fallbacks. The local path is not
+CellOracle and every perturbation result is a network prediction, not a
+wet-lab knockout.
 """
 
 from __future__ import annotations
@@ -15,6 +14,7 @@ import math
 import re
 import shutil
 import subprocess
+import tempfile
 import warnings
 from pathlib import Path
 
@@ -47,6 +47,9 @@ _CELL_ID_COLS = {
 }
 _CELL_TYPE_COLS = CELL_TYPE_COLS | {"louvain_annot"}
 _SC_TENIFOLD_ENGINES = frozenset({"scTenifold", "scTenifoldknk", "triple"})
+_R_SC_TENIFOLD_ENGINES = frozenset(
+    {"sctenifoldknk_r", "sctenifold_r", "r", "r_scTenifoldKnk"}
+)
 _LOCAL_GRN_ENGINES = frozenset({"local_grn", "local", "builtin"})
 _TARGET_EXCLUDE = re.compile(
     r"^(MT-|MTRNR|RPL|RPS|MRPL|MRPS|SNORD|SNORA|SCGB|IGH|IGK|IGL|TRA|TRB|TRG|"
@@ -151,38 +154,49 @@ def run_insilico_knockout(
     sc_diff: pd.DataFrame | None = None
     sc_meta: dict | None = None
     engine = _insilico_engine(isko)
-    use_sc = _use_scTenifold(matrix, isko, engine)
+    use_r_sc = engine in _R_SC_TENIFOLD_ENGINES or (
+        engine == "auto"
+        and _looks_like_raw_counts(matrix)
+        and _r_sctenifold_available()
+    )
+    use_sc = _use_scTenifold(matrix, isko, engine) if not use_r_sc else True
     force_raw = isko.get("raw_count_input")
     if use_sc and not _looks_like_raw_counts(matrix) and not force_raw:
-        if engine in _SC_TENIFOLD_ENGINES:
+        if engine in _SC_TENIFOLD_ENGINES or engine in _R_SC_TENIFOLD_ENGINES:
             raise DockingError(
                 "scTenifold engine requires a raw count matrix; pass raw "
                 "counts or set insilico_knockout.raw_count_input=true"
             )
         use_sc = False
-    if use_sc and _scTenifold_available():
+    if use_r_sc:
+        if not _r_sctenifold_available():
+            raise DockingError(
+                "R scTenifoldKnk is configured but unavailable; Figure 4g "
+                "is blocked and no substitute method was run"
+            )
         raw_counts = matrix.loc[selected].copy()
         raw_counts.index.name = None
         raw_counts.columns.name = None
-        try:
-            sc_diff, sc_meta = _run_scTenifoldKnk(
-                raw_counts,
-                gene,
-                isko,
-                log,
-            )
-        except Exception as exc:
-            log.warning(
-                "official scTenifoldKnk failed; using the local sparse GRN "
-                "perturbation path: %s",
-                exc,
-            )
-            sc_diff = None
-            sc_meta = None
+        sc_diff, sc_meta = _run_r_scTenifoldKnk(
+            raw_counts,
+            gene,
+            isko,
+            log,
+        )
+    elif use_sc and _scTenifold_available():
+        raw_counts = matrix.loc[selected].copy()
+        raw_counts.index.name = None
+        raw_counts.columns.name = None
+        sc_diff, sc_meta = _run_scTenifoldKnk(
+            raw_counts,
+            gene,
+            isko,
+            log,
+        )
     elif use_sc:
-        log.warning(
-            "scTenifoldpy is not installed; using the built-in local sparse "
-            "GRN perturbation path"
+        raise DockingError(
+            "scTenifoldpy is not installed; Figure 4g is blocked and no "
+            "substitute method was run"
         )
     if cell_types is not None:
         cell_types = cell_types.reindex(log_mat.columns)
@@ -322,11 +336,16 @@ def run_insilico_knockout(
             if path.exists():
                 data_files[f"{Path(name).stem}_csv"] = path
 
-    engine_label = (
-        "scTenifoldKnk + local network perturbation"
-        if sc_diff is not None
-        else "local sparse GRN propagation (not CellOracle/scTenifoldKnk)"
-    )
+    if sc_diff is not None:
+        engine_label = str(
+            (sc_meta or {}).get("engine")
+            or "scTenifoldKnk (unspecified implementation)"
+        )
+    else:
+        engine_label = (
+            "local sparse GRN propagation "
+            "(not CellOracle/scTenifoldKnk)"
+        )
     report_path = _write_html_report(
         out_dir,
         fig_dir,
@@ -405,6 +424,30 @@ def _scTenifold_available() -> bool:
         return True
     except Exception:
         return False
+
+
+def _rscript_path() -> str | None:
+    return shutil.which("Rscript") or shutil.which("Rscript.exe")
+
+
+def _r_sctenifold_available() -> bool:
+    executable = _rscript_path()
+    if not executable:
+        return False
+    process = subprocess.run(
+        [
+            executable,
+            "--vanilla",
+            "-e",
+            'cat(requireNamespace("scTenifoldKnk", quietly=TRUE))',
+        ],
+        capture_output=True,
+        text=True,
+        encoding="utf-8",
+        errors="replace",
+        check=False,
+    )
+    return process.returncode == 0 and "TRUE" in process.stdout.upper()
 
 
 def _insilico_engine(isko: dict) -> str:
@@ -537,6 +580,128 @@ def _run_scTenifoldKnk(
     return diff, meta
 
 
+def _run_r_scTenifoldKnk(
+    raw_counts: pd.DataFrame,
+    gene: str,
+    isko: dict,
+    log,
+) -> tuple[pd.DataFrame, dict]:
+    """Run the original R scTenifoldKnk implementation on raw counts."""
+    executable = _rscript_path()
+    script = APP_ROOT / "src" / "docking" / "R" / "sctenifoldknk.R"
+    if not executable or not script.exists():
+        raise DockingError(
+            "R scTenifoldKnk is configured but Rscript or the bundled R "
+            "script is unavailable; Figure 4g is blocked and no substitute "
+            "method was run"
+        )
+    if not _r_sctenifold_available():
+        raise DockingError(
+            "R package scTenifoldKnk is not installed; Figure 4g is blocked "
+            "and no substitute method was run"
+        )
+    if gene not in raw_counts.index:
+        raise DockingError(
+            f"scTenifoldKnk knockout gene {gene} is not in the count matrix"
+        )
+    seed = int(isko.get("seed", 123))
+    n_networks = int(isko.get("scTenifold_n_networks", 5))
+    n_cells = min(
+        int(isko.get("scTenifold_n_cells", 500)),
+        max(2, raw_counts.shape[1]),
+    )
+    output_dir = Path(
+        str(isko.get("_provenance_output_dir") or tempfile.gettempdir())
+    )
+    output_dir = output_dir / "sctenifoldknk_r"
+    output_dir.mkdir(parents=True, exist_ok=True)
+    log.info(
+        "running original R scTenifoldKnk on %s cells x %s genes "
+        "(networks=%s, cells/network=%s)",
+        raw_counts.shape[1],
+        raw_counts.shape[0],
+        n_networks,
+        n_cells,
+    )
+    with tempfile.TemporaryDirectory(prefix="plan-one-sctenifold-") as temp:
+        matrix_path = Path(temp) / "counts.csv"
+        raw_counts.to_csv(matrix_path, index=True)
+        process = subprocess.run(
+            [
+                executable,
+                "--vanilla",
+                str(script),
+                f"--matrix={matrix_path}",
+                f"--gene={gene}",
+                f"--output={output_dir}",
+                f"--n-networks={n_networks}",
+                f"--n-cells={n_cells}",
+                f"--n-comp={int(isko.get('scTenifold_n_comp', 3))}",
+                f"--q={float(isko.get('scTenifold_q', 0.95)):g}",
+                f"--k={int(isko.get('scTenifold_K', 3))}",
+                f"--ma-dim={int(isko.get('scTenifold_ma_dim', 2))}",
+                f"--min-lib-size={float(isko.get('scTenifold_min_lib_size', 0)):g}",
+                f"--min-percent={float(isko.get('scTenifold_min_percent', 0)):g}",
+                f"--min-exp-sum={float(isko.get('scTenifold_min_exp_sum', 0)):g}",
+                f"--max-mito-ratio={float(isko.get('scTenifold_max_mito_ratio', 1)):g}",
+                "--remove-outliers="
+                + (
+                    "true"
+                    if bool(
+                        isko.get(
+                            "scTenifold_remove_outlier_cells",
+                            False,
+                        )
+                    )
+                    else "false"
+                ),
+                f"--seed={seed}",
+                f"--n-cores={int(isko.get('scTenifold_jobs', 1))}",
+            ],
+            capture_output=True,
+            text=True,
+            encoding="utf-8",
+            errors="replace",
+            check=False,
+            timeout=int(isko.get("scTenifold_timeout_seconds", 86400)),
+        )
+        result_path = output_dir / "sctenifoldknk_results.csv"
+        summary_path = output_dir / "sctenifoldknk_summary.json"
+        if process.returncode != 0 or not result_path.exists():
+            detail = (process.stderr or process.stdout or "").strip()
+            raise DockingError(
+                "R scTenifoldKnk failed; Figure 4g remains blocked and no "
+                f"substitute method was run. {detail[-1200:]}"
+            )
+        diff = pd.read_csv(result_path)
+        meta = {}
+        if summary_path.exists():
+            try:
+                import json
+
+                meta = json.loads(summary_path.read_text(encoding="utf-8"))
+            except Exception:  # noqa: BLE001
+                meta = {}
+    if diff.empty or "gene" not in diff.columns:
+        raise DockingError("R scTenifoldKnk returned no valid gene results")
+    diff.columns = [
+        str(column).lower().replace(" ", "_").replace("p-value", "pvalue")
+        for column in diff.columns
+    ]
+    if "p.value" in diff.columns:
+        diff = diff.rename(columns={"p.value": "pvalue"})
+    if "p.adj" in diff.columns:
+        diff = diff.rename(columns={"p.adj": "p.adjust"})
+    meta = {
+        **meta,
+        "engine": "scTenifoldKnk (R package)",
+        "genes_scored": int(len(diff)),
+        "output_dir": str(output_dir),
+    }
+    log.info("R scTenifoldKnk scored %s genes for %s", len(diff), gene)
+    return diff, meta
+
+
 def _merge_scTenifold(
     changes: pd.DataFrame,
     diff: pd.DataFrame | None,
@@ -552,6 +717,7 @@ def _merge_scTenifold(
         "adjusted_p-value": "sctenifold_padj",
         "adjusted p-value": "sctenifold_padj",
         "p.adj": "sctenifold_padj",
+        "p.adjust": "sctenifold_padj",
         "adjusted_pvalue": "sctenifold_padj",
     }
     diff = diff.rename(columns=rename)
@@ -590,10 +756,8 @@ def _merge_scTenifold(
     out["sctenifold_score"] = (
         0.6 * p_rank.fillna(0.0) + 0.4 * distance_rank.fillna(0.0)
     )
-    out["combined_impact"] = (
-        0.6 * out["sctenifold_score"].fillna(delta_rank)
-        + 0.4 * delta_rank
-    )
+    out["local_delta_rank"] = delta_rank
+    out["combined_impact"] = out["sctenifold_score"].fillna(0.0)
     out = out.sort_values(
         ["combined_impact", "gene"], ascending=[False, True]
     ).reset_index(drop=True)
@@ -1007,7 +1171,9 @@ def _coefficient_matrix(
 
     coef = pd.DataFrame(0.0, index=genes, columns=genes)
     coef.loc[regulators] = beta
-    np.fill_diagonal(coef.values, 0.0)
+    coefficient_values = coef.to_numpy(copy=True)
+    np.fill_diagonal(coefficient_values, 0.0)
+    coef = pd.DataFrame(coefficient_values, index=genes, columns=genes)
     singular = float(np.linalg.svd(coef.to_numpy(), compute_uv=False)[0])
     if singular > 1.0:
         coef = coef * (0.95 / singular)
@@ -1916,9 +2082,10 @@ def _write_html_report(
         "图5：敲除后改变靶基因 KEGG 通路富集气泡图",
     )
     sc_method_note = (
-        "<p>本次输入为原始计数矩阵，核心敲除由官方 scTenifoldKnk 完成；"
-        "完整 differential regulation 表见 "
-        "<code>data/insilico_scTenifold_results.csv</code>。</p>"
+        "<p>本次输入为原始计数矩阵，核心 differential regulation 由 R "
+        "scTenifoldKnk 完成；完整结果见 "
+        "<code>data/insilico_scTenifold_results.csv</code>。表中 wt/ko/delta "
+        "列仅用于本地 GRN 向量场可视化，不作为官方 scTenifoldKnk 排名依据。</p>"
         if has_sc
         else ""
     )

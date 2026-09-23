@@ -3,8 +3,11 @@
 from __future__ import annotations
 
 import gzip
+import json
 import logging
 import re
+import shutil
+import subprocess
 from pathlib import Path
 from typing import Any
 from urllib.parse import quote
@@ -20,7 +23,7 @@ import matplotlib.pyplot as plt
 import numpy as np
 import pandas as pd
 from scipy import sparse, stats
-from scipy.io import mmread
+from scipy.io import mmread, mmwrite
 
 from . import cache
 from .common import bh_fdr, ensure_dir, get_json, save_figure, slug, write_json
@@ -508,6 +511,227 @@ def _make_unique_labels(mapping: dict[str, str]) -> dict[str, str]:
     return output
 
 
+def _rscript_path() -> str | None:
+    return shutil.which("Rscript") or shutil.which("Rscript.exe")
+
+
+def _cellchat_r_available() -> bool:
+    executable = _rscript_path()
+    if not executable:
+        return False
+    process = subprocess.run(
+        [
+            executable,
+            "--vanilla",
+            "-e",
+            'cat(requireNamespace("CellChat", quietly=TRUE))',
+        ],
+        capture_output=True,
+        text=True,
+        encoding="utf-8",
+        errors="replace",
+        check=False,
+    )
+    return process.returncode == 0 and "TRUE" in process.stdout.upper()
+
+
+def _export_cellchat_inputs(
+    data: ad.AnnData,
+    input_dir: Path,
+    *,
+    group_column: str,
+    cell_type_column: str,
+) -> tuple[Path, Path, Path, Path]:
+    if "counts" not in data.layers:
+        raise RuntimeError(
+            "the original R CellChat path requires a raw-count layer named "
+            "'counts'; no normalized matrix was substituted"
+        )
+    observation = data.obs.copy()
+    if group_column not in observation or cell_type_column not in observation:
+        raise RuntimeError(
+            "CellChat metadata must contain condition and annotated cell type"
+        )
+    keep = (
+        observation[group_column].astype(str).str.strip().ne("")
+        & observation[cell_type_column].astype(str).str.strip().ne("")
+    )
+    subset = data[keep.to_numpy()].copy()
+    if subset.n_obs < 20:
+        raise RuntimeError("too few annotated cells for R CellChat")
+    ensure_dir(input_dir)
+    matrix_path = input_dir / "counts.mtx"
+    genes_path = input_dir / "genes.txt"
+    cells_path = input_dir / "cells.txt"
+    metadata_path = input_dir / "metadata.tsv"
+    counts = subset.layers["counts"]
+    if sparse.issparse(counts):
+        counts = counts.transpose().tocoo()
+    else:
+        counts = sparse.coo_matrix(
+            np.asarray(counts, dtype=float).transpose()
+        )
+    mmwrite(matrix_path, counts)
+    genes_path.write_text(
+        "\n".join(subset.var_names.astype(str)),
+        encoding="utf-8",
+    )
+    cells = subset.obs_names.astype(str)
+    cells_path.write_text("\n".join(cells), encoding="utf-8")
+    metadata = pd.DataFrame(
+        {
+            "cell": cells,
+            "condition": subset.obs[group_column].astype(str).to_numpy(),
+            "cell_type": subset.obs[cell_type_column].astype(str).to_numpy(),
+        }
+    )
+    metadata.to_csv(metadata_path, sep="\t", index=False)
+    return matrix_path, genes_path, cells_path, metadata_path
+
+
+def _run_r_cellchat_analysis(
+    data: ad.AnnData,
+    output_dir: Path,
+    *,
+    species: str = "mm",
+    group_column: str = "condition",
+    cell_type_column: str = "cell_type",
+    min_cells: int = 10,
+    n_bootstrap: int = 100,
+) -> dict[str, pd.DataFrame | dict[str, Any]]:
+    """Run the original R CellChat implementation on raw counts."""
+    executable = _rscript_path()
+    script = Path(__file__).resolve().parent / "R" / "cellchat_analysis.R"
+    if not executable or not script.exists():
+        raise RuntimeError(
+            "R CellChat is configured but Rscript or the bundled R script is "
+            "unavailable; Figure 4f is blocked rather than substituted"
+        )
+    input_dir = ensure_dir(output_dir / "cellchat_r_inputs")
+    matrix_path, genes_path, cells_path, metadata_path = (
+        _export_cellchat_inputs(
+            data,
+            input_dir,
+            group_column=group_column,
+            cell_type_column=cell_type_column,
+        )
+    )
+    process = subprocess.run(
+        [
+            executable,
+            "--vanilla",
+            str(script),
+            f"--matrix={matrix_path}",
+            f"--genes={genes_path}",
+            f"--cells={cells_path}",
+            f"--metadata={metadata_path}",
+            f"--output={output_dir}",
+            f"--species={species}",
+            f"--group-column={group_column}",
+            f"--celltype-column={cell_type_column}",
+            f"--min-cells={int(min_cells)}",
+            f"--nboot={int(n_bootstrap)}",
+        ],
+        capture_output=True,
+        text=True,
+        encoding="utf-8",
+        errors="replace",
+        check=False,
+        timeout=3600,
+    )
+    interaction_path = output_dir / "cellchat_r_interactions.csv"
+    summary_path = output_dir / "cellchat_r_summary.json"
+    if process.returncode != 0 or not summary_path.exists():
+        detail = (process.stderr or process.stdout or "").strip()
+        raise RuntimeError(
+            "R CellChat failed; Figure 4f remains blocked and no substitute "
+            f"method was run. {detail[-1200:]}"
+        )
+    summary = json.loads(summary_path.read_text(encoding="utf-8"))
+    raw = (
+        pd.read_csv(interaction_path)
+        if interaction_path.exists() and interaction_path.stat().st_size
+        else pd.DataFrame()
+    )
+    if raw.empty:
+        return {
+            "interactions": pd.DataFrame(),
+            "pathways": pd.DataFrame(),
+            "status": {
+                **summary,
+                "status": "valid_negative",
+                "reason": "R CellChat returned no communication interactions",
+            },
+        }
+    raw = raw.rename(
+        columns={
+            "pathway_name": "pathway",
+            "prob": "score",
+            "pval": "cell_level_pvalue",
+        }
+    )
+    required = {"source", "target", "ligand", "receptor", "group", "score"}
+    if not required.issubset(raw.columns):
+        raise RuntimeError(
+            "R CellChat output is missing required communication columns"
+        )
+    raw["source"] = raw["source"].astype(str)
+    raw["target"] = raw["target"].astype(str)
+    raw["ligand"] = raw["ligand"].astype(str)
+    raw["receptor"] = raw["receptor"].astype(str)
+    raw["group"] = raw["group"].astype(str)
+    raw["score"] = pd.to_numeric(raw["score"], errors="coerce")
+    keys = ["pathway", "ligand", "receptor", "source", "target"]
+    grouped = (
+        raw.groupby([*keys, "group"], dropna=False, as_index=False)["score"]
+        .max()
+    )
+    wide = (
+        grouped.pivot_table(
+            index=keys,
+            columns="group",
+            values="score",
+            aggfunc="max",
+        )
+        .reset_index()
+        .rename_axis(None, axis=1)
+    )
+    for column in ("NCD", "HFD"):
+        if column not in wide:
+            wide[column] = np.nan
+    wide["delta_HFD_NCD"] = wide["HFD"] - wide["NCD"]
+    wide["inference_status"] = "cell_level_probability_only"
+    wide["fdr"] = np.nan
+    wide["significant"] = False
+    pathways = (
+        wide.groupby("pathway", as_index=False)
+        .agg(
+            NCD=("NCD", "sum"),
+            HFD=("HFD", "sum"),
+            delta_HFD_NCD=("delta_HFD_NCD", "sum"),
+            n_pairs=("pathway", "size"),
+            n_significant=("significant", "sum"),
+        )
+        .sort_values(["n_significant", "delta_HFD_NCD"], ascending=False)
+    )
+    return {
+        "interactions": wide,
+        "pathways": pathways,
+        "status": {
+            **summary,
+            "status": "descriptive_only",
+            "reason": (
+                "R CellChat probabilities were computed per group; "
+                "cell-level probabilities are not treated as independent "
+                "biological replicates"
+            ),
+            "n_interactions": int(len(wide)),
+            "n_significant": 0,
+            "significant_inference": False,
+        },
+    }
+
+
 def run_mouse_single_cell(
     extracted_dir: Path,
     soft_path: Path,
@@ -515,6 +739,7 @@ def run_mouse_single_cell(
     output_dir: Path,
     *,
     sample_key: str | None = None,
+    cellchat_backend: str = "explicit_lr",
     cellchat_permutations: int = 100,
     cellchat_seed: int = 123,
     allow_network: bool = True,
@@ -610,7 +835,26 @@ def run_mouse_single_cell(
     })
     interaction_path = output_dir / "cellchat_like_interactions.csv"
     pathway_path = output_dir / "cellchat_like_pathways.csv"
-    lr = _cellchat_like_analysis(data, n_permutations=cellchat_permutations, seed=cellchat_seed)
+    backend = str(cellchat_backend or "explicit_lr").strip().lower()
+    if backend in {"r_cellchat", "cellchat", "original"}:
+        lr = _run_r_cellchat_analysis(
+            data,
+            output_dir,
+            species="mm",
+            group_column="condition",
+            cell_type_column="cell_type",
+            n_bootstrap=cellchat_permutations,
+        )
+    elif backend in {"explicit_lr", "python", "legacy"}:
+        lr = _cellchat_like_analysis(
+            data,
+            n_permutations=cellchat_permutations,
+            seed=cellchat_seed,
+        )
+    else:
+        raise ValueError(
+            "cellchat_backend must be r_cellchat or explicit_lr"
+        )
     lr["interactions"].to_csv(interaction_path, index=False)
     lr["pathways"].to_csv(pathway_path, index=False)
     communication_status = dict(lr.get("status") or {})
@@ -618,7 +862,21 @@ def run_mouse_single_cell(
         output_dir / "cellchat_permutation_summary.json",
         {
             **communication_status,
-            "n_permutations": int(cellchat_permutations),
+            "n_bootstrap": (
+                int(cellchat_permutations)
+                if backend in {"r_cellchat", "cellchat", "original"}
+                else 0
+            ),
+            "n_biounit_permutations": (
+                0
+                if backend in {"r_cellchat", "cellchat", "original"}
+                else int(cellchat_permutations)
+            ),
+            "n_permutations": (
+                None
+                if backend in {"r_cellchat", "cellchat", "original"}
+                else int(cellchat_permutations)
+            ),
             "n_interactions": len(lr["interactions"]),
             "n_significant": (
                 int(lr["interactions"]["significant"].sum())
@@ -626,9 +884,14 @@ def run_mouse_single_cell(
                 else 0
             ),
             "note": (
-                "This is an explicit ligand-receptor scoring procedure, not "
-                "the R CellChat implementation. Significant group inference "
-                "requires at least two independent biological units per group."
+                "Original R CellChat was executed on raw counts."
+                if backend in {"r_cellchat", "cellchat", "original"}
+                else (
+                    "This is an explicit ligand-receptor scoring procedure, "
+                    "not the R CellChat implementation. Significant group "
+                    "inference requires at least two independent biological "
+                    "units per group."
+                )
             ),
         },
     )
@@ -636,6 +899,11 @@ def run_mouse_single_cell(
         lr["interactions"],
         lr["pathways"],
         output_dir / "fig4f_cellchat_network.png",
+        title=(
+            "R CellChat communication network"
+            if backend in {"r_cellchat", "cellchat", "original"}
+            else "Explicit ligand-receptor scoring network"
+        ),
     )
     unit_column, unit_map = _choose_inference_unit(data)
     library_manifest = (
@@ -1261,6 +1529,8 @@ def _plot_cell_communication(
     interactions: pd.DataFrame,
     pathways: pd.DataFrame,
     output: Path,
+    *,
+    title: str = "Cell-cell communication",
 ) -> None:
     if pathways.empty:
         return
@@ -1370,10 +1640,7 @@ def _plot_cell_communication(
         plt.Line2D([0], [0], color="#4f7fa8", lw=3, label="HFD < NCD"),
     ]
     ax.legend(handles=handles, loc="upper right", frameon=False, fontsize=7)
-    ax.set_title(
-        "Ligand-receptor scoring network (not R CellChat)",
-        fontweight="bold",
-    )
+    ax.set_title(title, fontweight="bold")
     ax.axis("off")
     save_figure(fig, output)
 

@@ -993,7 +993,7 @@ Cytoscape 集成采用自动降级策略：`network_toxicology.cytoscape` 为 `a
 - `plan_coverage.json/md` 用于查看 42 个 Panel 的代码实现覆盖、当前结果覆盖、外部依赖条件和性能目标未达标项。代码覆盖高不等于结果已经完成。
 - `environment_audit.json` 记录 Vina、GROMACS、gmx_MMPBSA、R CellChat、PoseBusters、Meeko 等版本。具体方案版本要求必须由本地配置和论文方法记录。
 - 疾病靶点 Panel 只有在至少两个可审计来源存在时才生成真实交集；GeneCards、OMIM、TTD 缺失时使用开放来源必须改名说明，不能写成原三库 Venn。
-- CellChat-like 网络必须显示置换次数、p 值或 FDR 和限制说明；不能把近似结果写成 R CellChat 原实现。
+- 实验方案一默认运行 R CellChat 原实现并记录版本、数据库和参数；细胞级概率无独立生物单位支持时只能作描述。仅显式选择后备方法时，才显示其置换次数、p 值或 FDR 和限制说明。
 - Figure 5d-h 只能来自真实 GROMACS/MMPBSA 轨迹和输出；没有运行或没有解析到结果时应显示 unavailable/not run。
 
 ## 8. 建议验收清单

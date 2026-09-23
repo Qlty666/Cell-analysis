@@ -84,7 +84,7 @@ REVIEWS: dict[tuple[str, str], FigureReview] = {
         "合理",
         "良好",
         "可用",
-        "已改用可复现的Louvain社区检测，得到4个主要模块；应把方法和种子/上下文节点定义写入图注。",
+        "按原方案运行R MCL；图注应记录inflation、上下文节点和聚类版本。",
     ),
     ("Figure2_PPI网络与枢纽基因初步筛选", "c"): FigureReview(
         "合理",
@@ -204,13 +204,13 @@ REVIEWS: dict[tuple[str, str], FigureReview] = {
         "合理",
         "良好",
         "需限定解释",
-        "输出为显式配体-受体评分；只有至少两个独立生物单位/组时才执行标签置换和FDR，否则仅描述。",
+        "按原方案运行R CellChat并保存版本、数据库和参数；细胞级概率不替代独立生物单位统计。",
     ),
     ("Figure4_单细胞图谱_细胞通讯与虚拟扰动", "g"): FigureReview(
         "合理",
         "良好",
         "需限定解释",
-        "正文必须说明这是局部稀疏GRN预测扰动；若scTenifoldKnk不可用，不得笼统称为CellOracle或真实敲除。",
+        "按原方案运行R scTenifoldKnk并记录网络数、细胞数和随机种子；预测扰动仍不是湿实验敲除。",
     ),
     ("Figure4_单细胞图谱_细胞通讯与虚拟扰动", "h"): FigureReview(
         "合理",
@@ -970,10 +970,10 @@ def _render_audit_markdown(
             "treat p>0.05 as a standalone pass/fail test.",
         "- Rebuild Figure 1d/e only if licensed GeneCards, OMIM, TTD exports and "
         "independent ChEMBL/STITCH evidence become available.",
-            "- Keep the explicit ligand-receptor method label; use a full CellChat "
-            "analysis only if the R package and species database are available.",
+            "- Keep the R CellChat version, species database and cell-level "
+            "probability limitations in the figure legend.",
             "- Re-render predicted perturbation-response panels from source data "
-            "and state the local GRN method in the figure legend.",
+            "and state the R scTenifoldKnk parameters in the figure legend.",
         "- Assemble final multi-panel figures, add lowercase panel letters, export "
         "vector PDF/SVG for line art, and provide source data tables.",
         "- Add confidence intervals, effect sizes and exact FDR to key statistical panels.",

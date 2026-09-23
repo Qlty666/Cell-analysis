@@ -391,7 +391,14 @@ def _add_common(
     )
     sub.add_argument(
         "--insilico-engine",
-        choices=["auto", "celloracle", "scTenifoldKnk", "triple"],
+        choices=[
+            "auto",
+            "celloracle",
+            "scTenifoldKnk",
+            "scTenifoldKnk_r",
+            "triple",
+            "local_grn",
+        ],
         default=None,
         help="virtual knockout engine (default: auto raw-count detection)",
     )
