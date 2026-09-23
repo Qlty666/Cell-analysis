@@ -5,6 +5,7 @@ from __future__ import annotations
 
 import re
 import json
+import shutil
 import tempfile
 import unittest
 from pathlib import Path
@@ -15,18 +16,35 @@ import pandas as pd
 import anndata as ad
 
 from experiment_plan_one.common import bh_fdr, split_gene_symbol
+from experiment_plan_one.bulk import (
+    _parse_paired_count_sample,
+    differential_expression_limma,
+)
+from experiment_plan_one import cache as plan_cache
 from experiment_plan_one.classify import classify_experiment_plan_results
 from experiment_plan_one.coexpression import run_coexpression_analysis
 from experiment_plan_one.coverage import audit_plan_coverage
 from experiment_plan_one.figure_audit import _dynamic_result_reviews, _summary
 from experiment_plan_one.md_figures import generate_plan_md_figures
-from experiment_plan_one.ml import _nested_cv_evaluation, _pipeline, _model_zoo
+from experiment_plan_one.ml import (
+    _model_zoo,
+    _nested_cv_evaluation,
+    _pipeline,
+    run_ml_validation,
+)
 from experiment_plan_one.pipeline import (
     ExperimentPlanOne,
     default_config,
     merge_config,
 )
-from experiment_plan_one.single_cell import _cellchat_like_analysis
+from experiment_plan_one.planning import write_analysis_plan
+from experiment_plan_one.ppi import run_ppi_analysis
+from experiment_plan_one.single_cell import (
+    _cellchat_like_analysis,
+    _donor_expression,
+    _patient_id,
+    map_human_to_mouse_homologs,
+)
 from experiment_plan_one.targets import (
     _parse_swiss_target_table,
     _sea_result_frame,
@@ -182,6 +200,94 @@ class TestExperimentPlanOne(unittest.TestCase):
         self.assertEqual(config["ml"]["seed"], 7)
         self.assertEqual(config["ml"]["cv_folds"], 5)
 
+    def test_analysis_plan_freezes_endpoint_roles_and_manifest(self):
+        with tempfile.TemporaryDirectory(ignore_cleanup_errors=True) as tmp:
+            root = Path(tmp)
+            outputs = write_analysis_plan(root, default_config())
+            for path in outputs.values():
+                self.assertTrue(path.exists(), path)
+            plan_text = outputs["analysis_plan"].read_text(encoding="utf-8")
+            manifest = pd.read_csv(outputs["cohort_manifest"], sep="\t")
+            self.assertIn("same_endpoint_external_candidate", plan_text)
+            self.assertIn("different_endpoints_are_not_external_validation", plan_text)
+            self.assertIn("GSE164441", set(manifest["accession"]))
+
+    def test_paired_count_sample_parser_accepts_explicit_n_t_labels(self):
+        self.assertEqual(
+            _parse_paired_count_sample("651N_count"),
+            ("651", "adjacent_normal"),
+        )
+        self.assertEqual(
+            _parse_paired_count_sample("651T_count"),
+            ("651", "tumor"),
+        )
+        with self.assertRaises(ValueError):
+            _parse_paired_count_sample("651_count")
+
+    @unittest.skipUnless(
+        shutil.which("Rscript") or shutil.which("Rscript.exe"),
+        "Rscript is unavailable",
+    )
+    def test_limma_combined_disease_contrast_and_gene_alignment(self):
+        with tempfile.TemporaryDirectory(ignore_cleanup_errors=True) as tmp:
+            root = Path(tmp)
+            genes = ["G1", "G2", "G3", "G4", "G5", "G6"]
+            samples = ["S1", "S2", "S3", "S4", "S5", "S6"]
+            counts = pd.DataFrame(
+                np.column_stack(
+                    [
+                        np.full(6, 100.0),
+                        np.full(6, 100.0),
+                        np.full(6, 100.0),
+                        np.full(6, 100.0),
+                        np.full(6, 100.0),
+                        np.full(6, 100.0),
+                    ]
+                ),
+                index=genes,
+                columns=samples,
+            )
+            counts.loc["G1", :] = [100, 100, 100, 100, 100, 100]
+            counts.loc["G2", :] = [100, 100, 500, 500, 50, 50]
+            counts.loc["G3", :] = [100, 100, 50, 50, 500, 500]
+            counts.loc["G4", :] = [100, 100, 50, 50, 50, 50]
+            counts.loc["G5", :] = [100, 100, 100, 100, 100, 100]
+            counts.loc["G6", :] = [500, 500, 200, 200, 200, 200]
+            counts.to_csv(root / "counts.csv")
+            pd.DataFrame(
+                {
+                    "condition": [
+                        "HC",
+                        "HC",
+                        "SS",
+                        "SS",
+                        "NASH",
+                        "NASH",
+                    ]
+                },
+                index=samples,
+            ).to_csv(root / "metadata.csv")
+            result = differential_expression_limma(
+                root / "counts.csv",
+                root / "metadata.csv",
+                root / "result.csv",
+                condition_column="condition",
+                group1=["HC"],
+                group2=["SS", "NASH"],
+                comparison="HC_vs_NAFLD",
+                input_type="counts",
+                timeout=180,
+            )
+            by_gene = result.set_index("gene")
+            self.assertGreater(by_gene.loc["G2", "delta"], 0)
+            self.assertLess(by_gene.loc["G4", "delta"], 0)
+            self.assertGreater(by_gene.loc["G2", "group2_mean"], 0)
+            self.assertFalse(
+                result[
+                    ["gene", "group1_mean", "group2_mean", "delta"]
+                ].isna().any().any()
+            )
+
     def test_stage_signature_changes_with_inputs(self):
         with tempfile.TemporaryDirectory(ignore_cleanup_errors=True) as tmp:
             root = Path(tmp)
@@ -193,6 +299,36 @@ class TestExperimentPlanOne(unittest.TestCase):
             source.write_text("gene,value\nEGFR,2\n", encoding="utf-8")
             second = runner.context.stage_signature("ml", ["bulk"])
             self.assertNotEqual(first, second)
+
+    def test_cache_requires_same_signature_and_content(self):
+        with tempfile.TemporaryDirectory(ignore_cleanup_errors=True) as tmp:
+            root = Path(tmp)
+            output = root / "output.csv"
+            state = root / "state.json"
+            output.write_text("gene,value\nEGFR,1\n", encoding="utf-8")
+            key = plan_cache.signature(
+                files=[],
+                parameters={"genes": ["EGFR"], "software": "test"},
+            )
+            plan_cache.save(state, key, [output])
+            self.assertTrue(plan_cache.valid(state, key, [output]))
+            changed_key = plan_cache.signature(
+                files=[],
+                parameters={"genes": ["TP53"], "software": "test"},
+            )
+            self.assertFalse(plan_cache.valid(state, changed_key, [output]))
+            output.write_text("gene,value\nEGFR,2\n", encoding="utf-8")
+            self.assertFalse(plan_cache.valid(state, key, [output]))
+
+    def test_output_root_cannot_mix_run_ids(self):
+        with tempfile.TemporaryDirectory(ignore_cleanup_errors=True) as tmp:
+            root = Path(tmp)
+            ExperimentPlanOne(root, {**default_config(), "run_id": "run-A"})
+            with self.assertRaisesRegex(RuntimeError, "different run_id"):
+                ExperimentPlanOne(
+                    root,
+                    {**default_config(), "run_id": "run-B"},
+                )
 
     def test_missing_stage_output_detection(self):
         with tempfile.TemporaryDirectory(ignore_cleanup_errors=True) as tmp:
@@ -311,6 +447,32 @@ class TestExperimentPlanOne(unittest.TestCase):
         self.assertEqual(len(probabilities), len(y))
         self.assertGreaterEqual(metrics["auc"], 0.0)
 
+    def test_static_coexpression_selection_is_rejected_as_cv_input(self):
+        with tempfile.TemporaryDirectory(ignore_cleanup_errors=True) as tmp:
+            root = Path(tmp)
+            samples = [f"S{index}" for index in range(10)]
+            pd.DataFrame(
+                np.arange(30, dtype=float).reshape(3, 10),
+                index=["G1", "G2", "G3"],
+                columns=samples,
+            ).to_csv(root / "expression.csv")
+            pd.DataFrame(
+                {"condition": ["HC", "NASH"] * 5},
+                index=samples,
+            ).to_csv(root / "metadata.csv")
+            with self.assertRaisesRegex(
+                ValueError,
+                "coexpression",
+            ):
+                run_ml_validation(
+                    root / "expression.csv",
+                    root / "metadata.csv",
+                    {"coexpression_disease_module": ["G1", "G2"]},
+                    {},
+                    root / "output",
+                    cv_folds=5,
+                )
+
     def test_optional_boosting_models_can_be_absent(self):
         with mock.patch(
             "experiment_plan_one.ml._xgboost",
@@ -323,6 +485,17 @@ class TestExperimentPlanOne(unittest.TestCase):
         self.assertNotIn("XGBoost", models)
         self.assertNotIn("LightGBM", models)
         self.assertIn("RandomForest", models)
+
+    def test_empty_ppi_intersection_is_valid_negative_not_fabricated_network(self):
+        with tempfile.TemporaryDirectory(ignore_cleanup_errors=True) as tmp:
+            output = Path(tmp) / "ppi"
+            result = run_ppi_analysis([], output)
+            self.assertEqual(result["status"], "valid_negative")
+            summary = json.loads(
+                (output / "ppi_summary.json").read_text(encoding="utf-8")
+            )
+            self.assertEqual(summary["status"], "valid_negative")
+            self.assertEqual(summary["network_edges"], 0)
 
     def test_classify_results_creates_plan_tree(self):
         with tempfile.TemporaryDirectory() as tmp:
@@ -365,6 +538,19 @@ class TestExperimentPlanOne(unittest.TestCase):
             docking = root / "08_docking"
             run = docking / "targets" / "GENE1" / "outputs" / "md" / "06_md" / "lig1"
             run.mkdir(parents=True)
+            (docking / "md_run_manifest.json").write_text(
+                json.dumps(
+                    {
+                        "target_id": "GENE1",
+                        "ligand_id": "lig1",
+                        "run_id": "GENE1|lig1|md|run_001",
+                        "run_dir": str(run),
+                        "status": "completed",
+                        "production_ns": 100.0,
+                    }
+                ),
+                encoding="utf-8",
+            )
             pd.DataFrame(
                 {
                     "id": ["lig1"],
@@ -379,7 +565,7 @@ class TestExperimentPlanOne(unittest.TestCase):
             }.items():
                 run.joinpath(name).write_text(
                     "\n".join(
-                        f"{index * 10} {value}"
+                        f"{index * 50} {value}"
                         for index, value in enumerate(values)
                     ),
                     encoding="utf-8",
@@ -388,12 +574,64 @@ class TestExperimentPlanOne(unittest.TestCase):
                 "1 0.1\n2 0.2\n",
                 encoding="utf-8",
             )
+            run.joinpath("FINAL_DECOMP_MMPBSA.dat").write_text(
+                "#Residue TOTAL STD\n"
+                "ALA1 -5.0 0.2\n"
+                "GLY2 -4.0 0.1\n",
+                encoding="utf-8",
+            )
             result = generate_plan_md_figures(docking, root / "09_md_mmpbsa")
+            self.assertEqual(result["status"], "completed")
             self.assertTrue(result["panels"]["d_rmsd"])
             self.assertTrue(result["panels"]["e_ligand_rmsd"])
             self.assertTrue(result["panels"]["f_rmsf"])
             self.assertTrue(result["panels"]["g_rg"])
             self.assertTrue(result["panels"]["h_mmpbsa"])
+
+    def test_md_total_energy_alone_does_not_complete_mmpbsa_panel(self):
+        with tempfile.TemporaryDirectory(ignore_cleanup_errors=True) as tmp:
+            root = Path(tmp)
+            docking = root / "08_docking"
+            run = docking / "targets" / "GENE1" / "outputs" / "md" / "06_md" / "lig1"
+            run.mkdir(parents=True)
+            (docking / "md_run_manifest.json").write_text(
+                json.dumps(
+                    {
+                        "target_id": "GENE1",
+                        "run_id": "GENE1|lig1|md|run_001",
+                        "run_dir": str(run),
+                        "status": "completed",
+                        "production_ns": 100.0,
+                    }
+                ),
+                encoding="utf-8",
+            )
+            for name in (
+                "rmsd_protein.xvg",
+                "rmsd_ligand.xvg",
+                "gyrate_protein.xvg",
+            ):
+                run.joinpath(name).write_text(
+                    "0 0.1\n50 0.11\n100 0.12\n",
+                    encoding="utf-8",
+                )
+            run.joinpath("rmsf_protein_residue.xvg").write_text(
+                "1 0.1\n2 0.2\n",
+                encoding="utf-8",
+            )
+            pd.DataFrame(
+                {
+                    "id": ["lig1"],
+                    "mmpbsa_status": ["completed"],
+                    "mmpbsa_delta_total_kj_mol": [-42.0],
+                }
+            ).to_csv(docking / "md_simulation_results.csv", index=False)
+            result = generate_plan_md_figures(docking, root / "09_md_mmpbsa")
+            self.assertFalse(result["panels"]["h_mmpbsa"])
+            self.assertEqual(
+                result["mmpbsa"]["status"],
+                "incomplete_total_energy_only",
+            )
 
     def test_cellchat_permutation_outputs_fdr(self):
         rng = np.random.default_rng(3)
@@ -402,7 +640,9 @@ class TestExperimentPlanOne(unittest.TestCase):
             obs=pd.DataFrame(
                 {
                     "cell_type": ["A"] * 20 + ["B"] * 20,
-                    "condition": ["NCD", "HFD"] * 20,
+                    "condition": (["NCD"] * 10 + ["HFD"] * 10) * 2,
+                    "donor_id": (["D1"] * 5 + ["D2"] * 5 + ["D3"] * 5 + ["D4"] * 5)
+                    * 2,
                 }
             ),
         )
@@ -416,6 +656,97 @@ class TestExperimentPlanOne(unittest.TestCase):
         self.assertIn("p_value", result["interactions"].columns)
         self.assertIn("fdr", result["interactions"].columns)
         self.assertIn("significant", result["interactions"].columns)
+        self.assertEqual(result["status"]["status"], "completed")
+        self.assertEqual(result["status"]["n_NCD_units"], 2)
+        self.assertEqual(result["status"]["n_HFD_units"], 2)
+
+    def test_cellchat_does_not_infer_significance_with_one_donor_per_group(self):
+        data = ad.AnnData(
+            X=np.ones((8, 4), dtype=float),
+            obs=pd.DataFrame(
+                {
+                    "cell_type": ["A"] * 4 + ["B"] * 4,
+                    "condition": ["NCD"] * 2 + ["HFD"] * 2 + ["NCD"] * 2 + ["HFD"] * 2,
+                    "donor_id": ["N1"] * 2 + ["H1"] * 2 + ["N1"] * 2 + ["H1"] * 2,
+                }
+            ),
+        )
+        data.var_names = ["TNF", "TNFRSF1A", "IL6", "IL6R"]
+        result = _cellchat_like_analysis(data, n_permutations=10, seed=1)
+        self.assertEqual(result["status"]["status"], "descriptive_only")
+        self.assertFalse(result["interactions"]["significant"].any())
+        self.assertTrue(result["interactions"]["fdr"].isna().all())
+
+    def test_cellchat_library_ids_are_not_treated_as_animal_replicates(self):
+        data = ad.AnnData(
+            X=np.ones((8, 4), dtype=float),
+            obs=pd.DataFrame(
+                {
+                    "cell_type": ["A"] * 4 + ["B"] * 4,
+                    "condition": ["NCD"] * 2 + ["HFD"] * 2 + ["NCD"] * 2 + ["HFD"] * 2,
+                    "sample_id": ["L1"] * 2 + ["L2"] * 2 + ["L1"] * 2 + ["L2"] * 2,
+                }
+            ),
+        )
+        data.var_names = ["TNF", "TNFRSF1A", "IL6", "IL6R"]
+        result = _cellchat_like_analysis(data, n_permutations=10, seed=1)
+        self.assertEqual(result["status"]["status"], "descriptive_only")
+        self.assertFalse(result["status"]["verified_biological_units"])
+        self.assertIn("library IDs", result["status"]["reason"])
+
+    def test_human_donor_expression_merges_technical_libraries(self):
+        frame = pd.DataFrame(
+            {
+                "patient_id": ["P1", "P1", "P2"],
+                "gene": ["G1", "G1", "G1"],
+                "cell_type": ["A", "A", "A"],
+                "condition": ["MASH", "MASH", "Healthy"],
+                "expression": [1.0, 3.0, 2.0],
+            }
+        )
+        merged = _donor_expression(frame, "patient_id")
+        self.assertEqual(len(merged), 2)
+        self.assertEqual(
+            float(merged.loc[merged["patient_id"].eq("P1"), "expression"].iloc[0]),
+            2.0,
+        )
+        self.assertEqual(
+            _patient_id({"title": "PCL17-end stage-SITTE11"}),
+            "PCL17",
+        )
+
+    def test_mouse_homolog_mapping_is_cached_with_source_version(self):
+        def fake_get_json(url, **_kwargs):
+            if "/query?" in url:
+                return {
+                    "hits": [
+                        {
+                            "symbol": "GPAT3",
+                            "homologene": {
+                                "id": 13099,
+                                "genes": [
+                                    [9606, 84803],
+                                    [10090, 231510],
+                                ],
+                            },
+                        }
+                    ]
+                }
+            if "/gene/" in url:
+                return {"symbol": "Gpat3"}
+            raise AssertionError(url)
+
+        with tempfile.TemporaryDirectory(ignore_cleanup_errors=True) as tmp:
+            output = Path(tmp) / "homologs.tsv"
+            with mock.patch(
+                "experiment_plan_one.single_cell.get_json",
+                side_effect=fake_get_json,
+            ):
+                mapping = map_human_to_mouse_homologs(["GPAT3"], output)
+            self.assertEqual(mapping, {"GPAT3": "GPAT3"})
+            frame = pd.read_csv(output, sep="\t")
+            self.assertEqual(frame.iloc[0]["mapping_status"], "one_to_one")
+            self.assertEqual(frame.iloc[0]["source_version"], "HomoloGene:13099")
 
     def test_coexpression_module_analysis_outputs_hubs(self):
         rng = np.random.default_rng(3)
@@ -485,7 +816,8 @@ class TestExperimentPlanOne(unittest.TestCase):
             )
             self.assertIn("current_result_completion_percent", summary)
             self.assertIn("environment", summary)
-            self.assertEqual(summary["performance_targets_evaluable"], 1)
+            self.assertEqual(summary["performance_targets_evaluable"], 0)
+            self.assertEqual(summary["performance_targets_unknown"], 1)
             self.assertEqual(summary["performance_targets_not_evaluated"], 2)
 
     def test_ml_figure_reviews_follow_current_metrics(self):
@@ -535,7 +867,7 @@ class TestExperimentPlanOne(unittest.TestCase):
             self.assertIn("0.309", reviews[(figure, "c")].notes)
             self.assertEqual(reviews[(figure, "d")].verdict, "需限定解释")
             self.assertIn("0.909", reviews[(figure, "d")].notes)
-            self.assertEqual(reviews[(figure, "e")].verdict, "可用")
+            self.assertEqual(reviews[(figure, "e")].verdict, "需限定解释")
             self.assertIn("0.140", reviews[(figure, "e")].notes)
 
     def test_figure_summary_counts_unique_panels_not_file_aliases(self):

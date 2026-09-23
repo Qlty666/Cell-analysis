@@ -36,7 +36,7 @@ PANEL_REQUIREMENTS: tuple[PanelRequirement, ...] = (
     PanelRequirement("Figure1_化合物表征_靶点预测与通路富集", "g", "KEGG Top10 富集", 3, 1.0),
     PanelRequirement("Figure1_化合物表征_靶点预测与通路富集", "h", "GO BP/CC/MF 富集", 3, 1.0),
     PanelRequirement("Figure2_PPI网络与枢纽基因初步筛选", "a", "STRING PPI 网络", 3, 1.0),
-    PanelRequirement("Figure2_PPI网络与枢纽基因初步筛选", "b", "MCL/模块网络", 2, 0.95, "algorithm_equivalent", "当前实现为可复现社区检测；MCL 为可选增强。"),
+    PanelRequirement("Figure2_PPI网络与枢纽基因初步筛选", "b", "模块网络", 2, 0.95, "algorithm_equivalent", "方案修订为可复现 Louvain 社区检测，并在图中明确方法名称；不再冒充 MCL。"),
     PanelRequirement("Figure2_PPI网络与枢纽基因初步筛选", "c", "Degree Top20", 2, 1.0),
     PanelRequirement("Figure2_PPI网络与枢纽基因初步筛选", "d", "Betweenness 排名", 2, 1.0),
     PanelRequirement("Figure2_PPI网络与枢纽基因初步筛选", "e", "MCC ∩ Degree", 3, 1.0),
@@ -45,9 +45,9 @@ PANEL_REQUIREMENTS: tuple[PanelRequirement, ...] = (
     PanelRequirement("Figure2_PPI网络与枢纽基因初步筛选", "h", "GSE164441 表达验证", 2, 1.0, "endpoint_mismatch", "GSE164441 为肝癌与癌旁对照，必须按不同终点解释。"),
     PanelRequirement("Figure3_机器学习模型构建与SHAP核心特征", "a", "11 模型 AUC 热图", 3, 1.0),
     PanelRequirement("Figure3_机器学习模型构建与SHAP核心特征", "b", "训练集 ROC", 3, 1.0),
-    PanelRequirement("Figure3_机器学习模型构建与SHAP核心特征", "c", "GSE49541 外部 ROC", 4, 0.90, "endpoint_mismatch", "临床终点为纤维化分期；报告实际AUC但不套用健康/NAFLD分类阈值。"),
-    PanelRequirement("Figure3_机器学习模型构建与SHAP核心特征", "d", "外部 NAFLD ROC", 4, 0.90, "endpoint_mismatch", "GSE164441为HCC终点，不套用NAFLD阈值；GSE135251作为补充NAFLD终点进行阈值评价。"),
-    PanelRequirement("Figure3_机器学习模型构建与SHAP核心特征", "e", "校准曲线", 4, 0.90, "outcome_dependent", "代码支持 sigmoid/isotonic 校准选择，但统计校准仍取决于样本量。"),
+    PanelRequirement("Figure3_机器学习模型构建与SHAP核心特征", "c", "GSE49541 跨终点探索 ROC", 4, 0.90, "endpoint_mismatch", "纤维化分期与健康/NAFLD不是同一终点；报告实际AUC但不设成功阈值。"),
+    PanelRequirement("Figure3_机器学习模型构建与SHAP核心特征", "d", "同终点候选与HCC扩展 ROC", 4, 0.90, "endpoint_mismatch", "GSE135251已登记既往分析暴露；GSE164441为HCC配对癌旁终点。AUC阈值不作为验收门禁。"),
+    PanelRequirement("Figure3_机器学习模型构建与SHAP核心特征", "e", "校准曲线", 4, 0.90, "outcome_dependent", "联合报告校准截距、斜率、Brier和H-L结果；H-L p>0.05 单独不证明校准合格。"),
     PanelRequirement("Figure3_机器学习模型构建与SHAP核心特征", "f", "SHAP 条形图", 3, 1.0),
     PanelRequirement("Figure3_机器学习模型构建与SHAP核心特征", "g", "SHAP 蜂群图", 3, 1.0),
     PanelRequirement("Figure3_机器学习模型构建与SHAP核心特征", "h", "核心基因与纤维化关联", 3, 1.0),
@@ -56,19 +56,19 @@ PANEL_REQUIREMENTS: tuple[PanelRequirement, ...] = (
     PanelRequirement("Figure4_单细胞图谱_细胞通讯与虚拟扰动", "c", "核心基因各亚群表达", 2, 1.0),
     PanelRequirement("Figure4_单细胞图谱_细胞通讯与虚拟扰动", "d", "核心基因 UMAP 特征图", 2, 1.0),
     PanelRequirement("Figure4_单细胞图谱_细胞通讯与虚拟扰动", "e", "细胞组成图", 2, 1.0),
-    PanelRequirement("Figure4_单细胞图谱_细胞通讯与虚拟扰动", "f", "细胞通讯网络", 4, 0.90, "method_equivalent", "默认使用带置换检验和 FDR 的配体-受体评分；完整 CellChat 为可选外部工具。"),
-    PanelRequirement("Figure4_单细胞图谱_细胞通讯与虚拟扰动", "g", "虚拟敲除 Top10/网络/UMAP", 3, 0.95, "external_tool", "scTenifoldKnk 可用时执行；否则保留明确的网络模拟结果。"),
+    PanelRequirement("Figure4_单细胞图谱_细胞通讯与虚拟扰动", "f", "细胞通讯网络", 4, 0.90, "method_equivalent", "实际执行显式配体-受体评分；只有达到独立生物重复门槛时才输出置换/FDR，否则仅描述。"),
+    PanelRequirement("Figure4_单细胞图谱_细胞通讯与虚拟扰动", "g", "预测扰动响应", 3, 0.95, "external_tool", "scTenifoldKnk 可用时执行；否则明确报告局部网络扰动，不称真实敲除或CellOracle实现。"),
     PanelRequirement("Figure4_单细胞图谱_细胞通讯与虚拟扰动", "h", "虚拟敲除后富集", 2, 0.95),
     PanelRequirement("Figure4_单细胞图谱_细胞通讯与虚拟扰动", "i", "人类疾病谱 UMAP", 3, 1.0),
     PanelRequirement("Figure4_单细胞图谱_细胞通讯与虚拟扰动", "j", "人类核心基因细胞类型验证", 3, 1.0),
     PanelRequirement("Figure5_分子对接与分子动力学模拟", "a", "3D 对接构象", 3, 0.90, "visualization_equivalent", "使用可复现的 3D 构象与结合口袋可视化；Discovery Studio 为可选复核工具。"),
-    PanelRequirement("Figure5_分子对接与分子动力学模拟", "b", "2D 相互作用图", 3, 0.90, "visualization_equivalent", "按氢键、疏水、π-π、盐桥分类；PLIP/Discovery Studio 为可选复核工具。"),
+    PanelRequirement("Figure5_分子对接与分子动力学模拟", "b", "2D 相互作用图", 3, 0.90, "visualization_equivalent", "距离/元素/几何规则输出候选接触，并明确证据级别；不得将距离接近直接写成已证实氢键或π堆积。"),
     PanelRequirement("Figure5_分子对接与分子动力学模拟", "c", "对接能量热图", 2, 1.0),
     PanelRequirement("Figure5_分子对接与分子动力学模拟", "d", "蛋白 RMSD", 4, 1.0, "gromacs", "需要 md.run=true 或外部 GROMACS 完成 100 ns 轨迹。"),
     PanelRequirement("Figure5_分子对接与分子动力学模拟", "e", "配体 RMSD", 4, 1.0, "gromacs", "需要 md.run=true 或外部 GROMACS 完成 100 ns 轨迹。"),
     PanelRequirement("Figure5_分子对接与分子动力学模拟", "f", "关键残基 RMSF", 4, 1.0, "gromacs", "需要 md.run=true 或外部 GROMACS 完成 100 ns 轨迹。"),
     PanelRequirement("Figure5_分子对接与分子动力学模拟", "g", "回旋半径 Rg", 3, 1.0, "gromacs", "需要 md.run=true 或外部 GROMACS 完成 100 ns 轨迹。"),
-    PanelRequirement("Figure5_分子对接与分子动力学模拟", "h", "MM-PBSA 自由能分解", 5, 0.75, "gmx_mmpbsa", "需要可用的 gmx_MMPBSA 或等效命令；未安装时明确标记不可用。"),
+    PanelRequirement("Figure5_分子对接与分子动力学模拟", "h", "MM-PBSA 自由能分解", 5, 0.75, "gmx_mmpbsa", "需要残基分解、TOTAL列、单位和误差；仅总能量不能交付本面板。"),
 )
 
 
@@ -77,11 +77,10 @@ GOOD_VERDICTS = {
     "主图候选",
     "需修饰",
     "需重排",
-    "需补统计",
-    "需限定解释",
     "阴性结果",
     "结果未达标",
     "结果未全达标",
+    "需限定解释",
 }
 
 
@@ -108,8 +107,14 @@ def _status(
         return "missing"
     if raw_status == "prepared_not_run":
         return "prepared_not_run"
+    if verdict in {"不满足方案", "未运行"} or raw_status == "not_run":
+        return "not_run"
     if verdict in {"不可替代Venn", "不合理", "需重绘", "不满足方案"}:
         return "needs_revision"
+    if verdict == "需限定解释":
+        return "exploratory"
+    if verdict == "阴性结果":
+        return "valid_negative"
     return "available"
 
 
@@ -227,9 +232,11 @@ def audit_plan_coverage(output_root: Path) -> dict[str, Any]:
         review = reviews.get((requirement.figure, requirement.panel))
         status = _status(requirement, review)
         verdict = str((review or {}).get("audit_verdict") or "")
-        if status == "available" and verdict in GOOD_VERDICTS:
+        if status in {"available", "valid_negative"} and verdict in GOOD_VERDICTS:
             current_credit = 1.0
-        elif status == "available" and verdict == "补充材料":
+        elif status == "exploratory" or (
+            status == "available" and verdict == "补充材料"
+        ):
             current_credit = 0.5
         else:
             current_credit = 0.0
@@ -239,20 +246,29 @@ def audit_plan_coverage(output_root: Path) -> dict[str, Any]:
         if requirement.figure == "Figure3_机器学习模型构建与SHAP核心特征":
             if requirement.panel == "e":
                 performance_target_applicable = True
-                performance_target_met = verdict not in {
-                    "结果未达标",
-                    "结果未全达标",
-                    "不合理",
-                }
-                performance_target_status = (
-                    "met" if performance_target_met else "not_met"
-                )
+                # A missing/ambiguous audit is never evidence of calibration.
+                performance_target_status = "unknown"
+                if status == "available" and verdict in {"可用", "主图候选"}:
+                    performance_target_met = True
+                    performance_target_status = "met"
+                elif status == "available" and verdict in {"结果未达标", "结果未全达标", "不合理"}:
+                    performance_target_met = False
+                    performance_target_status = "not_met"
             elif requirement.panel in {"c", "d"}:
                 # The available validation cohorts use fibrosis or HCC
                 # endpoints rather than the planned healthy-versus-NAFLD one.
                 performance_target_met = None
                 performance_target_status = "not_evaluated"
         projected_credit = 1.0 if requirement.implementation >= 0.90 else requirement.implementation
+        method_valid = bool(
+            status in {"available", "valid_negative", "exploratory"}
+            and verdict in GOOD_VERDICTS
+        )
+        evidence_sufficient = bool(
+            status in {"available", "valid_negative"}
+            and verdict
+            in {"可用", "主图候选", "阴性结果"}
+        )
         rows.append(
             {
                 "figure": requirement.figure,
@@ -265,6 +281,19 @@ def audit_plan_coverage(output_root: Path) -> dict[str, Any]:
                 "dependency": requirement.dependency,
                 "current_credit": current_credit,
                 "projected_credit": projected_credit,
+                "file_generated": status
+                in {"available", "prepared_not_run", "needs_revision"},
+                "method_valid": method_valid,
+                "evidence_sufficient": evidence_sufficient,
+                "scientific_outcome_status": (
+                    "valid_negative"
+                    if verdict == "阴性结果"
+                    else "reported_with_limitations"
+                    if verdict == "需限定解释"
+                    else "available_result"
+                    if method_valid
+                    else "unknown"
+                ),
                 "performance_target_met": performance_target_met,
                 "performance_target_applicable": performance_target_applicable,
                 "performance_target_status": performance_target_status,
@@ -273,7 +302,7 @@ def audit_plan_coverage(output_root: Path) -> dict[str, Any]:
         )
     frame = pd.DataFrame(rows)
     total_weight = float(frame["weight"].sum())
-    weighted = lambda column: float(  # noqa: E731
+    weighted = lambda column: float(
         (frame[column] * frame["weight"]).sum() / total_weight
     )
     implementation_percent = weighted("implementation_support") * 100.0
@@ -289,8 +318,22 @@ def audit_plan_coverage(output_root: Path) -> dict[str, Any]:
         .to_dict("records")
     )
     summary = {
-        "standard": "experiment-plan-one weighted coverage",
-        "panels": int(len(frame)),
+        "standard": "experiment-plan-one weighted implementation/output coverage (not publication readiness)",
+        "publication_readiness": "not_assessed",
+        "evidence_state_vocabulary": [
+            "not_run",
+            "input_prepared",
+            "failed",
+            "exploratory",
+            "valid_negative",
+            "valid_positive",
+            "unknown",
+        ],
+        "method_valid_panels": int(frame["method_valid"].sum()),
+        "evidence_sufficient_panels": int(frame["evidence_sufficient"].sum()),
+        "file_generated_panels": int(frame["file_generated"].sum()),
+        "performance_targets_unknown": int(frame["performance_target_status"].eq("unknown").sum()),
+        "panels": len(frame),
         "weight_total": total_weight,
         "implementation_completion_percent": round(implementation_percent, 2),
         "current_result_completion_percent": round(current_percent, 2),
@@ -350,6 +393,9 @@ def _render_markdown(rows: pd.DataFrame, summary: dict[str, Any]) -> str:
         f"- Panels: {summary['panels']}",
         f"- Code/implementation coverage: {summary['implementation_completion_percent']:.2f}%",
         f"- Current executed-result coverage: {summary['current_result_completion_percent']:.2f}%",
+        f"- Panels with generated files: {summary['file_generated_panels']}/{summary['panels']}",
+        f"- Panels with method-valid audits: {summary['method_valid_panels']}/{summary['panels']}",
+        f"- Panels with sufficient evidence audits: {summary['evidence_sufficient_panels']}/{summary['panels']}",
         (
             "- Projected coverage with required external data/tools: "
             f"{summary['projected_completion_percent_with_prerequisites']:.2f}%"

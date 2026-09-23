@@ -1,5 +1,14 @@
 {
   "completion_target_percent": 90.0,
+  "run_id": null,
+  "known_reference_targets": [
+    "TNF",
+    "IL1B",
+    "IL6",
+    "TP53",
+    "MAPK14",
+    "PTGS2"
+  ],
   "novelty_exclusions": [
     "TNF",
     "IL1B",
@@ -41,40 +50,61 @@
     "omim_file": null,
     "ttd_file": null,
     "gene_column": null,
-    "use_open_evidence_sources": true
+    "use_open_evidence_sources": true,
+    "source_thresholds": {
+      "GeneCards": "relevance_score_above_median_verify_licensed_export",
+      "OMIM": "gene_map_or_morbid_map_entry",
+      "TTD": "approved_or_clinical_marker_entry"
+    }
   },
   "datasets": {
     "GSE89632": {
       "role": "training",
+      "endpoint": "healthy_control_vs_NAFLD",
       "platform": "GPL14951",
       "condition_column": "condition"
     },
     "GSE49541": {
-      "role": "external_validation_fibrosis",
+      "role": "separate_endpoint_fibrosis_association",
+      "endpoint": "advanced_vs_mild_fibrosis",
+      "validation_status": "not_same_endpoint_validation",
       "platform": "GPL570",
       "condition_column": "condition"
     },
     "GSE164441": {
-      "role": "external_validation_hcc_tumor_vs_adjacent",
-      "condition_column": "condition"
+      "role": "hcc_extension_analysis",
+      "endpoint": "tumor_vs_patient_matched_adjacent_non_tumor",
+      "validation_status": "different_endpoint",
+      "condition_column": "condition",
+      "pair_column": "patient"
     },
     "GSE135251": {
-      "role": "primary_external_validation_nafld",
+      "role": "same_endpoint_external_candidate",
       "endpoint": "healthy_vs_NAFLD",
-      "condition_column": "condition"
+      "validation_status": "previously_exposed_development_support",
+      "previously_used_for_model_development": true,
+      "condition_column": "condition",
+      "expected_condition_counts": {
+        "control": 10,
+        "NAFLD": 206
+      }
     },
     "GSE270583": {
       "role": "mouse_single_cell_discovery",
-      "species": "mm"
+      "species": "mm",
+      "validation_status": "insufficient_biological_replication"
     },
     "GSE202379": {
       "role": "human_single_cell_validation",
-      "species": "hs"
+      "species": "hs",
+      "biological_unit": "donor",
+      "metadata_revision": "2025-06-06"
     }
   },
   "ppi": {
     "required_score": 700,
-    "top_n": 20
+    "top_n": 20,
+    "module_method": "louvain"
   },
   "ml": {
     "cv_folds": 5,
@@ -107,11 +137,18 @@
     "mouse": {
       "max_cells": 5000,
       "cellchat_permutations": 100,
-      "cellchat_seed": 123
+      "cellchat_seed": 123,
+      "inference_unit": "library_or_verified_animal"
     },
     "human": {
-      "max_cells_per_sample": 1200,
-      "seed": 42
+      "max_cells_per_sample": 0,
+      "seed": 42,
+      "inference_unit": "donor"
+    },
+    "insilico": {
+      "engine": "local_grn",
+      "scientific_role": "predicted_perturbation_response",
+      "perturbation_scope": "pre_specified_primary_target"
     }
   },
   "docking": {

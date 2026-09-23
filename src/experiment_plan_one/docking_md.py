@@ -3,12 +3,9 @@
 from __future__ import annotations
 
 import json
-import logging
 import math
-import os
 import re
 import shutil
-import subprocess
 import urllib.parse
 import urllib.request
 from pathlib import Path
@@ -19,7 +16,15 @@ import numpy as np
 import pandas as pd
 from scipy.spatial import cKDTree
 
-from .common import LOG, download_file, ensure_dir, get_json, save_figure, write_json
+from .common import (
+    LOG,
+    download_file,
+    ensure_dir,
+    get_json,
+    save_figure,
+    sha256_file,
+    write_json,
+)
 
 UNIPROT_SEARCH = "https://rest.uniprot.org/uniprotkb/search"
 RCSB_SEARCH = "https://search.rcsb.org/rcsbsearch/v2/query"
@@ -204,9 +209,13 @@ def run_docking_for_targets(
     )
     rows: list[dict[str, Any]] = []
     target_records: list[dict[str, Any]] = []
+    run_manifest: list[dict[str, Any]] = []
+    ligand_id = str(compound.get("pubchem_cid") or "ligand")
     for target in targets:
         gene = str(target["gene"]).upper()
         target_dir = ensure_dir(output_dir / "targets" / gene)
+        docking_run_id = f"{gene}|{ligand_id}|dock|replicate_set"
+        md_run_id = f"{gene}|{ligand_id}|md|run_001"
         data: dict[str, Any] = {
             "workdir": str(target_dir),
             "output_dir": "outputs/run_001",
@@ -256,6 +265,9 @@ def run_docking_for_targets(
                 "tanimoto_cutoff": 0.7,
             },
             "md_simulation": {
+                "target_id": gene,
+                "ligand_id": ligand_id,
+                "run_id": md_run_id,
                 "mode": "prepare",
                 "top_n": 1,
                 "prod_steps": 50_000_000,
@@ -297,13 +309,29 @@ def run_docking_for_targets(
         shutil.copy2(receptor_pdb, receptor_copy)
         config_path = target_dir / "docking_config.json"
         write_json(config_path, data)
+        run_manifest.append(
+            {
+                "target_id": gene,
+                "ligand_id": ligand_id,
+                "docking_run_id": docking_run_id,
+                "md_run_id": md_run_id,
+                "workdir": str(target_dir),
+                "config": str(config_path),
+                "config_sha256": sha256_file(config_path),
+                "receptor_sha256": sha256_file(receptor_copy),
+                "ligand_sha256": sha256_file(ligand),
+                "random_seed": 42,
+                "docking_replicates": int(replicates),
+                "structure": structure,
+            }
+        )
         cfg = ResolvedConfig(data, config_path)
         log = setup_logging(str(target_dir / "docking.log"))
         try:
             prepare_receptor(cfg, log)
             prepare_ligands(cfg, log)
             run_docking(cfg, log)
-            summary = analyze_results(cfg, log)
+            analyze_results(cfg, log)
         except Exception as exc:  # noqa: BLE001
             LOG.warning("docking failed for %s: %s", gene, exc)
             target_records.append(
@@ -353,9 +381,21 @@ def run_docking_for_targets(
         )
     score_frame = pd.DataFrame(rows)
     score_frame.to_csv(output_dir / "docking_scores.csv", index=False)
+    write_json(
+        output_dir / "docking_run_manifest.json",
+        {
+            "schema_version": 1,
+            "targets": run_manifest,
+            "selection_rule": (
+                "prepare MD only for the first pre-specified target in the "
+                "priority order; Vina scores are not compared across proteins"
+            ),
+        },
+    )
     if not score_frame.empty:
         _plot_docking_heatmap(score_frame, output_dir / "fig5c_docking_affinity_heatmap.png")
-        best_target = score_frame.sort_values("best_affinity_kcal_mol").iloc[0]
+        # Vina scores are not comparable across different protein pockets.
+        best_target = score_frame.iloc[0]
         best_dir = Path(str(best_target["workdir"]))
         _write_docking_pose_figure(
             best_dir,
@@ -363,6 +403,25 @@ def run_docking_for_targets(
             str(best_target["gene"]),
         )
         _write_interaction_figure(best_dir, output_dir / "fig5b_interaction_schematic.png", str(best_target["gene"]))
+        write_json(
+            output_dir / "fig5b_status.json",
+            {
+                "status": "geometric_candidates_only",
+                "method": (
+                    "distance plus donor-H-acceptor angle where explicit "
+                    "hydrogens are present"
+                ),
+                "limitations": (
+                    "Aromatic plane/pi-stacking, protonation and charge "
+                    "evidence were not validated with PLIP or an equivalent "
+                    "chemistry engine; candidate labels must not be reported "
+                    "as confirmed interactions."
+                ),
+                "machine_readable_table": str(
+                    output_dir / "fig5b_interaction_schematic.csv"
+                ),
+            },
+        )
     write_json(
         output_dir / "docking_summary.json",
         {
@@ -370,7 +429,8 @@ def run_docking_for_targets(
             "targets_completed": len(rows),
             "targets": target_records,
             "exhaustiveness": exhaustiveness,
-            "seed_replicates": 3,
+            "seed_replicates": int(replicates),
+            "run_manifest": str(output_dir / "docking_run_manifest.json"),
         },
     )
     return {
@@ -490,7 +550,7 @@ def _parse_pdb_coordinates(path: Path) -> tuple[np.ndarray, np.ndarray]:
 
 
 def _plot_docking_heatmap(scores: pd.DataFrame, output: Path) -> None:
-    frame = scores.dropna(subset=["best_affinity_kcal_mol"]).sort_values("best_affinity_kcal_mol")
+    frame = scores.dropna(subset=["best_affinity_kcal_mol"]).copy()
     if frame.empty:
         return
     fig, ax = plt.subplots(figsize=(6.2, max(3.5, len(frame) * 0.45)))
@@ -526,7 +586,17 @@ def _plot_docking_heatmap(scores: pd.DataFrame, output: Path) -> None:
             fontsize=7,
             fontweight="bold",
         )
-    ax.set_title("6PPD-Q docking affinity", fontweight="bold")
+    ax.set_title("6PPD-Q docking affinity by pre-specified target order", fontweight="bold")
+    ax.text(
+        0,
+        -0.24,
+        "Vina scores are pocket-specific and are not ranked across proteins.",
+        transform=ax.transAxes,
+        ha="left",
+        va="top",
+        fontsize=7,
+        color="#4a5560",
+    )
     fig.colorbar(image, ax=ax, label="kcal/mol", shrink=0.7)
     save_figure(fig, output)
 
@@ -595,10 +665,11 @@ def _write_interaction_figure(target_dir: Path, output: Path, gene: str) -> None
             .head(18)
         )
         type_colors = {
-            "hydrogen_bond": "#2f6bb3",
-            "hydrophobic": "#d29b32",
-            "salt_bridge": "#c0392b",
-            "aromatic_contact": "#6c5fa7",
+            "hydrogen_bond_geometric_candidate": "#2f6bb3",
+            "polar_contact_candidate": "#6b8eb5",
+            "hydrophobic_contact": "#d29b32",
+            "salt_bridge_candidate": "#c0392b",
+            "aromatic_contact_candidate": "#6c5fa7",
             "vdw_contact": "#7b8794",
         }
         for position, (_, row) in enumerate(top.iterrows()):
@@ -648,8 +719,9 @@ def _write_interaction_figure(target_dir: Path, output: Path, gene: str) -> None
     ax.text(
         0.5,
         0.02,
-        "Interaction types are geometric approximations. PLIP/Discovery Studio "
-        "can be used for orthogonal review.",
+        "Interaction labels are distance/geometry candidates; PLIP or another "
+        "validated analyzer is required before claiming confirmed hydrogen "
+        "bonds, salt bridges or pi-stacking.",
         ha="center",
         va="bottom",
         fontsize=7.8,
@@ -928,7 +1000,10 @@ def _typed_interactions(
         [atom["coordinate"] for atom in ligand_atoms]
     )
     tree = cKDTree(ligand_coordinates)
-    records: dict[tuple[str, str, str, int, str], float] = {}
+    records: dict[
+        tuple[str, str, str, int, str],
+        dict[str, Any],
+    ] = {}
     aromatic_residues = {"PHE", "TYR", "TRP", "HIS"}
     negative_atoms = {
         ("ASP", "OD1"),
@@ -944,6 +1019,33 @@ def _typed_interactions(
         ("HIS", "ND1"),
         ("HIS", "NE2"),
     }
+    def donor_angle(
+        donor: dict[str, Any],
+        acceptor_coordinate: np.ndarray,
+    ) -> float | None:
+        donor_coordinate = np.asarray(donor["coordinate"], dtype=float)
+        hydrogens = [
+            atom
+            for atom in ligand_atoms
+            if str(atom.get("element")).upper() == "H"
+            and float(np.linalg.norm(atom["coordinate"] - donor_coordinate)) <= 1.25
+        ]
+        if not hydrogens:
+            return None
+        hydrogen = min(
+            hydrogens,
+            key=lambda atom: float(
+                np.linalg.norm(atom["coordinate"] - donor_coordinate)
+            ),
+        )
+        vector_a = donor_coordinate - hydrogen["coordinate"]
+        vector_b = acceptor_coordinate - hydrogen["coordinate"]
+        denominator = float(np.linalg.norm(vector_a) * np.linalg.norm(vector_b))
+        if denominator <= 0:
+            return None
+        cosine = float(np.dot(vector_a, vector_b) / denominator)
+        return float(np.degrees(np.arccos(np.clip(cosine, -1.0, 1.0))))
+
     for protein in protein_atoms:
         distance, ligand_index = tree.query(protein["coordinate"])
         distance = float(distance)
@@ -952,13 +1054,83 @@ def _typed_interactions(
         ligand = ligand_atoms[int(ligand_index)]
         ligand_element = str(ligand["element"]).upper()
         protein_element = str(protein["element"]).upper()
-        interactions: list[str] = []
+        interactions: list[tuple[str, str, float | None, str]] = []
         if (
             protein_element in {"N", "O", "S"}
             and ligand_element in {"N", "O", "S"}
             and distance <= 3.5
         ):
-            interactions.append("hydrogen_bond")
+            ligand_donor = ligand
+            protein_donor = protein
+            angle = donor_angle(
+                ligand_donor,
+                np.asarray(protein["coordinate"], dtype=float),
+            )
+            protein_hydrogen_candidates = [
+                atom
+                for atom in protein_atoms
+                if str(atom.get("element")).upper() == "H"
+                and float(
+                    np.linalg.norm(
+                        atom["coordinate"]
+                        - np.asarray(protein_donor["coordinate"], dtype=float)
+                    )
+                )
+                <= 1.25
+            ]
+            if angle is None and protein_hydrogen_candidates:
+                hydrogen = min(
+                    protein_hydrogen_candidates,
+                    key=lambda atom: float(
+                        np.linalg.norm(
+                            atom["coordinate"]
+                            - np.asarray(protein_donor["coordinate"], dtype=float)
+                        )
+                    ),
+                )
+                vector_a = (
+                    np.asarray(protein_donor["coordinate"], dtype=float)
+                    - hydrogen["coordinate"]
+                )
+                vector_b = (
+                    np.asarray(ligand["coordinate"], dtype=float)
+                    - hydrogen["coordinate"]
+                )
+                denominator = float(
+                    np.linalg.norm(vector_a) * np.linalg.norm(vector_b)
+                )
+                if denominator > 0:
+                    angle = float(
+                        np.degrees(
+                            np.arccos(
+                                np.clip(
+                                    float(
+                                        np.dot(vector_a, vector_b) / denominator
+                                    ),
+                                    -1.0,
+                                    1.0,
+                                )
+                            )
+                        )
+                    )
+            if angle is not None and 120.0 <= angle <= 180.0:
+                interactions.append(
+                    (
+                        "hydrogen_bond_geometric_candidate",
+                        "geometry_and_distance",
+                        angle,
+                        "donor-H-acceptor angle passes the geometric candidate rule",
+                    )
+                )
+            else:
+                interactions.append(
+                    (
+                        "polar_contact_candidate",
+                        "distance_only",
+                        angle,
+                        "polar atoms are close; explicit hydrogen-bond geometry was not verifiable",
+                    )
+                )
         if (
             (protein["residue"], protein["atom"]) in negative_atoms
             and ligand_element in {"N", "O"}
@@ -968,22 +1140,50 @@ def _typed_interactions(
             and ligand_element in {"N", "O"}
             and distance <= 4.0
         ):
-            interactions.append("salt_bridge")
+            interactions.append(
+                (
+                    "salt_bridge_candidate",
+                    "charged_group_distance",
+                    None,
+                    "charged functional groups are close; not experimentally confirmed",
+                )
+            )
         if (
             protein["residue"] in aromatic_residues
             and ligand_element in {"C", "N", "O"}
             and distance <= 4.5
         ):
-            interactions.append("aromatic_contact")
+            interactions.append(
+                (
+                    "aromatic_contact_candidate",
+                    "ring_identity_and_distance",
+                    None,
+                    "aromatic residue and ligand atom are close; plane geometry is not claimed",
+                )
+            )
         if (
             protein_element == "C"
             and ligand_element == "C"
             and distance <= 4.5
         ):
-            interactions.append("hydrophobic")
+            interactions.append(
+                (
+                    "hydrophobic_contact",
+                    "carbon_distance",
+                    None,
+                    "carbon-carbon close contact",
+                )
+            )
         if not interactions:
-            interactions.append("vdw_contact")
-        for interaction in interactions:
+            interactions.append(
+                (
+                    "vdw_contact",
+                    "distance_only",
+                    None,
+                    "no stronger typed contact candidate was detected",
+                )
+            )
+        for interaction, evidence, angle, note in interactions:
             key = (
                 interaction,
                 str(ligand["atom"]),
@@ -991,7 +1191,18 @@ def _typed_interactions(
                 int(protein["residue_number"]),
                 str(protein["chain"]),
             )
-            records[key] = min(records.get(key, float("inf")), distance)
+            current = records.get(key)
+            if current is None or distance < float(current["distance_angstrom"]):
+                records[key] = {
+                    "distance_angstrom": distance,
+                    "evidence_class": evidence,
+                    "angle_degrees": (
+                        round(float(angle), 3)
+                        if angle is not None and np.isfinite(angle)
+                        else np.nan
+                    ),
+                    "evidence_note": note,
+                }
     rows = [
         {
             "interaction_type": key[0],
@@ -999,9 +1210,9 @@ def _typed_interactions(
             "residue": key[2],
             "residue_number": key[3],
             "chain": key[4],
-            "distance_angstrom": distance,
+            **value,
         }
-        for key, distance in records.items()
+        for key, value in records.items()
     ]
     return (
         pd.DataFrame(rows)
@@ -1083,7 +1294,22 @@ def prepare_or_run_md(
     scores = pd.read_csv(scores_path)
     if scores.empty:
         return {"status": "skipped", "reason": "no completed docking target"}
-    best = scores.sort_values("best_affinity_kcal_mol").iloc[0]
+    best = scores.iloc[0]
+    gene = str(best["gene"]).upper()
+    manifest_path = docking_dir / "docking_run_manifest.json"
+    manifest = (
+        json.loads(manifest_path.read_text(encoding="utf-8"))
+        if manifest_path.exists()
+        else {}
+    )
+    manifest_entry = next(
+        (
+            entry
+            for entry in (manifest.get("targets") or [])
+            if str(entry.get("target_id") or "").upper() == gene
+        ),
+        {},
+    )
     target_dir = Path(str(best["workdir"]))
     config_path = target_dir / "docking_config.json"
     data = json.loads(config_path.read_text(encoding="utf-8"))
@@ -1100,6 +1326,17 @@ def prepare_or_run_md(
             "cpu": int(cpu),
             "gpu": bool(gpu),
             "mmpbsa_command": data["md_simulation"].get("mmpbsa_command"),
+            "target_id": gene,
+            "ligand_id": str(
+                manifest_entry.get("ligand_id")
+                or data["md_simulation"].get("ligand_id")
+                or ""
+            ),
+            "run_id": str(
+                manifest_entry.get("md_run_id")
+                or data["md_simulation"].get("run_id")
+                or f"{gene}|md|run_001"
+            ),
         }
     )
     write_json(config_path, data)
@@ -1107,13 +1344,71 @@ def prepare_or_run_md(
     log = setup_logging(str(target_dir / "md.log"))
     result = run_md_simulation(cfg, log)
     write_json(docking_dir / "md_execution.json", result)
+    run_dir = _select_manifest_run_dir(
+        cfg.md_dir(),
+        ligand_id=str(
+            manifest_entry.get("ligand_id")
+            or data["md_simulation"].get("ligand_id")
+            or ""
+        ),
+    )
+    production_ns = float(result.get("prod_ns") or 0.0)
+    if str(result.get("mode")) == "prepare":
+        run_status = "prepared"
+    elif int(result.get("completed") or 0) > 0:
+        run_status = "completed"
+    else:
+        run_status = "failed"
+    if run_status == "completed" and production_ns < 100.0 - 1e-9:
+        run_status = "incomplete_duration"
+    write_json(
+        docking_dir / "md_run_manifest.json",
+        {
+            "schema_version": 1,
+            "target_id": gene,
+            "ligand_id": str(manifest_entry.get("ligand_id") or ""),
+            "run_id": str(
+                manifest_entry.get("md_run_id")
+                or data["md_simulation"].get("run_id")
+                or f"{gene}|md|run_001"
+            ),
+            "run_dir": str(run_dir) if run_dir else "",
+            "status": run_status,
+            "production_ns": production_ns,
+            "configured_production_ns": 100.0,
+            "random_seed": int(data["md_simulation"].get("gen_seed", 42)),
+            "receptor_sha256": sha256_file(
+                Path(data["receptor"]["input"])
+            ),
+            "ligand_sha256": sha256_file(
+                Path(data["ligand"]["input"])
+            ),
+            "selection_rule": (
+                "first pre-specified target in docking_scores.csv; "
+                "cross-protein Vina scores are not ranked"
+            ),
+            "result": result,
+        },
+    )
     return {
         "status": result.get("status") or ("completed" if run else "prepared"),
         "target": str(best["gene"]),
         "mode": "auto" if run else "prepare",
         "simulation_ns": 100.0,
+        "production_ns": production_ns,
+        "run_dir": str(run_dir) if run_dir else "",
         "temperature_k": 310.0,
         "pressure_bar": 1.0,
         "gpu": bool(gpu),
         "result": result,
     }
+
+
+def _select_manifest_run_dir(md_dir: Path, *, ligand_id: str) -> Path | None:
+    if not md_dir.exists():
+        return None
+    candidates = sorted(path for path in md_dir.iterdir() if path.is_dir())
+    exact = [path for path in candidates if path.name == ligand_id]
+    if len(exact) == 1:
+        return exact[0]
+    return candidates[0] if len(candidates) == 1 else None

@@ -84,11 +84,55 @@ if (length(genes) < 3) quit(status = 0)
 org_pkg <- if (species == "mm") "org.Mm.eg.db" else "org.Hs.eg.db"
 org_db <- getExportedValue(org_pkg, org_pkg)
 kegg_org <- ifelse(species == "mm", "mmu", "hsa")
+universe_ids <- NULL
+if (length(args) >= 4 && nzchar(args[4])) {
+  background <- read.csv(args[4], stringsAsFactors = FALSE)$gene
+  unique_background <- unique(as.character(background))
+  unique_background <- unique_background[
+    !is.na(unique_background) & nzchar(unique_background)
+  ]
+  mapped_background <- suppressWarnings(bitr(
+    unique_background,
+    fromType = "SYMBOL",
+    toType = "ENTREZID",
+    OrgDb = org_db
+  ))
+  background_mapping <- data.frame(
+    gene = unique_background,
+    entrez_id = mapped_background$ENTREZID[
+      match(unique_background, mapped_background$SYMBOL)
+    ],
+    mapping_status = ifelse(
+      unique_background %in% mapped_background$SYMBOL,
+      "mapped",
+      "unmapped"
+    ),
+    stringsAsFactors = FALSE
+  )
+  universe_ids <- unique(mapped_background$ENTREZID)
+  if (length(universe_ids) < 3) stop("fewer than three background genes mapped")
+  write.csv(background_mapping, file.path(out_dir, "background_id_mapping.csv"), row.names = FALSE)
+}
 
 eg <- tryCatch(
   bitr(genes, fromType = "SYMBOL", toType = "ENTREZID", OrgDb = org_db),
   error = function(e) NULL
 )
+query_mapping <- data.frame(
+  gene = genes,
+  entrez_id = NA_character_,
+  mapping_status = "unmapped",
+  stringsAsFactors = FALSE
+)
+if (!is.null(eg) && nrow(eg) > 0) {
+  query_mapping$entrez_id <- eg$ENTREZID[match(genes, eg$SYMBOL)]
+  query_mapping$mapping_status <- ifelse(
+    genes %in% eg$SYMBOL,
+    "mapped",
+    "unmapped"
+  )
+}
+write.csv(query_mapping, file.path(out_dir, "query_id_mapping.csv"), row.names = FALSE)
 if (is.null(eg) || nrow(eg) == 0) {
   write.csv(data.frame(note = "no gene ID mapping"),
             file.path(out_dir, "insilico_go_enrichment.csv"), row.names = FALSE)
@@ -96,6 +140,27 @@ if (is.null(eg) || nrow(eg) == 0) {
             file.path(out_dir, "insilico_kegg_enrichment.csv"), row.names = FALSE)
   quit(status = 0)
 }
+if (!is.null(universe_ids) && any(!eg$ENTREZID %in% universe_ids)) {
+  stop("query genes are outside the specified testable background")
+}
+
+package_versions <- data.frame(
+  package = c(
+    "clusterProfiler", "org.Hs.eg.db", "org.Mm.eg.db", "KEGG_REST"
+  ),
+  version = c(
+    as.character(utils::packageVersion("clusterProfiler")),
+    as.character(utils::packageVersion("org.Hs.eg.db")),
+    as.character(utils::packageVersion("org.Mm.eg.db")),
+    paste0("query_date=", Sys.Date())
+  ),
+  stringsAsFactors = FALSE
+)
+write.csv(
+  package_versions,
+  file.path(out_dir, "enrichment_database_versions.csv"),
+  row.names = FALSE
+)
 
 go_parts <- lapply(c("BP", "CC", "MF"), function(ont) {
   res <- tryCatch(
@@ -104,9 +169,10 @@ go_parts <- lapply(c("BP", "CC", "MF"), function(ont) {
       OrgDb = org_db,
       keyType = "ENTREZID",
       ont = ont,
+      universe = universe_ids,
       pAdjustMethod = "BH",
-      pvalueCutoff = 0.2,
-      qvalueCutoff = 0.3,
+      pvalueCutoff = 1,
+      qvalueCutoff = 1,
       readable = TRUE
     ),
     error = function(e) NULL
@@ -129,7 +195,8 @@ if (!is.null(go_df) && nrow(go_df) > 0) {
 
 kegg <- tryCatch(
   enrichKEGG(gene = unique(eg$ENTREZID), organism = kegg_org,
-             pvalueCutoff = 0.2),
+             universe = universe_ids, pAdjustMethod = "BH", pvalueCutoff = 1,
+             qvalueCutoff = 1),
   error = function(e) NULL
 )
 if (!is.null(kegg)) {

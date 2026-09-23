@@ -309,7 +309,6 @@ def _fetch_swiss_target(
         headers={**headers, "Referer": f"{SWISS_TARGET_BASE}/index.php"},
     )
     response = opener.open(request, timeout=timeout)
-    submitted_url = response.geturl()
     submitted = response.read().decode("utf-8", "replace")
     match = re.search(r'location\.replace\("([^"]+)', submitted)
     if not match:

@@ -132,31 +132,31 @@ REVIEWS: dict[tuple[str, str], FigureReview] = {
         "合理",
         "良好",
         "可用",
-        "交叉验证ROC绘制方式正确。",
+        "ROC由整个模型/特征选择流程的外折OOF预测绘制，而不是普通CV预测。",
     ),
     ("Figure3_机器学习模型构建与SHAP核心特征", "c"): FigureReview(
         "部分合理",
         "良好",
-        "结果未达标",
-        "GSE49541检测的是纤维化分期，不是同一健康/NAFLD终点；应按实际外部验证指标解释。",
+        "需限定解释",
+        "GSE49541检测的是纤维化分期，不是同一健康/NAFLD终点；仅作为跨终点探索，不设AUC通过阈值。",
     ),
     ("Figure3_机器学习模型构建与SHAP核心特征", "d"): FigureReview(
         "部分合理",
         "良好",
-        "结果未全达标",
-        "外部队列的终点不同，应分别报告AUC并按实际验证结果判断泛化性。",
+        "需限定解释",
+        "GSE135251是同一疾病类别候选但既往分析暴露需登记；GSE164441为HCC配对癌旁扩展终点。",
     ),
     ("Figure3_机器学习模型构建与SHAP核心特征", "e"): FigureReview(
-        "不合理",
-        "中等",
-        "结果未达标",
-        "应根据嵌套交叉验证输出的校准斜率、截距、Brier和Hosmer-Lemeshow检验判断。",
+        "合理",
+        "良好",
+        "需限定解释",
+        "校准参数、Brier和H-L检验需联合解释；H-L p>0.05 不单独证明校准合格。",
     ),
     ("Figure3_机器学习模型构建与SHAP核心特征", "f"): FigureReview(
         "合理",
         "良好",
         "可用",
-        "SHAP排名清晰，但仅63例训练，应报告稳定性/重采样波动。",
+        "SHAP值来自明确标识的未校准解释模型；需报告重复筛选稳定性。",
     ),
     ("Figure3_机器学习模型构建与SHAP核心特征", "g"): FigureReview(
         "合理",
@@ -185,8 +185,8 @@ REVIEWS: dict[tuple[str, str], FigureReview] = {
     ("Figure4_单细胞图谱_细胞通讯与虚拟扰动", "c"): FigureReview(
         "合理",
         "良好",
-        "可用",
-        "GPAT3在主要细胞中表达稀疏，统计零膨胀明显，应与dropout一起解释。",
+        "需限定解释",
+        "小提琴图仅描述细胞分布；GSE270583每个条件生物学重复不足，不输出组间显著性。",
     ),
     ("Figure4_单细胞图谱_细胞通讯与虚拟扰动", "d"): FigureReview(
         "合理",
@@ -197,20 +197,20 @@ REVIEWS: dict[tuple[str, str], FigureReview] = {
     ("Figure4_单细胞图谱_细胞通讯与虚拟扰动", "e"): FigureReview(
         "合理",
         "良好",
-        "可用",
-        "组成图清楚，图例已移至下方；建议增加每样本比例统计和β回归/FDR。",
+        "需限定解释",
+        "组成比例先按独立文库/样本计算；单NCD对照不足以进行群体组成推断。",
     ),
     ("Figure4_单细胞图谱_细胞通讯与虚拟扰动", "f"): FigureReview(
         "合理",
         "良好",
         "需限定解释",
-        "已改为显式配体-受体评分、细胞类型内条件标签置换检验和 FDR；仍不是 R CellChat 原实现，主图标题和图注必须保留 CellChat-like 限定。",
+        "输出为显式配体-受体评分；只有至少两个独立生物单位/组时才执行标签置换和FDR，否则仅描述。",
     ),
     ("Figure4_单细胞图谱_细胞通讯与虚拟扰动", "g"): FigureReview(
         "合理",
         "良好",
         "需限定解释",
-        "Top10 变化图已从源数据按 600 dpi 重绘；网络与 UMAP 保留为补充材料。正文必须说明这是 scTenifold/网络模拟而非湿实验敲除。",
+        "正文必须说明这是局部稀疏GRN预测扰动；若scTenifoldKnk不可用，不得笼统称为CellOracle或真实敲除。",
     ),
     ("Figure4_单细胞图谱_细胞通讯与虚拟扰动", "h"): FigureReview(
         "合理",
@@ -221,14 +221,14 @@ REVIEWS: dict[tuple[str, str], FigureReview] = {
     ("Figure4_单细胞图谱_细胞通讯与虚拟扰动", "i"): FigureReview(
         "合理",
         "良好",
-        "可用",
-        "人类疾病谱UMAP清楚，建议标注疾病分期比例。",
+        "需限定解释",
+        "人类UMAP按当前SOFT解析展示；多文库患者需合并，未知donor不得参与患者级推断。",
     ),
     ("Figure4_单细胞图谱_细胞通讯与虚拟扰动", "j"): FigureReview(
         "合理",
         "良好",
-        "可用",
-        "已重构为紧凑的基因×细胞类型×疾病阶段热图，显示相对Healthy的中位表达差并标注Kruskal-Wallis FDR。",
+        "需限定解释",
+        "热图为donor均值×细胞类型×疾病阶段探索性展示，并明确未知患者排除和重复文库合并。",
     ),
     ("Figure5_分子对接与分子动力学模拟", "a"): FigureReview(
         "合理",
@@ -240,13 +240,13 @@ REVIEWS: dict[tuple[str, str], FigureReview] = {
         "合理",
         "良好",
         "需限定解释",
-        "已按氢键、疏水、盐桥、芳香接触和 vdW 分类输出二维相互作用图；PLIP/Discovery Studio 可用于正交复核。",
+        "输出距离/几何候选接触并标注证据级别；未验证角度和环平面时不得写成已证实氢键、盐桥或π堆积。",
     ),
     ("Figure5_分子对接与分子动力学模拟", "c"): FigureReview(
         "合理",
         "良好",
-        "可用",
-        "五个靶点结合能热图清晰，但Vina分数不能替代实验亲和力。",
+        "需限定解释",
+        "热图保留预指定靶点顺序；Vina分数是口袋特异预测值，不跨蛋白排序，也不能替代实验亲和力。",
     ),
     ("Figure5_分子对接与分子动力学模拟", "d"): FigureReview(
         "未运行",
@@ -276,7 +276,7 @@ REVIEWS: dict[tuple[str, str], FigureReview] = {
         "未运行",
         "不可评价",
         "不满足方案",
-        "gmx_MMPBSA结合自由能分解未运行。",
+        "需要真实残基分解、TOTAL列、单位与误差；仅总能量不能满足本面板。",
     ),
 }
 
@@ -371,29 +371,14 @@ def _dynamic_result_reviews(
 
     fibrosis = external.get("GSE49541_fibrosis")
     if fibrosis:
-        evaluated = bool(fibrosis.get("evaluate_auc_target", True))
-        met = bool(fibrosis.get("target_met")) if evaluated else False
         reviews[(figure, "c")] = FigureReview(
-            "合理" if (met or not evaluated) else "部分合理",
+            "合理",
             "良好",
-            (
-                "可用"
-                if met
-                else "需限定解释"
-                if not evaluated
-                else "结果未达标"
-            ),
+            "需限定解释",
             (
                 "GSE49541检测的是纤维化分期，不是同一健康/NAFLD终点；"
                 f"AUC {_format_number(fibrosis.get('auc'))}，"
-                + (
-                    "该终点不套用NAFLD分类AUC阈值。"
-                    if not evaluated
-                    else (
-                        f"目标 {_format_number(fibrosis.get('target_auc'))}，"
-                        f"{'已达到' if met else '未达到'}方案阈值。"
-                    )
-                )
+                "该终点不套用NAFLD分类AUC阈值，也不以跨终点性能判定成功。"
             ),
         )
 
@@ -403,55 +388,40 @@ def _dynamic_result_reviews(
         if (row := external.get(key))
     ]
     if external_validation:
-        evaluated = [
-            row
-            for row in external_validation
-            if bool(row.get("evaluate_auc_target", True))
-        ]
-        all_met = bool(evaluated) and all(
-            bool(row.get("target_met")) for row in evaluated
-        )
-        details = [
-            f"{row.get('dataset')} AUC {_format_number(row.get('auc'))}"
-            + (
-                f" (target {_format_number(row.get('target_auc'))})"
-                if bool(row.get("evaluate_auc_target", True))
-                else " (different endpoint; no NAFLD target)"
+        details = []
+        for row in external_validation:
+            dataset = str(row.get("dataset") or "")
+            suffix = (
+                " (same endpoint category; prior analysis exposure recorded)"
+                if dataset == "GSE135251_NAFLD"
+                else " (HCC paired-adjacent endpoint; no NAFLD target)"
             )
-            for row in external_validation
-        ]
+            details.append(
+                f"{dataset} AUC {_format_number(row.get('auc'))}{suffix}"
+            )
         reviews[(figure, "d")] = FigureReview(
-            "合理" if all_met or not evaluated else "部分合理",
+            "合理",
             "良好",
-            (
-                "可用"
-                if all_met and not any(
-                    not bool(row.get("evaluate_auc_target", True))
-                    for row in external_validation
-                )
-                else "需限定解释"
-                if all_met or not evaluated
-                else "结果未全达标"
-            ),
+            "需限定解释",
             (
                 "; ".join(details)
-                + "。GSE164441为HCC肿瘤与癌旁终点，GSE135251为补充NAFLD终点。"
+                + "。GSE135251为同一疾病类别候选但已登记既往分析暴露；"
+                "GSE164441为HCC肿瘤与配对癌旁终点，不能称为同终点验证。"
             ),
         )
 
     if calibration:
-        met = bool(calibration.get("target_met"))
         reviews[(figure, "e")] = FigureReview(
-            "合理" if met else "不合理",
-            "良好" if met else "中等",
-            "可用" if met else "结果未达标",
+            "合理",
+            "良好",
+            "需限定解释",
             (
-                "嵌套交叉验证校准："
+                "嵌套外折预测校准："
                 f"Hosmer-Lemeshow p={_format_number(calibration.get('hosmer_lemeshow_p'), 3)}, "
                 f"Brier={_format_number(calibration.get('brier'))}, "
                 f"slope={_format_number(calibration.get('calibration_slope'))}, "
                 f"intercept={_format_number(calibration.get('calibration_intercept'))}; "
-                f"{'已达到' if met else '未达到'}方案的校准目标。"
+                "这些指标需联合解释，H-L p>0.05 单独不证明校准合格。"
             ),
         )
     return reviews
@@ -511,7 +481,12 @@ def audit_figures(
                     "合理",
                     "良好",
                     "可用",
-                    "Generated from parsed GROMACS/MM-PBSA trajectory outputs.",
+                    (
+                        "Generated from provenance-bound GROMACS/MM-PBSA "
+                        "outputs; "
+                        f"run={md_figure_status.get('run_manifest', {}).get('run_id', '')}, "
+                        f"production={md_figure_status.get('production_ns', '')} ns."
+                    ),
                 )
             if (
                 figure == "Figure1_化合物表征_靶点预测与通路富集"
@@ -645,7 +620,7 @@ def _svg_text_metrics(svg_path: Path) -> dict[str, Any]:
         for (x, y), values in list(duplicate_groups.items())[:5]
     ]
     return {
-        "duplicate_svg_text_anchor_groups": int(len(duplicate_groups)),
+        "duplicate_svg_text_anchor_groups": len(duplicate_groups),
         "duplicate_svg_text_examples": "; ".join(examples),
     }
 
@@ -781,34 +756,32 @@ def _summary(audit: pd.DataFrame) -> dict[str, Any]:
             )
             else "conditional_ready"
         ),
-        "panel_entries": int(len(all_panel_keys)),
-        "image_entries": int(len(audit)),
-        "available_panels": int(len(available_keys)),
-        "prepared_not_run_panels": int(len(not_run_keys)),
-        "missing_panels": int(len(missing_keys)),
+        "panel_entries": len(all_panel_keys),
+        "image_entries": len(audit),
+        "available_panels": len(available_keys),
+        "prepared_not_run_panels": len(not_run_keys),
+        "missing_panels": len(missing_keys),
         "mean_automatic_quality_score": float(scores.mean()) if len(scores) else None,
         "median_dpi_x": float(available["dpi_x"].median()) if len(available) else None,
-        "panels_wider_than_7_5_inches": int(len(oversize_keys)),
-        "resolution_or_vector_issue_count": int(len(resolution_issue_keys)),
+        "panels_wider_than_7_5_inches": len(oversize_keys),
+        "resolution_or_vector_issue_count": len(resolution_issue_keys),
         "recommended_output_counts": {
             str(key): int(value)
             for key, value in output_tiers.items()
         },
         "label_overlap_counts": {
-            "严重": int(len(severe_overlap_keys)),
-            "轻微": int(len(minor_overlap_keys)),
-            "无": int(
-                len(available_keys - severe_overlap_keys - minor_overlap_keys)
-            ),
+            "严重": len(severe_overlap_keys),
+            "轻微": len(minor_overlap_keys),
+            "无": len(available_keys - severe_overlap_keys - minor_overlap_keys),
         },
-        "duplicate_text_anchor_panel_count": int(len(duplicate_anchor_keys)),
+        "duplicate_text_anchor_panel_count": len(duplicate_anchor_keys),
         "severe_label_overlap_panels": severe_overlaps[
             ["figure", "panel", "content", "label_overlap_notes"]
         ].to_dict(orient="records"),
         "minor_label_overlap_panels": minor_overlaps[
             ["figure", "panel", "content", "label_overlap_notes"]
         ].to_dict(orient="records"),
-        "major_issue_count": int(len(major_issues)),
+        "major_issue_count": len(major_issues),
         "major_issues": major_issues[
             ["figure", "panel", "content", "audit_verdict", "notes"]
         ].to_dict(orient="records"),
@@ -993,14 +966,14 @@ def _render_audit_markdown(
         "",
         "- Run the 100 ns GROMACS production simulation and replace all `NOT_RUN` "
         "panels with measured trajectory and MM-PBSA outputs.",
-        "- Re-run Calibration after a calibration method is selected; the current "
-        "Hosmer-Lemeshow test fails.",
+            "- Report calibration intercept, slope, Brier and H-L together; do not "
+            "treat p>0.05 as a standalone pass/fail test.",
         "- Rebuild Figure 1d/e only if licensed GeneCards, OMIM, TTD exports and "
         "independent ChEMBL/STITCH evidence become available.",
-        "- Keep the CellChat-like label on the ligand-receptor network, or replace it "
-        "with a full CellChat permutation analysis and validated interaction diagram.",
-        "- Re-render the 160 dpi virtual-knockout wrapper panels from source data "
-        "before considering them for a main figure.",
+            "- Keep the explicit ligand-receptor method label; use a full CellChat "
+            "analysis only if the R package and species database are available.",
+            "- Re-render predicted perturbation-response panels from source data "
+            "and state the local GRN method in the figure legend.",
         "- Assemble final multi-panel figures, add lowercase panel letters, export "
         "vector PDF/SVG for line art, and provide source data tables.",
         "- Add confidence intervals, effect sizes and exact FDR to key statistical panels.",

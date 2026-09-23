@@ -30,7 +30,7 @@ from sklearn.metrics import (
 from sklearn.model_selection import RepeatedStratifiedKFold, StratifiedKFold
 from sklearn.neural_network import MLPClassifier
 from sklearn.pipeline import Pipeline
-from sklearn.preprocessing import StandardScaler
+from sklearn.preprocessing import QuantileTransformer, StandardScaler
 from sklearn.svm import SVC
 
 from .common import ensure_dir, read_expression, save_figure, write_json
@@ -127,7 +127,7 @@ def _model_zoo(seed: int = 42) -> dict[str, Any]:
 def _xgboost(seed: int) -> Any:
     try:
         from xgboost import XGBClassifier
-    except Exception as exc:  # noqa: BLE001
+    except Exception as exc:
         raise RuntimeError(f"xgboost unavailable: {exc}") from exc
     return XGBClassifier(
         n_estimators=350,
@@ -146,7 +146,7 @@ def _xgboost(seed: int) -> Any:
 def _lightgbm(seed: int) -> Any:
     try:
         from lightgbm import LGBMClassifier
-    except Exception as exc:  # noqa: BLE001
+    except Exception as exc:
         raise RuntimeError(f"lightgbm unavailable: {exc}") from exc
     return LGBMClassifier(
         n_estimators=350,
@@ -168,7 +168,8 @@ def _pipeline(
     selector: SelectKBest | None = None,
 ) -> Pipeline:
     steps: list[tuple[str, Any]] = [
-        ("imputer", SimpleImputer(strategy="median")),
+        ("imputer", SimpleImputer(strategy="median", keep_empty_features=True)),
+        ("quantiles", QuantileTransformer(n_quantiles=100, output_distribution="uniform", random_state=42)),
         ("scaler", StandardScaler()),
     ]
     if selector is not None:
@@ -224,7 +225,9 @@ def _nested_cv_evaluation(
             X = X_by_feature[key[0]].iloc[train_index]
             y_train = y.iloc[train_index]
             min_class = int(y_train.value_counts().min())
-            folds = max(2, min(inner_folds, min_class))
+            if min_class < 2:
+                raise ValueError("outer training split has insufficient class replication")
+            folds = min(inner_folds, min_class)
             inner = StratifiedKFold(
                 n_splits=folds,
                 shuffle=True,
@@ -248,9 +251,10 @@ def _nested_cv_evaluation(
                             )
                         )
                     )
-                except Exception:  # noqa: BLE001
-                    continue
-            if scores:
+                except Exception as exc:  # noqa: BLE001
+                    LOG.warning("inner CV candidate %s failed: %s", key, exc)
+                    break
+            if len(scores) == folds:
                 candidate_scores[key] = float(np.mean(scores))
         if not candidate_scores:
             raise RuntimeError(
@@ -276,8 +280,9 @@ def _nested_cv_evaluation(
                 "feature_set": best_key[0],
                 "model": best_key[1],
                 "inner_auc": candidate_scores[best_key],
-                "n_train": int(len(train_index)),
-                "n_test": int(len(test_index)),
+                "n_train": len(train_index),
+                "n_test": len(test_index),
+                "test_sample_ids": ";".join(map(str, y.index[test_index])),
             }
         )
     if np.isnan(probabilities).any():
@@ -330,15 +335,15 @@ def run_ml_validation(
     if y.nunique() != 2:
         raise ValueError("training labels must contain exactly two disease classes")
 
-    # Rank harmonization removes platform-specific mean/variance shifts
-    # without using outcome labels. Each gene is converted to its within-
-    # cohort percentile before model fitting or external prediction.
-    all_matrix = (
-        expression[sample_ids]
-        .T.astype(float)
-        .rank(axis=0, method="average", pct=True)
-        .fillna(0.5)
-    )
+    # All learned transformations belong to the fitted sklearn Pipeline.
+    # No cohort-wide ranks or test-set distribution adaptation.
+    all_matrix = expression[sample_ids].T.astype(float)
+    if not all_matrix.index.is_unique or not all_matrix.columns.is_unique:
+        raise ValueError("training sample and gene IDs must be unique")
+    if int(y.value_counts().min()) < cv_folds or cv_folds < 2:
+        raise ValueError("insufficient samples per class for configured CV folds")
+    if any(name.startswith("coexpression") for name in candidate_sets):
+        raise ValueError("label-selected coexpression sets must not be passed as static CV features")
     feature_sets: dict[str, tuple[list[str], int | None, str]] = {}
     for name, genes in candidate_sets.items():
         usable = sorted(set(gene.upper() for gene in genes) & set(expression.index))
@@ -436,8 +441,8 @@ def run_ml_validation(
                     "cv_auc_mean": float(np.mean(fold_auc)),
                     "cv_auc_sd": float(np.std(fold_auc, ddof=1)),
                     "cv_auc_folds": ";".join(f"{value:.6f}" for value in fold_auc),
-                    "cv_auc_ci_low": float(np.percentile(fold_auc, 2.5)),
-                    "cv_auc_ci_high": float(np.percentile(fold_auc, 97.5)),
+                    "fold_auc_percentile_2_5": float(np.percentile(fold_auc, 2.5)),
+                    "fold_auc_percentile_97_5": float(np.percentile(fold_auc, 97.5)),
                     "cv_repeats": int(max(1, cv_repeats)),
                     "cv_average_precision": float(np.mean(fold_ap)),
                     "cv_brier": float(np.mean(fold_brier)),
@@ -452,7 +457,8 @@ def run_ml_validation(
     performance = pd.DataFrame(rows)
     performance.to_csv(output_dir / "model_performance.csv", index=False)
     valid_performance = performance[performance["status"] == "ok"].sort_values(
-        ["cv_auc_mean", "cv_average_precision"], ascending=False
+        ["cv_auc_mean", "cv_average_precision", "model", "feature_set"],
+        ascending=[False, False, True, True],
     )
     if valid_performance.empty:
         raise RuntimeError("all ML models failed")
@@ -468,21 +474,10 @@ def run_ml_validation(
         output_dir / "nested_model_selection.csv",
         index=False,
     )
-    selected_model = max(
-        nested_metrics["selected_models"],
-        key=lambda value: (
-            nested_metrics["selected_models"][value],
-            value,
-        ),
-    )
-    selected_feature_set = max(
-        nested_metrics["selected_feature_sets"],
-        key=lambda value: (
-            nested_metrics["selected_feature_sets"][value],
-            value,
-        ),
-    )
-    best_key = (selected_feature_set, selected_model)
+    # Final development choice is the joint candidate maximizing development CV.
+    # Nested outer predictions estimate this selection procedure, not this final fit.
+    best = valid_performance.iloc[0]
+    best_key = (str(best["feature_set"]), str(best["model"]))
     best_model_raw, _ = fitted_models[best_key]
     best_model = _fit_calibrated(
         best_model_raw,
@@ -490,18 +485,22 @@ def run_ml_validation(
         y,
         seed=seed,
     )
-    cv = cv_predictions[best_key]
-    best = valid_performance[
-        (valid_performance["feature_set"] == best_key[0])
-        & (valid_performance["model"] == best_key[1])
-    ].iloc[0]
-
+    cv = {"y": y.to_numpy(), "probability": nested_probability}
+    import joblib
+    joblib.dump(best_model, output_dir / "frozen_model.joblib")
+    write_json(output_dir / "model_contract.json", {
+        "features": list(X_by_feature[best_key[0]].columns),
+        "preprocessing": "training-fitted imputation, quantile mapping, scaling",
+        "selection": "joint development CV; nested OOF for reported internal performance",
+        "shap_model": "uncalibrated explanatory model; not the calibrated predictor",
+        "missing_feature_policy": "reject missing or all-missing required input columns",
+    })
     _plot_auc_heatmap(performance, output_dir / "fig3a_multimodel_auc_heatmap.png")
     _plot_roc(
         cv["y"],
         cv["probability"],
         output_dir / "fig3b_best_model_roc_training.png",
-        title=f"{best_key[0]} / {best_key[1]}",
+        title="Nested out-of-fold selection procedure",
     )
     calibration = _plot_calibration(
         y.to_numpy(),
@@ -522,24 +521,43 @@ def run_ml_validation(
             "probability": cv["probability"],
         }
     )
+    cv_frame["prediction_role"] = "nested_outer_oof"
+    cv_frame["outer_fold"] = 0
+    for fold in nested_selection.itertuples():
+        cv_frame.loc[cv_frame["sample_id"].astype(str).isin(fold.test_sample_ids.split(";")), "outer_fold"] = fold.outer_fold
     cv_frame.to_csv(output_dir / "best_model_cv_predictions.csv", index=False)
+    cv_frame.to_csv(output_dir / "nested_oof_predictions.csv", index=False)
 
     validation_rows: list[dict[str, Any]] = []
     for dataset_name, spec in validation_datasets.items():
-        result = validate_external_model(
-            best_model,
-            training_expression_path=training_expression_path,
-            validation_expression_path=Path(spec["expression"]),
-            validation_metadata_path=Path(spec["metadata"]),
-            condition_map=spec.get("condition_map") or {},
-            comparison=spec.get("comparison") or ("case", "control"),
-            output_dir=output_dir,
-            dataset_name=dataset_name,
-            title=spec.get("title") or dataset_name,
-            endpoint_warning=str(spec.get("endpoint_warning") or ""),
-            evaluate_auc_target=bool(spec.get("evaluate_auc_target", True)),
-            endpoint_role=str(spec.get("endpoint_role") or ""),
-        )
+        try:
+            result = validate_external_model(
+                best_model,
+                training_expression_path=training_expression_path,
+                validation_expression_path=Path(spec["expression"]),
+                validation_metadata_path=Path(spec["metadata"]),
+                condition_map=spec.get("condition_map") or {},
+                comparison=spec.get("comparison") or ("case", "control"),
+                output_dir=output_dir,
+                dataset_name=dataset_name,
+                title=spec.get("title") or dataset_name,
+                endpoint_warning=str(spec.get("endpoint_warning") or ""),
+                evaluate_auc_target=bool(
+                    spec.get("evaluate_auc_target", False)
+                ),
+                endpoint_role=str(spec.get("endpoint_role") or ""),
+            )
+        except Exception as exc:  # noqa: BLE001
+            LOG.warning("external validation failed for %s: %s", dataset_name, exc)
+            result = {
+                "dataset": dataset_name,
+                "status": "failed",
+                "reason": str(exc),
+                "endpoint_role": str(spec.get("endpoint_role") or ""),
+                "endpoint_warning": str(spec.get("endpoint_warning") or ""),
+                "target_met": None,
+                "evaluate_auc_target": False,
+            }
         validation_rows.append(result)
     validation = pd.DataFrame(validation_rows)
     validation.to_csv(output_dir / "external_validation_metrics.csv", index=False)
@@ -557,29 +575,41 @@ def run_ml_validation(
         {
             "best_feature_set": best_key[0],
             "best_model": best_key[1],
-            "cv_auc": float(best["cv_auc_mean"]),
-            "cv_auc_sd": float(best["cv_auc_sd"]),
-            "cv_auc_ci_low": float(best["cv_auc_ci_low"]),
-            "cv_auc_ci_high": float(best["cv_auc_ci_high"]),
+            "cv_auc": float(nested_metrics["auc"]),
+            "cv_auc_sd": None,
+            "cv_auc_sd_note": (
+                "not reported for the outer-OOF AUC; development-fold SD is "
+                "not an independent uncertainty estimate"
+            ),
+            "development_cv_auc_sd": float(best["cv_auc_sd"]),
+            "cv_auc_ci_low": None,
+            "cv_auc_ci_high": None,
+            "cv_auc_ci_note": "not estimated; fold percentiles are not confidence intervals",
+            "development_cv_auc": float(best["cv_auc_mean"]),
             "cv_folds": int(cv_folds),
             "cv_repeats": int(max(1, cv_repeats)),
             "nested_cv": nested_metrics,
             "calibration_method": "sigmoid_calibrated_outer_fold",
             "cv_auc_target": 0.85,
-            "cv_auc_target_met": bool(float(best["cv_auc_mean"]) >= 0.85),
+            "cv_auc_target_met": None,
+            "cv_auc_target_note": "descriptive planning target; not a publication gate",
             "calibration": calibration,
             "external_validation": validation.to_dict(orient="records"),
             "core_genes": core_genes,
             "shap_status": shap["status"],
+            "shap_stability": (
+                str(shap["stability"]) if shap.get("stability") else ""
+            ),
         },
     )
     return {
         "performance": output_dir / "model_performance.csv",
         "external_validation": output_dir / "external_validation_metrics.csv",
         "best_model": best_key,
-        "cv_auc": float(best["cv_auc_mean"]),
+        "cv_auc": float(nested_metrics["auc"]),
         "core_genes": core_genes,
         "shap_values": shap.get("values_path"),
+        "shap_stability": shap.get("stability"),
     }
 
 
@@ -595,33 +625,21 @@ def validate_external_model(
     dataset_name: str,
     title: str,
     endpoint_warning: str = "",
-    evaluate_auc_target: bool = True,
+    evaluate_auc_target: bool = False,
     endpoint_role: str = "",
 ) -> dict[str, Any]:
-    training = read_expression(training_expression_path)
     validation = read_expression(validation_expression_path)
-    ranked_training = training.T.astype(float).rank(axis=0, method="average", pct=True)
-    ranked_validation = validation.T.astype(float).rank(axis=0, method="average", pct=True)
     metadata = pd.read_csv(validation_metadata_path, index_col=0)
     model_columns = _estimator_feature_names(fitted_model)
     if not model_columns:
-        imputer = fitted_model.named_steps.get("imputer")
-        model_columns = list(getattr(imputer, "feature_names_in_", []))
-    if not model_columns:
         raise ValueError(f"could not determine fitted feature names for {dataset_name}")
-    matrix = ranked_validation.reindex(columns=model_columns)
-    for column in model_columns:
-        if column not in ranked_validation.columns:
-            matrix[column] = (
-                float(ranked_training[column].median())
-                if column in ranked_training.columns
-                else 0.5
-            )
-        matrix[column] = pd.to_numeric(matrix[column], errors="coerce").fillna(
-            float(ranked_training[column].median())
-            if column in ranked_training.columns
-            else 0.5
-        )
+    matrix = validation.T.astype(float)
+    missing = [c for c in model_columns if c not in matrix or matrix[c].isna().all()]
+    if missing:
+        raise ValueError(f"{dataset_name}: required features absent/all missing: {missing[:20]}")
+    matrix = matrix.loc[:, model_columns]
+    if not matrix.index.is_unique or not metadata.index.is_unique:
+        raise ValueError("external sample identifiers must be unique")
     condition = metadata.loc[metadata.index.intersection(matrix.index), "condition"].astype(str)
     mapped = condition.map(condition_map)
     valid = mapped.notna()
@@ -631,11 +649,41 @@ def validate_external_model(
     y = mapped[valid].astype(int)
     probabilities = fitted_model.predict_proba(X)[:, 1]
     auc = float(roc_auc_score(y, probabilities))
+    cluster_column = next(
+        (
+            column
+            for column in ("patient", "patient_id", "donor_id", "donor")
+            if column in metadata.columns
+        ),
+        "",
+    )
+    clusters = (
+        metadata.loc[X.index, cluster_column].fillna("").astype(str)
+        if cluster_column
+        else pd.Series(X.index.astype(str), index=X.index)
+    )
+    if clusters.eq("").any():
+        raise ValueError(
+            f"{dataset_name}: biological-unit IDs are missing; "
+            "patient-level confidence intervals cannot be computed"
+        )
+    cluster_values = clusters.loc[X.index].to_numpy()
+    unique_clusters = np.unique(cluster_values)
     rng = np.random.default_rng(42)
     auc_boot: list[float] = []
     ap_boot: list[float] = []
     for _ in range(1000):
-        indices = rng.integers(0, len(y), size=len(y))
+        sampled_clusters = rng.choice(
+            unique_clusters,
+            size=len(unique_clusters),
+            replace=True,
+        )
+        indices = np.concatenate(
+            [
+                np.flatnonzero(cluster_values == cluster)
+                for cluster in sampled_clusters
+            ]
+        )
         sampled = y.to_numpy()[indices]
         if len(set(sampled)) < 2:
             continue
@@ -666,6 +714,7 @@ def validate_external_model(
         {
             "sample_id": X.index,
             "condition": condition.loc[X.index].to_numpy(),
+            "biological_unit": cluster_values,
             "label": y.to_numpy(),
             "probability": probabilities,
         }
@@ -689,7 +738,7 @@ def validate_external_model(
     return {
         "dataset": dataset_name,
         "comparison": f"{comparison[0]} vs {comparison[1]}",
-        "n": int(len(y)),
+        "n": len(y),
         "n_positive": int(y.sum()),
         "auc": auc,
         "average_precision": float(average_precision_score(y, probabilities)),
@@ -705,7 +754,13 @@ def validate_external_model(
         "auprc_ci_high": (
             float(np.percentile(ap_boot, 97.5)) if ap_boot else None
         ),
-        "brier": float(brier_score_loss(y, probabilities)),
+            "brier": float(brier_score_loss(y, probabilities)),
+        "ci_method": (
+            f"cluster_bootstrap_1000_resampling_{cluster_column}"
+            if cluster_column
+            else "sample_bootstrap_1000"
+        ),
+        "n_biological_units": len(unique_clusters),
         "calibration_slope": calibration["slope"],
         "calibration_intercept": calibration["intercept"],
         "calibration_bins": calibration_curve_frame.to_dict(orient="records"),
@@ -824,7 +879,12 @@ def _plot_calibration(
         "brier": float(brier_score_loss(y, probability)),
         "calibration_slope": calibration["slope"],
         "calibration_intercept": calibration["intercept"],
-        "target_met": bool(hl_p is not None and np.isfinite(hl_p) and hl_p > 0.05),
+        "target_met": None,
+        "interpretation": (
+            "Report calibration slope, intercept, Brier score and the "
+            "Hosmer-Lemeshow result together; p>0.05 alone is not a "
+            "calibration pass criterion."
+        ),
     }
 
 
@@ -1018,6 +1078,40 @@ def _shap_analysis(
             .sort_values("mean_abs_shap", ascending=False)
             .reset_index(drop=True)
         )
+        rng = np.random.default_rng(42)
+        rank_records: dict[str, list[int]] = {
+            str(gene): [] for gene in feature_names
+        }
+        if len(values) >= 2:
+            for _ in range(200):
+                sampled = rng.integers(0, len(values), size=len(values))
+                bootstrap_mean = np.mean(np.abs(values[sampled]), axis=0)
+                order = np.argsort(-bootstrap_mean)
+                for rank, feature_index in enumerate(order, start=1):
+                    rank_records[str(feature_names[feature_index])].append(rank)
+        stability = pd.DataFrame(
+            [
+                {
+                    "gene": gene,
+                    "selection_frequency": (
+                        float(np.mean(np.asarray(rank_records[gene]) <= 10))
+                        if rank_records[gene]
+                        else np.nan
+                    ),
+                    "mean_rank": (
+                        float(np.mean(rank_records[gene]))
+                        if rank_records[gene]
+                        else np.nan
+                    ),
+                    "n_bootstraps": len(rank_records[gene]),
+                }
+                for gene in importance["gene"].astype(str)
+            ]
+        )
+        stability.to_csv(
+            output_dir / "fig3f_shap_stability.csv",
+            index=False,
+        )
         importance.to_csv(output_dir / "fig3f_shap_importance.csv", index=False)
         values_path = output_dir / "shap_values.csv"
         pd.DataFrame(values, columns=feature_names).to_csv(values_path, index=False)
@@ -1033,18 +1127,26 @@ def _shap_analysis(
             "top_genes": importance["gene"].tolist(),
             "values_path": values_path,
             "importance": output_dir / "fig3f_shap_importance.csv",
+            "stability": output_dir / "fig3f_shap_stability.csv",
         }
     except Exception as exc:  # noqa: BLE001
-        LOG.warning("SHAP failed; using model importance fallback: %s", exc)
-        importance = _fallback_importance(model, X)
-        importance.to_csv(output_dir / "fig3f_shap_importance.csv", index=False)
-        _shap_bar(importance, output_dir / "fig3f_shap_importance.png")
-        return {
-            "status": f"fallback: {exc}",
-            "top_genes": importance["gene"].tolist(),
-            "values_path": None,
-            "importance": output_dir / "fig3f_shap_importance.csv",
-        }
+        LOG.warning("SHAP unavailable; no surrogate SHAP output will be produced: %s", exc)
+        # A different importance statistic must never masquerade as SHAP.
+        for name in (
+            "fig3f_shap_importance.csv",
+            "fig3f_shap_stability.csv",
+            "shap_values.csv",
+            "fig3f_shap_importance.png",
+            "fig3g_shap_beeswarm.png",
+        ):
+            path = output_dir / name
+            path.unlink(missing_ok=True)
+            if path.suffix == ".png":
+                path.with_suffix(".pdf").unlink(missing_ok=True)
+                path.with_suffix(".svg").unlink(missing_ok=True)
+        return {"status": f"unavailable: {exc}", "top_genes": [],
+                "values_path": None, "importance": None}
+
 
 
 def _transform_for_explanation(model: Pipeline, X: pd.DataFrame) -> tuple[np.ndarray, list[str]]:

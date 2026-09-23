@@ -237,8 +237,6 @@ def run_coexpression_analysis(
             "module",
         ].astype(str)
     )
-    if not selected_modules:
-        selected_modules = {str(trait_frame.iloc[0]["module"])}
     trait_lookup = trait_frame.set_index("module")
 
     gene_rows: list[dict[str, Any]] = []
@@ -276,8 +274,7 @@ def run_coexpression_analysis(
         .reset_index(drop=True)
     )
     strong = hub_frame[hub_frame["abs_kME"] >= float(kme_threshold)]
-    if not strong.empty:
-        hub_frame = strong.reset_index(drop=True)
+    hub_frame = strong.reset_index(drop=True)
     module_gene_frame = (
         gene_frame[gene_frame["disease_associated_module"]]
         .sort_values(["module", "abs_kME"], ascending=[True, False])
@@ -314,6 +311,8 @@ def run_coexpression_analysis(
     )
     summary = {
         "status": "completed",
+        "scientific_outcome": "significant_modules" if selected_modules else "valid_negative",
+        "inference_role": "exploratory; not a preselected ML feature set",
         "method": "signed correlation adjacency, WGCNA-style",
         "implementation_note": (
             "This is a reproducible local co-expression screen, not the "

@@ -9,13 +9,13 @@ import urllib.request
 from pathlib import Path
 from typing import Any
 
-import matplotlib.pyplot as plt
 import matplotlib.patheffects as path_effects
+import matplotlib.pyplot as plt
 import networkx as nx
 import numpy as np
 import pandas as pd
 
-from .common import FIGURE_PALETTE, LOG, ensure_dir, save_figure, write_json
+from .common import FIGURE_PALETTE, ensure_dir, save_figure, write_json
 from .targets import make_venn_figure
 
 STRING_NETWORK_URL = "https://string-db.org/api/tsv/network"
@@ -51,9 +51,15 @@ def fetch_string_network(
     )
     with urllib.request.urlopen(request, timeout=timeout) as response:
         text = response.read().decode("utf-8", "replace")
+    if not text.strip():
+        empty = pd.DataFrame(columns=["node1", "node2", "score", "source"])
+        empty.to_csv(output_path, sep="\t", index=False)
+        return empty
     frame = pd.read_csv(io.StringIO(text), sep="\t")
     if frame.empty:
-        raise RuntimeError("STRING returned no network edges")
+        empty = pd.DataFrame(columns=["node1", "node2", "score", "source"])
+        empty.to_csv(output_path, sep="\t", index=False)
+        return empty
     column_lookup = {str(column).lower(): str(column) for column in frame.columns}
     left = column_lookup.get("preferredname_a") or column_lookup.get("stringid_a")
     right = column_lookup.get("preferredname_b") or column_lookup.get("stringid_b")
@@ -76,15 +82,23 @@ def fetch_string_network(
 def ppi_hub_metrics(edges: pd.DataFrame, genes: list[str] | None = None) -> pd.DataFrame:
     """Calculate common centralities and an interpretable consensus rank."""
     graph = nx.Graph()
-    for row in edges.itertuples(index=False):
-        graph.add_edge(
-            str(row.node1).upper(),
-            str(row.node2).upper(),
-            weight=float(row.score),
-        )
+    input_nodes = {
+        str(gene).upper()
+        for gene in (genes or [])
+        if str(gene).strip()
+    }
+    for node in input_nodes:
+        graph.add_node(node)
+    if not edges.empty:
+        for row in edges.itertuples(index=False):
+            graph.add_edge(
+                str(row.node1).upper(),
+                str(row.node2).upper(),
+                weight=float(row.score),
+            )
     if graph.number_of_nodes() == 0:
         raise ValueError("PPI graph has no nodes")
-    nodes = sorted(set(genes or graph.nodes()))
+    nodes = sorted(input_nodes or set(graph.nodes()))
     nodes = [node for node in nodes if node in graph]
     if not nodes:
         raise ValueError("none of the requested genes are present in the PPI graph")
@@ -156,8 +170,57 @@ def run_ppi_analysis(
     top_n: int = 20,
     add_nodes: int = 50,
     force: bool = False,
+    module_method: str = "louvain",
 ) -> dict[str, Any]:
     ensure_dir(output_dir)
+    genes = sorted(set(str(gene).upper() for gene in genes if str(gene).strip()))
+    method = str(module_method or "louvain").strip().lower()
+    if method != "louvain":
+        raise ValueError(
+            "only the validated Louvain implementation is enabled; "
+            "install and validate MCL before naming it as the method"
+        )
+    if not genes:
+        empty = pd.DataFrame(
+            columns=[
+                "gene",
+                "degree",
+                "betweenness",
+                "closeness",
+                "eigenvector",
+                "pagerank",
+                "clustering",
+                "mcc",
+                "ppi_rank_score",
+                "degree_rank",
+                "betweenness_rank",
+                "module",
+            ]
+        )
+        empty.to_csv(output_dir / "ppi_hub_metrics.csv", index=False)
+        pd.DataFrame(columns=["node1", "node2", "score", "source"]).to_csv(
+            output_dir / "string_edges.tsv",
+            sep="\t",
+            index=False,
+        )
+        summary = {
+            "status": "valid_negative",
+            "reason": "compound-disease intersection is empty",
+            "input_genes": 0,
+            "network_nodes": 0,
+            "network_edges": 0,
+            "required_score": required_score,
+            "module_method": "not_run_empty_network",
+        }
+        write_json(output_dir / "ppi_summary.json", summary)
+        return {
+            "status": "valid_negative",
+            "edges": output_dir / "string_edges.tsv",
+            "metrics": output_dir / "ppi_hub_metrics.csv",
+            "top_genes": [],
+            "top3": [],
+            "modules": [],
+        }
     edges = fetch_string_network(
         genes,
         output_dir / "string_edges.tsv",
@@ -165,6 +228,29 @@ def run_ppi_analysis(
         add_nodes=add_nodes,
         force=force,
     )
+    edges.to_csv(output_dir / "string_edges.tsv", sep="\t", index=False)
+    if edges.empty:
+        summary = {
+            "status": "valid_negative",
+            "reason": "STRING returned no edges above the configured score",
+            "input_genes": len(genes),
+            "network_nodes": len(genes),
+            "network_edges": 0,
+            "required_score": required_score,
+            "module_method": "not_run_no_edges",
+        }
+        pd.DataFrame(
+            {"gene": genes, "degree": 0, "mcc": 0.0, "module": "Other"}
+        ).to_csv(output_dir / "ppi_hub_metrics.csv", index=False)
+        write_json(output_dir / "ppi_summary.json", summary)
+        return {
+            "status": "valid_negative",
+            "edges": output_dir / "string_edges.tsv",
+            "metrics": output_dir / "ppi_hub_metrics.csv",
+            "top_genes": [],
+            "top3": [],
+            "modules": [],
+        }
     metrics = ppi_hub_metrics(edges, genes=genes)
     metrics.to_csv(output_dir / "ppi_hub_metrics.csv", index=False)
     graph = nx.Graph()
@@ -191,6 +277,32 @@ def run_ppi_analysis(
     }
     metrics["module"] = metrics["gene"].map(cluster_map).fillna("Other")
     metrics.to_csv(output_dir / "ppi_hub_metrics.csv", index=False)
+    metrics.sort_values(
+        ["degree", "gene"], ascending=[False, True]
+    ).to_csv(output_dir / "ppi_degree_ranking.csv", index=False)
+    metrics.sort_values(
+        ["betweenness", "gene"], ascending=[False, True]
+    ).to_csv(output_dir / "ppi_betweenness_ranking.csv", index=False)
+    mcc_top = set(
+        metrics.sort_values(["mcc", "degree", "gene"], ascending=[False, False, True])
+        .head(10)["gene"]
+    )
+    degree_top = set(
+        metrics.sort_values(
+            ["degree", "mcc", "gene"], ascending=[False, False, True]
+        ).head(10)["gene"]
+    )
+    pd.DataFrame(
+        [
+            {
+                "gene": gene,
+                "in_mcc_top10": gene in mcc_top,
+                "in_degree_top10": gene in degree_top,
+                "in_intersection": gene in (mcc_top & degree_top),
+            }
+            for gene in sorted(mcc_top | degree_top)
+        ]
+    ).to_csv(output_dir / "ppi_mcc_degree_top10.csv", index=False)
 
     _draw_network(
         graph,
@@ -223,8 +335,6 @@ def run_ppi_analysis(
         "Betweenness centrality",
         top_n,
     )
-    mcc_top = set(metrics.nlargest(10, "mcc")["gene"])
-    degree_top = set(metrics.nlargest(10, "degree")["gene"])
     make_venn_figure(
         {"MCC Top 10": mcc_top, "Degree Top 10": degree_top},
         output_dir / "fig2e_mcc_degree_venn.png",
@@ -239,6 +349,25 @@ def run_ppi_analysis(
             "network_edges": int(graph.number_of_edges()),
             "required_score": required_score,
             "module_method": "Louvain",
+            "module_method_note": (
+                "The original MCL label was replaced with the actually "
+                "executed Louvain implementation."
+            ),
+            "betweenness_definition": {
+                "graph": "undirected simple graph",
+                "weight": None,
+                "distance": "unweighted shortest-path hops",
+                "normalized": True,
+                "note": "STRING confidence is not treated as distance.",
+            },
+            "degree_definition": "number of graph neighbors; ties retain the same rank",
+            "mcc_definition": (
+                "sum of factorial clique weights across all maximal cliques, "
+                "matching the common MCC plugin definition"
+            ),
+            "isolated_input_nodes": sorted(
+                set(metrics.loc[metrics["degree"].eq(0), "gene"])
+            ),
             "modules": {
                 f"M{i + 1}": sorted(cluster)
                 for i, cluster in enumerate(major_clusters)
@@ -247,6 +376,7 @@ def run_ppi_analysis(
         },
     )
     return {
+        "status": "completed",
         "edges": output_dir / "string_edges.tsv",
         "metrics": output_dir / "ppi_hub_metrics.csv",
         "top_genes": metrics["gene"].head(top_n).tolist(),

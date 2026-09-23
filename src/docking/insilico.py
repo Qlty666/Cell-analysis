@@ -1,12 +1,12 @@
 #!/usr/bin/env python3
-"""Single-cell virtual knockout analysis with optional real scTenifoldKnk.
+"""Single-cell predicted perturbation analysis with optional scTenifoldKnk.
 
 The module can call the official scTenifoldpy implementation of
 scTenifoldKnk when the input is a raw count matrix. It also keeps the
-CellOracle-style local GRN propagation used for expression-shift and UMAP
-vector-field visualisation, plus optional DrugReflector compound ranking and
-GO/KEGG enrichment. The knockout itself is a network prediction, not a
-wet-lab experiment.
+local sparse GRN propagation used for expression-shift and UMAP vector-field
+visualisation, plus optional DrugReflector compound ranking and GO/KEGG
+enrichment. The local path is not CellOracle and the perturbation is a network
+prediction, not a wet-lab knockout.
 """
 
 from __future__ import annotations
@@ -17,18 +17,21 @@ import shutil
 import subprocess
 import warnings
 from pathlib import Path
-from common.fingerprints import file_hash, fingerprint
 
 import numpy as np
 import pandas as pd
+
+from common.fingerprints import file_hash, fingerprint
 
 from .config import ResolvedConfig
 from .html_utils import esc
 from .utils import (
     CELL_TYPE_COLS,
     DockingError,
-    resolve_path as _resolve_path,
     write_json,
+)
+from .utils import (
+    resolve_path as _resolve_path,
 )
 
 APP_ROOT = Path(__file__).resolve().parent.parent.parent
@@ -44,10 +47,11 @@ _CELL_ID_COLS = {
 }
 _CELL_TYPE_COLS = CELL_TYPE_COLS | {"louvain_annot"}
 _SC_TENIFOLD_ENGINES = frozenset({"scTenifold", "scTenifoldknk", "triple"})
+_LOCAL_GRN_ENGINES = frozenset({"local_grn", "local", "builtin"})
 _TARGET_EXCLUDE = re.compile(
     r"^(MT-|MTRNR|RPL|RPS|MRPL|MRPS|SNORD|SNORA|SCGB|IGH|IGK|IGL|TRA|TRB|TRG|"
     r"HLA-D|LINC|RP[0-9]|AC[0-9]|AL[0-9])",
-    re.I,
+    re.IGNORECASE,
 )
 
 # A compact, species-neutral set of commonly used transcription factors. The
@@ -168,13 +172,17 @@ def run_insilico_knockout(
                 log,
             )
         except Exception as exc:
-            log.warning("official scTenifoldKnk failed; using CellOracle path: %s", exc)
+            log.warning(
+                "official scTenifoldKnk failed; using the local sparse GRN "
+                "perturbation path: %s",
+                exc,
+            )
             sc_diff = None
             sc_meta = None
     elif use_sc:
         log.warning(
-            "scTenifoldpy is not installed; using the built-in CellOracle "
-            "style path"
+            "scTenifoldpy is not installed; using the built-in local sparse "
+            "GRN perturbation path"
         )
     if cell_types is not None:
         cell_types = cell_types.reindex(log_mat.columns)
@@ -315,9 +323,9 @@ def run_insilico_knockout(
                 data_files[f"{Path(name).stem}_csv"] = path
 
     engine_label = (
-        "scTenifoldKnk + CellOracle-style"
+        "scTenifoldKnk + local network perturbation"
         if sc_diff is not None
-        else "CellOracle-style GRN propagation"
+        else "local sparse GRN propagation (not CellOracle/scTenifoldKnk)"
     )
     report_path = _write_html_report(
         out_dir,
@@ -340,7 +348,22 @@ def run_insilico_knockout(
         "output_hashes": {str(p.resolve()): file_hash(p) for p in data_files.values()},
         "ko_gene": gene,
         "engine": engine_label,
-        "cells": int(len(gem)),
+        "scientific_role": "predicted_perturbation_response",
+        "is_wet_lab_knockout": False,
+        "perturbation_scope": str(
+            isko.get("perturbation_scope") or "pre_specified_primary_target"
+        ),
+        "negative_control": (
+            "scTenifold network ensembles"
+            if sc_meta is not None
+            else "not_run_local_GRN_path"
+        ),
+        "stability_note": (
+            "scTenifold repetitions are available"
+            if sc_meta is not None
+            else "single local propagation run; external stability is not claimed"
+        ),
+        "cells": len(gem),
         "genes_modeled": int(gem.shape[1]),
         "regulators": [str(g) for g in regulators],
         "n_propagation": int(isko.get("n_propagation", 3)),
@@ -409,7 +432,7 @@ def _use_scTenifold(
     engine: str | None = None,
 ) -> bool:
     engine = _insilico_engine(isko) if engine is None else engine
-    if engine == "celloracle":
+    if engine in _LOCAL_GRN_ENGINES:
         return False
     force_raw = isko.get("raw_count_input")
     if force_raw is not None:
@@ -502,7 +525,7 @@ def _run_scTenifoldKnk(
         raise DockingError("scTenifoldKnk result has no gene column")
     meta = {
         "engine": "scTenifoldKnk (scTenifoldpy)",
-        "genes_scored": int(len(diff)),
+        "genes_scored": len(diff),
         "n_networks": n_networks,
         "n_cells_per_network": n_cells,
     }
@@ -1472,6 +1495,20 @@ def _run_enrichment(
         return {"status": "skipped", "reason": "too few target genes"}
     gene_csv = data_dir / "insilico_enrichment_input.csv"
     pd.DataFrame({"gene": genes}).to_csv(gene_csv, index=False)
+    background_path = data_dir / "insilico_enrichment_background.csv"
+    background = (
+        changes["gene"]
+        .dropna()
+        .astype(str)
+        .drop_duplicates()
+        .tolist()
+    )
+    if len(background) < 3:
+        return {
+            "status": "skipped",
+            "reason": "fewer than three testable network genes for background",
+        }
+    pd.DataFrame({"gene": background}).to_csv(background_path, index=False)
     script = APP_ROOT / "src" / "docking" / "insilico_enrichment.R"
     if not script.exists():
         return {"status": "skipped", "reason": "enrichment R script missing"}
@@ -1479,13 +1516,21 @@ def _run_enrichment(
     if rscript is None:
         return {"status": "skipped", "reason": "Rscript not found"}
     proc = subprocess.run(
-        [rscript, str(script), str(gene_csv), str(data_dir), species],
+        [
+            rscript,
+            str(script),
+            str(gene_csv),
+            str(data_dir),
+            species,
+            str(background_path),
+        ],
         cwd=str(APP_ROOT),
         capture_output=True,
         text=True,
         encoding="utf-8",
         errors="replace",
         timeout=int(isko.get("enrichment_timeout", 900)),
+        check=False,
     )
     if proc.returncode != 0:
         log.warning(
@@ -1545,6 +1590,10 @@ def _plot_enrichment_bubble(
     p_col = "p.adjust" if "p.adjust" in df.columns else "pvalue"
     df[p_col] = pd.to_numeric(df[p_col], errors="coerce")
     df = df.dropna(subset=[p_col]).sort_values(p_col)
+    if df.empty:
+        return False
+    if p_col == "p.adjust":
+        df = df[df[p_col] < 0.05].copy()
     if df.empty:
         return False
     if group_col and group_col in df.columns:
@@ -1631,10 +1680,9 @@ def _plot_go_faceted_bubble(
 ) -> bool:
     """Render GO enrichment as separate BP/CC/MF bubble panels."""
     import matplotlib.pyplot as plt
-    from matplotlib.colors import LinearSegmentedColormap
-    from matplotlib.colors import Normalize
-    from matplotlib.patches import Rectangle
+    from matplotlib.colors import LinearSegmentedColormap, Normalize
     from matplotlib.lines import Line2D
+    from matplotlib.patches import Rectangle
     from matplotlib.ticker import MaxNLocator
 
     bubble_cmap = LinearSegmentedColormap.from_list(
@@ -1824,7 +1872,7 @@ def _write_html_report(
     changes: pd.DataFrame,
     enrichment: dict,
     isko: dict,
-    engine_label: str = "CellOracle-style GRN propagation",
+    engine_label: str = "local sparse GRN propagation",
 ) -> Path:
     from datetime import datetime
 
@@ -1881,7 +1929,7 @@ def _write_html_report(
     html = f"""<!doctype html>
 <html lang="zh-CN">
 <head><meta charset="utf-8">
-<title>{ko_gene_html} 虚拟敲除分析报告</title>
+<title>{ko_gene_html} 预测扰动响应报告</title>
 <style>
 body{{font-family:'Microsoft YaHei',Arial,sans-serif;max-width:1100px;margin:32px auto;padding:0 24px;color:#222}}
 h1{{border-bottom:3px solid #1f6f8b;padding-bottom:10px}}
@@ -1896,7 +1944,7 @@ th{{background:#f1f5f6}}
 .note{{background:#eef7f3;padding:10px 14px;border-radius:4px}}
 </style></head>
 <body>
-<h1>{ko_gene_html} 虚拟敲除分析报告 <small>(In Silico Knockout)</small></h1>
+<h1>{ko_gene_html} 预测扰动响应报告 <small>(Predicted Perturbation)</small></h1>
 <div class="meta">分析时间：{datetime.now():%Y-%m-%d %H:%M}；物种：{species_html}；分析方式：{engine_html}</div>
 <div class="alert">本报告为基于单细胞基因调控网络的预测性结果，不等同于真实敲除实验；下游结论需经湿实验验证。</div>
 <h2>1. 数据集来源与分析规模</h2>

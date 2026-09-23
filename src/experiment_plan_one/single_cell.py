@@ -3,13 +3,11 @@
 from __future__ import annotations
 
 import gzip
-import json
 import logging
-import os
 import re
-import shutil
 from pathlib import Path
 from typing import Any
+from urllib.parse import quote
 
 try:  # Keep bulk/target stages importable without the optional scRNA stack.
     import anndata as ad
@@ -24,9 +22,11 @@ import pandas as pd
 from scipy import sparse, stats
 from scipy.io import mmread
 
-from .common import bh_fdr, ensure_dir, save_figure, slug, write_json
+from . import cache
+from .common import bh_fdr, ensure_dir, get_json, save_figure, slug, write_json
 
 LOG = logging.getLogger("experiment_plan_one.single_cell")
+MYGENE_API = "https://mygene.info/v3"
 
 
 def _require_scanpy() -> None:
@@ -77,6 +77,236 @@ LIGAND_RECEPTOR_DB = [
     ("Lipid transport", "APOE", "LRP1"),
     ("Lipid transport", "APOC3", "LRP1"),
 ]
+
+UNKNOWN_IDS = {"", "na", "n/a", "nan", "none", "unknown", "unassigned"}
+
+
+def _clean_identifier(value: Any) -> str:
+    text = str(value or "").strip()
+    return "" if text.lower() in UNKNOWN_IDS else text
+
+
+def _qc_snapshot(data: ad.AnnData) -> dict[str, Any]:
+    return {
+        "cells": int(data.n_obs),
+        "genes": int(data.n_vars),
+        "median_genes_per_cell": (
+            float(data.obs["n_genes_by_counts"].median())
+            if "n_genes_by_counts" in data.obs
+            else None
+        ),
+        "median_counts_per_cell": (
+            float(data.obs["total_counts"].median())
+            if "total_counts" in data.obs
+            else None
+        ),
+        "median_mitochondrial_percent": (
+            float(data.obs["pct_counts_mt"].median())
+            if "pct_counts_mt" in data.obs
+            else None
+        ),
+    }
+
+
+def _write_qc_report(
+    output_dir: Path,
+    before: dict[str, Any],
+    after: dict[str, Any],
+    *,
+    doublet_status: str,
+) -> None:
+    write_json(
+        output_dir / "qc_and_replication_report.json",
+        {
+            "before_qc": before,
+            "after_qc": after,
+            "doublet_assessment": doublet_status,
+            "ambient_rna_assessment": (
+                "not_evaluated_without_soupx_or_cellbender; no ambient-RNA "
+                "correction is claimed"
+            ),
+            "statistical_unit_rule": (
+                "Cells are never treated as biological replicates for group "
+                "inference; use donor/sample pseudobulk."
+            ),
+        },
+    )
+
+
+def _optional_doublet_assessment(data: ad.AnnData, output_dir: Path) -> str:
+    """Attempt Scrublet through Scanpy, but keep failure explicit."""
+    if "sample_id" not in data.obs or data.obs["sample_id"].nunique() < 1:
+        return "not_evaluated_missing_sample_ids"
+    try:
+        counts = data.layers.get("counts")
+        if counts is None:
+            return "not_evaluated_missing_raw_count_layer"
+        work = ad.AnnData(
+            X=counts.copy(),
+            obs=data.obs.copy(),
+            var=data.var.copy(),
+        )
+        sc.pp.scrublet(work, batch_key="sample_id")
+        data.obs["doublet_score"] = work.obs["doublet_score"].reindex(
+            data.obs_names
+        )
+        data.obs["predicted_doublet"] = work.obs["predicted_doublet"].reindex(
+            data.obs_names
+        )
+        scores = pd.to_numeric(
+            data.obs.get("doublet_score", pd.Series(index=data.obs_names)),
+            errors="coerce",
+        )
+        labels = data.obs.get(
+            "predicted_doublet",
+            pd.Series(False, index=data.obs_names),
+        )
+        pd.DataFrame(
+            {
+                "cell": data.obs_names.astype(str),
+                "sample_id": data.obs["sample_id"].astype(str).to_numpy(),
+                "doublet_score": scores.to_numpy(),
+                "predicted_doublet": np.asarray(labels, dtype=bool),
+            }
+        ).to_csv(output_dir / "doublet_scores.csv.gz", index=False, compression="gzip")
+        return (
+            f"completed_scrublet; predicted_doublets="
+            f"{int(np.asarray(labels, dtype=bool).sum())}"
+        )
+    except Exception as exc:  # noqa: BLE001
+        LOG.warning("doublet assessment unavailable: %s", exc)
+        return f"unavailable_without_verified_doublet_tool: {exc}"
+
+
+def _choose_inference_unit(data: ad.AnnData) -> tuple[str, dict[str, str]]:
+    """Return a donor column and a library-to-unit mapping."""
+    for column in ("donor_id", "animal_id", "patient_id"):
+        if column not in data.obs:
+            continue
+        values = data.obs[column].map(_clean_identifier)
+        if values.nunique() >= 2 and values.ne("").all():
+            return column, {
+                str(library): str(unit)
+                for library, unit in data.obs.groupby("sample_id", observed=True)[
+                    column
+                ]
+                .first()
+                .items()
+            }
+    return "sample_id", {
+        str(sample): str(sample)
+        for sample in data.obs["sample_id"].dropna().astype(str).unique()
+    }
+
+
+def map_human_to_mouse_homologs(
+    genes: list[str],
+    output_path: Path,
+    *,
+    allow_network: bool = True,
+    timeout: int = 60,
+) -> dict[str, str]:
+    """Map human symbols to one-to-one mouse orthologs with an auditable cache."""
+    if output_path.exists():
+        cached = pd.read_csv(output_path, sep="\t", dtype=str).fillna("")
+        cached_mapping = {
+            str(row["human_gene"]): str(row["mouse_gene"])
+            for _, row in cached.iterrows()
+            if row.get("mapping_status") == "one_to_one"
+            and str(row.get("mouse_gene") or "").strip()
+        }
+        if cached_mapping or not allow_network:
+            return cached_mapping
+    rows: list[dict[str, str]] = []
+    mapping: dict[str, str] = {}
+    for gene in sorted(set(str(value).upper() for value in genes if value)):
+        row = {
+            "human_gene": gene,
+            "mouse_gene": "",
+            "mouse_gene_id": "",
+            "homology_type": "",
+            "mapping_status": (
+                "network_disabled" if not allow_network else "unmapped"
+            ),
+            "reason": "",
+            "source": "NCBI HomoloGene via MyGene.info",
+            "source_version": "",
+        }
+        if allow_network:
+            try:
+                payload = get_json(
+                    (
+                        f"{MYGENE_API}/query?q={quote('symbol:' + gene)}"
+                        "&species=human&fields=symbol,homologene&size=10"
+                    ),
+                    timeout=timeout,
+                )
+                hits = (
+                    payload.get("hits") or []
+                    if isinstance(payload, dict)
+                    else []
+                )
+                exact = next(
+                    (
+                        hit
+                        for hit in hits
+                        if str(hit.get("symbol") or "").upper() == gene
+                    ),
+                    None,
+                )
+                homologene = (
+                    exact.get("homologene") if isinstance(exact, dict) else {}
+                ) or {}
+                gene_groups = homologene.get("genes") or []
+                mouse_members = [
+                    group
+                    for group in gene_groups
+                    if len(group) >= 2 and int(group[0]) == 10090
+                ]
+                human_members = [
+                    group
+                    for group in gene_groups
+                    if len(group) >= 2 and int(group[0]) == 9606
+                ]
+                if len(mouse_members) == 1 and len(human_members) == 1:
+                    mouse_id = str(mouse_members[0][1])
+                    lookup = get_json(
+                        (
+                            f"{MYGENE_API}/gene/{quote(mouse_id)}"
+                            "?fields=symbol"
+                        ),
+                        timeout=timeout,
+                    )
+                    mouse_symbol = (
+                        str(lookup.get("symbol") or "").upper()
+                        if isinstance(lookup, dict)
+                        else ""
+                    )
+                    if mouse_symbol:
+                        mapping[gene] = mouse_symbol
+                        row.update(
+                            {
+                                "mouse_gene": mouse_symbol,
+                                "mouse_gene_id": mouse_id,
+                                "homology_type": "homologene_one_to_one_group",
+                                "mapping_status": "one_to_one",
+                                "source_version": (
+                                    f"HomoloGene:{homologene.get('id')}"
+                                ),
+                            }
+                        )
+                    else:
+                        row["reason"] = "mouse symbol lookup failed"
+                else:
+                    row["reason"] = (
+                        "HomoloGene group is missing or not one-to-one"
+                    )
+            except Exception as exc:  # noqa: BLE001
+                row["reason"] = str(exc)
+        rows.append(row)
+    ensure_dir(output_path.parent)
+    pd.DataFrame(rows).to_csv(output_path, sep="\t", index=False)
+    return mapping
 
 
 def parse_geo_soft_samples(path: Path) -> dict[str, dict[str, Any]]:
@@ -166,19 +396,21 @@ def load_mouse_dataset(
 
     data.var["mt"] = data.var_names.astype(str).str.lower().str.startswith("mt-")
     sc.pp.calculate_qc_metrics(data, qc_vars=["mt"], inplace=True, percent_top=None)
+    data.uns["qc_before"] = _qc_snapshot(data)
     sc.pp.filter_cells(data, min_genes=min_genes)
     sc.pp.filter_genes(data, min_cells=3)
     data = data[data.obs["pct_counts_mt"].astype(float) <= max_mito_pct].copy()
+    data.uns["qc_after"] = _qc_snapshot(data)
     data.layers["counts"] = data.X.copy()
     sc.pp.normalize_total(data, target_sum=1e4)
     sc.pp.log1p(data)
     data.raw = data
     sc.pp.highly_variable_genes(data, n_top_genes=min(2500, data.n_vars), batch_key="batch")
     hvg = data[:, data.var["highly_variable"]].copy()
-    _integrate_batches(hvg)
     sc.pp.scale(hvg, max_value=10)
     sc.tl.pca(hvg, n_comps=min(40, hvg.n_vars - 1, hvg.n_obs - 1), svd_solver="arpack")
-    sc.pp.neighbors(hvg, n_neighbors=15, n_pcs=min(30, hvg.obsm["X_pca"].shape[1]))
+    representation = _integrate_batches(hvg)
+    sc.pp.neighbors(hvg, n_neighbors=15, n_pcs=min(30, hvg.obsm[representation].shape[1]), use_rep=representation)
     sc.tl.umap(hvg, random_state=42)
     sc.tl.leiden(hvg, resolution=0.7, key_added="cluster", flavor="igraph", n_iterations=2)
     data.obsm["X_pca"] = hvg.obsm["X_pca"]
@@ -201,19 +433,19 @@ def _find_sibling(source: Path, filename: str) -> Path | None:
     return matches[0] if matches else None
 
 
-def _integrate_batches(data: ad.AnnData) -> None:
+def _integrate_batches(data: ad.AnnData) -> str:
+    """Integrate an existing PCA representation; never change the count layer."""
+    if "X_pca" not in data.obsm:
+        raise ValueError("PCA must precede Harmony")
     if data.obs["batch"].nunique() < 2:
-        return
+        return "X_pca"
     try:
         sc.external.pp.harmony_integrate(data, "batch", max_iter_harmony=30)
-        data.obsm["X_pca"] = data.obsm["X_pca_harmony"]
-        LOG.info("Harmony integration completed")
-    except Exception as exc:  # noqa: BLE001
-        LOG.warning("Harmony unavailable/failed; using ComBat fallback: %s", exc)
-        try:
-            sc.pp.combat(data, key="batch")
-        except Exception as combat_exc:  # noqa: BLE001
-            LOG.warning("ComBat failed; continuing without batch correction: %s", combat_exc)
+        return "X_pca_harmony"
+    except Exception as exc:
+        LOG.warning("Harmony failed; explicitly retaining uncorrected PCA: %s", exc)
+        data.uns["integration_limitation"] = str(exc)
+        return "X_pca"
 
 
 def annotate_clusters(
@@ -285,15 +517,27 @@ def run_mouse_single_cell(
     sample_key: str | None = None,
     cellchat_permutations: int = 100,
     cellchat_seed: int = 123,
+    allow_network: bool = True,
 ) -> dict[str, Any]:
     _require_scanpy()
     ensure_dir(output_dir)
     data_path = output_dir / "mouse_liver_processed.h5ad"
-    if data_path.exists() and not sample_key:
+    state_path = output_dir / "single_cell.cache.json"
+    input_key = cache.signature(files=[soft_path, Path(__file__), *sorted(extracted_dir.rglob("*.gz"))],
+                                parameters={"sample_key": sample_key, "species": "mouse"})
+    if cache.valid(state_path, input_key, [data_path]) and not sample_key:
         data = ad.read_h5ad(data_path)
     else:
         data = load_mouse_dataset(extracted_dir, soft_path)
         data.write_h5ad(data_path, compression="gzip")
+        cache.save(state_path, input_key, [data_path])
+    doublet_status = _optional_doublet_assessment(data, output_dir)
+    _write_qc_report(
+        output_dir,
+        dict(data.uns.get("qc_before") or {}),
+        dict(data.uns.get("qc_after") or _qc_snapshot(data)),
+        doublet_status=doublet_status,
+    )
     data.obs["cell_type"] = annotate_clusters(data, MOUSE_MARKERS)
     data.obs["cell_type"] = (
         data.obs["cell_type"]
@@ -312,7 +556,15 @@ def run_mouse_single_cell(
         legend_title="Cell type",
     )
     _plot_marker_dotplot(data, MOUSE_MARKERS, output_dir / "fig4b_cell_type_markers.png")
-    core = _resolve_genes(data.var_names, core_genes)
+    homolog_path = output_dir / "human_mouse_homolog_mapping.tsv"
+    homolog_map = map_human_to_mouse_homologs(
+        core_genes,
+        homolog_path,
+        allow_network=allow_network,
+    )
+    requested_core = list(core_genes)
+    mouse_core = [homolog_map.get(gene.upper(), gene) for gene in core_genes]
+    core = _resolve_genes(data.var_names, mouse_core)
     gene_frames: list[pd.DataFrame] = []
     for gene in core:
         values = _expression_vector(data, gene)
@@ -350,57 +602,33 @@ def run_mouse_single_cell(
     composition.to_csv(output_dir / "cell_composition.csv", index=False)
     _plot_composition(composition, output_dir / "fig4e_cell_composition.png")
 
-    rank = sc.tl.rank_genes_groups(
-        data,
-        groupby="condition",
-        groups=["HFD"],
-        reference="NCD",
-        method="wilcoxon",
-        use_raw=True,
-        pts=True,
-    )
-    differential = sc.get.rank_genes_groups_df(data, group="HFD")
-    differential.to_csv(output_dir / "hfd_vs_ncd_cell_level_deg.csv", index=False)
-
+    write_json(output_dir / "disease_inference_status.json", {
+        "status": "descriptive_only",
+        "reason": "GSE270583 has one NCD library; cell counts cannot replace biological replicates",
+        "legacy_cell_level_DE": "not used for disease inference",
+        "jqf_role": "separate intervention arm; never merged into normal control",
+    })
     interaction_path = output_dir / "cellchat_like_interactions.csv"
     pathway_path = output_dir / "cellchat_like_pathways.csv"
-    if interaction_path.exists() and pathway_path.exists():
-        cached_interactions = pd.read_csv(interaction_path)
-        if "p_value" in cached_interactions.columns:
-            lr = {
-                "interactions": cached_interactions,
-                "pathways": pd.read_csv(pathway_path),
-            }
-        else:
-            lr = _cellchat_like_analysis(
-                data,
-                n_permutations=cellchat_permutations,
-                seed=cellchat_seed,
-            )
-            lr["interactions"].to_csv(interaction_path, index=False)
-            lr["pathways"].to_csv(pathway_path, index=False)
-    else:
-        lr = _cellchat_like_analysis(
-            data,
-            n_permutations=cellchat_permutations,
-            seed=cellchat_seed,
-        )
-        lr["interactions"].to_csv(interaction_path, index=False)
-        lr["pathways"].to_csv(pathway_path, index=False)
+    lr = _cellchat_like_analysis(data, n_permutations=cellchat_permutations, seed=cellchat_seed)
+    lr["interactions"].to_csv(interaction_path, index=False)
+    lr["pathways"].to_csv(pathway_path, index=False)
+    communication_status = dict(lr.get("status") or {})
     write_json(
         output_dir / "cellchat_permutation_summary.json",
         {
-            "method": "within-cell-type condition-label permutation",
+            **communication_status,
             "n_permutations": int(cellchat_permutations),
-            "n_interactions": int(len(lr["interactions"])),
+            "n_interactions": len(lr["interactions"]),
             "n_significant": (
                 int(lr["interactions"]["significant"].sum())
                 if "significant" in lr["interactions"].columns
                 else 0
             ),
             "note": (
-                "This is an auditable CellChat-like approximation, not the "
-                "R CellChat implementation."
+                "This is an explicit ligand-receptor scoring procedure, not "
+                "the R CellChat implementation. Significant group inference "
+                "requires at least two independent biological units per group."
             ),
         },
     )
@@ -409,6 +637,56 @@ def run_mouse_single_cell(
         lr["pathways"],
         output_dir / "fig4f_cellchat_network.png",
     )
+    unit_column, unit_map = _choose_inference_unit(data)
+    library_manifest = (
+        data.obs.groupby(["sample_id", "condition"], observed=True)
+        .size()
+        .rename("n_cells")
+        .reset_index()
+    )
+    library_manifest["biological_unit"] = library_manifest["sample_id"].map(
+        unit_map
+    )
+    library_manifest["verified_biological_replicate"] = unit_column in {
+        "donor_id",
+        "animal_id",
+    }
+    library_manifest["role"] = np.where(
+        library_manifest["condition"].astype(str).eq("JQF"),
+        "separate_intervention_arm",
+        "descriptive_library",
+    )
+    library_manifest_path = output_dir / "mouse_library_manifest.tsv"
+    library_manifest.to_csv(library_manifest_path, sep="\t", index=False)
+    cohort_rows: list[dict[str, Any]] = []
+    for (sample_id, condition), subset in data.obs.groupby(
+        ["sample_id", "condition"], observed=True
+    ):
+        unit = unit_map.get(str(sample_id), str(sample_id))
+        verified_donor = unit_column in {"donor_id", "animal_id", "patient_id"}
+        cohort_rows.append(
+            {
+                "accession": "GSE270583",
+                "sample_id": str(sample_id),
+                "library_id": str(sample_id),
+                "donor_id": str(unit) if verified_donor else "",
+                "species": "Mus musculus",
+                "platform": "10x scRNA-seq",
+                "tissue": "liver",
+                "condition": str(condition),
+                "original_diagnosis": str(condition),
+                "paired_patient": "no",
+                "batch": str(sample_id),
+                "exposure_status": "unknown",
+                "included": "yes",
+                "inclusion_reason": (
+                    "descriptive localization only; insufficient animal-level "
+                    "replication for disease significance"
+                ),
+                "data_version": "current GEO RAW",
+                "source": str(soft_path),
+            }
+        )
     write_json(
         output_dir / "mouse_single_cell_summary.json",
         {
@@ -418,11 +696,17 @@ def run_mouse_single_cell(
             "conditions": data.obs["condition"].value_counts().to_dict(),
             "cell_types": data.obs["cell_type"].value_counts().to_dict(),
             "core_genes": core,
+            "requested_human_core_genes": requested_core,
+            "homolog_mapping": str(homolog_path),
+            "biological_unit_column": unit_column,
+            "biological_units": len(set(unit_map.values())),
+            "library_manifest": str(library_manifest_path),
+            "disease_inference_status": "descriptive_only",
             "cellchat_note": (
                 "Ligand-receptor communication was tested with an explicit "
-                "local receptor-pair table and within-cell-type label "
-                "permutations; it is an auditable CellChat-like approximation, "
-                "not the R CellChat implementation."
+                "local receptor-pair table. Group labels are permuted across "
+                "biological units only when at least two units per condition "
+                "exist; otherwise the output is descriptive."
             ),
         },
     )
@@ -431,6 +715,7 @@ def run_mouse_single_cell(
         "cellchat": lr,
         "core_genes": core,
         "composition": output_dir / "cell_composition.csv",
+        "cohort_rows": cohort_rows,
     }
 
 
@@ -586,13 +871,11 @@ def _plot_core_violin(gene_expression: pd.DataFrame, output: Path) -> None:
             body.set_facecolor(color)
             body.set_alpha(0.7)
         ax.boxplot(values, widths=0.18, showfliers=False)
-        p_value = "NA"
-        if min(map(len, values)) >= 2:
-            p_value = f"{stats.mannwhitneyu(values[0], values[1]).pvalue:.2g}"
         ax.set_xticks([1, 2])
         ax.set_xticklabels(groups)
         ax.set_title(gene)
-        ax.text(0.98, 0.98, f"p={p_value}", transform=ax.transAxes, ha="right", va="top", fontsize=8)
+        ax.text(0.98, 0.98, "Descriptive cells; no replicate inference", transform=ax.transAxes,
+                ha="right", va="top", fontsize=6)
     fig.suptitle("Core-gene expression in mouse NAFLD", fontweight="bold")
     save_figure(fig, output)
 
@@ -621,22 +904,31 @@ def _plot_feature_grid(data: ad.AnnData, genes: list[str], output: Path) -> None
 def _plot_composition(composition: pd.DataFrame, output: Path) -> None:
     frame = (
         composition[composition["condition"].isin(["NCD", "HFD"])]
-        .groupby(["condition", "cell_type"], observed=True)["n_cells"]
+        .groupby(["sample_id", "cell_type"], observed=True)["n_cells"]
         .sum()
         .unstack(fill_value=0)
     )
     if frame.empty:
         return
     proportions = frame.div(frame.sum(axis=1), axis=0)
+    condition_lookup = (
+        composition.drop_duplicates("sample_id")
+        .set_index("sample_id")["condition"]
+        .astype(str)
+    )
+    labels = [
+        f"{sample}\n{condition_lookup.get(str(sample), '')}"
+        for sample in proportions.index.astype(str)
+    ]
     fig, ax = plt.subplots(figsize=(7.2, 5.4))
     bottom = np.zeros(len(proportions))
     colors = plt.get_cmap("tab20", frame.shape[1])
     for index, cell_type in enumerate(frame.columns):
         values = proportions[cell_type].to_numpy()
-        ax.bar(proportions.index, values, bottom=bottom, label=cell_type, color=colors(index))
+        ax.bar(labels, values, bottom=bottom, label=cell_type, color=colors(index))
         bottom += values
     ax.set_ylabel("Cell fraction")
-    ax.set_title("Cell composition in mouse liver", fontweight="bold")
+    ax.set_title("Cell composition by independent library", fontweight="bold")
     ax.legend(
         bbox_to_anchor=(0.5, -0.22),
         loc="upper center",
@@ -654,27 +946,87 @@ def _cellchat_like_analysis(
     seed: int = 123,
     max_cells: int = 5000,
 ) -> dict[str, pd.DataFrame]:
-    """Score LR pairs with a within-cell-type label-permutation test.
+    """Score LR pairs and permute condition labels at biological-unit level.
 
-    This is deliberately an auditable CellChat-like approximation rather than
-    an imitation of the R CellChat implementation. It tests whether the
-    HFD-minus-NCD communication score is larger than expected after permuting
-    condition labels within each annotated cell type.
+    This is an explicit ligand-receptor scoring procedure, not an imitation of
+    R CellChat. If fewer than two independent biological units are available in
+    either condition, observed scores are returned as descriptive only and no
+    p-values or FDR claims are made.
     """
     normalized = data.raw.to_adata() if data.raw is not None else data
     observation = data.obs.copy()
     conditions = ["NCD", "HFD"]
+    donor_column = next(
+        (
+            column
+            for column in ("donor_id", "animal_id")
+            if column in observation
+        ),
+        "",
+    )
+    verified_biological_units = bool(donor_column)
+    if not donor_column:
+        donor_column = "sample_id" if "sample_id" in observation else ""
+        if not donor_column:
+            return {
+                "interactions": pd.DataFrame(),
+                "pathways": pd.DataFrame(),
+                "status": {
+                    "status": "not_run",
+                    "reason": "no donor/sample identifier available for permutation",
+                },
+            }
+        observation = observation.copy()
+        observation["sample_id"] = observation["sample_id"].map(
+            _clean_identifier
+        )
     work = pd.DataFrame(
         {
             "__position": np.arange(len(observation), dtype=int),
             "cell_type": observation["cell_type"].astype(str).to_numpy(),
             "condition": observation["condition"].astype(str).to_numpy(),
+            "donor": observation[donor_column].map(_clean_identifier).to_numpy(),
         },
         index=observation.index,
     )
-    work = work[work["condition"].isin(conditions)]
+    work = work[
+        work["condition"].isin(conditions)
+        & work["donor"].ne("")
+    ]
     if work.empty:
-        return {"interactions": pd.DataFrame(), "pathways": pd.DataFrame()}
+        return {
+            "interactions": pd.DataFrame(),
+            "pathways": pd.DataFrame(),
+            "status": {
+                "status": "not_run",
+                "reason": "no labelled donor/sample observations in NCD/HFD",
+            },
+        }
+    donor_conditions = (
+        work.groupby("donor", observed=True)["condition"]
+        .agg(lambda values: sorted(set(values.astype(str))))
+        .to_dict()
+    )
+    if any(len(values) != 1 for values in donor_conditions.values()):
+        raise ValueError("a biological unit has conflicting NCD/HFD annotations")
+    donor_to_condition = {
+        str(donor): str(values[0])
+        for donor, values in donor_conditions.items()
+    }
+    donors = sorted(donor_to_condition)
+    donor_index = {donor: index for index, donor in enumerate(donors)}
+    donor_condition = np.asarray(
+        [donor_to_condition[donor] == "HFD" for donor in donors],
+        dtype=int,
+    )
+    n_by_condition = {
+        condition: int(np.sum(donor_condition == int(condition == "HFD")))
+        for condition in conditions
+    }
+    sufficient_replication = bool(
+        verified_biological_units
+        and all(value >= 2 for value in n_by_condition.values())
+    )
 
     rng = np.random.default_rng(seed)
     sampled_indices: list[int] = []
@@ -695,7 +1047,7 @@ def _cellchat_like_analysis(
         sampled["cell_type"],
         categories=cell_types,
     ).codes
-    condition_codes = (sampled["condition"].to_numpy() == "HFD").astype(int)
+    donor_codes = sampled["donor"].map(donor_index).to_numpy(dtype=int)
     n_cell_types = len(cell_types)
     expression = normalized.X
     pair_data: dict[tuple[str, str, str], dict[str, np.ndarray]] = {}
@@ -723,28 +1075,39 @@ def _cellchat_like_analysis(
         values: np.ndarray,
         condition_labels: np.ndarray,
     ) -> np.ndarray:
+        """Average donor x cell-type means with each donor weighted equally."""
+        donor_cell_sums = np.zeros((len(donors), n_cell_types), dtype=float)
+        donor_cell_counts = np.zeros((len(donors), n_cell_types), dtype=float)
+        np.add.at(
+            donor_cell_sums,
+            (donor_codes, cell_type_codes),
+            values,
+        )
+        np.add.at(
+            donor_cell_counts,
+            (donor_codes, cell_type_codes),
+            1.0,
+        )
+        donor_cell_means = np.divide(
+            donor_cell_sums,
+            donor_cell_counts,
+            out=np.full_like(donor_cell_sums, np.nan),
+            where=donor_cell_counts > 0,
+        )
         output = np.full((2, n_cell_types), np.nan, dtype=float)
         for condition_index in (0, 1):
             mask = condition_labels == condition_index
             if not mask.any():
                 continue
-            counts = np.bincount(
-                cell_type_codes[mask],
-                minlength=n_cell_types,
+            condition_values = donor_cell_means[mask]
+            valid = np.isfinite(condition_values)
+            counts = valid.sum(axis=0)
+            sums = np.nansum(condition_values, axis=0)
+            output[condition_index, counts > 0] = (
+                sums[counts > 0] / counts[counts > 0]
             )
-            sums = np.bincount(
-                cell_type_codes[mask],
-                weights=values[mask],
-                minlength=n_cell_types,
-            )
-            valid = counts > 0
-            output[condition_index, valid] = sums[valid] / counts[valid]
         return output
 
-    group_indices = {
-        cell_type: np.flatnonzero(cell_type_codes == index)
-        for index, cell_type in enumerate(cell_types)
-    }
     permutation_deltas: dict[tuple[str, str, str], np.ndarray] = {
         key: np.full(
             (max(1, n_permutations), n_cell_types, n_cell_types),
@@ -753,23 +1116,24 @@ def _cellchat_like_analysis(
         )
         for key in pair_data
     }
-    for permutation_index in range(max(1, n_permutations)):
-        permuted = condition_codes.copy()
-        for indices in group_indices.values():
-            permuted[indices] = rng.permutation(permuted[indices])
-        for key, values in pair_data.items():
-            ligand_means = means(values["ligand"], permuted)
-            receptor_means = means(values["receptor"], permuted)
-            scores = np.fmin(
-                ligand_means[:, :, None],
-                receptor_means[:, None, :],
-            )
-            permutation_deltas[key][permutation_index] = scores[1] - scores[0]
+    if sufficient_replication:
+        for permutation_index in range(max(1, n_permutations)):
+            permuted = rng.permutation(donor_condition)
+            for key, values in pair_data.items():
+                ligand_means = means(values["ligand"], permuted)
+                receptor_means = means(values["receptor"], permuted)
+                scores = np.fmin(
+                    ligand_means[:, :, None],
+                    receptor_means[:, None, :],
+                )
+                permutation_deltas[key][permutation_index] = (
+                    scores[1] - scores[0]
+                )
 
     records: list[dict[str, Any]] = []
     for (pathway, ligand, receptor), values in pair_data.items():
-        ligand_means = means(values["ligand"], condition_codes)
-        receptor_means = means(values["receptor"], condition_codes)
+        ligand_means = means(values["ligand"], donor_condition)
+        receptor_means = means(values["receptor"], donor_condition)
         scores = np.fmin(
             ligand_means[:, :, None],
             receptor_means[:, None, :],
@@ -794,7 +1158,7 @@ def _cellchat_like_analysis(
                         )
                         / (len(null_values) + 1)
                     )
-                    if len(null_values)
+                    if sufficient_replication and len(null_values)
                     else np.nan
                 )
                 records.append(
@@ -816,18 +1180,38 @@ def _cellchat_like_analysis(
                         ),
                         "delta_HFD_NCD": observed_delta,
                         "p_value": p_value,
+                        "inference_status": (
+                            "biological_unit_permutation"
+                            if sufficient_replication
+                            else "insufficient_biological_replicates"
+                        ),
+                        "n_NCD_units": n_by_condition["NCD"],
+                        "n_HFD_units": n_by_condition["HFD"],
+                        "donor_column": donor_column,
                     }
                 )
     interactions = pd.DataFrame(records)
     if interactions.empty:
-        return {"interactions": interactions, "pathways": pd.DataFrame()}
+        return {
+            "interactions": interactions,
+            "pathways": pd.DataFrame(),
+            "status": {
+                "status": "valid_negative",
+                "reason": "no matched ligand-receptor pairs in the local table",
+                "donor_column": donor_column,
+            },
+        }
     finite_p = interactions["p_value"].map(
         lambda value: float(value) if pd.notna(value) else 1.0
     )
     interactions["fdr"] = bh_fdr(finite_p.tolist())
-    interactions["significant"] = (
-        pd.to_numeric(interactions["fdr"], errors="coerce") < 0.05
-    )
+    if not sufficient_replication:
+        interactions["fdr"] = np.nan
+        interactions["significant"] = False
+    else:
+        interactions["significant"] = (
+            pd.to_numeric(interactions["fdr"], errors="coerce") < 0.05
+        )
     interactions["n_permutations"] = int(max(1, n_permutations))
     pathways = (
         interactions.groupby("pathway", as_index=False)
@@ -841,7 +1225,28 @@ def _cellchat_like_analysis(
         )
         .sort_values(["n_significant", "delta_HFD_NCD"], ascending=False)
     )
-    return {"interactions": interactions, "pathways": pathways}
+    status = {
+        "status": (
+            "completed" if sufficient_replication else "descriptive_only"
+        ),
+        "method": "explicit ligand-receptor scoring with biological-unit label permutation",
+        "statistical_unit": donor_column,
+        "verified_biological_units": verified_biological_units,
+        "n_NCD_units": n_by_condition["NCD"],
+        "n_HFD_units": n_by_condition["HFD"],
+        "reason": (
+            ""
+            if sufficient_replication
+            else "fewer than two independent biological units in at least one condition"
+            if verified_biological_units
+            else "library IDs are not treated as independent animals/donors"
+        ),
+    }
+    return {
+        "interactions": interactions,
+        "pathways": pathways,
+        "status": status,
+    }
 
 
 def _gene_matrix_column(matrix: Any, var_names: pd.Index, gene: str) -> np.ndarray:
@@ -966,7 +1371,7 @@ def _plot_cell_communication(
     ]
     ax.legend(handles=handles, loc="upper right", frameon=False, fontsize=7)
     ax.set_title(
-        "Ligand-receptor communication network (CellChat-like scoring)",
+        "Ligand-receptor scoring network (not R CellChat)",
         fontweight="bold",
     )
     ax.axis("off")
@@ -979,17 +1384,20 @@ def run_human_single_cell(
     core_genes: list[str],
     output_dir: Path,
     *,
-    max_cells_per_sample: int = 1200,
+    max_cells_per_sample: int = 0,
     seed: int = 42,
 ) -> dict[str, Any]:
     """Process GSE202379 raw count CSVs into a disease-spectrum atlas."""
     _require_scanpy()
     ensure_dir(output_dir)
     data_path = output_dir / "human_liver_processed.h5ad"
-    if data_path.exists():
+    state_path = output_dir / "single_cell.cache.json"
+    input_key = cache.signature(files=[soft_path, Path(__file__), *sorted(extracted_dir.rglob("*.gz"))],
+                                parameters={"max_cells_per_sample": max_cells_per_sample, "seed": seed})
+    metadata = parse_geo_soft_samples(soft_path)
+    if cache.valid(state_path, input_key, [data_path]):
         data = ad.read_h5ad(data_path)
     else:
-        metadata = parse_geo_soft_samples(soft_path)
         csv_files = sorted(extracted_dir.rglob("*raw_counts.csv.gz"))
         if not csv_files:
             csv_files = sorted(extracted_dir.rglob("*raw*counts.csv.gz"))
@@ -1004,7 +1412,7 @@ def run_human_single_cell(
             frame = pd.read_csv(csv_path, index_col=0)
             if frame.empty:
                 continue
-            if frame.shape[1] > max_cells_per_sample:
+            if max_cells_per_sample > 0 and frame.shape[1] > max_cells_per_sample:
                 selected_columns = np.sort(
                     rng.choice(frame.shape[1], size=max_cells_per_sample, replace=False)
                 )
@@ -1015,7 +1423,7 @@ def run_human_single_cell(
                 data={
                     "sample_id": gsm,
                     "condition": _human_condition(record),
-                    "patient_id": str(record.get("patient_id") or gsm),
+                    "patient_id": _patient_id(record),
                     "batch": gsm,
                 },
             )
@@ -1032,18 +1440,20 @@ def run_human_single_cell(
         data.layers["counts"] = data.X.copy()
         data.var["mt"] = data.var_names.astype(str).str.upper().str.startswith("MT-")
         sc.pp.calculate_qc_metrics(data, qc_vars=["mt"], inplace=True, percent_top=None)
+        data.uns["qc_before"] = _qc_snapshot(data)
         sc.pp.filter_cells(data, min_genes=200)
         sc.pp.filter_genes(data, min_cells=3)
         data = data[data.obs["pct_counts_mt"].astype(float) <= 20.0].copy()
+        data.uns["qc_after"] = _qc_snapshot(data)
         sc.pp.normalize_total(data, target_sum=1e4)
         sc.pp.log1p(data)
         data.raw = data
         sc.pp.highly_variable_genes(data, n_top_genes=min(2500, data.n_vars), batch_key="batch")
         hvg = data[:, data.var["highly_variable"]].copy()
-        _integrate_batches(hvg)
         sc.pp.scale(hvg, max_value=10)
         sc.tl.pca(hvg, n_comps=min(40, hvg.n_vars - 1, hvg.n_obs - 1), svd_solver="arpack")
-        sc.pp.neighbors(hvg, n_neighbors=15, n_pcs=min(30, hvg.obsm["X_pca"].shape[1]))
+        representation = _integrate_batches(hvg)
+        sc.pp.neighbors(hvg, n_neighbors=15, n_pcs=min(30, hvg.obsm[representation].shape[1]), use_rep=representation)
         sc.tl.umap(hvg, random_state=seed)
         sc.tl.leiden(hvg, resolution=0.8, key_added="cluster", flavor="igraph", n_iterations=2)
         data.obsm["X_pca"] = hvg.obsm["X_pca"]
@@ -1051,11 +1461,31 @@ def run_human_single_cell(
         data.obs["cluster"] = hvg.obs["cluster"].astype(str)
         data.obs["cell_type"] = annotate_clusters(data, HUMAN_MARKERS)
         data.write_h5ad(data_path, compression="gzip")
+        cache.save(state_path, input_key, [data_path])
+    doublet_status = _optional_doublet_assessment(data, output_dir)
+    _write_qc_report(
+        output_dir,
+        dict(data.uns.get("qc_before") or {}),
+        dict(data.uns.get("qc_after") or _qc_snapshot(data)),
+        doublet_status=doublet_status,
+    )
     data.obs["cell_type"] = (
         data.obs["cell_type"]
         .astype(str)
         .str.replace(r"\s+\d+$", "", regex=True)
     )
+    manifest_path, cohort_rows = _write_human_manifest(
+        data,
+        output_dir,
+        soft_path,
+        metadata,
+    )
+    included_samples = set(
+        pd.read_csv(manifest_path, sep="\t")
+        .loc[lambda frame: frame["included"].eq("yes"), "sample_id"]
+        .astype(str)
+    )
+    unknown_or_ambiguous_libraries = len(set(data.obs["sample_id"].astype(str)) - included_samples)
 
     _plot_umap(
         data,
@@ -1095,20 +1525,120 @@ def run_human_single_cell(
             "n_cells": int(data.n_obs),
             "n_genes": int(data.n_vars),
             "samples": int(data.obs["sample_id"].nunique()),
+            "donors": int(
+                data.obs["patient_id"]
+                .map(_clean_identifier)
+                .loc[lambda values: values.ne("")]
+                .nunique()
+            ),
+            "unknown_or_ambiguous_libraries": unknown_or_ambiguous_libraries,
             "conditions": data.obs["condition"].value_counts().to_dict(),
             "cell_types": data.obs["cell_type"].value_counts().to_dict(),
             "core_genes": core,
             "sampling_note": (
-                f"At most {max_cells_per_sample} cells were sampled per GEO sample "
-                "to keep memory use reproducible on the local workstation."
+                "No per-library cell cap is applied by default; all retained "
+                "nuclei are used unless a positive max_cells_per_sample is configured."
             ),
+            "statistical_unit": "donor",
+            "manifest": str(manifest_path),
         },
     )
     return {
         "h5ad": data_path,
         "core_genes": core,
         "expression": output_dir / "human_core_gene_expression_long.csv.gz",
+        "cohort_rows": cohort_rows,
     }
+
+
+def _patient_id(record: dict[str, Any]) -> str:
+    for field in ("patient_id", "patient", "donor_id", "donor"):
+        value = str(record.get(field) or "").strip()
+        if value and value.lower() not in {"nan", "unknown", "na"}:
+            return value
+    # Dataset-specific documented title prefix, not GSM-as-patient substitution.
+    match = re.match(r"^(P(?:CL|HL)?\d+)-", str(record.get("title") or ""), re.IGNORECASE)
+    return match.group(1).upper() if match else ""
+
+
+def _donor_expression(frame: pd.DataFrame, donor: str) -> pd.DataFrame:
+    if frame.empty or donor not in frame:
+        return frame.iloc[:0].copy()
+    ids = frame[donor].fillna("").astype(str).str.strip()
+    clean = frame.assign(**{donor: ids})
+    clean = clean.loc[~ids.str.lower().isin(UNKNOWN_IDS)].copy()
+    if clean.empty:
+        return clean
+    if clean.groupby(donor)["condition"].nunique().gt(1).any():
+        raise ValueError("a biological donor has conflicting conditions")
+    return clean.groupby(
+        [donor, "gene", "cell_type", "condition"],
+        observed=True,
+        as_index=False,
+    )["expression"].mean()
+
+
+def _write_human_manifest(
+    data: ad.AnnData,
+    output_dir: Path,
+    soft_path: Path,
+    metadata: dict[str, dict[str, Any]],
+) -> tuple[Path, list[dict[str, Any]]]:
+    rows: list[dict[str, Any]] = []
+    for sample_id, subset in data.obs.groupby("sample_id", observed=True):
+        patient_ids = subset["patient_id"].map(_clean_identifier)
+        patients = sorted(set(patient_ids.loc[patient_ids.ne("")].astype(str)))
+        conditions = sorted(set(subset["condition"].astype(str)))
+        included = len(patients) == 1 and len(conditions) == 1
+        reason = (
+            "verified donor-level metadata"
+            if included
+            else "unknown_conflicting_or_ambiguous_patient_id"
+        )
+        rows.append(
+            {
+                "accession": "GSE202379",
+                "sample_id": str(sample_id),
+                "library_id": str(sample_id),
+                "donor_id": patients[0] if len(patients) == 1 else "",
+                "species": "Homo sapiens",
+                "platform": "snRNA-seq",
+                "tissue": "liver",
+                "condition": conditions[0] if len(conditions) == 1 else "conflicting",
+                "original_diagnosis": "|".join(conditions),
+                "paired_patient": "yes" if included else "unknown",
+                "batch": str(sample_id),
+                "exposure_status": "unknown",
+                "included": "yes" if included else "no",
+                "inclusion_reason": reason,
+                "data_version": "current GEO SOFT/RAW",
+                "source": str(soft_path),
+                "n_cells": len(subset),
+            }
+        )
+    manifest = pd.DataFrame(rows)
+    manifest_path = output_dir / "human_donor_manifest.tsv"
+    manifest.to_csv(manifest_path, sep="\t", index=False)
+
+    correction_rows = []
+    for gsm in ("GSM6112262", "GSM6112263"):
+        record = metadata.get(gsm, {})
+        correction_rows.append(
+            {
+                "gsm": gsm,
+                "title": str(record.get("title") or ""),
+                "patient_id": _patient_id(record),
+                "disease_status": str(record.get("disease_status") or ""),
+                "official_revision_date": "2025-06-06",
+                "status": "current_SOFT_parsed_without_manual_swap",
+            }
+        )
+    pd.DataFrame(correction_rows).to_csv(
+        output_dir / "gse202379_metadata_correction_audit.tsv",
+        sep="\t",
+        index=False,
+    )
+    return manifest_path, rows
 
 
 def _human_condition(record: dict[str, Any]) -> str:
@@ -1127,6 +1657,10 @@ def _human_condition(record: dict[str, Any]) -> str:
 
 
 def _plot_human_core_genes(expression: pd.DataFrame, output: Path) -> None:
+    expression = _donor_expression(expression, "patient_id")
+    if expression.empty:
+        return
+    expression["cell"] = expression["patient_id"]
     data = expression[
         ~expression["condition"].isin(["Unknown", "End-stage"])
     ].copy()
@@ -1168,7 +1702,8 @@ def _plot_human_core_genes(expression: pd.DataFrame, output: Path) -> None:
                 if len(values_group) >= 2
             ]
             p_value = (
-                stats.kruskal(*nonempty).pvalue if len(nonempty) >= 2 else np.nan
+                (stats.kruskal(*nonempty).pvalue if np.ptp(np.concatenate(nonempty)) > 0 else 1.0)
+                if len(nonempty) >= 2 and all(len(v) >= 2 for v in values.values() if len(v)) else np.nan
             )
             for condition in disease_conditions:
                 values_group = values[condition]
@@ -1177,8 +1712,8 @@ def _plot_human_core_genes(expression: pd.DataFrame, output: Path) -> None:
                         "gene": gene,
                         "cell_type": cell_type,
                         "condition": condition,
-                        "n_healthy": int(len(healthy)),
-                        "n_condition": int(len(values_group)),
+                        "n_healthy": len(healthy),
+                        "n_condition": len(values_group),
                         "healthy_median": healthy_median,
                         "condition_median": (
                             float(values_group.median())
@@ -1287,11 +1822,11 @@ def _plot_human_core_genes(expression: pd.DataFrame, output: Path) -> None:
         shrink=0.82,
         pad=0.13,
     )
-    colorbar.set_label("Median expression difference vs Healthy")
+    colorbar.set_label("Median donor-mean expression difference vs Healthy")
     ax.text(
         1.0,
         -0.34,
-        "*FDR<0.05  **FDR<0.01  ***FDR<0.001 (Kruskal-Wallis)",
+        "*FDR<0.05  **FDR<0.01  ***FDR<0.001 (donor-mean Kruskal-Wallis; exploratory)",
         transform=ax.transAxes,
         ha="right",
         va="top",
@@ -1302,6 +1837,7 @@ def _plot_human_core_genes(expression: pd.DataFrame, output: Path) -> None:
 
 
 def _mouse_core_statistics(expression: pd.DataFrame) -> pd.DataFrame:
+    expression = _donor_expression(expression, "sample_id")
     rows: list[dict[str, Any]] = []
     if expression.empty:
         return pd.DataFrame()
@@ -1322,8 +1858,9 @@ def _mouse_core_statistics(expression: pd.DataFrame) -> pd.DataFrame:
             {
                 "gene": gene,
                 "cell_type": cell_type,
-                "n_NCD": int(len(control)),
-                "n_HFD": int(len(disease)),
+                "inference_level": "sample_mean_exploratory" if min(len(control), len(disease)) >= 2 else "insufficient_biological_replicates",
+                "n_NCD": len(control),
+                "n_HFD": len(disease),
                 "median_NCD": float(control.median()) if len(control) else np.nan,
                 "median_HFD": float(disease.median()) if len(disease) else np.nan,
                 "median_delta_HFD_NCD": (
@@ -1341,6 +1878,7 @@ def _mouse_core_statistics(expression: pd.DataFrame) -> pd.DataFrame:
 
 
 def _human_core_statistics(expression: pd.DataFrame) -> pd.DataFrame:
+    expression = _donor_expression(expression, "patient_id")
     rows: list[dict[str, Any]] = []
     if expression.empty:
         return pd.DataFrame()
@@ -1362,14 +1900,15 @@ def _human_core_statistics(expression: pd.DataFrame) -> pd.DataFrame:
             if len(group) >= 2
         ]
         if len(groups) >= 2:
-            p_value = stats.kruskal(*groups).pvalue
+            p_value = stats.kruskal(*groups).pvalue if np.ptp(np.concatenate(groups)) > 0 else 1.0
         else:
             p_value = np.nan
         rows.append(
             {
                 "gene": gene,
                 "cell_type": cell_type,
-                "n_cells": int(len(subset)),
+                "n_donors": len(subset),
+                "inference_level": "donor_mean_exploratory",
                 "n_conditions": int(subset["condition"].nunique()),
                 "p_value": p_value,
             }

@@ -2,12 +2,12 @@
 
 from __future__ import annotations
 
-import json
 import os
 import shutil
+from collections.abc import Iterable
 from dataclasses import dataclass
 from pathlib import Path
-from typing import Any, Iterable
+from typing import Any
 
 import pandas as pd
 from PIL import Image, UnidentifiedImageError
@@ -140,7 +140,7 @@ PANEL_ALIASES: tuple[PanelAlias, ...] = (
     PanelAlias(
         "Figure2_PPI网络与枢纽基因初步筛选",
         "b",
-        "Cytoscape 风格模块网络",
+        "Louvain 模块网络",
         "03_intersection_ppi/fig2b_cytoscape_module_network.png",
         "Fig2b_PPI模块网络.png",
     ),
@@ -203,23 +203,23 @@ PANEL_ALIASES: tuple[PanelAlias, ...] = (
     PanelAlias(
         "Figure3_机器学习模型构建与SHAP核心特征",
         "c",
-        "GSE49541 外部验证 ROC",
-        "05_machine_learning/fig3c_gse49541_external_roc.png",
-        "Fig3c_GSE49541_外部验证ROC.png",
+        "GSE49541 跨终点纤维化探索 ROC",
+        "05_machine_learning/fig3c_gse49541_cross_endpoint_roc.png",
+        "Fig3c_GSE49541_跨终点纤维化探索ROC.png",
     ),
     PanelAlias(
         "Figure3_机器学习模型构建与SHAP核心特征",
         "d",
-        "GSE164441 外部验证 ROC",
-        "05_machine_learning/fig3d_gse164441_external_roc.png",
-        "Fig3d_GSE164441_外部验证ROC.png",
+        "GSE135251 同终点候选 ROC",
+        "05_machine_learning/fig3d_gse135251_same_endpoint_roc.png",
+        "Fig3d_GSE135251_同终点候选ROC.png",
     ),
     PanelAlias(
         "Figure3_机器学习模型构建与SHAP核心特征",
         "d",
-        "GSE135251 补充 NAFLD 验证 ROC",
-        "05_machine_learning/fig3d_supplementary_gse135251_roc.png",
-        "Fig3d_补充_GSE135251_NAFLD验证ROC.png",
+        "GSE164441 HCC 配对扩展 ROC",
+        "05_machine_learning/fig3d_supplementary_gse164441_hcc_roc.png",
+        "Fig3d_补充_GSE164441_HCC配对扩展ROC.png",
     ),
     PanelAlias(
         "Figure3_机器学习模型构建与SHAP核心特征",
@@ -287,37 +287,37 @@ PANEL_ALIASES: tuple[PanelAlias, ...] = (
     PanelAlias(
         "Figure4_单细胞图谱_细胞通讯与虚拟扰动",
         "f",
-        "细胞通讯",
+        "显式配体-受体评分网络（非CellChat实现）",
         "06_single_cell_mouse/fig4f_cellchat_network.png",
-        "Fig4f_细胞通讯.png",
+        "Fig4f_配体受体评分网络.png",
     ),
     PanelAlias(
         "Figure4_单细胞图谱_细胞通讯与虚拟扰动",
         "g",
-        "虚拟敲除 Top 10 变化数据",
+        "预测扰动响应 Top 10 变化",
         "06_single_cell_mouse/fig4g_virtual_knockout_top10.png",
-        "Fig4g_虚拟敲除Top10.png",
+        "Fig4g_预测扰动响应Top10.png",
     ),
     PanelAlias(
         "Figure4_单细胞图谱_细胞通讯与虚拟扰动",
         "g",
-        "虚拟敲除调控网络",
+        "预测扰动响应网络",
         "06_single_cell_mouse/fig4g_virtual_knockout_network.png",
-        "Fig4g_虚拟敲除调控网络.png",
+        "Fig4g_预测扰动响应网络.png",
     ),
     PanelAlias(
         "Figure4_单细胞图谱_细胞通讯与虚拟扰动",
         "g",
-        "虚拟敲除 UMAP 偏移",
+        "预测扰动响应 UMAP 偏移",
         "06_single_cell_mouse/fig4g_virtual_knockout_shift.png",
-        "Fig4g_虚拟敲除UMAP偏移.png",
+        "Fig4g_预测扰动响应UMAP偏移.png",
     ),
     PanelAlias(
         "Figure4_单细胞图谱_细胞通讯与虚拟扰动",
         "h",
-        "虚拟敲除富集结果",
+        "预测扰动响应富集",
         "06_single_cell_mouse/fig4h_virtual_knockout_enrichment.png",
-        "Fig4h_虚拟敲除富集.png",
+        "Fig4h_预测扰动响应富集.png",
     ),
     PanelAlias(
         "Figure4_单细胞图谱_细胞通讯与虚拟扰动",
@@ -653,8 +653,8 @@ def _write_readme(target: Path, records: Iterable[dict[str, Any]]) -> None:
         "",
         "- Figure 1d、1e 中 GeneCards、OMIM、TTD 无本地授权数据时，"
         "使用来源状态图而不是伪造 Venn 交集。",
-        "- Figure 4f 是 CellChat 风格配体受体评分，不是完整 CellChat "
-        "置换检验的替代声明。",
+        "- Figure 4f 是显式配体-受体评分，不等于完整 R CellChat 分析；"
+        "独立生物重复不足时只作描述。",
         "- Figure 5d-5h 标记为 `prepared_not_run`，表示 100 ns GROMACS "
         "生产轨迹未实际运行，输入文件和未运行说明均已归档。",
         "",

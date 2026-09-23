@@ -19,15 +19,16 @@ import html
 import logging
 import os
 import re
-import shutil
 import shlex
+import shutil
 import subprocess
 import time
 from pathlib import Path
-from common.fingerprints import file_hash, fingerprint, read_state, atomic_json
 
 import numpy as np
 import pandas as pd
+
+from common.fingerprints import atomic_json, file_hash, fingerprint, read_state
 
 from .config import ResolvedConfig
 from .utils import (
@@ -155,7 +156,7 @@ def run_md_simulation(
     failed = sum(1 for row in rows if row["status"] == "failed")
     summary = {
         "mode": mode,
-        "requested": int(len(selected)),
+        "requested": len(selected),
         "completed": completed,
         "prepared": prepared,
         "failed": failed,
@@ -256,7 +257,7 @@ def _pose_path(cfg: ResolvedConfig, row) -> Path:
     pose = row.get("pose_file") if hasattr(row, "get") else None
     if pose and Path(str(pose)).exists():
         return Path(str(pose))
-    return cfg.docked_dir() / f"{str(row.get('id', 'ligand'))}.pdbqt"
+    return cfg.docked_dir() / f"{row.get('id', 'ligand')!s}.pdbqt"
 
 
 def _write_protein_pdb(
@@ -1098,6 +1099,12 @@ def _analyze_gromacs_output(cfg: ResolvedConfig, run_dir: Path) -> dict:
                     float(contact_mean), 6
                 )
         metrics["stability_label"] = _stability_label(metrics, cfg)
+        metrics["rmsd_fit_reference"] = (
+            "protein for protein RMSD; protein-fitted then ligand-atom "
+            "displacement for ligand RMSD"
+        )
+        metrics["rmsf_unit"] = "nm"
+        metrics["rg_time_unit"] = "ns"
         try:
             metrics.update(
                 _analyze_pca_fel(
@@ -1313,17 +1320,33 @@ def _run_mmpbsa(
         r"TOTAL\s+(-?\d+(?:\.\d+)?)",
     ]
     value = ""
+    unit = ""
     for pattern in patterns:
         match = re.search(pattern, text, flags=re.IGNORECASE)
         if match:
             raw = float(match.group(1))
-            # Common gmx_MMPBSA output is kcal/mol; normalise when needed.
-            value = raw * 4.184 if "kcal" in text.lower() else raw
+            lower = text.lower()
+            if "kcal/mol" in lower or "kcal mol" in lower:
+                value = raw * 4.184
+                unit = "kcal/mol -> kJ/mol"
+            elif "kj/mol" in lower or "kj mol" in lower:
+                value = raw
+                unit = "kJ/mol"
             break
+    if value == "":
+        return {
+            "mmpbsa_status": "failed_unknown_or_missing_units",
+            "mmpbsa_log": str(log_path),
+        }
     return {
         "mmpbsa_status": "completed",
         "mmpbsa_delta_total_kj_mol": value,
+        "mmpbsa_original_unit": unit,
         "mmpbsa_log": str(log_path),
+        "note": (
+            "Total energy is reported separately from residue decomposition; "
+            "it does not satisfy Figure 5h."
+        ),
     }
 
 

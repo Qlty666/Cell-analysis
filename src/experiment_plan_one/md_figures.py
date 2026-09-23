@@ -9,7 +9,7 @@ from typing import Any
 import numpy as np
 import pandas as pd
 
-from .common import LOG, ensure_dir, save_figure, write_json
+from .common import LOG, ensure_dir, read_json, save_figure, write_json
 
 
 def _parse_xvg(path: Path) -> np.ndarray | None:
@@ -27,19 +27,21 @@ def _parse_xvg(path: Path) -> np.ndarray | None:
     return np.asarray(rows, dtype=float) if rows else None
 
 
-def _latest_run_dir(docking_dir: Path) -> Path | None:
-    roots = [
-        path
-        for path in docking_dir.rglob("06_md")
-        if path.is_dir()
-    ]
-    if not roots:
-        return None
-    root = max(roots, key=lambda path: path.stat().st_mtime)
-    runs = [path for path in root.iterdir() if path.is_dir()]
-    if not runs:
-        return None
-    return max(runs, key=lambda path: path.stat().st_mtime)
+def _manifest_run(docking_dir: Path) -> tuple[Path | None, dict[str, Any]]:
+    manifest = read_json(docking_dir / "md_run_manifest.json", {})
+    if not isinstance(manifest, dict) or not manifest:
+        return None, {
+            "status": "missing_provenance_manifest",
+            "reason": "target/ligand/run IDs were not recorded",
+        }
+    run_value = str(manifest.get("run_dir") or "")
+    run_dir = Path(run_value) if run_value else None
+    if run_dir is None or not run_dir.is_dir():
+        return None, {
+            **manifest,
+            "status": "missing_bound_run_directory",
+        }
+    return run_dir, manifest
 
 
 def _metrics(docking_dir: Path) -> pd.DataFrame:
@@ -93,6 +95,8 @@ def _time_series_panel(
     ylabel: str,
     color: str,
     scale: float = 1.0,
+    time_unit: str = "ns",
+    min_duration_ns: float = 100.0,
 ) -> bool:
     import matplotlib.pyplot as plt
 
@@ -103,10 +107,21 @@ def _time_series_panel(
             "The corresponding GROMACS XVG file was not found.",
         )
         return False
+    duration = float(np.nanmax(data[:, 0]))
+    if duration < min_duration_ns - max(1e-6, min_duration_ns * 0.001):
+        _empty_panel(
+            output,
+            title,
+            (
+                f"The parsed trajectory reaches {duration:.3f} {time_unit}, "
+                f"below the required {min_duration_ns:g} ns production period."
+            ),
+        )
+        return False
     values = data[:, 1] * scale
     fig, ax = plt.subplots(figsize=(7.2, 4.4))
     ax.plot(data[:, 0], values, color=color, linewidth=1.35)
-    ax.set_xlabel("Time (ps)")
+    ax.set_xlabel(f"Time ({time_unit})")
     ax.set_ylabel(ylabel)
     ax.set_title(title, fontweight="bold")
     ax.grid(alpha=0.22)
@@ -115,7 +130,7 @@ def _time_series_panel(
     ax.text(
         0.02,
         0.96,
-        f"mean={mean:.3f}; SD={std:.3f}",
+        f"mean={mean:.3f}; SD={std:.3f}; duration={duration:.1f} {time_unit}",
         transform=ax.transAxes,
         ha="left",
         va="top",
@@ -175,30 +190,88 @@ def _parse_mmpbsa_decomposition(run_dir: Path) -> pd.DataFrame:
     if not candidates:
         return pd.DataFrame()
     path = candidates[0]
+    text = path.read_text(encoding="utf-8", errors="replace")
+    unit = "kJ/mol"
+    lower = text.lower()
+    if "kcal/mol" in lower:
+        unit = "kcal/mol"
+    headers: list[str] = []
     records: list[dict[str, Any]] = []
-    for line in path.read_text(encoding="utf-8", errors="replace").splitlines():
-        line = line.strip()
-        if not line or line.startswith("#"):
+    for line in text.splitlines():
+        stripped = line.strip()
+        if not stripped:
             continue
-        tokens = line.split()
-        numbers = []
-        for token in reversed(tokens):
+        comment = stripped.startswith("#")
+        content = stripped.lstrip("#").strip()
+        tokens = content.split()
+        if not tokens:
+            continue
+        if comment and (
+            "residue" in content.lower()
+            or "total" in content.lower()
+        ):
+            headers = [
+                re.sub(r"[^a-z0-9]+", "_", token.lower()).strip("_")
+                for token in tokens
+            ]
+            continue
+        residue_index = next(
+            (
+                index
+                for index, token in enumerate(tokens)
+                if re.fullmatch(r"(?:[A-Za-z]{3})?\d+[A-Za-z]?", token)
+                or re.fullmatch(r"[A-Za-z]{3}", token)
+            ),
+            None,
+        )
+        if residue_index is None:
+            continue
+        numeric_tokens: list[float] = []
+        for token in tokens[residue_index + 1 :]:
             try:
-                numbers.append(float(token))
+                numeric_tokens.append(float(token))
             except ValueError:
-                break
-        if len(numbers) < 2:
+                continue
+        if not numeric_tokens:
             continue
-        label = " ".join(tokens[: max(1, len(tokens) - len(numbers))])
-        if not re.search(r"\d", label):
-            continue
+        label = " ".join(tokens[: residue_index + 1])
+        total_index = None
+        std_index = None
+        for index, header in enumerate(headers):
+            header_offset = index - residue_index
+            value_index = header_offset - 1
+            if "total" in header:
+                total_index = value_index
+            if "std" in header or "error" in header:
+                std_index = value_index
+        delta = (
+            numeric_tokens[total_index]
+            if total_index is not None
+            and 0 <= total_index < len(numeric_tokens)
+            else numeric_tokens[-1]
+        )
+        if unit == "kcal/mol":
+            delta *= 4.184
+        std = None
+        if std_index is not None and 0 <= std_index < len(numeric_tokens):
+            std = numeric_tokens[std_index]
+            if unit == "kcal/mol":
+                std *= 4.184
         records.append(
             {
                 "residue": label,
-                "delta_kj_mol": numbers[-1],
+                "delta_kj_mol": delta,
+                "std_kj_mol": std,
             }
         )
-    return pd.DataFrame(records)
+    frame = pd.DataFrame(records)
+    frame.attrs["source"] = str(path)
+    frame.attrs["unit"] = "kJ/mol"
+    frame.attrs["original_unit"] = unit
+    frame.attrs["total_column_detected"] = bool(
+        any("total" in header for header in headers)
+    )
+    return frame
 
 
 def _mmpbsa_panel(
@@ -226,13 +299,44 @@ def _mmpbsa_panel(
             frame["delta_kj_mol"],
             color="#456b8c",
         )
+        has_uncertainty = (
+            "std_kj_mol" in frame
+            and pd.to_numeric(frame["std_kj_mol"], errors="coerce").notna().any()
+        )
+        total_column_detected = bool(
+            decomposition.attrs.get("total_column_detected")
+        )
+        if has_uncertainty:
+            ax.errorbar(
+                frame["delta_kj_mol"],
+                np.arange(len(frame)),
+                xerr=pd.to_numeric(
+                    frame["std_kj_mol"], errors="coerce"
+                ).fillna(0.0),
+                fmt="none",
+                ecolor="#7a8794",
+                elinewidth=0.8,
+                capsize=2,
+            )
         ax.set_xlabel("MM-PBSA contribution (kJ/mol)")
         ax.set_title("MM-PBSA residue energy decomposition", fontweight="bold")
         save_figure(fig, output)
         return {
-            "status": "completed",
+            "status": (
+                "completed_with_uncertainty"
+                if has_uncertainty and total_column_detected
+                else "partial_unverified_total_column"
+                if not total_column_detected
+                else "partial_missing_uncertainty"
+            ),
             "mode": "residue_decomposition",
-            "n_residues": int(len(decomposition)),
+            "n_residues": len(decomposition),
+            "unit": "kJ/mol",
+            "source": str(decomposition.attrs.get("source") or ""),
+            "original_unit": str(
+                decomposition.attrs.get("original_unit") or ""
+            ),
+            "total_column_detected": total_column_detected,
         }
 
     total = None
@@ -263,10 +367,13 @@ def _mmpbsa_panel(
         )
         save_figure(fig, output)
         return {
-            "status": "completed",
+            "status": "incomplete_total_energy_only",
             "mode": "total_energy_only",
             "delta_total_kj_mol": total,
-            "note": "Residue decomposition was not present in the external output.",
+            "note": (
+                "Residue decomposition and uncertainty were not present; "
+                "Fig5h cannot be completed from total energy alone."
+            ),
         }
     _empty_panel(
         output,
@@ -287,9 +394,14 @@ def generate_plan_md_figures(
 ) -> dict[str, Any]:
     """Generate final Figure-5d-h panels from real trajectory files."""
     output_dir = ensure_dir(output_dir)
-    run_dir = _latest_run_dir(docking_dir)
+    run_dir, run_manifest = _manifest_run(docking_dir)
     metrics = _metrics(docking_dir)
-    if run_dir is None:
+    production_ns = float(run_manifest.get("production_ns") or 0.0)
+    manifest_completed = (
+        str(run_manifest.get("status") or "") == "completed"
+        and production_ns >= 100.0 - 1e-9
+    )
+    if run_dir is None or not manifest_completed:
         for panel, title in (
             ("d_rmsd", "蛋白主链 RMSD"),
             ("e_ligand_rmsd", "配体 RMSD"),
@@ -297,26 +409,33 @@ def generate_plan_md_figures(
             ("g_rg", "回旋半径 Rg"),
         ):
             _empty_panel(
-                output_dir / f"fig5{panel}.png",
+                output_dir / f"fig5{panel}_NOT_RUN.png",
                 title,
-                "No completed GROMACS run directory was found. "
-                "Set md.run=true to execute the 100 ns workflow.",
+                "No provenance-bound 100 ns completed GROMACS run was found. "
+                "Set md.run=true and retain the run manifest.",
             )
         mmpbsa = _mmpbsa_panel(
             docking_dir,
             None,
             metrics,
-            output_dir / "fig5h_mmpbsa.png",
+            output_dir / "fig5h_mmpbsa_NOT_RUN.png",
         )
         result = {
-            "status": "not_run",
-            "run_dir": "",
+            "status": (
+                "not_run"
+                if not run_manifest
+                else "provenance_or_duration_incomplete"
+            ),
+            "run_dir": str(run_dir) if run_dir else "",
+            "manifest": run_manifest,
+            "production_ns": production_ns,
             "panels": {
                 "d_rmsd": False,
                 "e_ligand_rmsd": False,
                 "f_rmsf": False,
                 "g_rg": False,
-                "h_mmpbsa": mmpbsa["status"] == "completed",
+                "h_mmpbsa": mmpbsa["status"]
+                == "completed_with_uncertainty",
             },
             "mmpbsa": mmpbsa,
         }
@@ -330,6 +449,8 @@ def generate_plan_md_figures(
             title="Protein backbone RMSD",
             ylabel="RMSD (nm)",
             color="#1665c0",
+            time_unit="ns",
+            min_duration_ns=100.0,
         ),
         "e_ligand_rmsd": _time_series_panel(
             _parse_xvg(run_dir / "rmsd_ligand.xvg"),
@@ -337,6 +458,8 @@ def generate_plan_md_figures(
             title="Ligand RMSD",
             ylabel="RMSD (nm)",
             color="#c0392b",
+            time_unit="ns",
+            min_duration_ns=100.0,
         ),
         "f_rmsf": _rmsf_panel(
             _parse_xvg(run_dir / "rmsf_protein_residue.xvg"),
@@ -350,6 +473,8 @@ def generate_plan_md_figures(
             ylabel="Rg (Angstrom)",
             color="#2e7d32",
             scale=10.0,
+            time_unit="ns",
+            min_duration_ns=100.0,
         ),
     }
     mmpbsa = _mmpbsa_panel(
@@ -358,10 +483,14 @@ def generate_plan_md_figures(
         metrics,
         output_dir / "fig5h_mmpbsa.png",
     )
-    panels["h_mmpbsa"] = mmpbsa["status"] == "completed"
+    panels["h_mmpbsa"] = mmpbsa["status"] == "completed_with_uncertainty"
+    completed = all(panels.values())
     result = {
-        "status": "completed" if any(panels.values()) else "unavailable",
+        "status": "completed" if completed else "partial" if any(panels.values()) else "unavailable",
         "run_dir": str(run_dir),
+        "run_manifest": run_manifest,
+        "production_ns": production_ns,
+        "required_panels": list(panels),
         "panels": panels,
         "mmpbsa": mmpbsa,
     }

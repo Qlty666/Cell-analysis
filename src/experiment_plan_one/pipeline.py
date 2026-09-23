@@ -2,24 +2,22 @@
 
 from __future__ import annotations
 
-import html
 import hashlib
+import html
 import json
-import logging
-import os
 import platform
 import re
 import shutil
 import sys
 import time
+from collections.abc import Callable
 from dataclasses import dataclass
 from pathlib import Path
-from typing import Any, Callable
+from typing import Any
 
 import matplotlib.pyplot as plt
 import numpy as np
 import pandas as pd
-from scipy import sparse
 
 from evidence import (
     EvidenceContext,
@@ -33,15 +31,17 @@ from . import __version__
 from .bulk import (
     GSE164441_COUNT_URL,
     SERIES_MATRIX_URLS,
+    candidate_heatmap,
     differential_expression_limma,
     differential_summary_table,
-    candidate_heatmap,
     prepare_bulk_data,
     validation_boxplots,
 )
+from .classify import classify_experiment_plan_results
+from .coexpression import run_coexpression_analysis
 from .common import (
-    LOG,
     FIGURE_PALETTE,
+    LOG,
     STATUS_COLORS,
     configure_logging,
     download_file,
@@ -53,17 +53,20 @@ from .common import (
     slug,
     write_json,
 )
-from .classify import classify_experiment_plan_results
-from .coexpression import run_coexpression_analysis
 from .coverage import audit_plan_coverage
-from .figure_audit import audit_figures
 from .docking_md import prepare_or_run_md, run_docking_for_targets
 from .enrichment import run_go_kegg
-from .ml import run_ml_validation
+from .figure_audit import audit_figures
 from .md_figures import generate_plan_md_figures
+from .ml import run_ml_validation
+from .planning import (
+    append_cohort_rows,
+    dataset_registry,
+    update_data_checksums,
+    write_analysis_plan,
+)
 from .ppi import run_ppi_analysis
 from .single_cell import (
-    parse_geo_soft_samples,
     run_human_single_cell,
     run_mouse_single_cell,
 )
@@ -75,14 +78,15 @@ from .targets import (
     gwas_catalog_disease_targets,
     load_compound_target_file,
     load_disease_source_file,
-    make_workflow_figure,
     make_venn_figure,
+    make_workflow_figure,
     open_targets_disease_targets,
     rdkit_descriptors,
     write_compound_figures,
 )
 
 STAGES = (
+    "plan",
     "data",
     "targets",
     "disease",
@@ -160,10 +164,7 @@ class PipelineContext:
         path = Path(path)
         if not path.exists() or not path.is_file():
             return "missing"
-        stat = path.stat()
-        if stat.st_size <= 64 * 1024 * 1024:
-            return f"sha256:{sha256_file(path)}"
-        return f"meta:{stat.st_size}:{stat.st_mtime_ns}"
+        return f"sha256:{sha256_file(path)}"
 
     def stage_signature(self, stage: str, previous_stages: list[str]) -> str:
         payload: dict[str, Any] = {
@@ -218,6 +219,7 @@ class PipelineContext:
 
 
 STAGE_INPUT_PATHS: dict[str, list[Path]] = {
+    "plan": [],
     "data": [],
     "targets": [Path("00_data/cache")],
     "disease": [],
@@ -251,6 +253,13 @@ STAGE_INPUT_PATHS: dict[str, list[Path]] = {
 }
 
 STAGE_REQUIRED_OUTPUTS: dict[str, list[Path]] = {
+    "plan": [
+        Path("00_plan/analysis_plan.yaml"),
+        Path("00_plan/cohort_manifest.tsv"),
+        Path("00_plan/sample_inclusion_exclusion.tsv"),
+        Path("00_plan/metadata_corrections.tsv"),
+        Path("00_plan/data_checksums.json"),
+    ],
     "data": [
         Path("00_data/raw/dataset_inventory.json"),
         Path("00_data/raw/dataset_receipts.json"),
@@ -292,6 +301,15 @@ STAGE_REQUIRED_OUTPUTS: dict[str, list[Path]] = {
 def default_config() -> dict[str, Any]:
     return {
         "completion_target_percent": 90.0,
+        "run_id": None,
+        "known_reference_targets": [
+            "TNF",
+            "IL1B",
+            "IL6",
+            "TP53",
+            "MAPK14",
+            "PTGS2",
+        ],
         "novelty_exclusions": ["TNF", "IL1B", "IL6", "TP53", "MAPK14", "PTGS2"],
         "compound": {
             "name": "6PPD-Q",
@@ -326,37 +344,62 @@ def default_config() -> dict[str, Any]:
             "ttd_file": None,
             "gene_column": None,
             "use_open_evidence_sources": True,
+            "source_thresholds": {
+                "GeneCards": "relevance_score_above_median_verify_licensed_export",
+                "OMIM": "gene_map_or_morbid_map_entry",
+                "TTD": "approved_or_clinical_marker_entry",
+            },
         },
         "datasets": {
             "GSE89632": {
                 "role": "training",
+                "endpoint": "healthy_control_vs_NAFLD",
                 "platform": "GPL14951",
                 "condition_column": "condition",
             },
             "GSE49541": {
-                "role": "external_validation_fibrosis",
+                "role": "separate_endpoint_fibrosis_association",
+                "endpoint": "advanced_vs_mild_fibrosis",
+                "validation_status": "not_same_endpoint_validation",
                 "platform": "GPL570",
                 "condition_column": "condition",
             },
             "GSE164441": {
-                "role": "external_validation_hcc_tumor_vs_adjacent",
+                "role": "hcc_extension_analysis",
+                "endpoint": "tumor_vs_patient_matched_adjacent_non_tumor",
+                "validation_status": "different_endpoint",
                 "condition_column": "condition",
+                "pair_column": "patient",
             },
             "GSE135251": {
-                "role": "primary_external_validation_nafld",
+                "role": "same_endpoint_external_candidate",
                 "endpoint": "healthy_vs_NAFLD",
+                "validation_status": "previously_exposed_development_support",
+                "previously_used_for_model_development": True,
                 "condition_column": "condition",
+                "expected_condition_counts": {
+                    "control": 10,
+                    "NAFLD": 206,
+                },
             },
             "GSE270583": {
                 "role": "mouse_single_cell_discovery",
                 "species": "mm",
+                "validation_status": "insufficient_biological_replication",
             },
             "GSE202379": {
                 "role": "human_single_cell_validation",
                 "species": "hs",
+                "biological_unit": "donor",
+                "metadata_revision": "2025-06-06",
             },
         },
-        "ppi": {"required_score": 700, "top_n": 20, "add_nodes": 50},
+        "ppi": {
+            "required_score": 700,
+            "top_n": 20,
+            "add_nodes": 50,
+            "module_method": "louvain",
+        },
         "ml": {"cv_folds": 5, "cv_repeats": 5, "seed": 42},
         "coexpression": {
             "enabled": True,
@@ -384,8 +427,18 @@ def default_config() -> dict[str, Any]:
                 "max_cells": 5000,
                 "cellchat_permutations": 100,
                 "cellchat_seed": 123,
+                "inference_unit": "library_or_verified_animal",
             },
-            "human": {"max_cells_per_sample": 1200, "seed": 42},
+            "human": {
+                "max_cells_per_sample": 0,
+                "seed": 42,
+                "inference_unit": "donor",
+            },
+            "insilico": {
+                "engine": "local_grn",
+                "scientific_role": "predicted_perturbation_response",
+                "perturbation_scope": "pre_specified_primary_target",
+            },
         },
         "docking": {
             "targets": 5,
@@ -454,10 +507,45 @@ class ExperimentPlanOne:
         ):
             ensure_dir(path)
         configure_logging(self.context.log_dir / "experiment_plan_one.log", verbose)
+        identity_path = self.context.output_root / "run_identity.json"
+        existing_identity = read_json(identity_path, {})
+        requested_run_id = str(self.context.config.get("run_id") or "").strip()
+        if (
+            requested_run_id
+            and existing_identity.get("run_id")
+            and str(existing_identity["run_id"]) != requested_run_id
+        ):
+            raise RuntimeError(
+                "output_root already belongs to a different run_id; use a "
+                "new output_root to avoid mixing runs"
+            )
+        self.run_id = (
+            requested_run_id
+            or str(existing_identity.get("run_id") or "")
+            or f"run_{time.strftime('%Y%m%d_%H%M%S')}"
+        )
+        write_json(
+            identity_path,
+            {
+                "run_id": self.run_id,
+                "output_root": str(self.context.output_root),
+                "created_at": existing_identity.get("created_at")
+                or time.strftime("%Y-%m-%dT%H:%M:%S%z"),
+                "config_fingerprint": hashlib.sha256(
+                    json.dumps(
+                        self.context.config,
+                        ensure_ascii=False,
+                        sort_keys=True,
+                        default=str,
+                    ).encode("utf-8")
+                ).hexdigest(),
+            },
+        )
         self.results: dict[str, Any] = {}
 
     def run(self, stages: list[str]) -> dict[str, Any]:
         stage_functions: dict[str, Callable[[], dict[str, Any]]] = {
+            "plan": self.stage_plan,
             "data": self.stage_data,
             "targets": self.stage_targets,
             "disease": self.stage_disease,
@@ -559,6 +647,24 @@ class ExperimentPlanOne:
                 missing.append(relative.as_posix())
         return missing
 
+    def stage_plan(self) -> dict[str, Any]:
+        outputs = write_analysis_plan(
+            self.context.output_root,
+            {**self.context.config, "run_id": self.run_id},
+        )
+        update_data_checksums(
+            self.context.output_root,
+            [self.context.root / "config" / "experiment_plan_one.json"],
+        )
+        return {
+            "status": "completed",
+            "outputs": {key: str(value) for key, value in outputs.items()},
+            "note": (
+                "The plan freezes endpoint roles and known exposure; it does "
+                "not assert that external validation or wet-lab work is complete."
+            ),
+        }
+
     def stage_data(self) -> dict[str, Any]:
         outputs: dict[str, str] = {}
         receipts: dict[str, dict[str, Any]] = {}
@@ -592,10 +698,18 @@ class ExperimentPlanOne:
         # Bulk series matrices and platforms are handled by their dedicated stage.
         write_json(self.context.raw_dir / "dataset_inventory.json", outputs)
         write_json(self.context.raw_dir / "dataset_receipts.json", receipts)
+        update_data_checksums(
+            self.context.output_root,
+            [
+                self.context.raw_dir / filename
+                for filename in (*ARCHIVES.keys(), *SOFT_URLS.keys())
+            ],
+        )
         return {"outputs": outputs}
 
     def stage_targets(self) -> dict[str, Any]:
         out_dir = self.context.dir("01_compound_characterization")
+        retrieved_at = time.strftime("%Y-%m-%dT%H:%M:%S%z")
         cid = str(self.context.config["compound"]["pubchem_cid"])
         properties = compound_properties(cid)
         descriptors = rdkit_descriptors(properties["canonical_smiles"])
@@ -659,6 +773,29 @@ class ExperimentPlanOne:
                     index=False,
                 )
                 local_prediction_written = True
+        for name, status in statuses.items():
+            if isinstance(status, dict):
+                status.setdefault("retrieved_at", retrieved_at)
+                status.setdefault("species", "Homo sapiens")
+                status.setdefault("evidence_type", "compound-target association")
+                if name == "SEA":
+                    status.setdefault(
+                        "threshold",
+                        self.context.config["compound"].get("sea") or {},
+                    )
+        pd.DataFrame(
+            [
+                {
+                    "source": name,
+                    **(
+                        dict(status)
+                        if isinstance(status, dict)
+                        else {"status": str(status)}
+                    ),
+                }
+                for name, status in statuses.items()
+            ]
+        ).to_csv(out_dir / "target_evidence_provenance.csv", index=False)
         if local_prediction_written:
             source_frames: dict[str, pd.DataFrame] = {}
             for path in sorted(source_dir.glob("*.csv")):
@@ -713,20 +850,22 @@ class ExperimentPlanOne:
             {
                 "compound": properties,
                 "compound_descriptors": descriptors,
-                "source_status": statuses,
-                "target_count": int(len(targets)),
+            "source_status": statuses,
+            "provenance": str(out_dir / "target_evidence_provenance.csv"),
+            "target_count": len(targets),
             },
         )
         return {
             "compound_properties": str(out_dir / "compound_properties.csv"),
             "compound_targets": str(out_dir / "compound_targets.csv"),
             "figures": {key: str(value) for key, value in figures.items()},
-            "n_targets": int(len(targets)),
+            "n_targets": len(targets),
             "source_status": statuses,
         }
 
     def stage_disease(self) -> dict[str, Any]:
         out_dir = self.context.dir("02_disease_targets")
+        retrieved_at = time.strftime("%Y-%m-%dT%H:%M:%S%z")
         sources: dict[str, pd.DataFrame] = {}
         statuses: dict[str, Any] = {}
         for term in self.context.config["disease"].get("open_targets_terms") or [
@@ -801,6 +940,34 @@ class ExperimentPlanOne:
             statuses["ClinVar"] = clinvar_status
             if not clinvar_frame.empty:
                 sources["ClinVar"] = clinvar_frame
+        for name, status in statuses.items():
+            if isinstance(status, dict):
+                status.setdefault("retrieved_at", retrieved_at)
+                status.setdefault("species", "Homo sapiens")
+                status.setdefault("disease", self.context.config["disease"]["name"])
+                status.setdefault(
+                    "threshold",
+                    (
+                        self.context.config["disease"].get(
+                            "source_thresholds",
+                            {},
+                        )
+                        or {}
+                    ).get(name, "source-specific exported fields"),
+                )
+        pd.DataFrame(
+            [
+                {
+                    "source": name,
+                    **(
+                        dict(status)
+                        if isinstance(status, dict)
+                        else {"status": str(status)}
+                    ),
+                }
+                for name, status in statuses.items()
+            ]
+        ).to_csv(out_dir / "disease_target_provenance.csv", index=False)
         if not sources:
             raise RuntimeError(
                 "no disease-target source could be loaded; provide local "
@@ -826,18 +993,19 @@ class ExperimentPlanOne:
             out_dir / "disease_target_summary.json",
             {
                 "sources": statuses,
-                "counts": {name: int(len(frame)) for name, frame in sources.items()},
-                "combined_targets": int(len(combined)),
+                "counts": {name: len(frame) for name, frame in sources.items()},
+                "combined_targets": len(combined),
                 "note": (
                     "GeneCards, OMIM and TTD bulk downloads require licensed or "
                     "credentialed access unless local exports are supplied."
                 ),
+                "provenance": str(out_dir / "disease_target_provenance.csv"),
             },
         )
         return {
             "disease_targets": str(out_dir / "disease_targets.csv"),
             "sources": statuses,
-            "n_targets": int(len(combined)),
+            "n_targets": len(combined),
         }
 
     def stage_evidence(self) -> dict[str, Any]:
@@ -1017,8 +1185,8 @@ class ExperimentPlanOne:
             "database": str(database),
             "target_scope": scope,
             "requested_targets": len(target_symbols),
-            "evidence_records": int(len(scored["evidence"])),
-            "prioritized_targets": int(len(priority)),
+            "evidence_records": len(scored["evidence"]),
+            "prioritized_targets": len(priority),
             "collector_status": status.to_dict(orient="records"),
             "benchmark": scored.get("benchmark"),
             **paths,
@@ -1177,14 +1345,20 @@ class ExperimentPlanOne:
                 ],
             }
         )
-        excluded = {"TNF", "IL1B", "IL6", "TP53", "MAPK14", "PTGS2"}
+        excluded = {
+            str(value).upper()
+            for value in (
+                self.context.config.get("known_reference_targets")
+                or self.context.config.get("novelty_exclusions", [])
+            )
+        }
         overlap_frame["previously_reported_in_plan"] = overlap_frame["gene"].isin(
             excluded
         )
         overlap_frame["novelty_status"] = np.where(
             overlap_frame["previously_reported_in_plan"],
-            "excluded_from_prioritization",
-            "not_excluded_by_plan",
+            "known_positive_reference_not_removed",
+            "not_in_legacy_reference_list",
         )
         overlap_frame.to_csv(out_dir / "compound_disease_overlap.csv", index=False)
         overlap_frame.to_csv(out_dir / "target_novelty_assessment.csv", index=False)
@@ -1193,9 +1367,8 @@ class ExperimentPlanOne:
             out_dir / "fig1f_compound_disease_venn.png",
             title="6PPD-Q targets and NAFLD targets",
         )
-        analysis_genes = overlap if len(overlap) >= 3 else sorted(
-            set(compound["gene"].head(100)) | set(disease["gene"].head(100))
-        )
+        # Preserve a small/empty intersection; never replace it with a union.
+        analysis_genes = overlap
         ppi = run_ppi_analysis(
             analysis_genes,
             out_dir,
@@ -1203,10 +1376,14 @@ class ExperimentPlanOne:
             top_n=int(self.context.config["ppi"]["top_n"]),
             add_nodes=int(self.context.config["ppi"].get("add_nodes", 50)),
             force=self.context.force,
+            module_method=str(
+                self.context.config["ppi"].get("module_method", "louvain")
+            ),
         )
         enrichment = run_go_kegg(
             analysis_genes,
             out_dir / "enrichment",
+            universe=sorted(disease_genes),  # conditional background: disease-associated candidate pool
             species="hs",
             force=self.context.force,
         )
@@ -1233,6 +1410,93 @@ class ExperimentPlanOne:
         gse164441_meta = Path(paths["GSE164441_metadata"])
         gse135251_expr = Path(paths["GSE135251_expression"])
         gse135251_meta = Path(paths["GSE135251_metadata"])
+        registry = {
+            row["accession"]: row for row in dataset_registry(self.context.config)
+        }
+        cohort_rows: list[dict[str, Any]] = []
+        for accession, metadata_path in (
+            ("GSE89632", gse89632_meta),
+            ("GSE49541", gse49541_meta),
+            ("GSE164441", gse164441_meta),
+            ("GSE135251", gse135251_meta),
+        ):
+            metadata = pd.read_csv(metadata_path, index_col=0, dtype=str).fillna("")
+            descriptor = registry.get(accession, {})
+            donor_column = next(
+                (
+                    column
+                    for column in ("patient", "patient_id", "donor_id", "donor")
+                    if column in metadata.columns
+                ),
+                "",
+            )
+            diagnosis_column = next(
+                (
+                    column
+                    for column in (
+                        "diagnosis",
+                        "disease",
+                        "disease_status",
+                        "original_diagnosis",
+                    )
+                    if column in metadata.columns
+                ),
+                "",
+            )
+            for sample_id, row in metadata.iterrows():
+                condition = str(row.get("condition") or "")
+                donor_id = str(row.get(donor_column) or "") if donor_column else ""
+                cohort_rows.append(
+                    {
+                        "accession": accession,
+                        "sample_id": str(sample_id),
+                        "library_id": str(sample_id),
+                        "donor_id": donor_id or str(sample_id),
+                        "species": descriptor.get("species", ""),
+                        "platform": descriptor.get("platform", ""),
+                        "tissue": descriptor.get("tissue", "liver"),
+                        "condition": condition,
+                        "original_diagnosis": (
+                            str(row.get(diagnosis_column) or "")
+                            if diagnosis_column
+                            else condition
+                        ),
+                        "paired_patient": "yes" if donor_column else "no",
+                        "batch": str(row.get("batch") or row.get("platform_id") or ""),
+                        "exposure_status": "unknown",
+                        "included": "yes",
+                        "inclusion_reason": descriptor.get(
+                            "validation_status", descriptor.get("role", "")
+                        ),
+                        "data_version": "frozen_processed_matrix",
+                        "source": str(metadata_path),
+                    }
+                )
+        append_cohort_rows(self.context.output_root, cohort_rows)
+        update_data_checksums(
+            self.context.output_root,
+            [
+                *(
+                    Path(path)
+                    for path in paths.values()
+                    if Path(path).is_file()
+                ),
+                *(
+                    source_path
+                    for source_path in (
+                        self.context.raw_dir / name
+                        for name in (
+                            "GSE89632_series_matrix.txt.gz",
+                            "GSE49541_series_matrix.txt.gz",
+                            "GSE164441_count.txt.gz",
+                            "GSE135251_RAW.tar",
+                            "GSE135251_family.soft.gz",
+                        )
+                    )
+                    if source_path.is_file()
+                ),
+            ],
+        )
 
         bulk_sources = {
             "GSE89632_series_matrix": {
@@ -1246,6 +1510,16 @@ class ExperimentPlanOne:
             "GSE164441_count": {
                 "url": GSE164441_COUNT_URL,
                 "path": str(self.context.raw_dir / "GSE164441_count.txt.gz"),
+            },
+            "GSE135251_raw": {
+                "url": ARCHIVES["GSE135251_RAW.tar"]["url"],
+                "path": str(self.context.raw_dir / "GSE135251_RAW.tar"),
+            },
+            "GSE135251_soft": {
+                "url": SOFT_URLS["GSE135251_family.soft.gz"],
+                "path": str(
+                    self.context.raw_dir / "GSE135251_family.soft.gz"
+                ),
             },
         }
         for record in bulk_sources.values():
@@ -1281,22 +1555,25 @@ class ExperimentPlanOne:
             comparison="mild_vs_advanced_fibrosis",
         )
         tumor = differential_expression_limma(
-            gse164441_expr,
+            Path(paths["GSE164441_counts"]),
             gse164441_meta,
             out_dir / "gse164441_adjacent_vs_tumor_limma.csv",
             condition_column="condition",
             group1=["adjacent_normal"],
             group2=["tumor"],
             comparison="adjacent_normal_vs_tumor",
+            input_type="counts",
+            pair_column="patient",
         )
         gse135251_disease = differential_expression_limma(
-            gse135251_expr,
+            Path(paths["GSE135251_counts"]),
             gse135251_meta,
             out_dir / "gse135251_control_vs_NAFLD_limma.csv",
             condition_column="condition",
             group1=["control"],
             group2=["NAFLD"],
             comparison="control_vs_NAFLD",
+            input_type="counts",
         )
         for name, frame in {
             "gse89632_HC_vs_NAFLD": hc_vs_nafld,
@@ -1376,6 +1653,7 @@ class ExperimentPlanOne:
             out_dir,
             comparisons=("adjacent_normal", "tumor"),
             prefix="fig2h_gse164441",
+            pair_column="patient",
         )
         write_json(
             out_dir / "bulk_summary.json",
@@ -1384,18 +1662,87 @@ class ExperimentPlanOne:
                     "GSE89632": {
                         "samples": int(pd.read_csv(gse89632_meta, index_col=0).shape[0]),
                         "genes": int(pd.read_csv(gse89632_expr, index_col=0).shape[0]),
+                        "condition_counts": (
+                            pd.read_csv(gse89632_meta, index_col=0)["condition"]
+                            .astype(str)
+                            .value_counts()
+                            .to_dict()
+                        ),
+                        "endpoint": registry["GSE89632"]["endpoint"],
                     },
                     "GSE49541": {
                         "samples": int(pd.read_csv(gse49541_meta, index_col=0).shape[0]),
                         "genes": int(pd.read_csv(gse49541_expr, index_col=0).shape[0]),
+                        "condition_counts": (
+                            pd.read_csv(gse49541_meta, index_col=0)["condition"]
+                            .astype(str)
+                            .value_counts()
+                            .to_dict()
+                        ),
+                        "endpoint": registry["GSE49541"]["endpoint"],
+                        "validation_status": registry["GSE49541"][
+                            "validation_status"
+                        ],
                     },
                     "GSE164441": {
                         "samples": int(pd.read_csv(gse164441_meta, index_col=0).shape[0]),
                         "genes": int(pd.read_csv(gse164441_expr, index_col=0).shape[0]),
+                        "condition_counts": (
+                            pd.read_csv(gse164441_meta, index_col=0)["condition"]
+                            .astype(str)
+                            .value_counts()
+                            .to_dict()
+                        ),
+                        "endpoint": registry["GSE164441"]["endpoint"],
+                        "validation_status": registry["GSE164441"][
+                            "validation_status"
+                        ],
+                        "paired_complete": int(
+                            pd.read_csv(paths["GSE164441_pair_audit"])[
+                                "paired_complete"
+                            ].sum()
+                        ),
+                        "pair_audit": str(paths["GSE164441_pair_audit"]),
                     },
                     "GSE135251": {
                         "samples": int(pd.read_csv(gse135251_meta, index_col=0).shape[0]),
                         "genes": int(pd.read_csv(gse135251_expr, index_col=0).shape[0]),
+                        "condition_counts": (
+                            pd.read_csv(gse135251_meta, index_col=0)["condition"]
+                            .astype(str)
+                            .value_counts()
+                            .to_dict()
+                        ),
+                        "endpoint": registry["GSE135251"]["endpoint"],
+                        "validation_status": registry["GSE135251"][
+                            "validation_status"
+                        ],
+                        "expected_condition_counts": registry["GSE135251"].get(
+                            "expected_condition_counts",
+                            {},
+                        ),
+                        "expected_condition_counts_match": (
+                            {
+                                str(key): int(value)
+                                for key, value in (
+                                    pd.read_csv(gse135251_meta, index_col=0)[
+                                        "condition"
+                                    ]
+                                    .astype(str)
+                                    .value_counts()
+                                    .to_dict()
+                                ).items()
+                            }
+                            == {
+                                str(key): int(value)
+                                for key, value in (
+                                    registry["GSE135251"].get(
+                                        "expected_condition_counts",
+                                        {},
+                                    )
+                                ).items()
+                            }
+                        ),
                     },
                 },
                 "candidate_genes": top_candidates,
@@ -1446,33 +1793,8 @@ class ExperimentPlanOne:
                 )
             ),
         }
-        coexpression_hubs_path = (
-            self.context.output_root
-            / "04_bulk_training"
-            / "coexpression"
-            / "coexpression_hubs.csv"
-        )
-        if coexpression_hubs_path.exists():
-            coexpression_hubs = pd.read_csv(coexpression_hubs_path)
-            if not coexpression_hubs.empty and "gene" in coexpression_hubs.columns:
-                candidate_sets["coexpression_hubs"] = (
-                    coexpression_hubs["gene"].astype(str).tolist()
-                )
-        coexpression_modules_path = (
-            self.context.output_root
-            / "04_bulk_training"
-            / "coexpression"
-            / "coexpression_disease_module_genes.csv"
-        )
-        if coexpression_modules_path.exists():
-            coexpression_modules = pd.read_csv(coexpression_modules_path)
-            if (
-                not coexpression_modules.empty
-                and "gene" in coexpression_modules.columns
-            ):
-                candidate_sets["coexpression_disease_modules"] = (
-                    coexpression_modules["gene"].astype(str).tolist()
-                )
+        # Full-cohort, label-associated modules are exploratory only. They must
+        # not enter CV as preselected static features.
         validation = {
             "GSE49541_fibrosis": {
                 "expression": str(paths["GSE49541_expression"]),
@@ -1507,8 +1829,14 @@ class ExperimentPlanOne:
                 "condition_map": {"control": 0, "NAFLD": 1},
                 "comparison": ("NAFLD", "control"),
                 "title": "GSE135251: NAFLD vs healthy control",
-                "evaluate_auc_target": True,
+                "evaluate_auc_target": False,
                 "endpoint_role": "supplementary_true_nafld",
+                "endpoint_warning": (
+                    "The cohort is the closest available same-endpoint "
+                    "candidate, but repository history records prior model "
+                    "or preprocessing exposure; call it reused validation "
+                    "evidence rather than a fully unseen validation cohort."
+                ),
             },
         }
         result = run_ml_validation(
@@ -1522,9 +1850,9 @@ class ExperimentPlanOne:
             cv_repeats=int(self.context.config["ml"].get("cv_repeats", 5)),
         )
         aliases = {
-            "GSE49541_fibrosis_roc.png": "fig3c_gse49541_external_roc.png",
-            "GSE164441_tumor_roc.png": "fig3d_gse164441_external_roc.png",
-            "GSE135251_NAFLD_roc.png": "fig3d_supplementary_gse135251_roc.png",
+            "GSE49541_fibrosis_roc.png": "fig3c_gse49541_cross_endpoint_roc.png",
+            "GSE135251_NAFLD_roc.png": "fig3d_gse135251_same_endpoint_roc.png",
+            "GSE164441_tumor_roc.png": "fig3d_supplementary_gse164441_hcc_roc.png",
         }
         for source_name, target_name in aliases.items():
             source = out_dir / source_name
@@ -1534,24 +1862,32 @@ class ExperimentPlanOne:
                     vector = source.with_suffix(suffix)
                     if vector.exists():
                         shutil.copy2(vector, (out_dir / target_name).with_suffix(suffix))
-        core_genes = list(
-            dict.fromkeys(
-                list(result["core_genes"]) + ppi.head(5)["gene"].astype(str).tolist()
+        core_genes = list(result["core_genes"])[:3]
+        if core_genes:
+            validation_boxplots(
+                Path(paths["GSE49541_expression"]),
+                Path(paths["GSE49541_metadata"]),
+                core_genes,
+                out_dir,
+                comparisons=("mild_fibrosis", "advanced_fibrosis"),
+                prefix="fig3h_gse49541_core_genes",
             )
-        )[:3]
-        validation_boxplots(
-            Path(paths["GSE49541_expression"]),
-            Path(paths["GSE49541_metadata"]),
-            core_genes,
-            out_dir,
-            comparisons=("mild_fibrosis", "advanced_fibrosis"),
-            prefix="fig3h_gse49541_core_genes",
-        )
+        else:
+            write_json(
+                out_dir / "fig3h_status.json",
+                {
+                    "status": "missing",
+                    "reason": (
+                        "SHAP did not produce a valid model explanation; no "
+                        "surrogate importance was renamed as SHAP."
+                    ),
+                },
+            )
         write_json(
             out_dir / "ml_core_genes.json",
             {
                 "core_genes": core_genes,
-                "source": "SHAP ranking followed by PPI consensus ranking",
+                "source": "SHAP ranking of explicitly identified uncalibrated explanatory model",
             },
         )
         return {**_serializable(result), "core_genes": core_genes}
@@ -1578,6 +1914,20 @@ class ExperimentPlanOne:
                     123,
                 )
             ),
+            allow_network=bool(
+                (self.context.config.get("evidence") or {}).get(
+                    "allow_network",
+                    True,
+                )
+            ),
+        )
+        append_cohort_rows(
+            self.context.output_root,
+            result.get("cohort_rows") or [],
+        )
+        update_data_checksums(
+            self.context.output_root,
+            [Path(result["h5ad"])],
         )
         knockout = self._run_insilico_knockout(out_dir, core_genes)
         return {
@@ -1586,8 +1936,8 @@ class ExperimentPlanOne:
             "cellchat": {
                 "interactions_csv": str(out_dir / "cellchat_like_interactions.csv"),
                 "pathways_csv": str(out_dir / "cellchat_like_pathways.csv"),
-                "n_interactions": int(len(result["cellchat"]["interactions"])),
-                "n_pathways": int(len(result["cellchat"]["pathways"])),
+                "n_interactions": len(result["cellchat"]["interactions"]),
+                "n_pathways": len(result["cellchat"]["pathways"]),
             },
             "knockout": knockout,
         }
@@ -1607,6 +1957,14 @@ class ExperimentPlanOne:
             ),
             seed=int(self.context.config["single_cell"]["human"]["seed"]),
         )
+        append_cohort_rows(
+            self.context.output_root,
+            result.get("cohort_rows") or [],
+        )
+        update_data_checksums(
+            self.context.output_root,
+            [Path(result["h5ad"])],
+        )
         return {
             "h5ad": str(result["h5ad"]),
             "core_genes": result["core_genes"],
@@ -1622,11 +1980,7 @@ class ExperimentPlanOne:
         ordered = [
             gene
             for gene in dict.fromkeys(core + ppi["gene"].astype(str).tolist())
-            if not re.match(r"^(MIR|LET|LINC|SNOR|SCARNA|RMRP)", gene, flags=re.I)
-            and gene.upper() not in {
-                str(value).upper()
-                for value in self.context.config.get("novelty_exclusions", [])
-            }
+            if not re.match(r"^(MIR|LET|LINC|SNOR|SCARNA|RMRP)", gene, flags=re.IGNORECASE)
         ]
         limit = int(self.context.config["docking"]["targets"])
         selected = ordered[:limit]
@@ -1655,6 +2009,14 @@ class ExperimentPlanOne:
             cpu=int(self.context.config["docking"]["cpu"]),
             timeout=int(self.context.config["docking"]["timeout_seconds"]),
         )
+        update_data_checksums(
+            self.context.output_root,
+            [
+                out_dir / "docking_scores.csv",
+                out_dir / "docking_run_manifest.json",
+                out_dir / "fig5b_status.json",
+            ],
+        )
         return _serializable(result)
 
     def stage_md(self) -> dict[str, Any]:
@@ -1674,8 +2036,8 @@ class ExperimentPlanOne:
             timeout=int(self.context.config["md"]["timeout_seconds"]),
         )
         write_json(out_dir / "md_stage_summary.json", result)
-        nested = _find_latest_md_dir(docking_dir)
-        if nested:
+        nested = Path(str(result.get("run_dir") or ""))
+        if str(nested) and nested.is_dir():
             for path in nested.rglob("*"):
                 if path.is_file() and path.suffix.lower() in {
                     ".mdp",
@@ -1689,6 +2051,13 @@ class ExperimentPlanOne:
                     ensure_dir(destination.parent)
                     shutil.copy2(path, destination)
         md_figures = generate_plan_md_figures(docking_dir, out_dir)
+        update_data_checksums(
+            self.context.output_root,
+            [
+                docking_dir / "md_run_manifest.json",
+                out_dir / "md_plan_figures.json",
+            ],
+        )
         _plot_md_status(
             result,
             out_dir / "fig5d_md_preparation_status.png",
@@ -1740,9 +2109,10 @@ class ExperimentPlanOne:
             out_dir / "analysis_status.json",
             {
                 "version": __version__,
+                "run_id": self.run_id,
                 "output_root": str(self.context.output_root),
                 "stages": status,
-                "files": int(len(inventory)),
+                "files": len(inventory),
                 "plan_coverage": read_json(
                     out_dir / "plan_coverage" / "plan_coverage.json",
                     {},
@@ -1772,7 +2142,9 @@ class ExperimentPlanOne:
                 ),
                 "notes": [
                     "GSE164441 is tumor versus adjacent non-tumor, not a healthy-versus-NAFLD cohort.",
-                    "CellChat-like communication scoring uses an explicit local ligand-receptor table.",
+                    "GSE135251 is a same-endpoint candidate but prior analysis exposure is recorded; it is not described as fully unseen.",
+                    "Communication analysis uses explicit ligand-receptor scoring and tests labels across independent biological units only when replication permits.",
+                    "Predicted perturbation results use a local sparse GRN when scTenifoldKnk is unavailable and are not wet-lab knockouts.",
                     "100 ns MD production is prepared but started only when md.run=true.",
                 ],
             },
@@ -1783,7 +2155,7 @@ class ExperimentPlanOne:
             "inventory": str(out_dir / "result_inventory.csv"),
             "figure_index": str(out_dir / "figure_index.csv"),
             "summary": str(summary_path),
-            "n_files": int(len(inventory)),
+            "n_files": len(inventory),
         }
 
     def stage_classify(self) -> dict[str, Any]:
@@ -1808,34 +2180,18 @@ class ExperimentPlanOne:
         )
         if not path.exists():
             return []
-        exclusions = {
-            str(value).upper()
-            for value in self.context.config.get("novelty_exclusions", [])
-        }
-        return [
-            gene
-            for gene in pd.read_csv(path)["gene"].astype(str).tolist()
-            if gene.upper() not in exclusions
-        ]
+        return pd.read_csv(path)["gene"].astype(str).tolist()
 
     def _ml_core_genes(self) -> list[str]:
         path = self.context.output_root / "05_machine_learning" / "ml_core_genes.json"
-        core: list[str] = []
-        if path.exists():
-            core = list(read_json(path, {}).get("core_genes") or [])
-        ppi_path = self.context.output_root / "03_intersection_ppi" / "ppi_hub_metrics.csv"
-        if ppi_path.exists():
-            core.extend(pd.read_csv(ppi_path).head(5)["gene"].astype(str).tolist())
+        payload = read_json(path, {}) if path.exists() else {}
+        core = list(payload.get("core_genes") or [])
         core = [
             gene
             for gene in dict.fromkeys(core)
-            if not re.match(r"^(MIR|LET|LINC|SNOR|SCARNA|RMRP)", gene, flags=re.I)
-            and gene.upper() not in {
-                str(value).upper()
-                for value in self.context.config.get("novelty_exclusions", [])
-            }
+            if not re.match(r"^(MIR|LET|LINC|SNOR|SCARNA|RMRP)", gene, flags=re.IGNORECASE)
         ]
-        return core[:3] or self._core_candidate_genes()[:3]
+        return core[:3]
 
     def _run_insilico_knockout(
         self,
@@ -1844,6 +2200,15 @@ class ExperimentPlanOne:
     ) -> dict[str, Any]:
         if not core_genes:
             return {"status": "skipped", "reason": "no core genes"}
+        insilico_config = dict(
+            (self.context.config.get("single_cell") or {}).get("insilico")
+            or {}
+        )
+        engine = str(insilico_config.get("engine") or "local_grn")
+        scientific_role = str(
+            insilico_config.get("scientific_role")
+            or "predicted_perturbation_response"
+        )
         try:
             import anndata as ad
 
@@ -1870,7 +2235,8 @@ class ExperimentPlanOne:
                         "h5ad": self.context.fingerprint_file(
                             mouse_dir / "mouse_liver_processed.h5ad"
                         ),
-                        "engine": "celloracle",
+                        "engine": engine,
+                        "scientific_role": scientific_role,
                         "max_cells": 5000,
                         "max_genes": 1800,
                         "seed": 123,
@@ -1894,7 +2260,8 @@ class ExperimentPlanOne:
                     return {
                         "status": "completed",
                         "gene": gene,
-                        "engine": "cached existing in-silico knockout output",
+                        "engine": f"cached {engine} output",
+                        "scientific_role": scientific_role,
                         "report": str(previous_report),
                         "data": {
                             "go": str(mouse_dir / "virtual_knockout_go_enrichment.csv"),
@@ -1949,7 +2316,8 @@ class ExperimentPlanOne:
                 "insilico_knockout": {
                     "enabled": True,
                     "ko_gene": gene,
-                    "engine": "celloracle",
+                    "engine": engine,
+                    "scientific_role": scientific_role,
                     "raw_count_input": True,
                     "species": "mm",
                     "embedding_csv": str(knockout_dir / "embedding.csv"),
@@ -2036,6 +2404,7 @@ class ExperimentPlanOne:
             out_dir / "analysis_manifest.json",
             {
                 "version": __version__,
+                "run_id": self.run_id,
                 "created_at": time.strftime("%Y-%m-%d %H:%M:%S"),
                 "output_root": str(self.context.output_root),
                 "config": self.context.config,
@@ -2051,7 +2420,14 @@ class ExperimentPlanOne:
                         name: {"role": spec.get("role"), "platform": spec.get("platform"), "species": spec.get("species")}
                         for name, spec in (self.context.config.get("datasets") or {}).items()
                     },
-                    "novelty_exclusions": self.context.config.get("novelty_exclusions", []),
+                    "known_reference_targets": (
+                        self.context.config.get("known_reference_targets")
+                        or self.context.config.get("novelty_exclusions", [])
+                    ),
+                    "known_reference_policy": (
+                        "retained as positive references; not removed from "
+                        "candidate, model, or docking pools"
+                    ),
                 },
                 "stages": {
                     name: read_json(self.context.state_dir / f"{name}.json", {"status": "not_run"})
@@ -2061,7 +2437,7 @@ class ExperimentPlanOne:
         )
 
 
-def _balanced_cell_sample(data: "ad.AnnData", max_cells: int, seed: int = 123) -> np.ndarray:
+def _balanced_cell_sample(data: Any, max_cells: int, seed: int = 123) -> np.ndarray:
     import anndata as ad  # noqa: F401
 
     rng = np.random.default_rng(seed)
@@ -2211,13 +2587,19 @@ def _export_knockout_outputs(knockout_root: Path, mouse_dir: Path) -> None:
             y = np.arange(len(genes))
             height = 0.36
             ax.barh(y - height / 2, wt, height=height, color="#466b8a", label="WT")
-            ax.barh(y + height / 2, ko, height=height, color="#c05b4d", label="Virtual KO")
+            ax.barh(
+                y + height / 2,
+                ko,
+                height=height,
+                color="#c05b4d",
+                label="Predicted perturbation",
+            )
             ax.set_yticks(y)
             ax.set_yticklabels(genes)
             ax.invert_yaxis()
             ax.set_xlabel("Mean expression")
             ax.set_title(
-                "Top virtual-knockout expression changes",
+                "Top predicted perturbation-response changes",
                 fontweight="bold",
             )
             ax.legend(frameon=False)
@@ -2242,24 +2624,13 @@ def _export_knockout_outputs(knockout_root: Path, mouse_dir: Path) -> None:
         ax.text(
             0.5,
             0.36,
-            "The virtual-knockout target set did not reach the configured "
+            "The predicted perturbation-response target set did not reach the configured "
             "FDR threshold. This is retained as an explicit negative result.",
             ha="center",
             va="center",
             fontsize=9,
         )
         save_figure(fig, mouse_dir / "fig4h_virtual_knockout_enrichment.png")
-
-
-def _find_latest_md_dir(docking_dir: Path) -> Path | None:
-    candidates = [
-        path
-        for path in docking_dir.rglob("06_md")
-        if path.is_dir() and any(child.is_dir() for child in path.iterdir())
-    ]
-    if not candidates:
-        return None
-    return max(candidates, key=lambda path: path.stat().st_mtime)
 
 
 def _plot_md_status(result: dict[str, Any], output: Path) -> None:
@@ -2486,8 +2857,8 @@ def _render_markdown_report(
         "WGCNA-style approximation, not the original R WGCNA implementation.",
         "- GeneCards, OMIM and TTD require licensed/credentialed bulk access "
         "unless local source tables are supplied.",
-        "- The CellChat-like panel uses a local ligand-receptor table and is "
-        "not represented as a full CellChat run.",
+        "- The communication panel uses explicit ligand-receptor scoring and "
+        "is not represented as a full CellChat run.",
         "- GROMACS inputs are prepared for 100 ns; production is not started "
         "unless `md.run` is true.",
         "",
@@ -2704,9 +3075,9 @@ def _render_results_summary(
         "validation cohort.",
         "- GeneCards, OMIM and TTD are not available without licensed or "
         "credentialed bulk access; local files can be supplied in the config.",
-        "- The CellChat-like panel uses ligand-receptor scoring with "
-        "within-cell-type condition-label permutations and FDR; it is not the "
-        "R CellChat implementation.",
+          "- The communication panel uses ligand-receptor scoring with "
+          "biological-unit condition-label permutations and FDR when "
+          "replication permits; it is not the R CellChat implementation.",
         "- The Figure 5d-h panels are generated from GROMACS/MM-PBSA outputs "
         "only when the 100 ns production run is actually executed; otherwise "
         "they are explicitly marked not run.",

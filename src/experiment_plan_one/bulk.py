@@ -2,12 +2,11 @@
 
 from __future__ import annotations
 
-import logging
+import gzip
 import math
 import re
 import shutil
 import subprocess
-import gzip
 from pathlib import Path
 from typing import Any
 
@@ -19,6 +18,7 @@ from scipy import stats
 from scipy.cluster.hierarchy import leaves_list, linkage
 from scipy.spatial.distance import pdist
 
+from . import cache
 from .common import (
     LOG,
     benjamini_hochberg,
@@ -30,9 +30,7 @@ from .common import (
     read_expression,
     save_expression,
     save_figure,
-    split_gene_symbol,
     standardize_expression,
-    write_json,
     zscore_rows,
 )
 
@@ -65,7 +63,9 @@ def prepare_bulk_data(
         dataset_dir = ensure_dir(processed_dir / accession)
         expression_path = dataset_dir / "expression.csv.gz"
         metadata_path = dataset_dir / "metadata.csv"
-        if expression_path.exists() and metadata_path.exists() and not force:
+        state_path = dataset_dir / "preparation.cache.json"
+        input_key = cache.signature(files=[matrix_path, Path(__file__)], parameters=accession)
+        if not force and cache.valid(state_path, input_key, [expression_path, metadata_path]):
             outputs[f"{accession}_expression"] = expression_path
             outputs[f"{accession}_metadata"] = metadata_path
             continue
@@ -108,6 +108,7 @@ def prepare_bulk_data(
         mapped = mapped.apply(pd.to_numeric, errors="coerce").dropna(how="all")
         save_expression(mapped, expression_path)
         metadata.to_csv(metadata_path, encoding="utf-8")
+        cache.save(state_path, input_key, [expression_path, metadata_path])
         outputs[f"{accession}_expression"] = expression_path
         outputs[f"{accession}_metadata"] = metadata_path
 
@@ -116,7 +117,15 @@ def prepare_bulk_data(
     dataset_dir = ensure_dir(processed_dir / "GSE164441")
     expression_path = dataset_dir / "expression.csv.gz"
     metadata_path = dataset_dir / "metadata.csv"
-    if force or not expression_path.exists() or not metadata_path.exists():
+    counts_path = dataset_dir / "counts.csv.gz"
+    pair_path = dataset_dir / "paired_sample_audit.csv"
+    state_path = dataset_dir / "preparation.cache.json"
+    input_key = cache.signature(files=[count_path, Path(__file__)], parameters="GSE164441")
+    if force or not cache.valid(
+        state_path,
+        input_key,
+        [expression_path, metadata_path, counts_path, pair_path],
+    ):
         frame = pd.read_csv(count_path, sep="\t")
         gene_column = _first_matching(frame.columns, ["tracking_id", "gene_id", "gene"])
         if gene_column is None:
@@ -146,22 +155,38 @@ def prepare_bulk_data(
             {symbol: value for symbol, (_, value) in selected.items()}
         ).T
         mapped.index.name = "gene"
+        save_expression(mapped, counts_path)
         mapped = standardize_expression(mapped, already_log=False)
+        sample_labels = [_parse_paired_count_sample(sample) for sample in sample_columns]
         metadata = pd.DataFrame(
-            {
-                "sample_id": sample_columns,
-                "condition": [
-                    "tumor" if str(sample).upper().endswith("T_COUNT") else "adjacent_normal"
-                    for sample in sample_columns
-                ],
-                "patient": [
-                    str(sample).rsplit("_", 2)[0] for sample in sample_columns
-                ],
-            }
-        ).set_index("sample_id")
+            {"condition": [v[1] for v in sample_labels],
+             "patient": [v[0] for v in sample_labels]}, index=sample_columns)
+        metadata.index.name = "sample_id"
         _validate_metadata(mapped.columns, metadata, "GSE164441")
+        pair_audit = (
+            metadata.reset_index()
+            .groupby(["patient", "condition"], observed=True)
+            .size()
+            .unstack(fill_value=0)
+            .reset_index()
+        )
+        for required in ("tumor", "adjacent_normal"):
+            if required not in pair_audit:
+                pair_audit[required] = 0
+        pair_audit["paired_complete"] = (
+            pair_audit["tumor"].eq(1)
+            & pair_audit["adjacent_normal"].eq(1)
+        )
+        pair_audit.to_csv(pair_path, index=False)
         save_expression(mapped, expression_path)
         metadata.to_csv(metadata_path, encoding="utf-8")
+        cache.save(
+            state_path,
+            input_key,
+            [expression_path, metadata_path, counts_path, pair_path],
+        )
+    outputs["GSE164441_pair_audit"] = pair_path
+    outputs["GSE164441_counts"] = counts_path
     outputs["GSE164441_expression"] = expression_path
     outputs["GSE164441_metadata"] = metadata_path
 
@@ -172,7 +197,11 @@ def prepare_bulk_data(
         dataset_dir = ensure_dir(processed_dir / "GSE135251")
         expression_path = dataset_dir / "expression.csv.gz"
         metadata_path = dataset_dir / "metadata.csv"
-        if force or not expression_path.exists() or not metadata_path.exists():
+        counts_path = dataset_dir / "counts.csv.gz"
+        state_path = dataset_dir / "preparation.cache.json"
+        input_key = cache.signature(files=[gse135_archive, raw_dir / "GSE135251_family.soft.gz", Path(__file__)],
+                                    parameters="GSE135251")
+        if force or not cache.valid(state_path, input_key, [expression_path, metadata_path, counts_path]):
             count_files = sorted(extracted.glob("*.counts.txt.gz"))
             samples: dict[str, pd.Series] = {}
             for count_path in count_files:
@@ -210,15 +239,33 @@ def prepare_bulk_data(
                 {symbol: value for symbol, (_, value) in selected.items()}
             ).T
             mapped.index.name = "gene"
+            save_expression(mapped, counts_path)
             mapped = standardize_expression(mapped, already_log=False)
             metadata = _parse_gse135251_metadata(raw_dir / "GSE135251_family.soft.gz")
             metadata = metadata.reindex(mapped.columns)
             _validate_metadata(mapped.columns, metadata, "GSE135251")
             save_expression(mapped, expression_path)
             metadata.to_csv(metadata_path, encoding="utf-8")
+            cache.save(state_path, input_key, [expression_path, metadata_path, counts_path])
+        outputs["GSE135251_counts"] = counts_path
         outputs["GSE135251_expression"] = expression_path
         outputs["GSE135251_metadata"] = metadata_path
     return outputs
+
+
+def _parse_paired_count_sample(sample: str) -> tuple[str, str]:
+    """Require an explicit T/NT sample suffix; never infer all other labels as normal."""
+    match = re.fullmatch(
+        r"(.+?)[_-]?(NT|N|T)_count",
+        str(sample),
+        re.IGNORECASE,
+    )
+    if not match:
+        raise ValueError(f"Unrecognized paired count sample: {sample}")
+    patient = match.group(1).rstrip("_-")
+    if not patient:
+        raise ValueError(f"Missing patient identifier: {sample}")
+    return patient, "tumor" if match.group(2).upper() == "T" else "adjacent_normal"
 
 
 def _validate_metadata(sample_ids: Any, metadata: pd.DataFrame, accession: str) -> None:
@@ -382,10 +429,20 @@ def differential_expression_limma(
     group2: list[str],
     comparison: str,
     timeout: int = 1800,
+    input_type: str = "log_expression",
+    pair_column: str = "",
 ) -> pd.DataFrame:
     """Run limma on a matrix where rows are genes and columns are samples."""
     ensure_dir(output_path.parent)
-    if output_path.exists():
+    if input_type not in {"counts", "log_expression"}:
+        raise ValueError("input_type must be counts or log_expression")
+    script = Path(__file__).resolve().parent / "R" / "limma_contrasts.R"
+    state = output_path.with_suffix(output_path.suffix + ".cache.json")
+    key = cache.signature(files=[expression_path, metadata_path, script, Path(__file__)],
+                          parameters=[condition_column, group1, group2, comparison,
+                                      input_type, pair_column])
+    design_path = Path(str(output_path) + ".design.csv")
+    if cache.valid(state, key, [output_path, design_path]):
         return pd.read_csv(output_path)
     rscript = shutil.which("Rscript") or shutil.which("Rscript.exe")
     if not rscript:
@@ -402,6 +459,8 @@ def differential_expression_limma(
             ",".join(group1),
             ",".join(group2),
             comparison,
+            input_type,
+            pair_column,
         ],
         capture_output=True,
         text=True,
@@ -413,7 +472,11 @@ def differential_expression_limma(
         raise RuntimeError(
             f"limma failed for {comparison}: {(proc.stderr or proc.stdout)[-3000:]}"
         )
-    return pd.read_csv(output_path)
+    result = pd.read_csv(output_path)
+    if not design_path.exists():
+        raise RuntimeError("limma did not export its design matrix")
+    cache.save(state, key, [output_path, design_path])
+    return result
 
 
 def candidate_heatmap(
@@ -540,8 +603,11 @@ def validation_boxplots(
     condition_column: str = "condition",
     comparisons: tuple[str, str] | None = None,
     prefix: str = "validation",
+    pair_column: str = "",
+    bootstrap: int = 1000,
+    seed: int = 42,
 ) -> dict[str, Any]:
-    """Draw per-gene boxplots and report two-sided Mann-Whitney tests."""
+    """Draw per-gene boxplots with paired or independent effect estimates."""
     expression = read_expression(expression_path)
     metadata = pd.read_csv(metadata_path, index_col=0)
     wanted = [gene for gene in genes if gene in expression.index]
@@ -571,6 +637,7 @@ def validation_boxplots(
         squeeze=False,
     )
     rows: list[dict[str, Any]] = []
+    rng = np.random.default_rng(seed)
     for index, gene in enumerate(wanted):
         ax = axes.flat[index]
         values_by_group = []
@@ -588,6 +655,43 @@ def validation_boxplots(
                     alpha=0.7,
                     zorder=3,
                 )
+        paired_values: list[tuple[float, float]] = []
+        if pair_column:
+            if pair_column not in metadata.columns:
+                raise ValueError(
+                    f"pair column {pair_column!r} is absent from metadata"
+                )
+            group_samples = {
+                group: metadata.index[
+                    metadata[condition_column].astype(str) == group
+                ].tolist()
+                for group in labels
+            }
+            first_by_patient = {}
+            second_by_patient = {}
+            for sample in group_samples[labels[0]]:
+                patient = str(metadata.loc[sample, pair_column])
+                if sample in expression.columns:
+                    first_by_patient[patient] = float(expression.loc[gene, sample])
+            for sample in group_samples[labels[1]]:
+                patient = str(metadata.loc[sample, pair_column])
+                if sample in expression.columns:
+                    second_by_patient[patient] = float(expression.loc[gene, sample])
+            paired_values = [
+                (first_by_patient[patient], second_by_patient[patient])
+                for patient in sorted(set(first_by_patient) & set(second_by_patient))
+                if np.isfinite(first_by_patient[patient])
+                and np.isfinite(second_by_patient[patient])
+            ]
+            for left, right in paired_values:
+                ax.plot(
+                    [1, 2],
+                    [left, right],
+                    color="#afb8c1",
+                    linewidth=0.7,
+                    alpha=0.65,
+                    zorder=1,
+                )
         ax.boxplot(
             [values.to_numpy() for values in values_by_group],
             labels=display_labels,
@@ -598,22 +702,91 @@ def validation_boxplots(
             medianprops={"color": "#1f2933"},
         )
         ax.grid(axis="y", color="#dfe5ea", linewidth=0.6, alpha=0.8)
-        if len(values_by_group[0]) >= 2 and len(values_by_group[1]) >= 2:
+        median_difference = (
+            float(values_by_group[1].median() - values_by_group[0].median())
+            if len(values_by_group[0]) and len(values_by_group[1])
+            else np.nan
+        )
+        effect_size = median_difference
+        ci_low = np.nan
+        ci_high = np.nan
+        n_pairs = len(paired_values)
+        if pair_column and n_pairs >= 2:
+            differences = np.asarray(
+                [right - left for left, right in paired_values],
+                dtype=float,
+            )
+            try:
+                stat, p_value = stats.wilcoxon(
+                    differences,
+                    alternative="two-sided",
+                    zero_method="wilcox",
+                )
+            except ValueError:
+                stat, p_value = np.nan, 1.0
+            effect_size = float(np.median(differences))
+            bootstrap_values = np.asarray(
+                [
+                    np.median(
+                        rng.choice(
+                            differences,
+                            size=len(differences),
+                            replace=True,
+                        )
+                    )
+                    for _ in range(max(200, int(bootstrap)))
+                ]
+            )
+            ci_low, ci_high = np.percentile(bootstrap_values, [2.5, 97.5])
+            effect_measure = "paired_median_difference"
+        elif len(values_by_group[0]) >= 2 and len(values_by_group[1]) >= 2:
             stat, p_value = stats.mannwhitneyu(
                 values_by_group[0],
                 values_by_group[1],
                 alternative="two-sided",
             )
+            first = values_by_group[0].to_numpy(dtype=float)
+            second = values_by_group[1].to_numpy(dtype=float)
+            cliff = np.mean(
+                np.sign(second[:, None] - first[None, :])
+            )
+            effect_size = float(cliff)
+            estimates = []
+            for _ in range(max(200, int(bootstrap))):
+                sampled_first = rng.choice(first, size=len(first), replace=True)
+                sampled_second = rng.choice(second, size=len(second), replace=True)
+                estimates.append(
+                    float(np.median(sampled_second) - np.median(sampled_first))
+                )
+            ci_low, ci_high = np.percentile(estimates, [2.5, 97.5])
+            effect_measure = "cliffs_delta_with_median_difference_ci"
         else:
             stat, p_value = np.nan, np.nan
+            effect_measure = "insufficient_samples"
         rows.append(
             {
                 "gene": gene,
-                f"{labels[0]}_n": int(len(values_by_group[0])),
-                f"{labels[1]}_n": int(len(values_by_group[1])),
+                f"{labels[0]}_n": len(values_by_group[0]),
+                f"{labels[1]}_n": len(values_by_group[1]),
                 f"{labels[0]}_median": float(values_by_group[0].median()) if len(values_by_group[0]) else np.nan,
                 f"{labels[1]}_median": float(values_by_group[1].median()) if len(values_by_group[1]) else np.nan,
-                "mann_whitney_u": stat,
+                "test_statistic": stat,
+                "mann_whitney_u": (
+                    stat
+                    if not (pair_column and n_pairs >= 2)
+                    else np.nan
+                ),
+                "test": (
+                    "wilcoxon_signed_rank"
+                    if pair_column and n_pairs >= 2
+                    else "mann_whitney_u"
+                ),
+                "n_pairs": int(n_pairs),
+                "median_difference": median_difference,
+                "effect_size": effect_size,
+                "effect_size_measure": effect_measure,
+                "effect_ci_low": float(ci_low) if np.isfinite(ci_low) else np.nan,
+                "effect_ci_high": float(ci_high) if np.isfinite(ci_high) else np.nan,
                 "p_value": p_value,
             }
         )
