@@ -362,8 +362,12 @@ def _render_single_cell(source_root: Path, output_root: Path) -> None:
             pd.read_csv(composition_path),
             mouse_output / "fig4e_cell_composition.png",
         )
-    interaction_path = mouse_source / "cellchat_like_interactions.csv"
-    pathway_path = mouse_source / "cellchat_like_pathways.csv"
+    interaction_path = mouse_source / "cellchat_interactions.csv"
+    pathway_path = mouse_source / "cellchat_pathways.csv"
+    if not interaction_path.exists():
+        interaction_path = mouse_source / "cellchat_like_interactions.csv"
+    if not pathway_path.exists():
+        pathway_path = mouse_source / "cellchat_like_pathways.csv"
     if interaction_path.exists() and pathway_path.exists():
         _plot_cell_communication(
             pd.read_csv(interaction_path),

@@ -30,6 +30,7 @@ from experiment_plan_one.coverage import (
 )
 from experiment_plan_one.docking_md import (
     _find_plip,
+    _run_plip_report,
     _write_ligand_pdb,
 )
 from experiment_plan_one.figure_audit import _dynamic_result_reviews, _summary
@@ -286,6 +287,33 @@ class TestExperimentPlanOne(unittest.TestCase):
             self.assertIn("HETATM    1 C1   LIG Z   1", text)
             self.assertTrue(text.endswith("END\n"))
 
+    @unittest.skipUnless(_find_plip(), "PLIP is unavailable")
+    def test_plip_runner_tolerates_openbabel_without_inchikey(self):
+        from openbabel import openbabel as ob
+        from openbabel import pybel
+
+        if ob.OBConversion().FindFormat("inchikey"):
+            self.skipTest("Open Babel already provides InChIKey output")
+
+        def exercise_missing_inchikey() -> None:
+            pybel.Molecule.write(None, format="inchikey")
+
+        with tempfile.TemporaryDirectory(ignore_cleanup_errors=True) as tmp:
+            root = Path(tmp)
+            complex_path = root / "complex.pdb"
+            complex_path.write_text("END\n", encoding="utf-8")
+            with mock.patch(
+                "plip.plipcmd.main",
+                side_effect=exercise_missing_inchikey,
+            ):
+                code, output, patched = _run_plip_report(
+                    complex_path,
+                    root / "report",
+                )
+            self.assertEqual(code, 0)
+            self.assertEqual(output, "")
+            self.assertEqual(patched, True)
+
     @unittest.skipUnless(
         _cellchat_r_available(),
         "R CellChat is unavailable",
@@ -336,6 +364,8 @@ class TestExperimentPlanOne(unittest.TestCase):
                 group_column="condition",
                 cell_type_column="cell_type",
                 min_cells=3,
+                max_cells=40,
+                seed=7,
             )
             status = result["status"]
             self.assertEqual(status["method"], "R CellChat")
@@ -344,6 +374,14 @@ class TestExperimentPlanOne(unittest.TestCase):
                 {"descriptive_only", "valid_negative", "completed"},
             )
             self.assertFalse(status.get("group_statistics", True))
+            self.assertGreaterEqual(
+                status["gene_prefilter"]["exported_genes"],
+                2,
+            )
+            self.assertLessEqual(
+                status["gene_prefilter"]["cell_sampling"]["sampled_cells"],
+                40,
+            )
 
     def test_analysis_plan_freezes_endpoint_roles_and_manifest(self):
         with tempfile.TemporaryDirectory(ignore_cleanup_errors=True) as tmp:
@@ -370,7 +408,7 @@ class TestExperimentPlanOne(unittest.TestCase):
                 "traceability",
             },
         )
-        self.assertEqual(len(governance["issue_register"]), 27)
+        self.assertEqual(len(governance["issue_register"]), 32)
         self.assertGreaterEqual(
             governance["issue_register"]["status"].isin(
                 {"blocked", "not_run"}
@@ -406,6 +444,23 @@ class TestExperimentPlanOne(unittest.TestCase):
             self.assertEqual(readiness["tiers"]["T1"]["status"], "met")
             self.assertEqual(readiness["tiers"]["T2"]["status"], "not_run")
             self.assertEqual(readiness["tiers"]["T3"]["status"], "blocked")
+            self.assertEqual(
+                {
+                    row["change_id"]
+                    for row in readiness["tiers"]["T2"][
+                        "non_equivalent_method_changes"
+                    ]
+                },
+                {"MC-004"},
+            )
+            self.assertGreaterEqual(
+                len(
+                    readiness["tiers"]["T2"][
+                        "retired_original_method_changes"
+                    ]
+                ),
+                4,
+            )
 
     def test_paired_count_sample_parser_accepts_explicit_n_t_labels(self):
         self.assertEqual(
@@ -547,7 +602,15 @@ class TestExperimentPlanOne(unittest.TestCase):
                 return_value={"status": "prepared", "mode": "prepare"},
             ):
                 results = runner.run(["md"])
+            manifest = json.loads(
+                (
+                    root / "10_reports" / "analysis_manifest.json"
+                ).read_text(encoding="utf-8")
+            )
             self.assertEqual(results["md"]["status"], "prepared")
+            self.assertIn("external_tools", manifest)
+            self.assertIn("method_decisions", manifest)
+            self.assertIn("vina", manifest["external_tools"])
             state_path = root / "12_reports" / ".stages" / "md.json"
             state = json.loads(state_path.read_text(encoding="utf-8"))
             self.assertEqual(state["status"], "prepared")
@@ -1077,6 +1140,62 @@ class TestExperimentPlanOne(unittest.TestCase):
                 ),
                 encoding="utf-8",
             )
+            ppi_dir = root / "03_intersection_ppi"
+            ppi_dir.mkdir(parents=True)
+            (ppi_dir / "ppi_summary.json").write_text(
+                json.dumps(
+                    {
+                        "status": "completed",
+                        "module_method": "MCL",
+                        "mcl_inflation": 2.0,
+                    }
+                ),
+                encoding="utf-8",
+            )
+            mouse_dir = root / "06_single_cell_mouse"
+            mouse_dir.mkdir(parents=True)
+            (mouse_dir / "cellchat_permutation_summary.json").write_text(
+                json.dumps(
+                    {
+                        "status": "valid_negative",
+                        "method": "R CellChat",
+                        "n_interactions": 0,
+                    }
+                ),
+                encoding="utf-8",
+            )
+            insilico_dir = (
+                mouse_dir
+                / "virtual_knockout"
+                / "outputs"
+                / "run_001"
+                / "results"
+                / "04_knockout"
+                / "in_silico"
+            )
+            insilico_dir.mkdir(parents=True)
+            (insilico_dir / "insilico_summary.json").write_text(
+                json.dumps(
+                    {
+                        "status": "completed",
+                        "engine": "scTenifoldKnk (R package)",
+                        "scientific_role": "predicted_perturbation_response",
+                    }
+                ),
+                encoding="utf-8",
+            )
+            docking_dir = root / "08_docking"
+            docking_dir.mkdir(parents=True)
+            (docking_dir / "fig5b_status.json").write_text(
+                json.dumps(
+                    {
+                        "status": "completed",
+                        "method": "PLIP 3.0.1",
+                        "validated": True,
+                    }
+                ),
+                encoding="utf-8",
+            )
             reviews = _dynamic_result_reviews(root)
             figure = "Figure3_机器学习模型构建与SHAP核心特征"
             self.assertEqual(reviews[(figure, "c")].verdict, "需限定解释")
@@ -1085,6 +1204,30 @@ class TestExperimentPlanOne(unittest.TestCase):
             self.assertIn("0.909", reviews[(figure, "d")].notes)
             self.assertEqual(reviews[(figure, "e")].verdict, "需限定解释")
             self.assertIn("0.140", reviews[(figure, "e")].notes)
+            self.assertEqual(
+                reviews[
+                    ("Figure2_PPI网络与枢纽基因初步筛选", "b")
+                ].verdict,
+                "可用",
+            )
+            self.assertEqual(
+                reviews[
+                    ("Figure4_单细胞图谱_细胞通讯与虚拟扰动", "f")
+                ].verdict,
+                "阴性结果",
+            )
+            self.assertEqual(
+                reviews[
+                    ("Figure4_单细胞图谱_细胞通讯与虚拟扰动", "g")
+                ].verdict,
+                "可用",
+            )
+            self.assertIn(
+                "PLIP 3.0.1",
+                reviews[
+                    ("Figure5_分子对接与分子动力学模拟", "b")
+                ].notes,
+            )
 
     def test_figure_summary_counts_unique_panels_not_file_aliases(self):
         base = {

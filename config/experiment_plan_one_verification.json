@@ -1,7 +1,7 @@
 {
   "verified_at": "2026-09-23",
   "baseline_commit": "e6c0370b3b7210ac557ae9c5432e72af74f14b35",
-  "analysis_code_fingerprint": "b10dde7d596b3fc0269c0d30f58c6766f26d501f184b0af74a5216f8228b28d9",
+  "analysis_code_fingerprint": "5dcb6a361543ce2763b32029787a68755bef943252e61afa5f5ec72c849544bb",
   "status": "passed",
   "scope": "Frozen script implementation checks only; not a scientific completion certificate.",
   "checks": [
@@ -9,18 +9,18 @@
       "name": "targeted_experiment_plan_tests",
       "status": "passed",
       "command": "python -m pytest tests/test_experiment_plan_one.py tests/test_insilico_knockout.py -q",
-      "evidence": "46 passed, 2 deselected; includes real R MCL, R CellChat and R scTenifoldKnk smoke tests"
+      "evidence": "49 passed; includes real R MCL, R CellChat, R scTenifoldKnk and PLIP compatibility smoke tests"
     },
     {
       "name": "cross_module_regression_tests",
       "status": "passed",
       "command": "python -m pytest -q --ignore=tests/test_portable_package.py",
-      "evidence": "514 passed, 1 skipped and 75 subtests passed"
+      "evidence": "515 passed, 1 skipped and 75 subtests passed"
     },
     {
       "name": "real_data_smoke",
       "status": "passed",
-      "detail": "Bulk counts pairing metadata and human-mouse orthology were checked on local frozen inputs."
+      "detail": "Bulk pairing checks passed; R MCL ran on the 60-node network; R CellChat ran on 31,922 mouse cells with database prefilter and 4,811-cell stratified sample; R scTenifoldKnk ran on 300 genes x 500 cells; PLIP ran on five local docking poses."
     }
   ],
   "known_out_of_scope_failure": {

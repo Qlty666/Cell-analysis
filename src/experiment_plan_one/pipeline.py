@@ -53,7 +53,7 @@ from .common import (
     slug,
     write_json,
 )
-from .coverage import audit_plan_coverage
+from .coverage import audit_plan_coverage, audit_plan_environment
 from .docking_md import prepare_or_run_md, run_docking_for_targets
 from .enrichment import run_go_kegg
 from .figure_audit import audit_figures
@@ -63,6 +63,7 @@ from .planning import (
     append_cohort_rows,
     audit_delivery_readiness,
     dataset_registry,
+    load_governance,
     update_data_checksums,
     write_analysis_plan,
     write_governance_artifacts,
@@ -446,6 +447,7 @@ def default_config() -> dict[str, Any]:
             "mouse": {
                 "max_cells": 5000,
                 "cellchat_backend": "r_cellchat",
+                "cellchat_max_cells": 5000,
                 "cellchat_permutations": 100,
                 "cellchat_seed": 123,
                 "inference_unit": "library_or_verified_animal",
@@ -1958,6 +1960,15 @@ class ExperimentPlanOne:
                     "r_cellchat",
                 )
             ),
+            cellchat_max_cells=int(
+                self.context.config["single_cell"]["mouse"].get(
+                    "cellchat_max_cells",
+                    self.context.config["single_cell"]["mouse"].get(
+                        "max_cells",
+                        5000,
+                    ),
+                )
+            ),
             cellchat_permutations=int(
                 self.context.config["single_cell"]["mouse"].get(
                     "cellchat_permutations",
@@ -1990,8 +2001,8 @@ class ExperimentPlanOne:
             "h5ad": str(result["h5ad"]),
             "core_genes": result["core_genes"],
             "cellchat": {
-                "interactions_csv": str(out_dir / "cellchat_like_interactions.csv"),
-                "pathways_csv": str(out_dir / "cellchat_like_pathways.csv"),
+                "interactions_csv": str(out_dir / "cellchat_interactions.csv"),
+                "pathways_csv": str(out_dir / "cellchat_pathways.csv"),
                 "n_interactions": len(result["cellchat"]["interactions"]),
                 "n_pathways": len(result["cellchat"]["pathways"]),
             },
@@ -2299,6 +2310,22 @@ class ExperimentPlanOne:
             insilico_config.get("scientific_role")
             or "predicted_perturbation_response"
         )
+        mouse_config = dict(
+            (self.context.config.get("single_cell") or {}).get("mouse")
+            or {}
+        )
+        insilico_max_cells = int(
+            insilico_config.get(
+                "max_cells",
+                mouse_config.get("max_cells", 5000),
+            )
+        )
+        insilico_max_genes = int(
+            insilico_config.get(
+                "max_genes",
+                mouse_config.get("max_genes", 1800),
+            )
+        )
         try:
             import anndata as ad
 
@@ -2327,8 +2354,8 @@ class ExperimentPlanOne:
                         ),
                         "engine": engine,
                         "scientific_role": scientific_role,
-                        "max_cells": 5000,
-                        "max_genes": 1800,
+                        "max_cells": insilico_max_cells,
+                        "max_genes": insilico_max_genes,
                         "seed": 123,
                     },
                     sort_keys=True,
@@ -2359,7 +2386,10 @@ class ExperimentPlanOne:
                             "target_changes": str(mouse_dir / "virtual_knockout_target_changes.csv"),
                         },
                     }
-            selected_cells = _balanced_cell_sample(data, max_cells=5000)
+            selected_cells = _balanced_cell_sample(
+                data,
+                max_cells=insilico_max_cells,
+            )
             data = data[selected_cells].copy()
             counts = data.layers.get("counts")
             if counts is None:
@@ -2412,8 +2442,8 @@ class ExperimentPlanOne:
                     "species": "mm",
                     "embedding_csv": str(knockout_dir / "embedding.csv"),
                     "min_cells": 100,
-                    "max_cells": 5000,
-                    "max_genes": 1800,
+                    "max_cells": insilico_max_cells,
+                    "max_genes": insilico_max_genes,
                     "seed": 123,
                     "knn_impute_neighbors": 66,
                     "n_propagation": 3,
@@ -2488,11 +2518,14 @@ class ExperimentPlanOne:
                     "numpy",
                     "pandas",
                     "scipy",
-                    "sklearn",
+                    "scikit-learn",
                     "scanpy",
                     "anndata",
                     "matplotlib",
                     "rdkit",
+                    "plip",
+                    "scTenifoldpy",
+                    "openbabel",
                     "xgboost",
                     "lightgbm",
                     "shap",
@@ -2514,6 +2547,10 @@ class ExperimentPlanOne:
                 "output_root": str(self.context.output_root),
                 "config": self.context.config,
                 "software": software,
+                "external_tools": audit_plan_environment(),
+                "method_decisions": load_governance()[
+                    "method_changes"
+                ].to_dict("records"),
                 "reproducibility": {
                     "git_commit": _git_commit(self.context.root),
                     "random_seeds": {

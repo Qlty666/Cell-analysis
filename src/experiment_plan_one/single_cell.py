@@ -535,13 +535,64 @@ def _cellchat_r_available() -> bool:
     return process.returncode == 0 and "TRUE" in process.stdout.upper()
 
 
+def _cellchat_database_genes(
+    executable: str,
+    output_dir: Path,
+    *,
+    species: str,
+) -> tuple[list[str], dict[str, Any], Path, Path]:
+    script = (
+        Path(__file__).resolve().parent
+        / "R"
+        / "cellchat_database_genes.R"
+    )
+    genes_path = output_dir / "cellchat_database_genes.txt"
+    summary_path = output_dir / "cellchat_database_genes.json"
+    process = subprocess.run(
+        [
+            executable,
+            "--vanilla",
+            str(script),
+            f"--output={genes_path}",
+            f"--summary={summary_path}",
+            f"--species={species}",
+        ],
+        capture_output=True,
+        text=True,
+        encoding="utf-8",
+        errors="replace",
+        check=False,
+        timeout=300,
+    )
+    if process.returncode != 0 or not genes_path.exists():
+        detail = (process.stderr or process.stdout or "").strip()
+        raise RuntimeError(
+            "could not load the CellChat species database; Figure 4f is "
+            f"blocked. {detail[-800:]}"
+        )
+    genes = [
+        value.strip()
+        for value in genes_path.read_text(encoding="utf-8").splitlines()
+        if value.strip()
+    ]
+    summary = (
+        json.loads(summary_path.read_text(encoding="utf-8"))
+        if summary_path.exists()
+        else {}
+    )
+    return genes, summary, genes_path, summary_path
+
+
 def _export_cellchat_inputs(
     data: ad.AnnData,
     input_dir: Path,
     *,
     group_column: str,
     cell_type_column: str,
-) -> tuple[Path, Path, Path, Path]:
+    database_genes: list[str],
+    max_cells: int = 0,
+    seed: int = 123,
+) -> tuple[Path, Path, Path, Path, dict[str, Any]]:
     if "counts" not in data.layers:
         raise RuntimeError(
             "the original R CellChat path requires a raw-count layer named "
@@ -559,6 +610,67 @@ def _export_cellchat_inputs(
     subset = data[keep.to_numpy()].copy()
     if subset.n_obs < 20:
         raise RuntimeError("too few annotated cells for R CellChat")
+    input_cells = int(subset.n_obs)
+    sampled_cells = input_cells
+    if max_cells > 0 and input_cells > max_cells:
+        strata = pd.DataFrame(
+            {
+                "condition": subset.obs[group_column].astype(str).to_numpy(),
+                "cell_type": subset.obs[cell_type_column].astype(str).to_numpy(),
+            },
+            index=np.arange(input_cells),
+        )
+        group_sizes = strata.groupby(
+            ["condition", "cell_type"],
+            observed=True,
+        ).size()
+        rng = np.random.default_rng(seed)
+        selected: list[int] = []
+        for key, positions in strata.groupby(
+            ["condition", "cell_type"],
+            observed=True,
+        ).indices.items():
+            allocation = max(
+                1,
+                int(
+                    np.floor(
+                        max_cells
+                        * int(group_sizes.loc[key])
+                        / input_cells
+                    )
+                ),
+            )
+            take = min(len(positions), allocation)
+            selected.extend(
+                rng.choice(positions, size=take, replace=False).tolist()
+            )
+        if len(selected) > max_cells:
+            selected = rng.choice(
+                selected,
+                size=max_cells,
+                replace=False,
+            ).tolist()
+        subset = subset[sorted(set(selected))].copy()
+        sampled_cells = int(subset.n_obs)
+    database_lookup = {
+        gene.upper(): gene
+        for gene in database_genes
+    }
+    selected_records: list[tuple[int, str]] = []
+    selected_symbols: set[str] = set()
+    for index, gene in enumerate(subset.var_names.astype(str)):
+        canonical = database_lookup.get(gene.upper())
+        if canonical and canonical not in selected_symbols:
+            selected_records.append((index, canonical))
+            selected_symbols.add(canonical)
+    if len(selected_records) < 2:
+        raise RuntimeError(
+            "fewer than two input genes matched the CellChat species database"
+        )
+    selected_indices = [record[0] for record in selected_records]
+    canonical_symbols = [record[1] for record in selected_records]
+    subset = subset[:, selected_indices].copy()
+    subset.var_names = pd.Index(canonical_symbols)
     ensure_dir(input_dir)
     matrix_path = input_dir / "counts.mtx"
     genes_path = input_dir / "genes.txt"
@@ -586,7 +698,25 @@ def _export_cellchat_inputs(
         }
     )
     metadata.to_csv(metadata_path, sep="\t", index=False)
-    return matrix_path, genes_path, cells_path, metadata_path
+    return (
+        matrix_path,
+        genes_path,
+        cells_path,
+        metadata_path,
+        {
+            "input_genes": int(data.n_vars),
+            "cellchat_database_genes": int(len(database_genes)),
+            "exported_genes": int(subset.n_vars),
+            "gene_prefilter": "case-insensitive CellChat species database symbols",
+            "cell_sampling": {
+                "input_cells": input_cells,
+                "sampled_cells": sampled_cells,
+                "max_cells": int(max_cells),
+                "seed": int(seed),
+                "strata": [group_column, cell_type_column],
+            },
+        },
+    )
 
 
 def _run_r_cellchat_analysis(
@@ -598,6 +728,9 @@ def _run_r_cellchat_analysis(
     cell_type_column: str = "cell_type",
     min_cells: int = 10,
     n_bootstrap: int = 100,
+    groups: tuple[str, ...] = ("NCD", "HFD"),
+    max_cells: int = 0,
+    seed: int = 123,
 ) -> dict[str, pd.DataFrame | dict[str, Any]]:
     """Run the original R CellChat implementation on raw counts."""
     executable = _rscript_path()
@@ -608,13 +741,30 @@ def _run_r_cellchat_analysis(
             "unavailable; Figure 4f is blocked rather than substituted"
         )
     input_dir = ensure_dir(output_dir / "cellchat_r_inputs")
-    matrix_path, genes_path, cells_path, metadata_path = (
-        _export_cellchat_inputs(
-            data,
-            input_dir,
-            group_column=group_column,
-            cell_type_column=cell_type_column,
-        )
+    (
+        database_genes,
+        database_summary,
+        database_genes_path,
+        database_summary_path,
+    ) = _cellchat_database_genes(
+        executable,
+        input_dir,
+        species=species,
+    )
+    (
+        matrix_path,
+        genes_path,
+        cells_path,
+        metadata_path,
+        prefilter,
+    ) = _export_cellchat_inputs(
+        data,
+        input_dir,
+        group_column=group_column,
+        cell_type_column=cell_type_column,
+        database_genes=database_genes,
+        max_cells=max_cells,
+        seed=seed,
     )
     process = subprocess.run(
         [
@@ -631,6 +781,7 @@ def _run_r_cellchat_analysis(
             f"--celltype-column={cell_type_column}",
             f"--min-cells={int(min_cells)}",
             f"--nboot={int(n_bootstrap)}",
+            f"--groups={','.join(str(group) for group in groups)}",
         ],
         capture_output=True,
         text=True,
@@ -648,6 +799,13 @@ def _run_r_cellchat_analysis(
             f"method was run. {detail[-1200:]}"
         )
     summary = json.loads(summary_path.read_text(encoding="utf-8"))
+    summary = {
+        **summary,
+        "gene_prefilter": prefilter,
+        "database_gene_file": str(database_genes_path),
+        "database_summary_file": str(database_summary_path),
+        "database_summary": database_summary,
+    }
     raw = (
         pd.read_csv(interaction_path)
         if interaction_path.exists() and interaction_path.stat().st_size
@@ -740,6 +898,7 @@ def run_mouse_single_cell(
     *,
     sample_key: str | None = None,
     cellchat_backend: str = "explicit_lr",
+    cellchat_max_cells: int = 0,
     cellchat_permutations: int = 100,
     cellchat_seed: int = 123,
     allow_network: bool = True,
@@ -833,8 +992,10 @@ def run_mouse_single_cell(
         "legacy_cell_level_DE": "not used for disease inference",
         "jqf_role": "separate intervention arm; never merged into normal control",
     })
-    interaction_path = output_dir / "cellchat_like_interactions.csv"
-    pathway_path = output_dir / "cellchat_like_pathways.csv"
+    interaction_path = output_dir / "cellchat_interactions.csv"
+    pathway_path = output_dir / "cellchat_pathways.csv"
+    legacy_interaction_path = output_dir / "cellchat_like_interactions.csv"
+    legacy_pathway_path = output_dir / "cellchat_like_pathways.csv"
     backend = str(cellchat_backend or "explicit_lr").strip().lower()
     if backend in {"r_cellchat", "cellchat", "original"}:
         lr = _run_r_cellchat_analysis(
@@ -844,6 +1005,9 @@ def run_mouse_single_cell(
             group_column="condition",
             cell_type_column="cell_type",
             n_bootstrap=cellchat_permutations,
+            groups=("NCD", "HFD"),
+            max_cells=int(cellchat_max_cells),
+            seed=int(cellchat_seed),
         )
     elif backend in {"explicit_lr", "python", "legacy"}:
         lr = _cellchat_like_analysis(
@@ -857,6 +1021,8 @@ def run_mouse_single_cell(
         )
     lr["interactions"].to_csv(interaction_path, index=False)
     lr["pathways"].to_csv(pathway_path, index=False)
+    lr["interactions"].to_csv(legacy_interaction_path, index=False)
+    lr["pathways"].to_csv(legacy_pathway_path, index=False)
     communication_status = dict(lr.get("status") or {})
     write_json(
         output_dir / "cellchat_permutation_summary.json",
