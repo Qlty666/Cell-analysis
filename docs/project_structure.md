@@ -236,7 +236,11 @@ Script/
 | `config/experiment_plan_one_verification.json` | 冻结脚本的测试、真实数据冒烟核查和已知限制记录 |
 | `config/experiment_plan_one_experimental_validation.example.json` | T3 湿实验因果验证记录模板 |
 | `config/experiment_plan_one_source_authorizations.json` | GeneCards、OMIM、TTD 等来源的合法导出与授权凭证路径登记模板 |
+| `config/experiment_plan_one_external_validation.json` | 独立同终点外部队列、文件哈希、模型锁定和单次评价规则 |
+| `config/experiment_plan_one_animal_replication.json` | 小鼠独立动物重复门槛、公开数据检索记录和限制说明 |
+| `config/experiment_plan_one_experimental_validation.json` | 湿实验因果链、靶点干预/救援、直接结合和伦理材料占位记录 |
 | `00_plan/cohort_freeze.json` 与 `00_plan/cohort_manifest.frozen.tsv` | 最终 cohort、donor 映射和来源授权冻结状态及哈希 |
+| `00_plan/experimental_validation_manifest.json` | 湿实验记录；只有 `completed_verified` 才能解除 T3 阻塞 |
 | `skills/liver-*/SKILL.md` | Codex skill 定义 |
 | `skills/liver-*/agents/openai.yaml` | skill agent 配置 |
 | `pytest.ini` | pytest 配置（`testpaths = tests`） |

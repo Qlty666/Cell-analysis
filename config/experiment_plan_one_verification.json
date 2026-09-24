@@ -1,7 +1,7 @@
 {
   "verified_at": "2026-09-23",
   "baseline_commit": "e6c0370b3b7210ac557ae9c5432e72af74f14b35",
-  "analysis_code_fingerprint": "f6989db17bd231b0c9401e5c12b62309a4dc7d1dd364b38028140a7196bbfbbc",
+  "analysis_code_fingerprint": "a124b5004e9bb44aff4d0d6dc4a0a04c363077f65a7a0c2f91654e44f0b4b012",
   "status": "passed",
   "scope": "Frozen script implementation checks only; not a scientific completion certificate.",
   "checks": [
@@ -9,18 +9,18 @@
       "name": "targeted_experiment_plan_tests",
       "status": "passed",
       "command": "python -m pytest tests/test_experiment_plan_one.py tests/test_insilico_knockout.py -q",
-      "evidence": "53 passed; includes cohort/donor freeze, source-authorization compatibility and original-method smoke tests"
+      "evidence": "58 passed; includes cohort/donor freeze, reserved external validation, animal-replication gating, wet-lab protocol gating, source authorization and original-method smoke tests"
     },
     {
       "name": "cross_module_regression_tests",
       "status": "passed",
       "command": "python -m pytest -q --ignore=tests/test_portable_package.py",
-      "evidence": "519 passed, 1 skipped and 75 subtests passed"
+      "evidence": "522 passed, 1 skipped and 75 subtests passed"
     },
     {
       "name": "real_data_smoke",
       "status": "passed",
-      "detail": "Cohort freeze validation covered 434 records; GSE164441 mapped 20 libraries to 10 patients and GSE202379 mapped 59 libraries to 47 donors, while four GSE270583 libraries remained explicitly unresolved. R MCL ran on the 60-node network; R CellChat ran on 31,922 mouse cells with database prefilter and stratified sampling; R scTenifoldKnk ran on 300 genes x 500 cells; PLIP ran on five local docking poses."
+      "detail": "Cohort freeze validation covered 434 records; GSE164441 mapped 20 libraries to 10 patients and GSE202379 mapped 59 libraries to 47 donors, while four GSE270583 libraries remained explicitly unresolved. GSE126848 was downloaded, checksum-verified and reserved as a 57-patient same-endpoint validation cohort with evaluation_status=not_evaluated. Public animal-replication search found no eligible NCD/HFD single-cell dataset with two independent animals per group. R MCL ran on the 60-node network; R CellChat ran on 31,922 mouse cells with database prefilter and stratified sampling; R scTenifoldKnk ran on 300 genes x 500 cells; PLIP ran on five local docking poses."
     }
   ],
   "known_out_of_scope_failure": {

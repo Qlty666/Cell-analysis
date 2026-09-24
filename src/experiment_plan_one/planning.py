@@ -3,6 +3,7 @@
 from __future__ import annotations
 
 import hashlib
+import gzip
 import json
 import re
 import shutil
@@ -12,7 +13,7 @@ from typing import Any
 
 import pandas as pd
 
-from .common import ensure_dir, sha256_file, write_json
+from .common import ensure_dir, sha256_file, slug, write_json
 
 PLAN_DIR = "00_plan"
 GOVERNANCE_DIR = "governance"
@@ -44,6 +45,15 @@ GOVERNANCE_FILES = {
 }
 SOURCE_AUTHORIZATIONS_FILE = (
     "experiment_plan_one_source_authorizations.json"
+)
+EXTERNAL_VALIDATION_FILE = (
+    "experiment_plan_one_external_validation.json"
+)
+ANIMAL_REPLICATION_FILE = (
+    "experiment_plan_one_animal_replication.json"
+)
+EXPERIMENTAL_VALIDATION_FILE = (
+    "experiment_plan_one_experimental_validation.json"
 )
 REQUIRED_FINAL_ACCESSIONS = {
     "GSE89632",
@@ -326,6 +336,18 @@ def audit_delivery_readiness(
         Path(output_root) / PLAN_DIR / "cohort_freeze.json",
         {},
     )
+    external_validation = _read_json(
+        Path(output_root)
+        / PLAN_DIR
+        / "external_validation_registry.frozen.json",
+        {},
+    )
+    animal_replication = _read_json(
+        Path(output_root)
+        / PLAN_DIR
+        / "animal_replication_registry.frozen.json",
+        {},
+    )
     retired_changes = changes[
         changes["status"].astype(str).eq("retired_original_restored")
     ]
@@ -356,6 +378,13 @@ def audit_delivery_readiness(
         tier1_met
         and full_rerun["status"] == "completed"
         and str(cohort_freeze.get("status") or "") == "frozen_complete"
+        and int(external_validation.get("eligible_ready_count") or 0) > 0
+        and int(
+            external_validation.get("completed_evaluation_count") or 0
+        ) > 0
+        and int(
+            animal_replication.get("eligible_public_dataset_count") or 0
+        ) > 0
         and not unresolved
         and blocking_method_changes.empty
         and (
@@ -399,6 +428,22 @@ def audit_delivery_readiness(
                 "source_authorization_errors"
             )
             or [],
+            "external_validation_status": external_validation.get(
+                "status"
+            ),
+            "external_validation_eligible_ready_count": (
+                external_validation.get("eligible_ready_count")
+            ),
+            "external_validation_completed_evaluation_count": (
+                external_validation.get("completed_evaluation_count")
+            ),
+            "animal_replication_status": animal_replication.get("status"),
+            "animal_replication_eligible_public_dataset_count": (
+                animal_replication.get("eligible_public_dataset_count")
+            ),
+            "animal_replication_claim_limit": animal_replication.get(
+                "claim_limit"
+            ),
             "non_equivalent_method_changes": (
                 non_equivalent_changes[
                     [
@@ -447,6 +492,11 @@ def audit_delivery_readiness(
                 / PLAN_DIR
                 / "experimental_validation_manifest.json"
             ),
+            "experimental_status": experimental_manifest.get("status"),
+            "completed_verified_records": experimental_manifest.get(
+                "completed_verified_records"
+            ),
+            "pending_records": experimental_manifest.get("pending_records"),
             "reason": (
                 ""
                 if tier3_met
@@ -681,6 +731,371 @@ def freeze_source_authorizations(
     return output_path, frozen
 
 
+def _parse_external_soft_samples(path: Path) -> dict[str, dict[str, str]]:
+    records: dict[str, dict[str, str]] = {}
+    current: dict[str, str] | None = None
+    with gzip.open(path, "rt", encoding="utf-8", errors="replace") as handle:
+        for raw in handle:
+            line = raw.rstrip("\r\n")
+            if line.startswith("^SAMPLE ="):
+                if current and current.get("gsm"):
+                    records[current["gsm"]] = current
+                current = {"gsm": line.split("=", 1)[1].strip()}
+                continue
+            if current is None or not line.startswith("!"):
+                continue
+            key, _, value = line[1:].partition("=")
+            key = key.strip()
+            value = value.strip()
+            if key == "Sample_title":
+                current["title"] = value
+            elif key == "Sample_description":
+                current["description"] = value
+            elif key == "Sample_characteristics_ch1":
+                if ":" in value:
+                    feature, feature_value = value.split(":", 1)
+                    current[slug(feature)] = feature_value.strip()
+    if current and current.get("gsm"):
+        records[current["gsm"]] = current
+    return records
+
+
+def _external_condition(title: str) -> tuple[str, str]:
+    normalized = title.strip()
+    if normalized.lower().startswith("normal-weight"):
+        return "control_normal_weight", "control"
+    if normalized.lower().startswith("obese"):
+        return "control_obese", "control"
+    if normalized.upper().startswith("NAFL"):
+        return "NAFL", "NAFLD"
+    if normalized.upper().startswith("NASH"):
+        return "NASH", "NAFLD"
+    return "unknown", "unknown"
+
+
+def freeze_external_validation_registry(
+    output_root: Path,
+    *,
+    root: Path | None = None,
+) -> tuple[Path, dict[str, Any]]:
+    """Freeze reserved independent-validation data without evaluating it."""
+    root = root or _repo_root()
+    config_path = root / "config" / EXTERNAL_VALIDATION_FILE
+    payload = _read_json(config_path, {})
+    candidates = (
+        payload.get("candidates")
+        if isinstance(payload, dict)
+        else []
+    ) or []
+    output_dir = ensure_dir(
+        Path(output_root) / PLAN_DIR / "external_validation"
+    )
+    frozen_candidates: list[dict[str, Any]] = []
+    errors: list[str] = []
+    for raw in candidates:
+        if not isinstance(raw, dict):
+            errors.append("external validation candidate is not an object")
+            continue
+        candidate = dict(raw)
+        accession = str(candidate.get("accession") or "").strip()
+        local_files = candidate.get("local_files") or {}
+        verified_files: dict[str, dict[str, Any]] = {}
+        candidate_errors: list[str] = []
+        for file_role, file_spec in local_files.items():
+            if not isinstance(file_spec, dict):
+                candidate_errors.append(
+                    f"{accession}: invalid local file entry {file_role}"
+                )
+                continue
+            path = _resolve_authorization_file(
+                file_spec.get("path"),
+                root=root,
+            )
+            expected_sha = str(file_spec.get("sha256") or "").lower()
+            if path is None or not path.is_file():
+                candidate_errors.append(
+                    f"{accession}: {file_role} file is missing"
+                )
+                verified_files[file_role] = {
+                    "path": str(path) if path else "",
+                    "verified": False,
+                }
+                continue
+            actual_sha = sha256_file(path)
+            verified = bool(
+                expected_sha and actual_sha.lower() == expected_sha
+            )
+            if not verified:
+                candidate_errors.append(
+                    f"{accession}: {file_role} checksum mismatch"
+                )
+            verified_files[file_role] = {
+                "path": str(path),
+                "url": str(file_spec.get("url") or ""),
+                "sha256": actual_sha,
+                "verified": verified,
+            }
+        manifest_path = output_dir / f"{accession}_cohort_manifest.tsv"
+        manifest_status = "not_created"
+        manifest_rows = 0
+        condition_counts: dict[str, int] = {}
+        if (
+            not candidate_errors
+            and "counts" in verified_files
+            and "soft" in verified_files
+        ):
+            counts_path = Path(
+                verified_files["counts"]["path"]
+            )
+            soft_path = Path(verified_files["soft"]["path"])
+            with gzip.open(
+                counts_path,
+                "rt",
+                encoding="utf-8",
+                errors="replace",
+            ) as handle:
+                count_columns = handle.readline().rstrip(
+                    "\r\n"
+                ).split("\t")[1:]
+            soft_records = _parse_external_soft_samples(soft_path)
+
+            def normalize_numeric_id(value: Any) -> str:
+                return str(value).strip().lstrip("0") or "0"
+
+            by_description = {
+                normalize_numeric_id(
+                    str(record.get("description") or "")
+                ): record
+                for record in soft_records.values()
+                if str(record.get("description") or "")
+            }
+            manifest_rows_data: list[dict[str, Any]] = []
+            for column in count_columns:
+                record = by_description.get(
+                    normalize_numeric_id(column)
+                )
+                if not record:
+                    candidate_errors.append(
+                        f"{accession}: count column {column} has no SOFT sample"
+                    )
+                    continue
+                title = str(record.get("title") or "")
+                original_condition, binary_condition = _external_condition(
+                    title
+                )
+                manifest_rows_data.append(
+                    {
+                        "accession": accession,
+                        "gsm": str(record.get("gsm") or ""),
+                        "sample_id": str(column),
+                        "library_id": str(record.get("gsm") or column),
+                        "donor_id": str(column),
+                        "species": str(
+                            candidate.get("species") or "Homo sapiens"
+                        ),
+                        "platform": str(
+                            candidate.get("platform") or ""
+                        ),
+                        "tissue": str(
+                            candidate.get("tissue") or "liver"
+                        ),
+                        "title": title,
+                        "original_diagnosis": original_condition,
+                        "condition": binary_condition,
+                        "gender": str(record.get("gender") or ""),
+                        "included": "yes",
+                        "inclusion_reason": (
+                            "reserved independent same-endpoint cohort"
+                        ),
+                        "evaluation_status": "not_evaluated",
+                    }
+                )
+            expected_samples = int(
+                candidate.get("expected_samples") or len(count_columns)
+            )
+            if len(manifest_rows_data) != expected_samples:
+                candidate_errors.append(
+                    f"{accession}: expected {expected_samples} samples, "
+                    f"found {len(manifest_rows_data)}"
+                )
+            if len({row["donor_id"] for row in manifest_rows_data}) != len(
+                manifest_rows_data
+            ):
+                candidate_errors.append(
+                    f"{accession}: donor identifiers are not unique"
+                )
+            condition_counts = {
+                str(key): int(value)
+                for key, value in pd.Series(
+                    [
+                        row["original_diagnosis"]
+                        for row in manifest_rows_data
+                    ]
+                )
+                .value_counts()
+                .to_dict()
+                .items()
+            }
+            expected_counts = candidate.get("expected_condition_counts") or {}
+            for condition, expected in expected_counts.items():
+                if condition_counts.get(str(condition), 0) != int(expected):
+                    candidate_errors.append(
+                        f"{accession}: condition {condition} expected "
+                        f"{expected}, found {condition_counts.get(str(condition), 0)}"
+                    )
+            pd.DataFrame(manifest_rows_data).to_csv(
+                manifest_path,
+                sep="\t",
+                index=False,
+            )
+            manifest_status = "frozen"
+            manifest_rows = len(manifest_rows_data)
+        candidate_status = (
+            "reserved_ready_not_evaluated"
+            if not candidate_errors
+            else "blocked_incomplete"
+        )
+        errors.extend(candidate_errors)
+        frozen_candidates.append(
+            {
+                **candidate,
+                "status": candidate_status,
+                "eligible_for_external_validation": (
+                    candidate_status == "reserved_ready_not_evaluated"
+                    and not bool(
+                        candidate.get(
+                            "previously_used_for_model_development",
+                            True,
+                        )
+                    )
+                    and bool(
+                        candidate.get(
+                            "reserved_before_model_evaluation",
+                            False,
+                        )
+                    )
+                ),
+                "evaluation_status": "not_evaluated",
+                "local_files": verified_files,
+                "cohort_manifest": str(manifest_path),
+                "cohort_manifest_status": manifest_status,
+                "cohort_manifest_sha256": (
+                    sha256_file(manifest_path)
+                    if manifest_path.is_file()
+                    else ""
+                ),
+                "rows": int(manifest_rows),
+                "condition_counts": condition_counts,
+                "errors": candidate_errors,
+            }
+        )
+    eligible = [
+        item
+        for item in frozen_candidates
+        if item.get("eligible_for_external_validation")
+    ]
+    evaluated = [
+        item
+        for item in frozen_candidates
+        if str(item.get("evaluation_status") or "") == "completed_verified"
+    ]
+    frozen = {
+        "schema_version": int(payload.get("schema_version", 1) or 1),
+        "status": "ready_not_evaluated" if eligible else "blocked_incomplete",
+        "config_file": str(config_path),
+        "config_sha256": (
+            sha256_file(config_path) if config_path.is_file() else ""
+        ),
+        "model_lock_policy": payload.get("model_lock_policy"),
+        "eligible_ready_count": len(eligible),
+        "completed_evaluation_count": len(evaluated),
+        "errors": errors,
+        "candidates": frozen_candidates,
+    }
+    output_path = (
+        ensure_dir(Path(output_root) / PLAN_DIR)
+        / "external_validation_registry.frozen.json"
+    )
+    write_json(output_path, frozen)
+    return output_path, frozen
+
+
+def freeze_animal_replication_registry(
+    output_root: Path,
+    *,
+    root: Path | None = None,
+) -> tuple[Path, dict[str, Any]]:
+    """Freeze the animal-replication requirement and public-data search audit."""
+    root = root or _repo_root()
+    config_path = root / "config" / ANIMAL_REPLICATION_FILE
+    payload = _read_json(config_path, {})
+    status = str(payload.get("status") or "blocked_incomplete")
+    frozen = {
+        **payload,
+        "config_file": str(config_path),
+        "config_sha256": (
+            sha256_file(config_path) if config_path.is_file() else ""
+        ),
+        "status": status,
+        "eligible_public_dataset_count": (
+            1 if status == "ready" else 0
+        ),
+        "claim_limit": str(
+            payload.get("claim_limit")
+            or "No independent-animal inference is permitted."
+        ),
+    }
+    output_path = (
+        ensure_dir(Path(output_root) / PLAN_DIR)
+        / "animal_replication_registry.frozen.json"
+    )
+    write_json(output_path, frozen)
+    return output_path, frozen
+
+
+def freeze_experimental_validation_manifest(
+    output_root: Path,
+    *,
+    root: Path | None = None,
+) -> tuple[Path, dict[str, Any]]:
+    """Freeze the wet-lab protocol and keep unverified claims blocked."""
+    root = root or _repo_root()
+    config_path = root / "config" / EXPERIMENTAL_VALIDATION_FILE
+    payload = _read_json(config_path, {})
+    records = payload.get("records") or []
+    completed = [
+        record
+        for record in records
+        if isinstance(record, dict)
+        and str(record.get("status") or "") == "completed_verified"
+    ]
+    configured_status = str(
+        payload.get("status") or "protocol_only_pending_real_experiment"
+    )
+    status = (
+        "completed_verified"
+        if records and len(completed) == len(records)
+        else configured_status
+    )
+    frozen = {
+        **payload,
+        "status": status,
+        "config_file": str(config_path),
+        "config_sha256": (
+            sha256_file(config_path) if config_path.is_file() else ""
+        ),
+        "records": records,
+        "completed_verified_records": len(completed),
+        "pending_records": max(0, len(records) - len(completed)),
+    }
+    output_path = (
+        ensure_dir(Path(output_root) / PLAN_DIR)
+        / "experimental_validation_manifest.json"
+    )
+    write_json(output_path, frozen)
+    return output_path, frozen
+
+
 def build_donor_mapping(
     cohort: pd.DataFrame,
 ) -> tuple[pd.DataFrame, list[str]]:
@@ -821,6 +1236,24 @@ def freeze_cohort_artifacts(
         output_root,
         root=root,
     )
+    external_validation_path, external_validation = (
+        freeze_external_validation_registry(
+            output_root,
+            root=root,
+        )
+    )
+    animal_replication_path, animal_replication = (
+        freeze_animal_replication_registry(
+            output_root,
+            root=root,
+        )
+    )
+    experimental_validation_path, experimental_validation = (
+        freeze_experimental_validation_manifest(
+            output_root,
+            root=root,
+        )
+    )
     if final:
         if "included" in cohort and cohort["included"].astype(str).eq(
             "planned"
@@ -934,6 +1367,34 @@ def freeze_cohort_artifacts(
         "source_authorizations": str(authorization_path),
         "source_authorization_status": authorization.get("status"),
         "source_authorization_errors": authorization.get("errors") or [],
+        "external_validation": str(external_validation_path),
+        "external_validation_status": external_validation.get("status"),
+        "external_validation_eligible_ready_count": external_validation.get(
+            "eligible_ready_count"
+        ),
+        "external_validation_completed_evaluation_count": (
+            external_validation.get("completed_evaluation_count")
+        ),
+        "external_validation_errors": external_validation.get("errors")
+        or [],
+        "animal_replication": str(animal_replication_path),
+        "animal_replication_status": animal_replication.get("status"),
+        "animal_replication_eligible_public_dataset_count": (
+            animal_replication.get("eligible_public_dataset_count")
+        ),
+        "animal_replication_claim_limit": animal_replication.get(
+            "claim_limit"
+        ),
+        "experimental_validation": str(experimental_validation_path),
+        "experimental_validation_status": experimental_validation.get(
+            "status"
+        ),
+        "experimental_validation_completed_records": (
+            experimental_validation.get("completed_verified_records")
+        ),
+        "experimental_validation_pending_records": (
+            experimental_validation.get("pending_records")
+        ),
         "rows": int(len(cohort)),
         "sample_level_rows": (
             int(cohort["sample_id"].astype(str).str.strip().ne("").sum())
@@ -971,6 +1432,9 @@ def freeze_cohort_artifacts(
         "cohort_freeze": freeze_path,
         "donor_mapping": mapping_path,
         "source_authorizations": authorization_path,
+        "external_validation": external_validation_path,
+        "animal_replication": animal_replication_path,
+        "experimental_validation": experimental_validation_path,
         "validation": freeze_payload,
     }
 
@@ -1124,6 +1588,15 @@ def write_analysis_plan(
         "donor_mapping": Path(cohort_freeze["donor_mapping"]),
         "source_authorizations": Path(
             cohort_freeze["source_authorizations"]
+        ),
+        "external_validation": Path(
+            cohort_freeze["external_validation"]
+        ),
+        "animal_replication": Path(
+            cohort_freeze["animal_replication"]
+        ),
+        "experimental_validation": Path(
+            cohort_freeze["experimental_validation"]
         ),
     }
 

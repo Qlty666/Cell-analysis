@@ -278,6 +278,9 @@ STAGE_REQUIRED_OUTPUTS: dict[str, list[Path]] = {
         Path("00_plan/cohort_freeze.draft.json"),
         Path("00_plan/donor_mapping.tsv"),
         Path("00_plan/source_authorizations.frozen.json"),
+        Path("00_plan/external_validation_registry.frozen.json"),
+        Path("00_plan/animal_replication_registry.frozen.json"),
+        Path("00_plan/experimental_validation_manifest.json"),
         Path("00_plan/governance/experiment_plan_one_freeze.json"),
         Path("00_plan/governance/experiment_plan_one_delivery_tiers.json"),
         Path("00_plan/governance/experiment_plan_one_issue_register.csv"),
@@ -2603,6 +2606,24 @@ class ExperimentPlanOne:
                     self.context.output_root
                     / "00_plan"
                     / "source_authorizations.frozen.json",
+                    {},
+                ),
+                "external_validation": read_json(
+                    self.context.output_root
+                    / "00_plan"
+                    / "external_validation_registry.frozen.json",
+                    {},
+                ),
+                "animal_replication": read_json(
+                    self.context.output_root
+                    / "00_plan"
+                    / "animal_replication_registry.frozen.json",
+                    {},
+                ),
+                "experimental_validation": read_json(
+                    self.context.output_root
+                    / "00_plan"
+                    / "experimental_validation_manifest.json",
                     {},
                 ),
                 "reproducibility": {

@@ -5,6 +5,8 @@ from __future__ import annotations
 
 import re
 import json
+import gzip
+import hashlib
 import shutil
 import tempfile
 import unittest
@@ -50,7 +52,10 @@ from experiment_plan_one.planning import (
     COHORT_COLUMNS,
     audit_delivery_readiness,
     build_donor_mapping,
+    freeze_animal_replication_registry,
     freeze_cohort_artifacts,
+    freeze_external_validation_registry,
+    freeze_experimental_validation_manifest,
     freeze_source_authorizations,
     load_governance,
     write_analysis_plan,
@@ -608,6 +613,150 @@ class TestExperimentPlanOne(unittest.TestCase):
                 payload["sources"][0]["authorization_file_sha256"]
             )
 
+    def test_external_validation_registry_reserves_untouched_cohort(self):
+        with tempfile.TemporaryDirectory(ignore_cleanup_errors=True) as tmp:
+            root = Path(tmp)
+            config_dir = root / "config"
+            config_dir.mkdir()
+            counts_path = root / "counts.txt.gz"
+            soft_path = root / "family.soft.gz"
+            with gzip.open(counts_path, "wt", encoding="utf-8") as handle:
+                handle.write("key\t001\t002\n")
+                handle.write("ENSG1\t5\t7\n")
+            soft_text = (
+                "^SAMPLE = GSM1\n"
+                "!Sample_title = Normal-weight_1\n"
+                "!Sample_characteristics_ch1 = gender: Female\n"
+                "!Sample_characteristics_ch1 = disease: Healthy\n"
+                "!Sample_description = 001\n"
+                "^SAMPLE = GSM2\n"
+                "!Sample_title = NAFL_1\n"
+                "!Sample_characteristics_ch1 = gender: Male\n"
+                "!Sample_characteristics_ch1 = disease: NAFLD\n"
+                "!Sample_description = 002\n"
+            )
+            with gzip.open(soft_path, "wt", encoding="utf-8") as handle:
+                handle.write(soft_text)
+
+            def digest(path: Path) -> str:
+                return hashlib.sha256(path.read_bytes()).hexdigest()
+
+            (config_dir / "experiment_plan_one_external_validation.json").write_text(
+                json.dumps(
+                    {
+                        "schema_version": 1,
+                        "model_lock_policy": "reserve until final model lock",
+                        "candidates": [
+                            {
+                                "accession": "GSE_TEST",
+                                "role": "same_endpoint_external_validation_reserved",
+                                "species": "Homo sapiens",
+                                "platform": "GPL18573",
+                                "tissue": "liver",
+                                "previously_used_for_model_development": False,
+                                "reserved_before_model_evaluation": True,
+                                "expected_samples": 2,
+                                "expected_condition_counts": {
+                                    "control_normal_weight": 1,
+                                    "NAFL": 1,
+                                },
+                                "local_files": {
+                                    "counts": {
+                                        "path": str(counts_path),
+                                        "sha256": digest(counts_path),
+                                    },
+                                    "soft": {
+                                        "path": str(soft_path),
+                                        "sha256": digest(soft_path),
+                                    },
+                                },
+                            }
+                        ],
+                    }
+                ),
+                encoding="utf-8",
+            )
+            output_root = root / "output"
+            _, payload = freeze_external_validation_registry(
+                output_root,
+                root=root,
+            )
+            self.assertEqual(payload["status"], "ready_not_evaluated")
+            self.assertEqual(payload["eligible_ready_count"], 1)
+            self.assertEqual(payload["completed_evaluation_count"], 0)
+            candidate = payload["candidates"][0]
+            self.assertEqual(candidate["rows"], 2)
+            self.assertEqual(
+                candidate["evaluation_status"],
+                "not_evaluated",
+            )
+
+    def test_animal_replication_registry_blocks_unsupported_inference(self):
+        with tempfile.TemporaryDirectory(ignore_cleanup_errors=True) as tmp:
+            root = Path(tmp)
+            config_dir = root / "config"
+            config_dir.mkdir()
+            (config_dir / "experiment_plan_one_animal_replication.json").write_text(
+                json.dumps(
+                    {
+                        "schema_version": 1,
+                        "requirement": {
+                            "minimum_independent_animals_per_group": 2
+                        },
+                        "status": "blocked_no_eligible_public_dataset",
+                        "claim_limit": "Keep the mouse panel descriptive.",
+                    }
+                ),
+                encoding="utf-8",
+            )
+            _, payload = freeze_animal_replication_registry(
+                root / "output",
+                root=root,
+            )
+            self.assertEqual(
+                payload["status"],
+                "blocked_no_eligible_public_dataset",
+            )
+            self.assertEqual(
+                payload["eligible_public_dataset_count"],
+                0,
+            )
+            self.assertIn("descriptive", payload["claim_limit"])
+
+    def test_experimental_validation_manifest_requires_real_records(self):
+        with tempfile.TemporaryDirectory(ignore_cleanup_errors=True) as tmp:
+            root = Path(tmp)
+            config_dir = root / "config"
+            config_dir.mkdir()
+            (config_dir / "experiment_plan_one_experimental_validation.json").write_text(
+                json.dumps(
+                    {
+                        "schema_version": 1,
+                        "status": "protocol_only_pending_real_experiment",
+                        "records": [
+                            {
+                                "claim_id": "C1",
+                                "status": "planned_protocol_only",
+                            }
+                        ],
+                    }
+                ),
+                encoding="utf-8",
+            )
+            manifest_path, payload = (
+                freeze_experimental_validation_manifest(
+                    root / "output",
+                    root=root,
+                )
+            )
+            self.assertTrue(manifest_path.exists())
+            self.assertEqual(
+                payload["status"],
+                "protocol_only_pending_real_experiment",
+            )
+            self.assertEqual(payload["completed_verified_records"], 0)
+            self.assertEqual(payload["pending_records"], 1)
+
     def test_governance_freeze_register_and_method_changes_are_complete(self):
         governance = load_governance()
         self.assertEqual(governance["freeze"]["state"], "frozen")
@@ -621,7 +770,7 @@ class TestExperimentPlanOne(unittest.TestCase):
                 "traceability",
             },
         )
-        self.assertEqual(len(governance["issue_register"]), 37)
+        self.assertEqual(len(governance["issue_register"]), 39)
         self.assertGreaterEqual(
             governance["issue_register"]["status"].isin(
                 {"blocked", "not_run"}

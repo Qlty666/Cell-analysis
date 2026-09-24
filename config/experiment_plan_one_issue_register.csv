@@ -35,4 +35,6 @@ RES-004,full_rerun,all stages,完整真实全流程尚未重跑,当前只有针�
 RES-005,not_executed,Figure5d-5g,真实100 ns生产轨迹未运行,md_plan_figures状态为not_run或prepared,结构模拟人员,完成真实轨迹和收敛分析前保持not_run,not_run,T2,no,2026-09-23
 RES-006,not_executed,Figure5h,MM-PBSA残基分解未运行,缺少分解TOTAL和误差文件,结构模拟人员,完成真实分解前保持not_run,not_run,T2,no,2026-09-23
 RES-007,external_resource,licensed source certificates,GeneCards OMIM TTD缺少本地导出和授权凭证,source_authorizations.frozen.json记录blocked_missing_file或reference,研究负责人,获得合法导出及授权引用后更新配置并重新冻结,blocked,T2,no,2026-09-24
-EXP-001,experimental_validation,causal claims,缺少暴露干预救援与直接结合实验,没有真实实验数据可核验,实验人员,因果主张保持blocked,blocked,T3,no,2026-09-23
+RES-008,external_resource,independent same-endpoint cohort,缺少未参与开发的同终点队列,GSE126848已下载并按文件SHA256冻结为reserved_not_evaluated,研究负责人及分析开发人员,模型冻结后仅评价一次且不得重新筛选特征,resolved_verified,T2,yes,2026-09-24
+RES-009,not_executed,external validation evaluation,GSE126848尚未在冻结模型上评价,external_validation_registry记录completed_evaluation_count为0,分析开发人员,完成训练模型冻结和环境锁后执行单次外部评价,not_run,T2,no,2026-09-24
+EXP-001,experimental_validation,causal claims,缺少暴露干预救援与直接结合实验,experimental_validation_manifest已冻结3项protocol_only记录但completed_verified为0,实验人员,因果主张保持blocked直到真实实验和伦理材料完成,blocked,T3,no,2026-09-24
