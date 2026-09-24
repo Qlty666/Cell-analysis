@@ -4,6 +4,7 @@ GOV-002,method_substitution,Figure2b MCL,曾用Louvain替代原方案MCL,原方�
 GOV-003,method_substitution,Figure4f CellChat,曾用显式配体受体评分替代R CellChat,CellChat 1.6.1已安装且cellchat_analysis.R输出cellchat_r_summary.json,研究负责人及分析开发人员,恢复原方案R CellChat并限制细胞级概率解释,resolved_verified,T2,yes,2026-09-23
 GOV-004,method_substitution,Figure4g scTenifoldKnk,曾用局部GRN替代scTenifoldKnk,scTenifoldKnk 1.1 R包已安装且sctenifoldknk.R输出diffRegulation,研究负责人及分析开发人员,恢复原方案R scTenifoldKnk且失败时blocked不静默替代,resolved_verified,T2,yes,2026-09-23
 GOV-005,method_substitution,Figure5b interaction analysis,曾仅有几何候选接触,PLIP 3.0.1已安装且fig5b_status.json记录验证状态,结构模拟人员,真实docking pose存在时运行PLIP并保存相互作用表,resolved_verified,T2,yes,2026-09-23
+GOV-006,governance,T2 cohort gate,仅有Panel问题表不能证明cohort和授权数据已冻结,delivery_readiness将读取cohort_freeze.json并要求frozen_complete,研究负责人及分析开发人员,未完成冻结时T2保持not_run,resolved_verified,T1,yes,2026-09-24
 DAT-001,data_alignment,GSE89632,HC与SS加NASH对比曾只计算NASH减HC,合成方向测试和真实数据核查通过,分析开发人员,已修复并保留设计矩阵与回归测试,resolved_verified,T1,yes,2026-09-23
 DAT-002,data_alignment,GSE164441,肿瘤与癌旁必须按患者配对,HCC数据核查为10名患者10对配对样本,分析开发人员,使用患者配对设计并保存配对检查表,resolved_verified,T1,yes,2026-09-23
 DAT-003,data_alignment,GSE135251,队列曾用于开发时不能称为完全未接触外部验证,配置登记既往分析暴露,研究负责人,限定为同终点候选并如实披露既往暴露,limited,T2,no,2026-09-23
@@ -13,6 +14,8 @@ DAT-006,data_alignment,GSE270583,NCD仅一个文库且HFD两个文库不足以�
 DAT-007,data_alignment,GSE202379,多文库患者不得按GSM数量增加样本量,修正后SOFT解析为59文库47患者,分析开发人员,按donor合并并审计更正元数据,resolved_verified,T1,yes,2026-09-23
 DAT-008,data_alignment,Figure4f CellChat,小鼠AnnData基因名为大写而CellChatDB.mouse符号为标题式,真实h5ad运行首次返回0个LR对；case-insensitive映射后恢复到1057个数据库基因,分析开发人员,按数据库符号大小写映射并记录文件,resolved_verified,T1,yes,2026-09-23
 DAT-009,data_alignment,Figure4f groups,JQF是独立干预臂不能并入NCD或HFD,"R CellChat summary记录requested_groups=NCD,HFD且excluded_groups=JQF",研究负责人及分析开发人员,固定组别过滤并保留排除记录,resolved_verified,T1,yes,2026-09-23
+DAT-010,data_alignment,cohort manifest,计划阶段占位清单不能直接当最终样本清单,cohort_freeze区分draft和frozen及validation_errors,分析开发人员,最终冻结前禁止planned行和未解析患者或动物ID,resolved_verified,T1,yes,2026-09-24
+DAT-011,data_alignment,GSE164441 donor mapping,patient字段中的651N和651T会被误算为两个患者,真实旧数据donor_mapping复算后20个文库归并为10名患者,分析开发人员,去除N或T后缀并按配对患者校验tumor与adjacent_normal,resolved_verified,T1,yes,2026-09-24
 STA-001,code_defect,ML pipeline,插补缩放与特征筛选曾可能使用全队列信息,嵌套CV和训练折内预处理测试通过,分析开发人员,冻结模型流程并保留outer-OOF预测,resolved_verified,T1,yes,2026-09-23
 STA-002,code_defect,external validation,外部队列重新排名会改变冻结模型输入,外部验证不再执行队列级重排,分析开发人员,使用冻结预处理器和患者级区间,resolved_verified,T1,yes,2026-09-23
 STA-003,code_defect,single-cell inference,细胞级检验会把细胞数当生物学重复,单细胞代码改为donor或sample汇总,分析开发人员,重复不足时只输出描述性结果,resolved_verified,T1,yes,2026-09-23
@@ -24,10 +27,12 @@ STA-006,status_determination,Figure audit,静态REVIEWS会把实际R方法状态
 TRC-001,traceability,cache and manifests,相同基因数量但不同基因名单可能错误复用缓存,缓存键纳入内容哈希参数和软件版本,分析开发人员,旧缓存自动失效并记录run_id,resolved_verified,T1,yes,2026-09-23
 TRC-002,traceability,MD provenance,不能按修改时间猜测轨迹,运行改为target_id ligand_id run_id绑定,结构模拟人员,保留manifest和输入哈希,resolved_verified,T1,yes,2026-09-23
 TRC-003,traceability,CellChat resources,全基因导出生成1.26GB MatrixMarket并占用约4GB内存,真实31922细胞运行耗时较长；过滤到1057个CellChat数据库基因后矩阵降至约34MB,分析开发人员,先按数据库符号过滤并记录基因和细胞抽样参数,resolved_verified,T1,yes,2026-09-23
+TRC-004,traceability,donor mapping,GSM数量不能代表患者或动物重复,donor_mapping.tsv记录library donor biological_unit mapping_status evidence和conflict,分析开发人员,按accession建立library到donor映射且保留unresolved状态,resolved_verified,T1,yes,2026-09-24
 RES-001,external_resource,licensed databases,GeneCards OMIM TTD缺少合法导出,运行时状态为unavailable,研究负责人,缺少来源时blocked并允许开放来源替代但改名,blocked,T2,no,2026-09-23
 RES-002,external_resource,same-endpoint validation,缺少未参与调参的同终点独立队列,当前只有既往暴露过的GSE135251,研究负责人,寻找新队列或限定验证强度,blocked,T2,no,2026-09-23
 RES-003,external_resource,single-cell replication,GSE270583没有足够独立动物重复,样本清单明确不足,研究负责人及实验人员,补充动物实验或保持描述性,blocked,T2,no,2026-09-23
 RES-004,full_rerun,all stages,完整真实全流程尚未重跑,当前只有针对性测试和真实数据冒烟核查,研究负责人及分析开发人员,在T2评审前执行冻结版本全流程,not_run,T2,no,2026-09-23
 RES-005,not_executed,Figure5d-5g,真实100 ns生产轨迹未运行,md_plan_figures状态为not_run或prepared,结构模拟人员,完成真实轨迹和收敛分析前保持not_run,not_run,T2,no,2026-09-23
 RES-006,not_executed,Figure5h,MM-PBSA残基分解未运行,缺少分解TOTAL和误差文件,结构模拟人员,完成真实分解前保持not_run,not_run,T2,no,2026-09-23
+RES-007,external_resource,licensed source certificates,GeneCards OMIM TTD缺少本地导出和授权凭证,source_authorizations.frozen.json记录blocked_missing_file或reference,研究负责人,获得合法导出及授权引用后更新配置并重新冻结,blocked,T2,no,2026-09-24
 EXP-001,experimental_validation,causal claims,缺少暴露干预救援与直接结合实验,没有真实实验数据可核验,实验人员,因果主张保持blocked,blocked,T3,no,2026-09-23

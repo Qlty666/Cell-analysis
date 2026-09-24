@@ -136,6 +136,7 @@ launchers\run_web_ui.bat
 - Python 3.10+，推荐 3.11。
 - R 4.5+。
 - 实验方案一的原方案方法还要求 R 包 `MCL`、`CellChat`、`scTenifoldKnk`，以及 PLIP 3.0.1；安装脚本已纳入这些依赖。
+- GeneCards、OMIM、TTD 等授权导出和授权凭证路径登记在 `config/experiment_plan_one_source_authorizations.json`，缺少时对应 Panel 保持 `blocked`。
 - AutoDock Vina，虚拟筛选时使用。
 - GROMACS、ACPYPE 和 gmx_MMPBSA，运行分子动力学时使用。
 

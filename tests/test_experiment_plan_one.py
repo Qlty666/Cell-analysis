@@ -47,7 +47,11 @@ from experiment_plan_one.pipeline import (
     merge_config,
 )
 from experiment_plan_one.planning import (
+    COHORT_COLUMNS,
     audit_delivery_readiness,
+    build_donor_mapping,
+    freeze_cohort_artifacts,
+    freeze_source_authorizations,
     load_governance,
     write_analysis_plan,
     write_governance_artifacts,
@@ -394,6 +398,215 @@ class TestExperimentPlanOne(unittest.TestCase):
             self.assertIn("same_endpoint_external_candidate", plan_text)
             self.assertIn("different_endpoints_are_not_external_validation", plan_text)
             self.assertIn("GSE164441", set(manifest["accession"]))
+            self.assertTrue(outputs["donor_mapping"].exists())
+            self.assertTrue(outputs["source_authorizations"].exists())
+            freeze = json.loads(
+                outputs["cohort_freeze"].read_text(encoding="utf-8")
+            )
+            self.assertIn(
+                freeze["status"],
+                {"draft_valid", "draft_incomplete"},
+            )
+            self.assertIn(
+                "source_authorization_status",
+                freeze,
+            )
+
+    def test_donor_mapping_distinguishes_verified_and_unresolved_units(self):
+        cohort = pd.DataFrame(
+            {
+                "accession": [
+                    "GSE202379",
+                    "GSE270583",
+                    "GSE270583",
+                    "GSE164441",
+                    "GSE164441",
+                ],
+                "sample_id": [
+                    "GSM1",
+                    "LIB_NCD",
+                    "LIB_HFD",
+                    "651N_count",
+                    "651T_count",
+                ],
+                "library_id": [
+                    "GSM1",
+                    "LIB_NCD",
+                    "LIB_HFD",
+                    "651N_count",
+                    "651T_count",
+                ],
+                "donor_id": ["P01", "", "", "651N", "651T"],
+                "condition": [
+                    "Healthy",
+                    "NCD",
+                    "HFD",
+                    "adjacent_normal",
+                    "tumor",
+                ],
+                "species": [
+                    "Homo sapiens",
+                    "Mus musculus",
+                    "Mus musculus",
+                    "Homo sapiens",
+                    "Homo sapiens",
+                ],
+                "tissue": ["liver"] * 5,
+                "included": ["yes"] * 5,
+                "source": ["soft"] * 5,
+            }
+        )
+        mapping, errors = build_donor_mapping(cohort)
+        self.assertEqual(errors, [])
+        statuses = dict(
+            zip(
+                mapping["accession"],
+                mapping["mapping_status"],
+            )
+        )
+        self.assertEqual(
+            statuses["GSE202379"],
+            "verified_library_to_donor",
+        )
+        self.assertEqual(
+            set(
+                mapping.loc[
+                    mapping["accession"].eq("GSE270583"),
+                    "mapping_status",
+                ]
+            ),
+            {"unresolved_library_level_only"},
+        )
+        self.assertEqual(
+            set(
+                mapping.loc[
+                    mapping["accession"].eq("GSE164441"),
+                    "donor_id",
+                ]
+            ),
+            {"651"},
+        )
+
+    def test_cohort_freeze_final_blocks_planned_rows_and_licenses(self):
+        with tempfile.TemporaryDirectory(ignore_cleanup_errors=True) as tmp:
+            root = Path(tmp)
+            outputs = write_analysis_plan(root, default_config())
+            self.assertTrue(outputs["cohort_freeze"].exists())
+            result = freeze_cohort_artifacts(
+                root,
+                final=True,
+            )
+            freeze_path = Path(str(result["cohort_freeze"]))
+            self.assertTrue(freeze_path.exists())
+            payload = result["validation"]
+            self.assertEqual(payload["status"], "blocked_incomplete")
+            self.assertTrue(payload["validation_errors"])
+            self.assertFalse(
+                (root / "00_plan" / "cohort_manifest.frozen.tsv").exists()
+            )
+
+    def test_cohort_freeze_is_independent_from_missing_authorizations(self):
+        with tempfile.TemporaryDirectory(ignore_cleanup_errors=True) as tmp:
+            root = Path(tmp)
+            plan_dir = root / "00_plan"
+            plan_dir.mkdir(parents=True)
+            rows = []
+            for index, accession in enumerate(
+                (
+                    "GSE89632",
+                    "GSE49541",
+                    "GSE164441",
+                    "GSE135251",
+                    "GSE270583",
+                    "GSE202379",
+                )
+            ):
+                row = {column: "" for column in COHORT_COLUMNS}
+                row.update(
+                    {
+                        "accession": accession,
+                        "sample_id": f"S{index}",
+                        "library_id": f"L{index}",
+                        "donor_id": (
+                            f"D{index}"
+                            if accession
+                            in {"GSE164441", "GSE202379"}
+                            else ""
+                        ),
+                        "condition": "case" if index % 2 else "control",
+                        "species": "Homo sapiens",
+                        "tissue": "liver",
+                        "included": "yes",
+                        "source": "synthetic_validation_fixture",
+                    }
+                )
+                rows.append(row)
+            pd.DataFrame(rows, columns=COHORT_COLUMNS).to_csv(
+                plan_dir / "cohort_manifest.tsv",
+                sep="\t",
+                index=False,
+            )
+            result = freeze_cohort_artifacts(
+                root,
+                final=True,
+                force=True,
+            )
+            payload = result["validation"]
+            self.assertEqual(
+                payload["status"],
+                "partially_frozen_authorization_blocked",
+            )
+            self.assertEqual(payload["cohort_status"], "frozen_complete")
+            self.assertTrue(
+                (plan_dir / "cohort_manifest.frozen.tsv").exists()
+            )
+            self.assertIn(
+                "animal-level libraries",
+                " ".join(payload["donor_mapping_limitations"]),
+            )
+
+    def test_source_authorization_freeze_hashes_local_files(self):
+        with tempfile.TemporaryDirectory(ignore_cleanup_errors=True) as tmp:
+            root = Path(tmp)
+            config_dir = root / "config"
+            config_dir.mkdir()
+            local_file = root / "genecards.tsv"
+            local_file.write_text("gene\nTP53\n", encoding="utf-8")
+            authorization_file = root / "authorization.pdf"
+            authorization_file.write_bytes(b"authorization")
+            (config_dir / "experiment_plan_one_source_authorizations.json").write_text(
+                json.dumps(
+                    {
+                        "schema_version": 1,
+                        "sources": [
+                            {
+                                "source_id": "GeneCards",
+                                "panel": "1e",
+                                "access_type": "licensed",
+                                "status": "provided",
+                                "local_file": str(local_file),
+                                "authorization_reference": "license-001",
+                                "authorization_file": str(
+                                    authorization_file
+                                ),
+                            }
+                        ],
+                    }
+                ),
+                encoding="utf-8",
+            )
+            output_root = root / "output"
+            _, payload = freeze_source_authorizations(
+                output_root,
+                root=root,
+            )
+            self.assertEqual(payload["status"], "complete")
+            self.assertTrue(
+                payload["sources"][0]["local_file_sha256"]
+            )
+            self.assertTrue(
+                payload["sources"][0]["authorization_file_sha256"]
+            )
 
     def test_governance_freeze_register_and_method_changes_are_complete(self):
         governance = load_governance()
@@ -408,7 +621,7 @@ class TestExperimentPlanOne(unittest.TestCase):
                 "traceability",
             },
         )
-        self.assertEqual(len(governance["issue_register"]), 32)
+        self.assertEqual(len(governance["issue_register"]), 37)
         self.assertGreaterEqual(
             governance["issue_register"]["status"].isin(
                 {"blocked", "not_run"}
