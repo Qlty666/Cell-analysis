@@ -77,6 +77,22 @@ T3 记录模板见 `config/experiment_plan_one_experimental_validation.example.j
 
 文件存在不等于方法完成。一个 Panel 完成不自动代表同一 Figure 或同一分析模块完成。
 
+## Cohort、donor 与授权数据冻结
+
+- `00_plan/cohort_manifest.tsv`：运行期间更新；计划阶段的占位行只能形成 draft。
+- `00_plan/donor_mapping.tsv`：按 library 记录 donor/animal 映射、生物单位、映射证据、状态和冲突。
+- `00_plan/cohort_freeze.json`：全流程结束时生成；只有没有 planned 行、患者/动物映射没有 unresolved、授权数据没有错误时才是 `frozen_complete`。
+- `00_plan/cohort_manifest.frozen.tsv`：仅在 `frozen_complete` 时生成，并保存 SHA-256。
+- `00_plan/source_authorizations.frozen.json`：冻结 GeneCards、OMIM、TTD 等授权来源的导出文件、授权引用和文件哈希。缺少合法导出或授权引用时保持 `blocked_incomplete`。
+- `00_plan/external_validation_registry.frozen.json`：冻结独立同终点候选队列、文件哈希、条件计数和 `not_evaluated` 状态。GSE126848 已作为保留验证队列登记，模型冻结前不得用于训练、筛选或调参。
+- `00_plan/animal_replication_registry.frozen.json`：记录独立动物重复要求和公开数据检索结果。没有满足 NCD/HFD 独立动物门槛的数据集时保持 blocked，GSE270583 只能描述性展示。
+- `00_plan/experimental_validation_manifest.json`：记录暴露、靶点干预/救援和直接结合实验的计划、伦理与结果路径。没有真实 `completed_verified` 记录时 T3 必须保持 blocked。
+- `config/experiment_plan_one_source_authorizations.json`：只填写文件路径和授权引用，不把密钥或个人隐私写入仓库。
+
+Cohort/donor 已满足冻结条件但授权凭证缺失时，状态为 `partially_frozen_authorization_blocked`；此时 cohort 可以冻结，但 T2 仍不能通过。
+
+如果 `cohort_freeze.json` 不是 `frozen_complete`，T2 必须保持 `not_run`，不得用旧 cohort manifest、GSM 数量或文件存在状态替代样本冻结。
+
 ## 方法替代登记
 
 实际方法与原方案不一致时，必须同时记录：

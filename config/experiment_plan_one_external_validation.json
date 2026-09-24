@@ -1,0 +1,56 @@
+{
+  "schema_version": 1,
+  "model_lock_policy": "Do not use reserved cohorts for feature selection, preprocessing fitting, model selection, thresholding or method changes before the final model is frozen.",
+  "candidates": [
+    {
+      "accession": "GSE126848",
+      "role": "same_endpoint_external_validation_reserved",
+      "endpoint": "healthy_controls_vs_NAFLD",
+      "species": "Homo sapiens",
+      "platform": "GPL18573",
+      "tissue": "liver biopsy",
+      "selection_date": "2026-09-24",
+      "selection_rationale": "Independent human liver RNA-seq cohort with normal-weight and obese controls, NAFL and NASH samples; selected by endpoint and metadata completeness before any model evaluation.",
+      "previously_used_for_model_development": false,
+      "reserved_before_model_evaluation": true,
+      "expected_samples": 57,
+      "expected_condition_counts": {
+        "control_normal_weight": 14,
+        "control_obese": 12,
+        "NAFL": 15,
+        "NASH": 16
+      },
+      "binary_condition_map": {
+        "control_normal_weight": "control",
+        "control_obese": "control",
+        "NAFL": "NAFLD",
+        "NASH": "NAFLD"
+      },
+      "evaluation_requirements": [
+        "freeze the full model and preprocessor",
+        "do not refit or reselect features on this cohort",
+        "evaluate once after model lock",
+        "report patient-level AUC with confidence interval",
+        "report calibration slope, intercept, Brier score and DCA"
+      ],
+      "local_files": {
+        "counts": {
+          "path": "D:/AAA Liver cancer/external_validation/GSE126848/GSE126848_Gene_counts_raw.txt.gz",
+          "url": "https://ftp.ncbi.nlm.nih.gov/geo/series/GSE126nnn/GSE126848/suppl/GSE126848_Gene_counts_raw.txt.gz",
+          "sha256": "8208defed61d1eb6a727723e8882e9f690e1277478d3ac7b2fd2c56c96aa0d3d"
+        },
+        "soft": {
+          "path": "D:/AAA Liver cancer/external_validation/GSE126848/GSE126848_family.soft.gz",
+          "url": "https://ftp.ncbi.nlm.nih.gov/geo/series/GSE126nnn/GSE126848/soft/GSE126848_family.soft.gz",
+          "sha256": "d1e23e7e46a04907455fdf02f0e0c442e136f05222bf087ea0533a94775536a9"
+        },
+        "series_matrix": {
+          "path": "D:/AAA Liver cancer/external_validation/GSE126848/GSE126848_series_matrix.txt.gz",
+          "url": "https://ftp.ncbi.nlm.nih.gov/geo/series/GSE126nnn/GSE126848/matrix/GSE126848_series_matrix.txt.gz",
+          "sha256": "66fca8fe7a5830856643a5630721b45ad71129281b9620fd98ae80ffedc520ae"
+        }
+      },
+      "status": "downloaded_reserved_not_evaluated"
+    }
+  ]
+}

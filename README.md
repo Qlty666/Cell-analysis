@@ -136,6 +136,9 @@ launchers\run_web_ui.bat
 - Python 3.10+，推荐 3.11。
 - R 4.5+。
 - 实验方案一的原方案方法还要求 R 包 `MCL`、`CellChat`、`scTenifoldKnk`，以及 PLIP 3.0.1；安装脚本已纳入这些依赖。
+- GeneCards、OMIM、TTD 等授权导出和授权凭证路径登记在 `config/experiment_plan_one_source_authorizations.json`，缺少时对应 Panel 保持 `blocked`。
+- 独立同终点队列和动物重复门槛分别登记在 `config/experiment_plan_one_external_validation.json` 与 `config/experiment_plan_one_animal_replication.json`；验证队列在模型冻结前只能保持 `not_evaluated`。
+- 湿实验因果链和伦理材料使用 `config/experiment_plan_one_experimental_validation.json` 固化；没有真实 `completed_verified` 记录时 T3 保持 blocked。
 - AutoDock Vina，虚拟筛选时使用。
 - GROMACS、ACPYPE 和 gmx_MMPBSA，运行分子动力学时使用。
 
@@ -154,6 +157,7 @@ launchers\run_web_ui.bat
 | [多数据库证据中心](docs/evidence_hub.md) | 证据模型、来源配置、评分和 CLI |
 | [项目结构](docs/project_structure.md) | 代码模块和目录职责 |
 | [脚本冻结与交付分级](docs/experiment_plan_one_script_freeze_20260923.md) | 实验方案一冻结范围、问题总表、方法替代登记和三级交付门槛 |
+| [论文包与主张边界](docs/experiment_plan_one_manuscript_package.md) | 42 Panel 图表、外部验证、湿实验和论文交付清单 |
 | [结果图指南](docs/result_figure_guide.md) | 结果文件用途与判读说明 |
 | [更新日志](CHANGELOG.md) | 历史版本与变更记录 |
 

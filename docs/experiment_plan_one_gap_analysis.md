@@ -111,6 +111,10 @@ GROMACS 输入准备。对 `y1` 现有结果的审计显示：
 
 ## 本轮真实小规模验证
 
+- Cohort 冻结：基于旧 `y1` 已处理矩阵构建并冻结了 434 条样本/文库记录。GSE164441 的 20 个文库正确归并为 10 名患者，GSE202379 的 59 个文库归并为 47 名 donor；GSE270583 的 4 个文库保持 `unresolved_library_level_only`，只允许描述性分析。Cohort 和 donor mapping 已达到 `frozen_complete`，但 GeneCards、OMIM、TTD 授权凭证仍缺失，所以总状态为 `partially_frozen_authorization_blocked`。
+- 独立同终点队列：GSE126848 已从 GEO 下载原始 counts、SOFT 和 series matrix 到 `D:\AAA Liver cancer\external_validation\GSE126848`，SHA-256 校验通过。条件是 14 个正常体重对照、12 个肥胖对照、15 个 NAFL、16 个 NASH，共 57 名独立患者。当前冻结状态为 `reserved_ready_not_evaluated`，不得在模型冻结前用于训练、筛选或调参。
+- 动物重复：公开 GEO 检索未找到满足至少两个独立 NCD 和两个独立 HFD 动物且可用于单细胞复现的队列。`animal_replication_registry.frozen.json` 保持 blocked，GSE270583 仍只能做描述性分析。
+- 湿实验规划：已冻结 3 项 `protocol_only` 实验记录，覆盖暴露表型、靶点干预/救援和直接结合/靶点占位；伦理批准、剂量、样本量、真实数据和结果文件均为空，T3 继续 blocked。
 - R MCL：在旧 `y1` 的 60 节点、389 边 STRING 网络上实际运行，输出 1 个 MCL 模块；这证明调用链可用，不代表最终 42 Panel 已验收。
 - R CellChat：在旧 `y1` 的 31,922 个细胞上实际运行。首次运行暴露小鼠基因名大小写不一致问题；修复后先映射到 1,057 个 CellChatDB.mouse 相互作用基因，再按条件/细胞类型抽样 4,811 个细胞，仅分析 NCD/HFD，JQF 明确排除。导出矩阵由约 1.26 GB 降到约 34 MB。当前只输出细胞级概率，不作独立生物单位组间显著性。
 - R scTenifoldKnk：在旧数据抽取的 300 个基因、500 个细胞上实际运行，返回 300 行 `diffRegulation`，并记录随机种子、网络数和细胞数。

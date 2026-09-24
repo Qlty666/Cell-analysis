@@ -31,6 +31,7 @@ from . import __version__
 from .bulk import (
     GSE164441_COUNT_URL,
     SERIES_MATRIX_URLS,
+    _parse_paired_count_sample,
     candidate_heatmap,
     differential_expression_limma,
     differential_summary_table,
@@ -63,6 +64,7 @@ from .planning import (
     append_cohort_rows,
     audit_delivery_readiness,
     dataset_registry,
+    freeze_cohort_artifacts,
     load_governance,
     update_data_checksums,
     write_analysis_plan,
@@ -273,6 +275,12 @@ STAGE_REQUIRED_OUTPUTS: dict[str, list[Path]] = {
         Path("00_plan/sample_inclusion_exclusion.tsv"),
         Path("00_plan/metadata_corrections.tsv"),
         Path("00_plan/data_checksums.json"),
+        Path("00_plan/cohort_freeze.draft.json"),
+        Path("00_plan/donor_mapping.tsv"),
+        Path("00_plan/source_authorizations.frozen.json"),
+        Path("00_plan/external_validation_registry.frozen.json"),
+        Path("00_plan/animal_replication_registry.frozen.json"),
+        Path("00_plan/experimental_validation_manifest.json"),
         Path("00_plan/governance/experiment_plan_one_freeze.json"),
         Path("00_plan/governance/experiment_plan_one_delivery_tiers.json"),
         Path("00_plan/governance/experiment_plan_one_issue_register.csv"),
@@ -667,6 +675,16 @@ class ExperimentPlanOne:
                     stage,
                     state["elapsed_seconds"],
                 )
+        full_run_complete = all(
+            str((self.results.get(stage) or {}).get("status") or "")
+            in successful_statuses
+            for stage in STAGES
+        )
+        freeze_cohort_artifacts(
+            self.context.output_root,
+            final=full_run_complete,
+            force=self.context.force,
+        )
         self._write_manifest()
         self._write_delivery_readiness()
         return self.results
@@ -1497,13 +1515,26 @@ class ExperimentPlanOne:
             )
             for sample_id, row in metadata.iterrows():
                 condition = str(row.get("condition") or "")
-                donor_id = str(row.get(donor_column) or "") if donor_column else ""
+                donor_id = (
+                    str(row.get(donor_column) or "").strip()
+                    if donor_column
+                    else ""
+                )
+                if donor_id.lower() in {"nan", "unknown", "na", "none"}:
+                    donor_id = ""
+                if accession == "GSE164441" and donor_id:
+                    try:
+                        donor_id = _parse_paired_count_sample(
+                            str(sample_id)
+                        )[0]
+                    except ValueError:
+                        pass
                 cohort_rows.append(
                     {
                         "accession": accession,
                         "sample_id": str(sample_id),
                         "library_id": str(sample_id),
-                        "donor_id": donor_id or str(sample_id),
+                        "donor_id": donor_id,
                         "species": descriptor.get("species", ""),
                         "platform": descriptor.get("platform", ""),
                         "tissue": descriptor.get("tissue", "liver"),
@@ -1513,7 +1544,13 @@ class ExperimentPlanOne:
                             if diagnosis_column
                             else condition
                         ),
-                        "paired_patient": "yes" if donor_column else "no",
+                        "paired_patient": (
+                            "yes"
+                            if donor_id
+                            else "unknown"
+                            if donor_column
+                            else "no"
+                        ),
                         "batch": str(row.get("batch") or row.get("platform_id") or ""),
                         "exposure_status": "unknown",
                         "included": "yes",
@@ -2551,6 +2588,44 @@ class ExperimentPlanOne:
                 "method_decisions": load_governance()[
                     "method_changes"
                 ].to_dict("records"),
+                "cohort_freeze": read_json(
+                    self.context.output_root
+                    / "00_plan"
+                    / (
+                        "cohort_freeze.json"
+                        if (
+                            self.context.output_root
+                            / "00_plan"
+                            / "cohort_freeze.json"
+                        ).exists()
+                        else "cohort_freeze.draft.json"
+                    ),
+                    {},
+                ),
+                "source_authorizations": read_json(
+                    self.context.output_root
+                    / "00_plan"
+                    / "source_authorizations.frozen.json",
+                    {},
+                ),
+                "external_validation": read_json(
+                    self.context.output_root
+                    / "00_plan"
+                    / "external_validation_registry.frozen.json",
+                    {},
+                ),
+                "animal_replication": read_json(
+                    self.context.output_root
+                    / "00_plan"
+                    / "animal_replication_registry.frozen.json",
+                    {},
+                ),
+                "experimental_validation": read_json(
+                    self.context.output_root
+                    / "00_plan"
+                    / "experimental_validation_manifest.json",
+                    {},
+                ),
                 "reproducibility": {
                     "git_commit": _git_commit(self.context.root),
                     "random_seeds": {

@@ -1,0 +1,83 @@
+{
+  "schema_version": 1,
+  "sources": [
+    {
+      "source_id": "GeneCards",
+      "panel": "1e",
+      "access_type": "licensed",
+      "status": "not_provided",
+      "local_file": null,
+      "authorization_reference": null,
+      "authorization_file": null,
+      "retrieved_at": null,
+      "expires_at": null,
+      "version": null,
+      "notes": "Provide a lawful export and authorization reference before reporting GeneCards targets."
+    },
+    {
+      "source_id": "OMIM",
+      "panel": "1e",
+      "access_type": "licensed",
+      "status": "not_provided",
+      "local_file": null,
+      "authorization_reference": null,
+      "authorization_file": null,
+      "retrieved_at": null,
+      "expires_at": null,
+      "version": null,
+      "notes": "Provide a lawful local export and license reference before reporting OMIM targets."
+    },
+    {
+      "source_id": "TTD",
+      "panel": "1e",
+      "access_type": "licensed",
+      "status": "not_provided",
+      "local_file": null,
+      "authorization_reference": null,
+      "authorization_file": null,
+      "retrieved_at": null,
+      "expires_at": null,
+      "version": null,
+      "notes": "Provide a lawful local export and authorization reference before reporting TTD targets."
+    },
+    {
+      "source_id": "Open Targets",
+      "panel": "1e",
+      "access_type": "open",
+      "status": "available_open_access",
+      "local_file": null,
+      "authorization_reference": null,
+      "authorization_file": null,
+      "retrieved_at": null,
+      "expires_at": null,
+      "version": null,
+      "notes": "Open evidence source; report under its own name and version."
+    },
+    {
+      "source_id": "GWAS Catalog",
+      "panel": "1e",
+      "access_type": "open",
+      "status": "available_open_access",
+      "local_file": null,
+      "authorization_reference": null,
+      "authorization_file": null,
+      "retrieved_at": null,
+      "expires_at": null,
+      "version": null,
+      "notes": "Open evidence source; report under its own name and version."
+    },
+    {
+      "source_id": "ClinVar",
+      "panel": "1e",
+      "access_type": "open",
+      "status": "available_open_access",
+      "local_file": null,
+      "authorization_reference": null,
+      "authorization_file": null,
+      "retrieved_at": null,
+      "expires_at": null,
+      "version": null,
+      "notes": "Open evidence source; report under its own name and version."
+    }
+  ]
+}

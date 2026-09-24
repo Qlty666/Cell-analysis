@@ -1,0 +1,61 @@
+{
+  "schema_version": 1,
+  "experiment_plan": "experiment_plan_one",
+  "status": "protocol_only_pending_real_experiment",
+  "records": [
+    {
+      "claim_id": "CAUSAL-EXPOSURE-01",
+      "claim_text": "6PPD-Q exposure causes a NAFLD/NASH-like hepatic phenotype.",
+      "experiment_type": "in_vivo_exposure",
+      "status": "planned_protocol_only",
+      "dataset_or_experiment_id": "",
+      "source_data": "",
+      "protocol": "Vehicle and at least two pre-specified 6PPD-Q exposure levels on the selected diet background; record route, dose, duration, sex, age, randomization and blinding.",
+      "ethics_or_animal_approval": "",
+      "analysis_code_commit": "",
+      "result_files": [],
+      "reviewer": "",
+      "reviewed_at": "",
+      "limitations": [
+        "No animal experiment or ethics approval has been completed.",
+        "Dose and sample size require literature, tolerability and power calculation."
+      ]
+    },
+    {
+      "claim_id": "CAUSAL-TARGET-02",
+      "claim_text": "The selected target mediates the hepatic effect of 6PPD-Q.",
+      "experiment_type": "target_perturbation_and_rescue",
+      "status": "planned_protocol_only",
+      "dataset_or_experiment_id": "",
+      "source_data": "",
+      "protocol": "Pre-specified target loss- or gain-of-function with vehicle and 6PPD-Q arms, followed by restoration or rescue; use genotype-appropriate controls and blinded phenotyping.",
+      "ethics_or_animal_approval": "",
+      "analysis_code_commit": "",
+      "result_files": [],
+      "reviewer": "",
+      "reviewed_at": "",
+      "limitations": [
+        "Target identity must be frozen before experiment execution.",
+        "No perturbation or rescue data exist."
+      ]
+    },
+    {
+      "claim_id": "CAUSAL-BINDING-03",
+      "claim_text": "6PPD-Q directly binds or engages the selected target.",
+      "experiment_type": "direct_binding_or_target_engagement",
+      "status": "planned_protocol_only",
+      "dataset_or_experiment_id": "",
+      "source_data": "",
+      "protocol": "Use recombinant protein SPR, ITC or MST plus a cellular binding assay such as CETSA or thermal shift with negative controls and orthogonal confirmation when feasible.",
+      "ethics_or_animal_approval": "not_applicable_or_pending",
+      "analysis_code_commit": "",
+      "result_files": [],
+      "reviewer": "",
+      "reviewed_at": "",
+      "limitations": [
+        "Docking and MD are not direct binding evidence.",
+        "No wet-lab binding or engagement data exist."
+      ]
+    }
+  ]
+}

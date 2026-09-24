@@ -1,0 +1,37 @@
+{
+  "schema_version": 1,
+  "requirement": {
+    "species": "Mus musculus",
+    "tissue": "liver",
+    "disease_model": "NCD versus HFD",
+    "assay": "scRNA-seq or snRNA-seq",
+    "minimum_independent_animals_per_group": 2,
+    "libraries_do_not_count_as_independent_animals": true
+  },
+  "search": {
+    "search_date": "2026-09-24",
+    "source": "NCBI GEO",
+    "query": "NAFLD or NASH AND Mus musculus AND single cell or single-cell AND gse",
+    "candidates": [
+      {
+        "accession": "GSE252248",
+        "reason": "Four libraries confound HFD, exercise and library composition; no verified two independent NCD and two HFD animals."
+      },
+      {
+        "accession": "GSE307893",
+        "reason": "Paired oligo and cDNA libraries do not establish independent biological animals."
+      },
+      {
+        "accession": "GSE315410",
+        "reason": "Chow-diet WT versus NgBR KO RNA-seq; not an NCD-versus-HFD single-cell replication."
+      },
+      {
+        "accession": "GSE206338",
+        "reason": "Whole-liver bulk RNA-seq; cannot replace single-cell animal replication."
+      }
+    ]
+  },
+  "status": "blocked_no_eligible_public_dataset",
+  "disposition": "Keep GSE270583 descriptive or add a new animal experiment with at least two independent NCD and two independent HFD animals and donor-resolved single-cell libraries.",
+  "claim_limit": "No disease-significance, composition or communication inference from GSE270583 until the animal replication requirement is satisfied."
+}
